@@ -1375,6 +1375,14 @@ class PreEditGuardTest(unittest.TestCase):
         self.assertIsNone(self.d("framework/README.md", via_hook=True))
         self.assertIsNone(self.d("src/app.ts"))
 
+    def test_notebook_edit_path(self):
+        """AUD-HAR-036 (T-3650): `NotebookEdit` gửi `notebook_path` (không `file_path`) — guard đọc như sửa file."""
+        nb = {"tool_name": "NotebookEdit", "tool_input": {"notebook_path": str(ROOT / ".autopilot" / "x.ipynb")}}
+        code, out, _ = run_hook("pre-edit-guard.sh", nb, ROOT)
+        self.assertEqual((code, decision(out)), (0, "ask"))
+        ok = {"tool_name": "NotebookEdit", "tool_input": {"notebook_path": str(ROOT / "notes" / "a.ipynb")}}
+        self.assertIsNone(decision(run_hook("pre-edit-guard.sh", ok, ROOT)[1]))
+
 
 @unittest.skipIf(shutil.which("bash") is None, "cần bash")
 class StopAndSessionTest(unittest.TestCase):
@@ -3076,9 +3084,11 @@ class GuardDeltaAuditTest(unittest.TestCase):
         ):
             with self.subTest(cmd):
                 self.assertEqual(self.dec(cmd), "deny")
+        # Đổi kỳ vọng có chủ đích (T-3637, AUD-SEC-311): `cat run.sh | bash` — ống vào shell mà guard không biết chữ — nay
+        # chặn theo tập con chuẩn (ADR-0063); viết `bash run.sh`.
+        self.assertEqual(self.dec("cat run.sh | bash"), "deny")
         for cmd in (
             "bash -c -e 'gh pr merge 7 --body-file b.md'",
-            "cat run.sh | bash",
             "echo x | xargs -0 bash -c",
         ):
             with self.subTest(cmd):
@@ -3241,7 +3251,8 @@ class HookRunnerTest(unittest.TestCase):
         )
         self.assertEqual(decision(r.stdout), "deny", r.stderr)
         self.assertFalse((self.hooks / "__pycache__").exists())
-        self.assertEqual(list((self.tmp / ".autopilot").iterdir()), [])  # AUD-SEC-065/074
+        # AUD-SEC-065/074: không bytecode nào trong .autopilot/ — chỉ nhật ký quyết định của hook (AUD-HAR-199, T-3655)
+        self.assertEqual([p.name for p in (self.tmp / ".autopilot").rglob("*")], ["guard-log.jsonl"])
         self.assertFalse((self.cache / "xtemplates").exists())  # không cache ở chỗ agent ghi được
 
     def test_guard_fields_reads_every_field(self):
@@ -5272,6 +5283,7 @@ class TypedDecisionTest(unittest.TestCase):
         g = self.g
         self.assertEqual(g.permission_mode("mcp__github__merge_pull_request"), "mcp")
         self.assertEqual(g.permission_mode("MultiEdit"), "edit")
+        self.assertEqual(g.permission_mode("NotebookEdit"), "edit")  # AUD-HAR-036
         self.assertEqual(
             g.permission_output({"decision": "allow", "reason": "ok"}),
             json.dumps(
@@ -5700,11 +5712,13 @@ class GuardFalseGreenBenchTest(unittest.TestCase):
             (
                 "echo ls | tee /dev/null | bash",
                 "echo hi | tee out.txt",
-                "cat run.sh | bash",  # file script: như `bash run.sh` (guard không đọc file) — giữ hành vi cũ
-                "echo 'rm -rf ~' | cat notes.txt | bash",  # cat có file: ống ra là nội dung file, không phải chữ echo
+                "bash run.sh",  # dạng thay cho `cat run.sh | bash`
                 "echo 'rm -rf ~' | tee /dev/null | wc -l",
             ),
         )
+        # Đổi kỳ vọng có chủ đích (T-3637, AUD-SEC-311): trước "giữ hành vi cũ" (cho qua) — ống vào shell mà guard không
+        # biết chữ (nội dung tệp qua `cat <tệp>`) nay chặn theo tập con chuẩn (ADR-0063).
+        self.assert_policy("deny", ("cat run.sh | bash", "echo 'rm -rf ~' | cat notes.txt | bash"))
 
     def test_guard_false_green_ssh_loopback_runs_here(self):
         self.assert_policy(

@@ -1440,5 +1440,72 @@ class TaskRunsTest(TmpRepoCase):
         self.assertEqual(self.runs(), {"T-001": 20, "T-002": 20})
 
 
+FAKE_AGENT = """
+import os, re, subprocess, sys
+mode = sys.argv[1]
+task = re.search(r"T-\\d+", sys.argv[-1]).group(0)
+if mode != "lazy":
+    subprocess.run([sys.executable, {xt!r}, "loop", "record", "--task", task, "--", "true"], check=False,
+                   capture_output=True, env={{**os.environ, "CLAUDE_PROJECT_DIR": os.getcwd()}})
+sys.exit(1 if mode == "broken-exit" else 0)
+"""
+
+
+class LoopRunTest(TmpRepoCase):
+    """ADR-0064 lát D (T-3646): `loop run --agent X` gọi agent headless từng task; tiến triển đọc từ bằng chứng, không từ
+    mã thoát của agent. Agent giả là script Python nhận prompt ở đối số cuối."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        repo = self.init_repo()
+        (repo / "docs" / "autopilot").mkdir(parents=True)
+        (repo / "docs" / "autopilot" / "PLAN.md").write_text(
+            "- [ ] `T-001` việc một — Gate: `true`\n- [ ] `T-002` việc hai — Gate: `true`\n", encoding="utf-8"
+        )
+        (repo / ".gitignore").write_text(".autopilot/\n", encoding="utf-8")
+        self.git("add", "-A")
+        self.git("commit", "-q", "-m", "init")
+        self.enterContext(unittest.mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(repo)}))
+        self.fake = self.tmp / "fake_agent.py"
+        self.fake.write_text(FAKE_AGENT.format(xt=str(Path(xt.__file__).resolve())), encoding="utf-8")
+
+    def run_loop(self, mode: str, *extra: str) -> tuple[int, str]:
+        with unittest.mock.patch.dict(xt.LOOP_AGENTS, {"codex": [sys.executable, str(self.fake), mode]}):
+            rc, out, _ = run_main("loop", "run", "--agent", "codex", *extra)
+        return rc, out
+
+    def test_not_initialised_stops(self) -> None:
+        rc, out = self.run_loop("good")
+        self.assertEqual(rc, 3)
+        self.assertIn("loop run: dừng", out)
+
+    def test_good_agent_finishes_and_exit_code_is_ignored(self) -> None:
+        self.assertEqual(run_main("loop", "init")[0], 0)
+        rc, out = self.run_loop("broken-exit")  # agent trả 1 nhưng làm đúng việc → vẫn tiến triển
+        self.assertEqual(rc, 0, out)
+        self.assertIn("[lượt 1] codex → T-001", out)
+        self.assertIn("[lượt 2] codex → T-002", out)
+        self.assertIn("loop run: dừng — done", out)
+
+    def test_lazy_agent_stalls(self) -> None:
+        self.assertEqual(run_main("loop", "init")[0], 0)
+        rc, out = self.run_loop("lazy")
+        self.assertEqual(rc, 1)
+        self.assertIn(f"{xt.LOOP_RUN_STALL} lượt không tiến triển ở T-001", out)
+
+    def test_turn_budget_dry_run_and_missing_agent(self) -> None:
+        self.assertEqual(run_main("loop", "init")[0], 0)
+        rc, out = self.run_loop("lazy", "--max-turns", "2")
+        self.assertEqual(rc, 1)
+        self.assertIn("hết 2 lượt", out)
+        rc, out = self.run_loop("good", "--dry-run")
+        self.assertEqual(rc, 0)
+        self.assertIn("loop record --task T-001", out)
+        with unittest.mock.patch.dict(xt.LOOP_AGENTS, {"codex": ["khong-co-lenh-nay-xt"]}):
+            rc, out, err = run_main("loop", "run", "--agent", "codex", "--max-turns", "1")
+        self.assertEqual(rc, 1)
+        self.assertIn("⚠ agent:", err)
+
+
 if __name__ == "__main__":
     unittest.main()

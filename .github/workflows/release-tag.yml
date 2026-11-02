@@ -30,15 +30,18 @@ jobs:
     name: tag
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10 # ký Sigstore qua mạng
     permissions:
       contents: write
+      id-token: write # OIDC cho chứng chỉ Sigstore của attestation (AUD-DEP-010)
+      attestations: write # lưu attestation vào GH attestations API của repo
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           token: ${{ secrets.XT_RELEASE_TOKEN || github.token }}
-      - name: Tạo và đẩy annotated tag từ VERSION
+      - name: Tạo annotated tag từ VERSION
+        id: tag
         env:
           INPUT_SHA: ${{ inputs.sha }}
         run: |
@@ -55,5 +58,21 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git tag -a "v$v" -m "v$v" "$target"
           test "$(git cat-file -t "v$v")" = tag
-          git push origin "refs/tags/v$v"
-          echo "OK — annotated tag v$v → $target"
+          # Nguồn phát hành = `git archive` của commit gắn tag; attestation ký TRƯỚC khi đẩy tag — ký lỗi thì chưa có tag,
+          # chạy lại workflow được (tag đã có thì workflow từ chối).
+          git archive --format=tar.gz --prefix="X-Templates-v$v/" -o "$RUNNER_TEMP/X-Templates-v$v.tar.gz" "$target"
+          echo "archive=$RUNNER_TEMP/X-Templates-v$v.tar.gz" >> "$GITHUB_OUTPUT"
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+      # Provenance SLSA của nguồn phát hành (AUD-DEP-010): `gh attestation verify X-Templates-vX.Y.Z.tar.gz --repo
+      # seeker19110/X-Templates` với file từ `git archive --format=tar.gz --prefix=X-Templates-vX.Y.Z/ vX.Y.Z`.
+      # attest-build-provenance 4.2.2 (MIT, xác minh 2026-11-02): repo công khai dùng Sigstore public-good.
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: ${{ steps.tag.outputs.archive }}
+      - name: Đẩy tag
+        env:
+          V: ${{ steps.tag.outputs.version }}
+        run: |
+          set -euo pipefail
+          git push origin "refs/tags/v$V"
+          echo "OK — annotated tag v$V"

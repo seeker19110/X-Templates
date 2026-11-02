@@ -3,7 +3,7 @@ title: Rủi ro & giả định: sổ rủi ro, spike, kế hoạch B
 kind: module
 prefix: PM-RISK
 applies_to: [all]
-updated: 2026-10-14
+updated: 2026-11-02
 ---
 
 # Rủi ro & giả định: sổ rủi ro, spike, kế hoạch B
@@ -37,7 +37,7 @@ updated: 2026-10-14
 
 ## Checklist
 
-- [ ] `PM-RISK-001` **MUST** Có sổ rủi ro (`docs/RISKS.md` hoặc mục trong `PROJECT.md`) với cột: ID `RK-NNN` · mô tả · xác suất · ảnh hưởng · chủ · cách ứng xử · biện pháp · trigger · trạng thái · ngày rà. → Kiểm: `rg -n "^\| RK-[0-9]{3}" docs/RISKS.md PROJECT.md` ≥1; mỗi dòng đủ cột.
+- [ ] `PM-RISK-001` **MUST** Có sổ rủi ro (`docs/RISKS.md` hoặc mục trong `PROJECT.md`) với cột: ID `RK-NNN` · mô tả · xác suất · ảnh hưởng · chủ · cách ứng xử · biện pháp · trigger · trạng thái · ngày rà. → Kiểm: `rg -n "^\| RK-[0-9]{3}" docs/RISKS.md PROJECT.md` ≥1; mỗi dòng đủ cột. · Mẫu: [`../templates/RISKS.md`](../templates/RISKS.md)
 - [ ] `PM-RISK-002` **MUST@L** Mỗi giả định trong `PROJECT.md` ánh xạ tới một `RK-NNN` hoặc được đánh dấu "đã kiểm chứng" kèm bằng chứng (link spike/dữ liệu). → Kiểm: bảng giả định có cột "RK / bằng chứng" không rỗng.
 - [ ] `PM-RISK-003` **MUST** Rủi ro xếp đầu (xác suất × ảnh hưởng cao nhất) có spike hoặc biện pháp bắt đầu trong lát dọc đầu tiên. → Kiểm: `PLAN.md` có task tham chiếu `RK-NNN` đứng đầu trong nhóm task đầu.
 - [ ] `PM-RISK-004` **MUST@L** Mỗi spike có: câu hỏi một dòng, hộp thời gian, tiêu chí trả lời, kết quả ghi lại (ADR/spec/`PROGRESS.md`); code spike không merge vào nhánh chính. → Kiểm: issue/ghi chú spike đủ 4 mục; `git log main --grep="spike"` không có commit merge nhánh `spike/`.

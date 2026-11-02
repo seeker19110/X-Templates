@@ -197,6 +197,16 @@ class GateFanOutTest(unittest.TestCase):
                     self.assertEqual(listed[-1], "3.14")
                     self.assertLessEqual(set(listed), {"3.11", "3.14"})
 
+    def test_pip_cache_keyed_on_installed_requirements(self):
+        """AUD-CI-028 (T-3654): job cài `-r requirements-*.txt` bật `cache: pip` với khoá băm đúng file đó."""
+        for name, body in self.jobs.items():
+            installed = re.findall(r"pip install [^\n]*-r (requirements-[\w-]+\.txt)", body)
+            if not installed:
+                continue
+            with self.subTest(job=name):
+                self.assertIn("cache: pip", body)
+                self.assertEqual(re.findall(r"cache-dependency-path: (\S+)", body), sorted(set(installed)))
+
     def test_sysmon_only_on_coverage_measuring_jobs(self):
         self.assertIn("COVERAGE_CORE: sysmon", self.jobs["test"])
         self.assertIn("COVERAGE_CORE: sysmon", self.jobs["coverage"])
@@ -231,6 +241,27 @@ class GateFanOutTest(unittest.TestCase):
         self.assertIn(f"python3 {listing} |", test)
         self.assertRegex(yaml, r"(?m)^test_combine: .*coverage report --fail-under=100$")
         self.assertIn("--fail-under=100", test)
+
+
+class SupplyChainArtifactsTest(unittest.TestCase):
+    """AUD-DEP-010 (T-3654): SBOM CycloneDX ở dep-audit; provenance của nguồn phát hành ký TRƯỚC khi đẩy tag."""
+
+    def test_dep_audit_uploads_cyclonedx_sbom_after_scan(self):
+        body = (WORKFLOWS / "dep-audit.yml").read_text(encoding="utf-8")
+        scan, sbom = body.index("Quét lỗ hổng"), body.index("-f cyclonedx-json -o sbom.cdx.json")
+        self.assertLess(scan, sbom)
+        self.assertRegex(body[sbom:], r"actions/upload-artifact@[0-9a-f]{40}[^\n]*\n(?:.*\n)*?\s+path: sbom\.cdx\.json")
+        self.assertIn("if-no-files-found: error", body[sbom:])
+
+    def test_release_tag_attests_archive_before_push(self):
+        body = (WORKFLOWS / "release-tag.yml").read_text(encoding="utf-8")
+        for perm in ("id-token: write", "attestations: write"):
+            self.assertIn(perm, body)
+        attest = body.index("actions/attest-build-provenance@")
+        self.assertRegex(body[attest:], r"^actions/attest-build-provenance@[0-9a-f]{40} ")
+        self.assertLess(body.index("git archive --format=tar.gz"), attest)
+        self.assertLess(attest, body.index('git push origin "refs/tags/'))
+        self.assertIn("subject-path: ${{ steps.tag.outputs.archive }}", body)
 
 
 class MergeGateStubTest(unittest.TestCase):

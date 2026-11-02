@@ -11,14 +11,14 @@ import stat
 import unicodedata
 import subprocess
 import sys
-import time
 import unittest
 import unittest.mock
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent))  # tests/cpu_budget.py
+import cpu_budget
 import xt
 from test_xt_cli import TmpRepoCase, run_main
 
@@ -948,17 +948,16 @@ class StageGuardTest(unittest.TestCase):
 
     def test_many_opaque_tokens_linear(self):
         """Nhiều token mờ không làm guard chạy bậc hai (review #352 lượt 2)."""
-        argv = ["python3", "x.py"] + ["$a"] * 80000
-        start = time.monotonic()
-        self.assertFalse(self.g._approves_stage(argv))
-        self.assertLess(time.monotonic() - start, 2.0)
+        self.assertFalse(self.g._approves_stage(["python3", "x.py"] + ["$a"] * 80000))
+        # tỉ lệ CPU cỡ 20000 → 80000, không ngưỡng giây cứng (AUD-TEST-008): đỏ dưới tải khi chạy song song
+        cpu_budget.assert_not_quadratic(self, lambda n: self.g._approves_stage(["python3", "x.py"] + ["$a"] * n), 20000)
 
     def test_many_dash_tokens_linear(self):
         """Nhiều token `-a` không làm guard chạy bậc hai (review #352 lượt 3)."""
-        argv = ["python3", "tool.py"] + ["-a"] * 16000
-        start = time.monotonic()
-        self.assertFalse(self.g._approves_stage(argv))
-        self.assertLess(time.monotonic() - start, 2.0)
+        self.assertFalse(self.g._approves_stage(["python3", "tool.py"] + ["-a"] * 16000))
+        cpu_budget.assert_not_quadratic(
+            self, lambda n: self.g._approves_stage(["python3", "tool.py"] + ["-a"] * n), 4000
+        )
 
     def test_stage_ledger_parent_dir(self):
         """AUD-HAR-154: xoá/dời/khôi phục thư mục tổ tiên của sổ (`docs/autopilot`, `docs`) là ghi tay sổ; chép/dời/liên

@@ -75,6 +75,10 @@ class DoctorCase(unittest.TestCase):
             )
         )
         self.enterContext(unittest.mock.patch.object(xt, "SCRIPT_DIR", self.base / ".xtemplates" / "scripts"))
+        # Nhóm `sandbox` tuỳ máy chạy test (container cloud thì im, runner CI thì cảnh báo) — test khác không đếm nó;
+        # `test_sandbox_group` tự đặt lại (T-3641).
+        self.real_in_container = xt._in_container
+        self.enterContext(unittest.mock.patch.object(xt, "_in_container", return_value=True))
         self.enterContext(unittest.mock.patch.object(xt, "validate", _memo_validate))
 
     def run_doctor(self, *args: str) -> tuple[int, str, str]:
@@ -128,6 +132,14 @@ class DoctorHealthyTest(DoctorCase):
         self.write("xt.yaml", "lint: ruff check .\ntest: pytest\n")
         msgs = [f.msg for f in self.findings() if f.code == "xt-yaml"]
         self.assertEqual(msgs, ["xt.yaml thiếu khoá typecheck, build — khai đủ, chuỗi rỗng nếu không áp dụng"])
+
+    def test_xt_yaml_indented_key_warns(self):  # AUD-CODE-037: xt.yaml phẳng — khoá thụt lề bị bỏ im lặng
+        self.write("xt.yaml", FILLED_YAML + "  test: pytest -x\n\ttypecheck: mypy .\n# lint: x\n")
+        warns = [f.msg for f in self.findings() if f.code == "xt-yaml" and f.level == "warn" and "thụt lề" in f.msg]
+        self.assertEqual(len(warns), 1, warns)
+        self.assertIn("test, typecheck", warns[0])
+        self.write("xt.yaml", FILLED_YAML)
+        self.assertFalse([f for f in self.findings() if "thụt lề" in f.msg])
 
     def test_xt_yaml_duplicate_key_is_error(self):  # AUD-XFEAT-002
         self.write("xt.yaml", FILLED_YAML + "lint: true\n")
@@ -272,6 +284,81 @@ class DoctorHooksTest(DoctorCase):
         self.assertEqual(
             found, [("error", "settings.json thiếu hook Stop"), ("warn", "settings.json thiếu hook PostToolUse")]
         )
+
+    def test_sandbox_group(self):
+        """LOOP-HARNESS-022 (T-3641, ADR-0064 lát E): không thấy sandbox → cảnh báo `sandbox`; vòng một phiên đang chạy mà
+        không có sandbox → lỗi; sandbox khai ở công cụ (Claude `sandbox.enabled`, Codex `sandbox_mode`, Gemini
+        `tools.sandbox`, Cursor `sandbox.json`, devcontainer) hay đang chạy trong container → không phát hiện; OpenCode
+        (không có sandbox chính chủ) → cảnh báo riêng; Codex `danger-full-access` không tính."""
+        none = unittest.mock.patch.object(xt, "_in_container", return_value=False)
+        with none:
+            self.assertIn("sandbox", self.codes("warn", deep=False))
+            self.assertNotIn("sandbox", self.codes("error", deep=False))
+            xt.write_state({"active": True, "single_session": True}, self.base)
+            self.assertIn("sandbox", self.codes("error", deep=False))
+            settings = self.base / ".claude" / "settings.json"
+            data = json.loads(settings.read_text(encoding="utf-8"))
+            settings.write_text(json.dumps({**data, "sandbox": {"enabled": True}}), encoding="utf-8")
+            self.assertNotIn("sandbox", self.codes("error", deep=False) + self.codes("warn", deep=False))
+            settings.write_text(json.dumps(data), encoding="utf-8")
+            for rel, text in (
+                (".codex/config.toml", 'sandbox_mode = "workspace-write"\n'),
+                (".gemini/settings.json", '{"tools": {"sandbox": "docker"}}'),
+                (".cursor/sandbox.json", "{}"),
+                (".devcontainer/devcontainer.json", "{}"),
+            ):
+                with self.subTest(rel):
+                    p = self.write(rel, text)
+                    self.assertNotIn("sandbox", self.codes("error", deep=False))
+                    p.unlink()
+            p = self.write(".codex/config.toml", 'sandbox_mode = "danger-full-access"\n')
+            self.assertIn("sandbox", self.codes("error", deep=False))
+            p.unlink()
+            self.write("opencode.json", "{}")
+            msgs = [f.msg for f in self.findings(deep=False) if f.code == "sandbox"]
+            self.assertTrue(any("OpenCode" in m for m in msgs), msgs)
+        with unittest.mock.patch.object(xt, "_in_container", return_value=True):
+            self.assertNotIn("sandbox", self.codes("error", deep=False))
+        env = {k: v for k, v in os.environ.items() if k not in ("CLAUDE_CODE_CONTAINER_ID", "IS_SANDBOX")}
+        with unittest.mock.patch.dict(os.environ, env, clear=True):
+            with unittest.mock.patch.object(xt.os.path, "exists", return_value=False):
+                self.assertFalse(self.real_in_container())
+            with unittest.mock.patch.object(xt.os.path, "exists", side_effect=lambda p: p == "/.dockerenv"):
+                self.assertTrue(self.real_in_container())
+            with unittest.mock.patch.object(xt.os.path, "exists", side_effect=lambda p: p == "/run/.containerenv"):
+                self.assertTrue(self.real_in_container())
+            with unittest.mock.patch.object(xt.os.path, "exists", return_value=False):
+                with unittest.mock.patch.dict(os.environ, {"IS_SANDBOX": "1"}):
+                    self.assertTrue(self.real_in_container())
+                with unittest.mock.patch.dict(os.environ, {"CLAUDE_CODE_CONTAINER_ID": "c-1"}):
+                    self.assertTrue(self.real_in_container())
+                with unittest.mock.patch.dict(os.environ, {"IS_SANDBOX": "0"}):
+                    self.assertFalse(self.real_in_container())
+
+    def test_pretool_matchers_cover_notebook_and_mcp_writes(self):
+        """AUD-HAR-036/198 (T-3650): bản cài phủ `NotebookEdit` ở hook sửa file và các tool MCP ghi (tạo nhánh/repo, fork,
+        issue); matcher cũ (thiếu) → cảnh báo `hooks`, nêu tên thiếu."""
+        self.assertNotIn("matcher", " ".join(f.msg for f in self.findings() if f.code == "hooks"))
+        settings = self.base / ".claude" / "settings.json"
+        data = json.loads(settings.read_text(encoding="utf-8"))
+        for entry in data["hooks"]["PreToolUse"]:
+            entry["matcher"] = entry["matcher"].replace("|NotebookEdit", "").replace("create_branch|", "")
+        settings.write_text(json.dumps(data), encoding="utf-8")
+        found = [(f.level, f.msg) for f in self.findings() if f.code == "hooks" and "matcher" in f.msg]
+        self.assertEqual(len(found), 1)
+        self.assertEqual(found[0][0], "warn")
+        self.assertIn("NotebookEdit", found[0][1])
+        self.assertIn("create_branch", found[0][1])
+        data["hooks"]["PreToolUse"] = "lạ"  # cấu trúc lạ: không phải danh sách → coi như không matcher nào
+        settings.write_text(json.dumps(data), encoding="utf-8")
+        self.assertTrue(any("matcher" in f.msg for f in self.findings() if f.code == "hooks"))
+
+    def test_pretool_matcher_invalid_regex_counts_as_none(self):
+        """Matcher không phải regex hợp lệ: doctor coi như không phủ (chiều bảo thủ — cách Claude Code xử lý chưa xác minh)
+        và không sập."""
+        found = xt._doctor_matchers({"PreToolUse": [{"matcher": "Bash|(NotebookEdit"}]})
+        self.assertEqual([f.level for f in found], ["warn"])
+        self.assertIn("NotebookEdit", found[0].msg)
 
     def test_shell_syntax_and_other_suffixes(self):
         self.write(".claude/hooks/stop-guard.sh", "if then\n")

@@ -97,7 +97,9 @@ Thoát: 0 = ổn, 1 = vi phạm/chưa đạt, 2 = lỗi dùng lệnh.
 from __future__ import annotations
 
 import argparse
+import ast
 import base64
+import concurrent.futures
 import contextlib
 import copy
 import datetime as _dt
@@ -630,7 +632,40 @@ def validate(root: Path) -> List[str]:
         errors += _check_applies_to(d, where, profile_slugs)
         errors += _check_slug_modules(d, where, slugs, by_rel)
         errors += _check_links(d, where, links)
-    return errors + _check_readmes(root)
+    return errors + _check_refs(docs, ids) + _check_readmes(root)
+
+
+# ID trỏ tới trong văn bản (AUD-DOC-182): dạng ID checklist; `AUD-…` là ID sổ audit của repo (docs/ops), không phải mục khung.
+ID_REF_RE = re.compile(r"\b[A-Z]{2,5}-[A-Z0-9]{2,8}-\d{3}\b")
+REF_SKIP_PREFIXES = ("AUD-",)
+
+
+def _check_refs(docs: List[Doc], ids: Dict[str, str]) -> List[str]:
+    """ID mục checklist được nhắc (ngoài code fence, trừ chính dòng định nghĩa) phải có mục định nghĩa ở đâu đó trong khung."""
+    errors: List[str] = []
+    own = {(d.rel, it.line): it.id for d in docs for it in d.items}
+    for d in docs:
+        for n, line in _lines_outside_fences(d.body, d.body_offset + 1):
+            for ref in dict.fromkeys(ID_REF_RE.findall(line)):
+                if ref not in ids and not ref.startswith(REF_SKIP_PREFIXES) and own.get((d.rel, n)) != ref:
+                    errors.append(f"{d.rel}.md:{n}: trỏ {ref} không có mục nào định nghĩa")
+    return errors
+
+
+VERIFIED_AT_RE = re.compile(r"xác minh(?: lại)?[^\d\n]{0,12}(\d{4}-\d{2}-\d{2})")
+
+
+def stale_verifications(root: Path, days: int, today: _dt.date) -> List[Tuple[str, str]]:
+    """(vị trí, ngày) của mọi "xác minh YYYY-MM-DD" cũ hơn `days` ngày so với `today` (AUD-DOC-177) — nguồn cần tra lại."""
+    docs, _ = load_docs(root)
+    out: List[Tuple[str, str]] = []
+    for d in docs:
+        for n, line in _lines_outside_fences(d.body, d.body_offset + 1):
+            for day in VERIFIED_AT_RE.findall(line):
+                with contextlib.suppress(ValueError):
+                    if (today - _dt.date.fromisoformat(day)).days > days:
+                        out.append((f"{d.rel}.md:{n}", day))
+    return out
 
 
 # --------------------------------------------------------------------------- compose
@@ -3055,6 +3090,35 @@ def _hours_to_green(first_started: Optional[_dt.datetime], green_finished: str) 
     return round((fin - first_started).total_seconds() / 3600, 3)
 
 
+GUARD_LOG = "guard-log.jsonl"  # hook guard nối mỗi quyết định (AUD-HAR-199) — tên giữ GIỐNG `guard.GUARD_LOG`
+
+
+def guard_stats(base: Path, since: Optional[_dt.datetime]) -> Dict[str, Any]:
+    """Tỉ lệ chặn của hook từ `.autopilot/guard-log.jsonl` (dòng hỏng bỏ qua; `since` = mốc bắt đầu vòng, None = mọi
+    dòng): số quyết định, số deny, số BUDGET (ngoài tập con guard đọc chắc — ADR-0063), số phiên. Tỉ lệ chặn cao là
+    dấu hiệu chặn oan (AUD-HAR-199) — so với 1/1.567 của ADR-0063."""
+    p = base / ".autopilot" / GUARD_LOG
+    lines = p.read_text(encoding="utf-8", errors="replace").splitlines() if p.is_file() else []
+    floor = since.timestamp() if since else float("-inf")
+    rows = []
+    for line in lines:
+        with contextlib.suppress(ValueError):
+            r = json.loads(line)
+            if isinstance(r, dict) and isinstance(r.get("ts"), int) and r["ts"] >= floor:
+                rows.append(r)
+    deny = sum(r.get("decision") == "deny" for r in rows)
+    budget = sum(r.get("code") == "BUDGET" for r in rows)
+    n = len(rows)
+    return {
+        "decisions": n,
+        "deny": deny,
+        "budget": budget,
+        "deny_rate": round(deny / n, 4) if n else None,
+        "budget_rate": round(budget / n, 4) if n else None,
+        "sessions": len({r.get("session") for r in rows}),
+    }
+
+
 def loop_stats(base: Path, all_loops: bool = False) -> Dict[str, Any]:
     """Số đo vòng (LOOP-DESIGN-024): mỗi task bao nhiêu lần chạy Gate tới lần xanh đầu, tỉ lệ xanh lần đầu, task cần
     ≥ 3 lần, thời gian tới xanh (giờ, trung vị/P95 — ADR-0061), vòng đã dùng, việc chờ người. Mặc định chỉ tính vòng
@@ -3101,6 +3165,7 @@ def loop_stats(base: Path, all_loops: bool = False) -> Dict[str, Any]:
         "max_iterations": st.get("max_iterations"),
         "deferred": sorted(_deferred(st)),
         "blocked": bool(st.get("blocked")),
+        "guard": guard_stats(base, None if all_loops else _parse_iso(str(st.get("started") or ""))),
     }
 
 
@@ -3125,6 +3190,11 @@ def _loop_stats(args: argparse.Namespace, base: Path) -> int:
     print(
         f"Giao việc: {_pct(s['delegation_rate'])} ({len(s['delegated'])}/{s['task_count']}) · "
         f"xanh lần đầu: giao {_pct(s['first_pass_rate_delegated'])} · tự làm {_pct(s['first_pass_rate_self'])}"
+    )
+    g = s["guard"]
+    print(
+        f"Guard: {g['decisions']} quyết định · chặn {g['deny']} ({_pct(g['deny_rate'])}) · "
+        f"BUDGET {g['budget']} ({_pct(g['budget_rate'])}) · {g['sessions']} phiên (AUD-HAR-199)"
     )
     for k, t in sorted(s["tasks"].items()):
         green = f"xanh ở lần {t['runs_to_green']}" if t["runs_to_green"] else "chưa xanh"
@@ -4483,7 +4553,38 @@ def _doctor_settings(base: Path, deep: bool) -> List[Finding]:
         for ev, lv in DOCTOR_HOOK_EVENTS.items()
         if not hooks.get(ev)
     ]
-    return out + _doctor_hook_files(base, hooks, deep)
+    return out + _doctor_matchers(hooks) + _doctor_hook_files(base, hooks, deep)
+
+
+# Tool phải qua hook PreToolUse của khung (AUD-HAR-036/198): sửa notebook như sửa file, tool MCP ghi ra GitHub.
+DOCTOR_PRETOOL_TOOLS: Tuple[str, ...] = (
+    "NotebookEdit",
+    "mcp__github__create_branch",
+    "mcp__github__create_repository",
+    "mcp__github__fork_repository",
+    "mcp__github__issue_write",
+    "mcp__github__sub_issue_write",
+)
+
+
+def _doctor_matchers(hooks: Dict[str, Any]) -> List[Finding]:
+    """Matcher PreToolUse (regex của Claude Code) có phủ các tool phải qua guard không — bản cài cũ thiếu thì cảnh báo."""
+    entries = hooks.get("PreToolUse")
+    pats = [e.get("matcher") for e in entries if isinstance(e, dict)] if isinstance(entries, list) else []
+    regs = [re.compile(p) for p in pats if isinstance(p, str) and _regex_ok(p)]
+    miss = [t for t in DOCTOR_PRETOOL_TOOLS if not any(r.fullmatch(t) for r in regs)]
+    if not miss:
+        return []
+    msg = f"matcher PreToolUse không phủ {', '.join(miss)} — tool đó chạy không qua guard; {INSTALL_HINT}"
+    return [Finding("hooks", "warn", msg)]
+
+
+def _regex_ok(p: str) -> bool:
+    try:
+        re.compile(p)
+    except re.error:
+        return False
+    return True
 
 
 def _doctor_harness_parts(base: Path) -> List[Finding]:
@@ -4564,9 +4665,14 @@ def gate_noop_keys(base: Path) -> List[str]:
     return [k for k, v in vals.items() if gate_noop(v)]
 
 
+YAML_DQ_RE = re.compile(r'"((?:[^"\\]|\\.)*)"')  # MỘT chuỗi nháy kép trọn giá trị (`\"` bên trong giữ nguyên chữ)
+YAML_SQ_RE = re.compile(r"'((?:[^']|'')*)'")  # MỘT chuỗi nháy đơn; `''` là `'` (YAML)
+
+
 def yaml_scalar(raw: str) -> str:
     """Giá trị YAML phẳng như dev-task.sh `yaml_get`: bỏ comment `#` (đầu giá trị hoặc sau khoảng trắng, ngoài nháy —
-    AUD-HAR-025), rồi bỏ nháy khi bọc cả hai đầu."""
+    AUD-HAR-025), rồi bỏ nháy chỉ khi cả giá trị là MỘT chuỗi nháy (`"a" "b"` giữ nguyên cho bash; `'it''s'` → `it's`
+    — AUD-CODE-037)."""
     out, quote, prev = [], "", " "
     for c in raw:
         if c == "#" and not quote and prev in " \t":
@@ -4575,7 +4681,11 @@ def yaml_scalar(raw: str) -> str:
             quote = "" if quote else c
         out.append(c)
         prev = c
-    return re.sub(r"^([\"'])(.*)\1$", r"\2", "".join(out).strip())
+    val = "".join(out).strip()
+    if m := YAML_DQ_RE.fullmatch(val):
+        return m[1]
+    m = YAML_SQ_RE.fullmatch(val)
+    return m[1].replace("''", "'") if m else val
 
 
 # Sàn Gate theo quy mô (LOOP-HARNESS-023, D-035): ở M/L, cổng do agent tự khai phải đạt mức tối thiểu — ADR-0011 chỉ chặn
@@ -4764,6 +4874,23 @@ def _doctor_gate_floor(base: Path) -> List[Finding]:
     return [Finding("gate-floor", "warn", f"{i} — sàn Gate M/L (LOOP-HARNESS-023)") for i in gate_floor_issues(base)]
 
 
+YAML_INDENTED_KEY_RE = re.compile(r"^[ \t]+([A-Za-z_][\w-]*):")
+
+
+def _doctor_yaml_layout(text: str, lines: List["re.Match[str]"]) -> List[Finding]:
+    """Khoá trùng (AUD-XFEAT-002: dev-task.sh và xt.py đều lấy dòng cuối, người đọc dễ hiểu nhầm dòng đầu) và khoá thụt
+    lề — xt.yaml phẳng, cả xt.py lẫn dev-task.sh chỉ đọc khoá ở cột 0 nên khoá thụt lề bị bỏ im lặng (AUD-CODE-037)."""
+    out: List[Finding] = []
+    dup = sorted(k for k, n in Counter(m[1] for m in lines).items() if n > 1)
+    if dup:
+        out.append(Finding("xt-yaml", "error", f"xt.yaml có khoá trùng: {', '.join(dup)} — giữ một dòng mỗi khoá"))
+    indented = list(dict.fromkeys(m[1] for m in map(YAML_INDENTED_KEY_RE.match, text.splitlines()) if m))
+    if indented:
+        msg = f"xt.yaml có khoá thụt lề bị bỏ qua: {', '.join(indented)} — xt.yaml phẳng, viết khoá ở đầu dòng"
+        out.append(Finding("xt-yaml", "warn", msg))
+    return out
+
+
 def _doctor_xt_yaml(base: Path, fw: Path) -> List[Finding]:
     p, legacy = base / "xt.yaml", base / "xs.yaml"
     if not p.is_file():
@@ -4774,12 +4901,10 @@ def _doctor_xt_yaml(base: Path, fw: Path) -> List[Finding]:
         )
         msg = "thiếu xt.yaml — dev-task.sh/cổng commit không có lệnh khai báo (LOOP-HARNESS-008)"
         return [Finding("xt-yaml", "error", msg, fix)]
-    lines = [m for m in map(YAML_KEY_RE.match, p.read_text(encoding="utf-8").splitlines()) if m]
+    text = p.read_text(encoding="utf-8")
+    lines = [m for m in map(YAML_KEY_RE.match, text.splitlines()) if m]
     keys = {m[1]: m[2] for m in lines}
-    out = _doctor_gate_tools(keys)
-    dup = sorted(k for k, n in Counter(m[1] for m in lines).items() if n > 1)
-    if dup:  # AUD-XFEAT-002: dev-task.sh và xt.py đều lấy dòng cuối, nhưng người đọc file dễ hiểu nhầm dòng đầu
-        out.append(Finding("xt-yaml", "error", f"xt.yaml có khoá trùng: {', '.join(dup)} — giữ một dòng mỗi khoá"))
+    out = _doctor_gate_tools(keys) + _doctor_yaml_layout(text, lines)
     scalars = {k: yaml_scalar(v) for k, v in keys.items()}
     phase_err = delivery_phase_error(scalars)
     if phase_err:
@@ -5140,16 +5265,9 @@ def latest_framework_tag() -> Optional[Tuple[int, int, int]]:
     """Tag `vX.Y.Z` mới nhất của repo khung qua `gh api` (REST, mọi trang, host github.com). Fail-open: không có gh, lỗi
     mạng/quyền, thân không phải UTF-8/JSON (trang chặn của proxy) → None — `doctor` là bước đầu của `/autopilot`."""
     repo = os.environ.get("XT_FRAMEWORK_REPO") or FRAMEWORK_REPO
-    pages: List[Any] = []
-    try:  # phân trang tự làm bằng `page=N` (FB-001: `--paginate` đi theo Link tới `repositories/{id}` bị proxy chặn)
-        for n in range(1, GH_MAX_PAGES + 1):
-            cmd = ["gh", "api", "--hostname", "github.com", f"repos/{repo}/tags?per_page=100&page={n}"]
-            r = subprocess.run(cmd, capture_output=True, text=True, timeout=VERSION_CHECK_TIMEOUT)
-            got = _json_values(r.stdout) if r.returncode == 0 else []
-            pages.extend(got)
-            if not got or _gh_page_len(got[-1]) < 100:
-                break
-    except (OSError, subprocess.SubprocessError, ValueError):  # ValueError gồm UnicodeDecodeError, JSONDecodeError
+    try:  # cùng đường REST phân trang `page=N` với `merge-check` (`_gh_api`, AUD-CODE-038), timeout ngắn của doctor
+        pages = _gh_api(f"repos/{repo}/tags?per_page=100", True, VERSION_CHECK_TIMEOUT, "github.com")
+    except (PrInputError, ValueError):  # ValueError gồm UnicodeDecodeError (trang chặn của proxy), JSONDecodeError
         return None
     tags = [t for page in pages if isinstance(page, list) for t in page]
     names = [t.get("name") for t in tags if isinstance(t, dict)]
@@ -5328,11 +5446,67 @@ def doctor_findings(base: Path, fw: Path, deep: bool = True) -> List[Finding]:
     out = _doctor_runtime() + _doctor_scripts() + _doctor_settings(base, deep) + _doctor_harness_parts(base)
     out += _doctor_docs(base, fw) + _doctor_xt_yaml(base, fw) + _doctor_gate_floor(base) + _doctor_gitignore(base)
     out += _doctor_state(base) + _doctor_legacy(base) + _doctor_git(base) + _doctor_merge(base) + _doctor_memory(base)
-    out += _doctor_orchestration(base)
+    out += _doctor_orchestration(base) + _doctor_sandbox(base)
     if deep:
         out += _doctor_framework(fw) + _doctor_progress(base) + _doctor_version(base) + _doctor_guard_canary(base)
         out += _doctor_claude_version(base)
     return out
+
+
+CONTAINER_MARKS = ("/.dockerenv", "/run/.containerenv")  # docker, podman — phiên cloud cũng chạy trong container
+CODEX_SANDBOX_RE = re.compile(r'^\s*sandbox_mode\s*=\s*"([\w-]+)"', re.M)
+
+
+def _in_container() -> bool:
+    """Phiên đang chạy trong container/VM cô lập: dấu của docker/podman, hay biến môi trường của phiên Claude Code trên
+    cloud (`CLAUDE_CODE_CONTAINER_ID`, `IS_SANDBOX=1` — máy ảo dùng một lần, mạng qua proxy). Biến môi trường là lời khai
+    của tiến trình cha: doctor chỉ khuyên, không phải cổng chặn."""
+    if os.environ.get("CLAUDE_CODE_CONTAINER_ID") or os.environ.get("IS_SANDBOX") == "1":
+        return True
+    return any(os.path.exists(p) for p in CONTAINER_MARKS)
+
+
+def _sandbox_sources(base: Path) -> List[str]:
+    """Sandbox khai ở công cụ agent trong dự án (ADR-0064 lát E, nghiên cứu 2026-11-02): Claude `sandbox.enabled`, Codex
+    `sandbox_mode` khác `danger-full-access`, Gemini `tools.sandbox`, Cursor `.cursor/sandbox.json`, devcontainer."""
+    found: List[str] = []
+    for rel in (".claude/settings.json", ".claude/settings.local.json"):
+        sb = (_read_json_obj(base / rel) or {}).get("sandbox")
+        if isinstance(sb, dict) and sb.get("enabled") is True:
+            found.append(f"{rel} sandbox.enabled")
+    codex = base / ".codex" / "config.toml"
+    m = CODEX_SANDBOX_RE.search(codex.read_text(encoding="utf-8", errors="replace")) if codex.is_file() else None
+    if m and m.group(1) != "danger-full-access":
+        found.append(f".codex/config.toml sandbox_mode={m.group(1)}")
+    tools = (_read_json_obj(base / ".gemini" / "settings.json") or {}).get("tools")
+    if isinstance(tools, dict) and tools.get("sandbox"):
+        found.append(".gemini/settings.json tools.sandbox")
+    found += [rel for rel in (".cursor/sandbox.json", ".devcontainer/devcontainer.json") if (base / rel).is_file()]
+    return found
+
+
+def _doctor_sandbox(base: Path) -> List[Finding]:
+    """`LOOP-HARNESS-022`: guard không phải sandbox — phiên autopilot không người trực cần sandbox OS/devcontainer có egress
+    allowlist. Không thấy → cảnh báo; vòng một phiên đang chạy (`loop init --single-session`) mà không thấy → lỗi.
+    OpenCode không có sandbox chính chủ → cảnh báo riêng."""
+    out: List[Finding] = []
+    if (base / "opencode.json").is_file() or (base / ".opencode").is_dir():
+        msg = "OpenCode không có sandbox chính chủ — chạy trong devcontainer/VM hay `srt` có egress allowlist"
+        out.append(Finding("sandbox", "warn", f"{msg} (LOOP-HARNESS-022)"))
+    if _in_container() or _sandbox_sources(base):
+        return out
+    st = read_state(base) or {}
+    unattended = bool(st.get("active") and st.get("single_session"))
+    msg = (
+        "không thấy sandbox (Claude `sandbox.enabled`, Codex `sandbox_mode`, Gemini `tools.sandbox`, Cursor "
+        "`sandbox.json`, devcontainer) và không chạy trong container — guard không chặn tiến trình con hay mạng "
+        "(LOOP-HARNESS-022)"
+    )
+    return out + [
+        Finding(
+            "sandbox", "error" if unattended else "warn", msg + (" — vòng một phiên đang chạy" if unattended else "")
+        )
+    ]
 
 
 def doctor_fix(findings: List[Finding]) -> Tuple[List[str], List[Finding]]:
@@ -6189,22 +6363,17 @@ def _touches_hard_key(
     return False
 
 
-def _gh_api_once(path: str) -> List[Any]:
+def _gh_api_once(path: str, timeout: float = 0, host: str = "") -> List[Any]:
     """Một lần `gh api` (REST, không GraphQL — phiên Claude Code chặn GraphQL) → danh sách giá trị JSON liền nhau.
-    `{owner}`/`{repo}`/`{branch}` do gh thay theo repo hiện tại."""
-    cmd = ["gh", "api", path]
+    `{owner}`/`{repo}`/`{branch}` do gh thay theo repo hiện tại; `host` → `--hostname`; `timeout` 0 = `GH_TIMEOUT`."""
+    cmd = ["gh", "api", *(["--hostname", host] if host else []), path]
     try:
-        r = subprocess.run(cmd, capture_output=True, text=True, check=False, timeout=GH_TIMEOUT)
+        r = subprocess.run(cmd, capture_output=True, text=True, check=False, timeout=timeout or GH_TIMEOUT)
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise PrInputError(f"không chạy được gh ({exc}) — cài/đăng nhập gh hoặc dùng --pr-json") from exc
     if r.returncode != 0:
         raise PrInputError(f"gh api {path} lỗi: {_one_line(r.stderr)}")
-    dec, rest, out = json.JSONDecoder(), r.stdout.strip(), []
-    while rest:
-        val, end = dec.raw_decode(rest)
-        out.append(val)
-        rest = rest[end:].lstrip()
-    return out
+    return _json_values(r.stdout)
 
 
 GH_MAX_PAGES = 50  # trần an toàn: 50 trang × per_page — API lặp trang cũng không thành vòng vô hạn
@@ -6219,19 +6388,20 @@ def _gh_page_len(val: Any) -> int:
     return 0
 
 
-def _gh_api(path: str, paginate: bool = False) -> List[Any]:
+def _gh_api(path: str, paginate: bool = False, timeout: float = 0, host: str = "") -> List[Any]:
     """REST qua `gh api` → danh sách giá trị JSON (mỗi trang một giá trị). Phân trang TỰ LÀM bằng `page=N` trên chính
     đường `repos/<chủ>/<repo>/…` (FB-001 của X-Company): `gh api --paginate` đi theo header Link tới
     `repositories/{id}/…` mà proxy của phiên Claude Code từ chối (403) nên `merge-check` hỏng với PR > 30 check/commit.
-    Dừng khi trang ngắn hơn `per_page` (30 mặc định của GitHub hoặc giá trị trong `path`) hoặc rỗng."""
+    Dừng khi trang ngắn hơn `per_page` (30 mặc định của GitHub hoặc giá trị trong `path`) hoặc rỗng. Lỗi → PrInputError
+    (hay ValueError khi thân không phải JSON/UTF-8)."""
     if not paginate:
-        return _gh_api_once(path)
+        return _gh_api_once(path, timeout, host)
     m = re.search(r"[?&]per_page=(\d+)", path)
     per_page = int(m.group(1)) if m else 30
     sep = "&" if "?" in path else "?"
     pages: List[Any] = []
     for n in range(1, GH_MAX_PAGES + 1):
-        got = _gh_api_once(f"{path}{sep}page={n}")
+        got = _gh_api_once(f"{path}{sep}page={n}", timeout, host)
         pages.extend(got)
         if not got or _gh_page_len(got[-1]) < per_page:
             break
@@ -6571,6 +6741,16 @@ def cmd_validate(args: argparse.Namespace) -> int:
     docs, _ = load_docs(args.framework)
     n_items = sum(len(d.items) for d in docs)
     print(f"✓ Khung hợp lệ: {len(docs)} file, {n_items} mục checklist.")
+    if args.stale is not None:
+        try:
+            today = _dt.date.fromisoformat(args.today) if args.today else _dt.date.today()
+        except ValueError:
+            print(f"✗ --today phải là YYYY-MM-DD: {args.today}", file=sys.stderr)
+            return 2
+        old = stale_verifications(args.framework, args.stale, today)
+        for where, day in old:
+            print(f"⚠ {where}: xác minh {day} — {(today - _dt.date.fromisoformat(day)).days} ngày")
+        print(f"{len(old)} ngày xác minh quá {args.stale} ngày (cảnh báo, không đổi mã thoát — tra lại nguồn).")
     return 0
 
 
@@ -8861,12 +9041,65 @@ def _loop_hook_stop(args: argparse.Namespace, base: Path) -> int:
 
 
 # Bảng tra `loop <lệnh con>` -> hàm xử lý (args, thư mục dự án) -> exit code.
+# Vòng lặp ngoài (ADR-0064 lát D, T-3646): lệnh headless của từng công cụ; prompt nối vào cuối. Mã thoát của agent KHÔNG
+# được tin (research §8: `opencode run` giữ mã khi bị từ chối quyền) — tiến triển chỉ đọc từ `loop_verdict` (bằng chứng).
+LOOP_AGENTS: Dict[str, List[str]] = {
+    "claude": ["claude", "-p"],
+    "codex": ["codex", "exec"],
+    "gemini": ["gemini", "-p"],
+    "cursor": ["agent", "-p", "--force"],
+    "copilot": ["copilot", "-p"],
+    "grok": ["grok", "-p"],
+    "opencode": ["opencode", "run"],
+}
+LOOP_RUN_STALL = 3  # lượt liền nhau mà verdict máy không đổi → dừng (agent không tiến triển)
+LOOP_RUN_PROMPT = (
+    "Dự án dùng khung X-Templates — đọc AGENTS.md. Việc kế tiếp do máy chọn: {reason}. Chỉ làm đúng task {task}; chạy "
+    "Gate qua `python3 .xtemplates/scripts/xt.py loop record --task {task} -- '<lệnh Gate trong PLAN>'`; việc cần người "
+    "→ `xt.py loop defer --task {task} --reason …`. Không làm task khác, không hỏi người."
+)
+
+
+def _loop_run(args: argparse.Namespace, base: Path) -> int:
+    """`loop run --agent X [--max-turns N] [--timeout S] [--dry-run]`: mỗi lượt đọc verdict từ bằng chứng, gọi agent headless
+    cho đúng task đó, rồi đọc lại verdict. Exit 0 khi xong (`done`/`done-pending-human`), 3 khi vòng không chạy được
+    (chưa `loop init`, blocked, …), 1 khi agent không tiến triển LOOP_RUN_STALL lượt hay hết lượt."""
+    seen: Optional[Tuple[Any, ...]] = None
+    stall = 0
+    for turn in range(1, args.max_turns + 1):
+        v = loop_verdict(base)
+        if v["verdict"] not in ("continue", "verify"):
+            print(f"loop run: dừng — {v['verdict']}: {v.get('reason', '')}")
+            return 0 if str(v["verdict"]).startswith("done") else 3
+        key = (v["verdict"], v.get("task"), v.get("reason"))
+        stall = stall + 1 if key == seen else 0
+        seen = key
+        if stall >= LOOP_RUN_STALL:
+            print(f"loop run: {LOOP_RUN_STALL} lượt không tiến triển ở {v.get('task')} — dừng: {v.get('reason', '')}")
+            return 1
+        cmd = [*LOOP_AGENTS[args.agent], LOOP_RUN_PROMPT.format(task=v.get("task") or "", reason=v.get("reason", ""))]
+        print(f"[lượt {turn}] {args.agent} → {v.get('task')}: {v.get('reason', '')}", flush=True)
+        if args.dry_run:
+            print(shlex.join(cmd))
+            return 0
+        try:
+            subprocess.run(cmd, cwd=base, timeout=args.timeout, check=False)
+        except (
+            OSError,
+            subprocess.TimeoutExpired,
+        ) as exc:  # agent không chạy được/quá giờ: lượt sau vẫn xét bằng chứng
+            print(f"  ⚠ agent: {exc}", file=sys.stderr)
+    print(f"loop run: hết {args.max_turns} lượt — chưa xong")
+    return 1
+
+
 LOOP_HANDLERS: Dict[str, Callable[[argparse.Namespace, Path], int]] = {
     "init": _loop_init,
     "status": _loop_status,
     "record": _loop_record,
     "next": _loop_next,
     "next-step": _loop_next_step,
+    "run": _loop_run,
     "block": _loop_block,
     "decide": _loop_decide,
     "defer": _loop_defer,
@@ -10816,6 +11049,7 @@ RELEASE_ROWS = (
     "acceptance",
     "rollback",
     "unchecked_must",
+    "go_no_go",
 )
 # ADR-0042: kiểm chỉ chạy trước phát hành (pha harden) — khoá xt.yaml của dự án, lệnh đỏ = NO-GO.
 RELEASE_RUN_KEYS = (
@@ -11125,6 +11359,51 @@ def _release_run(base: Path, blueprint: str, key: str, what: str) -> Dict[str, s
     return _release_row(key, "PASS", f"`{redact(cmd)}` exit 0")
 
 
+GO_NO_GO_DIRS = ("docs/ops", "docs", ".")  # nơi tìm `GO-NO-GO*.md` (repo khung: docs/ops; mẫu dự án đích: gốc)
+# Dòng ký của bảng §5: `| vai trò | tên | quyết định | YYYY-MM-DD |` — tên và ngày khác rỗng (mẫu để trống hai ô này).
+GO_SIGN_ROW_RE = re.compile(r"^\|[^|\n]*\|\s*[^|\s][^|\n]*\|[^|\n]*\|\s*\d{4}-\d{2}-\d{2}\s*\|\s*$", re.M)
+
+
+def _go_no_go_signed(text: str) -> bool:
+    """§5 (Ký) của GO-NO-GO có ít nhất một dòng ký có tên và ngày."""
+    part = re.split(r"^## 5\b.*$", text, maxsplit=1, flags=re.M)
+    return len(part) == 2 and bool(GO_SIGN_ROW_RE.search(re.split(r"^## ", part[1], maxsplit=1, flags=re.M)[0]))
+
+
+def _release_go_no_go(base: Path) -> Dict[str, str]:
+    """GO-NO-GO khớp `VERSION` (AUD-HAR-197, 3.29.0 phát hành không có file): tìm `GO-NO-GO*.md` nhắc `v<VERSION>` ở
+    `GO_NO_GO_DIRS`; có bản đã ký §5 → PASS; thiếu/chưa ký → N/A BLOCKER (việc của người: lập từ `release-check --json`,
+    người ký); không có VERSION → N/A SHOULD; không đọc được → FAIL (có thể giấu bản ký)."""
+    try:
+        version = (base / "VERSION").read_text(encoding="utf-8").strip()
+    except FileNotFoundError:
+        return _release_row("go_no_go", "N/A", "không có VERSION — chưa có bản phát hành để ký", "SHOULD")
+    except (OSError, ValueError) as exc:
+        return _release_row("go_no_go", "FAIL", f"không đọc được VERSION: {exc}")
+    found: List[str] = []
+    for d in GO_NO_GO_DIRS:
+        for p in sorted((base / d).glob("GO-NO-GO*.md")):
+            rel = p.relative_to(base).as_posix()
+            try:
+                text = p.read_text(encoding="utf-8")
+            except (OSError, ValueError) as exc:
+                return _release_row("go_no_go", "FAIL", f"không đọc được {rel}: {exc}")
+            if f"v{version}" in p.name or f"v{version}" in text:
+                if _go_no_go_signed(text):
+                    return _release_row("go_no_go", "PASS", f"{rel}: GO-NO-GO v{version} đã ký §5")
+                found.append(rel)
+    if found:
+        return _release_row(
+            "go_no_go", "N/A", f"{', '.join(found)}: §5 chưa có chữ ký (tên + ngày) — người ký", "BLOCKER"
+        )
+    return _release_row(
+        "go_no_go",
+        "N/A",
+        f"chưa có GO-NO-GO cho v{version} — lập theo mẫu GO-NO-GO.md từ `release-check --json`, người ký §5",
+        "BLOCKER",
+    )
+
+
 def _release_unchecked_must(base: Path, blueprint: str, mode: str) -> Dict[str, str]:
     """Số + tỉ lệ MUST tick `[x]` không có `— Kiểm:` (cùng nguồn `blueprint-status`/hàng `blueprint`). `warn` (mặc định):
     hàng ⚠ SHOULD, không đổi GO/NO-GO; `fail` (dự án đích bật ở harden): count > 0 là FAIL BLOCKER = NO-GO."""
@@ -11166,6 +11445,7 @@ def release_check(base: Path, blueprint: str, status: str, unchecked_must: str =
         _release_review_debt(base, status),
         *runs.values(),
         _release_unchecked_must(base, blueprint, unchecked_must),
+        _release_go_no_go(base),
     ]
     fails = [r["id"] for r in rows if r["result"] == "FAIL" and r["level"] == "BLOCKER"]
     human = [r["id"] for r in rows if r["result"] == "N/A" and r["level"] == "BLOCKER"]
@@ -11277,6 +11557,38 @@ def _write_reviews(base: Path, data: Dict[str, Any]) -> None:
 def _pr_record(data: Dict[str, Any], pr: str) -> Dict[str, Any]:
     rec = data.get(pr)
     return rec if isinstance(rec, dict) else {}
+
+
+RecFn = Callable[[Dict[str, Any]], Optional[Dict[str, Any]]]
+
+
+def update_reviews(base: Path, key: str, fn: RecFn) -> Dict[str, Any]:
+    """Đọc–sửa–ghi bản ghi PR `key` của `reviews.json` trong khoá `state.lock` (AUD-CODE-036, như `update_state`): đọc
+    lại sổ TRONG khoá, `fn(bản sao bản ghi)` → bản ghi mới (None = không ghi), ghi cả sổ. Không gọi mạng trong `fn` —
+    đăng lên GitHub ở ngoài khoá rồi gọi lại hàm này để đánh dấu. Trả bản ghi sau cùng."""
+    with _state_lock(base):
+        data = read_reviews(base)
+        rec = _pr_record(data, key)
+        new = fn(copy.deepcopy(rec))
+        if new is None:
+            return rec
+        data[key] = new
+        _write_reviews(base, data)
+        return new
+
+
+def _mark_published(at: str) -> RecFn:
+    """`fn` cho `update_reviews`: đánh dấu đã đăng bản ghi review có thời điểm `at` (bản ghi khác giữ nguyên)."""
+
+    def fn(rec: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        reviews = _ledger_reviews(rec)
+        hit = [r for r in reviews if r.get("at") == at]
+        if not hit:
+            return None
+        hit[-1]["published"] = True
+        return {**rec, "reviews": reviews}
+
+    return fn
 
 
 def _ledger_reviews(rec: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -11999,6 +12311,12 @@ def _rethink_problem(
     return None
 
 
+def _rec_rethinks(rec: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """`rethinks[]` của bản ghi PR (sổ hỏng → rỗng)."""
+    old = rec.get("rethinks")
+    return [r for r in old if isinstance(r, dict)] if isinstance(old, list) else []
+
+
 def _pr_rethink(args: argparse.Namespace, base: Path) -> int:
     """`pr rethink` (ADR-0053/0059): mở thêm đúng một lần sửa (review chưa sạch cuối giữ làm lượt 1) — chỉ khi `pr next`
     đang trả `debt` (còn 🔴:
@@ -12016,9 +12334,7 @@ def _pr_rethink(args: argparse.Namespace, base: Path) -> int:
             f"✗ `pr next` của PR #{key} là `{action}`, không phải `debt`/`rethink` — làm bước đó trước", file=sys.stderr
         )
         return 2
-    local = _pr_record(data, key)
-    old = local.get("rethinks")
-    rethinks = [r for r in old if isinstance(r, dict)] if isinstance(old, list) else []
+    rethinks = _rec_rethinks(_pr_record(data, key))
     # ADR-0061: trần theo PR, kiểm TRƯỚC D-NNN (không bắt ghi quyết định vĩnh viễn rồi mới báo hết trần — review #380);
     # PR cắt bản miễn (ADR-0059 §6)
     if 0 < cap <= len(rethinks) and not d.get("release"):
@@ -12042,8 +12358,7 @@ def _pr_rethink(args: argparse.Namespace, base: Path) -> int:
         error, extra, _ = _review_drift(base, last, head, str(pr.get("baseRefName") or "main"))
         if not error and not extra:
             entry["head"] = head
-    data[key] = {**local, "rethinks": [*rethinks, entry]}
-    _write_reviews(base, data)
+    update_reviews(base, key, lambda r: {**r, "rethinks": [*_rec_rethinks(r), entry]})
     print(f"✓ PR #{key}: mở thêm một lần sửa theo {args.decision} — sửa hết, push, chạy lại `xt.py pr next --pr {key}`")
     return 0
 
@@ -12157,11 +12472,8 @@ def _pr_debt(args: argparse.Namespace, base: Path) -> int:
         if problem:
             print(f"✗ {problem}", file=sys.stderr)
             return 2
-        reviews.append(
-            {"head": head, "clean": True, "debt": ids, "at": now_iso(), **({"fixed": fixed} if fixed else {})}
-        )
-        data[key] = {**local, "reviews": reviews}
-        _write_reviews(base, data)
+        new = {"head": head, "clean": True, "debt": ids, "at": now_iso(), **({"fixed": fixed} if fixed else {})}
+        reviews = _ledger_reviews(update_reviews(base, key, lambda r: {**r, "reviews": [*_ledger_reviews(r), new]}))
     entry = reviews[-1]
     print(
         f"✓ PR #{key}: ghi nợ review ở {head[:7]} ({', '.join(ids) or '—'}"
@@ -12173,9 +12485,7 @@ def _pr_debt(args: argparse.Namespace, base: Path) -> int:
         return 0
     rc = _publish_review(str(args.pr or key), key, head, True, debt=[*ids, *fixed])
     if rc == 0:
-        entry["published"] = True
-        data[key] = {**local, "reviews": reviews}
-        _write_reviews(base, data)
+        update_reviews(base, key, _mark_published(str(entry.get("at"))))
     return rc
 
 
@@ -12207,31 +12517,36 @@ def _bot_author_error(pr_arg: str, key: str, head: str, bot: str) -> str:
     return ""
 
 
-def _pr_reviewed(args: argparse.Namespace, base: Path) -> int:
+def _pr_reviewed_key(args: argparse.Namespace, base: Path) -> Optional[str]:
+    """Kiểm đầu vào của `pr reviewed` (SHA đủ, model, số PR, miễn trừ bot) → số PR, hoặc None khi phải exit 2."""
     if not FULL_SHA_RE.fullmatch(args.head):
         print(
             "✗ --head phải là SHA đủ 40 ký tự (git rev-parse <commit>) — review gắn với đúng commit đã rà",
             file=sys.stderr,
         )
-        return 2
+        return None
     if args.inconclusive:
         args.clean = False
     err = _review_models_error(args, {k: v for k, v in _xt_keys(base).items() if k in REVIEW_KEYS})
     if err:
         print(f"✗ {err}", file=sys.stderr)
-        return 2
+        return None
     key = _pr_key(args.pr)
     if key is None:
-        return 2
+        return None
     # chỉ review sạch cần miễn trừ bot (lỗi chặn/không kết luận không mở merge — không để REST lỗi làm mất chúng)
     bot = args.clean and args.author_model in TRUSTED_BOTS
     bot_err = _bot_author_error(str(args.pr), key, args.head, args.author_model) if bot else ""
     if bot_err:
         print(f"✗ {bot_err}", file=sys.stderr)
+        return None
+    return key
+
+
+def _pr_reviewed(args: argparse.Namespace, base: Path) -> int:
+    key = _pr_reviewed_key(args, base)
+    if key is None:
         return 2
-    data = read_reviews(base)
-    rec = _pr_record(data, key)
-    reviews = _ledger_reviews(rec)  # sổ hỏng → ghi lại từ đầu (AUD-CODE-019)
     entry: Dict[str, Any] = {"head": args.head, "clean": args.clean, "at": now_iso()}
     if args.inconclusive:
         entry["inconclusive"] = True
@@ -12245,22 +12560,24 @@ def _pr_reviewed(args: argparse.Namespace, base: Path) -> int:
     # Idempotent (AUD-HAR-071, BASE-DATA-008): chạy lại cùng kết quả ở cùng head không thêm bản ghi, đã đăng thì không
     # đăng trùng; chỉ so bản ghi CUỐI — đổi kết quả rồi đổi lại vẫn là bản ghi mới.
     same = ("head", "clean", "inconclusive", "reviewer_model", "author_model", *REVIEW_EFFORT_KEYS)
-    again = bool(reviews) and all(reviews[-1].get(k) == entry.get(k) for k in same)
-    if again:
-        entry = reviews[-1]
-    else:
-        reviews.append(entry)
-        data[key] = {**rec, "reviews": reviews}
-        _write_reviews(base, data)
+    seen: List[Dict[str, Any]] = []
+
+    def add(rec: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        reviews = _ledger_reviews(rec)  # sổ hỏng → ghi lại từ đầu (AUD-CODE-019)
+        if reviews and all(reviews[-1].get(k) == entry.get(k) for k in same):
+            seen.append(reviews[-1])
+            return None
+        return {**rec, "reviews": [*reviews, entry]}
+
+    update_reviews(base, key, add)
+    cur = seen[0] if seen else entry
     word = "chưa kết luận (cần review khác)" if args.inconclusive else "sạch" if args.clean else "còn lỗi chặn"
-    print(f"✓ PR #{key}: review {word} ở {args.head[:7]}" + (" (đã ghi trước đó — không ghi thêm)" if again else ""))
-    if args.no_publish or entry.get("published"):
+    print(f"✓ PR #{key}: review {word} ở {args.head[:7]}" + (" (đã ghi trước đó — không ghi thêm)" if seen else ""))
+    if args.no_publish or cur.get("published"):
         return 0
     rc = _publish_review(str(args.pr), key, args.head, args.clean, bool(args.inconclusive))
     if rc == 0:
-        entry["published"] = True
-        data[key] = {**rec, "reviews": reviews}
-        _write_reviews(base, data)
+        update_reviews(base, key, _mark_published(str(cur.get("at"))))
     return rc
 
 
@@ -12801,22 +13118,35 @@ def cmd_pr_stats(args: argparse.Namespace) -> int:
     return 0
 
 
+def _remember_problem(d: Dict[str, Any], rec: Dict[str, Any]) -> bool:
+    """Sổ cục bộ cần nhớ thêm: làn chuẩn (push sau đó không hạ PR về làn nhanh) hay head cập nhật nhánh (AUD-HAR-136)."""
+    old = rec.get("merges")
+    merges: Dict[str, Any] = old if isinstance(old, dict) else {}
+    lane = d["lane"] == "chuẩn" and not rec.get("standard_seen")
+    return lane or bool(d["base_merge_of"] and merges.get(d["head"]) != d["base_merge_of"])
+
+
+def _remember(d: Dict[str, Any], rec: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """`fn` cho `update_reviews`: ghi `standard_seen`/`merges` vào bản ghi đọc lại trong khoá (None = không đổi)."""
+    if not _remember_problem(d, rec):
+        return None
+    if d["lane"] == "chuẩn":
+        rec = {**rec, "standard_seen": True}
+    old = rec.get("merges")
+    merges: Dict[str, Any] = old if isinstance(old, dict) else {}
+    if d["base_merge_of"] and merges.get(d["head"]) != d["base_merge_of"]:
+        rec = {**rec, "merges": dict(list({**merges, d["head"]: d["base_merge_of"]}.items())[-MERGES_KEEP:])}
+    return rec
+
+
 def _pr_next_state(pr: Dict[str, Any], base: Path) -> Tuple[Dict[str, Any], Dict[str, Any], Dict[str, Any]]:
     """(quyết định `merge-check`, sổ review cục bộ cả file, sổ của PR gộp dấu đã đăng) cho `pr next`/`pr rethink`."""
     d, _ = _merge_eval(pr)
     data = read_reviews(base)
     rec = _pr_record(data, str(d["pr"]))
-    if d["lane"] == "chuẩn" and not rec.get("standard_seen"):  # nhớ làn chuẩn: push sau đó không hạ PR về làn nhanh
-        rec = {**rec, "standard_seen": True}
+    if _remember_problem(d, rec):
+        rec = update_reviews(base, str(d["pr"]), lambda r: _remember(d, r))
         data[str(d["pr"])] = rec
-        _write_reviews(base, data)
-    old = rec.get("merges")
-    merges: Dict[str, Any] = old if isinstance(old, dict) else {}
-    if d["base_merge_of"] and merges.get(d["head"]) != d["base_merge_of"]:  # nhớ head cập nhật nhánh (AUD-HAR-136)
-        keep = dict(list({**merges, d["head"]: d["base_merge_of"]}.items())[-MERGES_KEEP:])
-        rec = {**rec, "merges": keep}
-        data[str(d["pr"])] = rec
-        _write_reviews(base, data)
     rec = {**rec, "standard_seen": True} if _standard_seen(pr) else rec
     return d, data, with_published(rec, pr.get("xtReviews"), bool(pr.get("reviewIdentity")))
 
@@ -13501,6 +13831,131 @@ def _bench_print(out: Dict[str, Any]) -> None:
         print("  ! chưa có ca đối kháng do reviewer khác họ model viết (AUTO-07)")
     for r in out["failures"]:
         print(f"  ✗ {r['status']}: {r['id']} ({', '.join(r['refs'])}) mong {r['expect']} — được {r['got']}")
+
+
+# --- mutate-guard (T-3655, AUD-TEST-051): coverage 100 % chưa chứng minh test bắt được đổi CHÍNH SÁCH của guard ---------
+MUTATE_FUNCS = ("decide", "policy_action", "apply_policy", "_strict_why")
+MUTATE_TESTS = ("tests.test_guard_corpus", "tests.test_guard_strict", "tests.test_guard_audit1019")
+MUTATE_WORDS = ("deny", "ask", "allow", "")
+MUTATE_FLIP: Dict[type, type] = {
+    ast.And: ast.Or,
+    ast.Or: ast.And,
+    ast.Eq: ast.NotEq,
+    ast.NotEq: ast.Eq,
+    ast.In: ast.NotIn,
+    ast.NotIn: ast.In,
+    ast.Is: ast.IsNot,
+    ast.IsNot: ast.Is,
+}
+
+
+class GuardMutator(ast.NodeTransformer):
+    """Đột biến chính sách trong các hàm `funcs` (kể cả hàm lồng): chữ quyết định `deny/ask/allow` → `""`, `""` →
+    `"deny"`, bỏ `not`, đảo `and↔or`, `==↔!=`, `in↔not in`, `is↔is not`. `target` = thứ tự chỗ đột biến được áp (−1 = chỉ
+    đếm); `sites` = mô tả từng chỗ theo thứ tự duyệt — lần đếm và lần áp duyệt cùng thứ tự nên số khớp nhau."""
+
+    def __init__(self, funcs: Sequence[str], target: int = -1) -> None:
+        self.funcs, self.target, self.depth = set(funcs), target, 0
+        self.sites: List[str] = []
+
+    def _site(self, node: ast.AST, desc: str, make: Callable[[], ast.AST]) -> ast.AST:
+        self.sites.append(f"dòng {getattr(node, 'lineno', 0)}: {desc}")
+        return ast.copy_location(make(), node) if len(self.sites) - 1 == self.target else node
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> ast.AST:
+        inside = int(node.name in self.funcs)
+        self.depth += inside
+        self.generic_visit(node)
+        self.depth -= inside
+        return node
+
+    def visit_Constant(self, node: ast.Constant) -> ast.AST:
+        if not self.depth or not isinstance(node.value, str) or node.value not in MUTATE_WORDS:
+            return node
+        new = "" if node.value else "deny"
+        return self._site(node, f"{node.value!r} → {new!r}", lambda: ast.Constant(new))
+
+    def visit_UnaryOp(self, node: ast.UnaryOp) -> ast.AST:
+        self.generic_visit(node)
+        if not self.depth or not isinstance(node.op, ast.Not):
+            return node
+        return self._site(node, "bỏ `not`", lambda: node.operand)
+
+    def visit_BoolOp(self, node: ast.BoolOp) -> ast.AST:
+        self.generic_visit(node)
+        flip = MUTATE_FLIP[type(node.op)]
+        if not self.depth:
+            return node
+        return self._site(node, f"{type(node.op).__name__} → {flip.__name__}", lambda: ast.BoolOp(flip(), node.values))
+
+    def visit_Compare(self, node: ast.Compare) -> ast.AST:
+        self.generic_visit(node)
+        flip = MUTATE_FLIP.get(type(node.ops[0]))
+        if not self.depth or flip is None or len(node.ops) != 1:
+            return node
+        op = flip
+        return self._site(
+            node,
+            f"{type(node.ops[0]).__name__} → {op.__name__}",
+            lambda: ast.Compare(node.left, [op()], node.comparators),
+        )
+
+
+def _mutant_run(guard: Path, funcs: Sequence[str], target: int, tests: Sequence[str], root: Path) -> int:
+    """MỘT mutant trong tiến trình này: nạp guard đã đột biến làm module `<tên file>` (test `import guard` nhận bản này)
+    rồi chạy `tests`; 0 = test vẫn xanh (mutant SỐNG), 1 = test đỏ (bị giết)."""
+    import unittest  # chỉ tiến trình con của mutate-guard cần
+
+    tree = GuardMutator(funcs, target).visit(ast.parse(guard.read_text(encoding="utf-8"), str(guard)))
+    mod = types.ModuleType(guard.stem)
+    mod.__file__ = str(guard)
+    sys.modules[guard.stem] = mod
+    exec(compile(ast.fix_missing_locations(tree), str(guard), "exec"), mod.__dict__)
+    sys.path[:0] = [str(root), str(guard.parent)]
+    suite = unittest.defaultTestLoader.loadTestsFromNames(list(tests))
+    return 0 if unittest.TextTestRunner(stream=io.StringIO(), failfast=True).run(suite).wasSuccessful() else 1
+
+
+def _mutant_outcome(cmd: List[str], root: Path, timeout: float) -> str:
+    try:
+        r = subprocess.run(cmd, cwd=root, capture_output=True, text=True, timeout=timeout, check=False)
+    except subprocess.TimeoutExpired:
+        return "timeout"  # tính là bị giết (test treo khi chính sách đổi — vẫn là phát hiện)
+    return "survived" if r.returncode == 0 else "killed"
+
+
+def cmd_mutate_guard(args: argparse.Namespace) -> int:
+    """`mutate-guard`: đột biến chính sách của guard, mỗi mutant một tiến trình con chạy bộ test guard. Exit 0 khi mọi
+    mutant bị giết; 1 khi còn mutant sống (test chưa khoá hành vi đó); 2 khi không có chỗ đột biến hoặc bộ test đỏ ngay
+    khi chưa đột biến. Chỉ stdlib (thay mutmut — spike 2026-10-26 không chấm được, `docs/ops/MUTATION-2026-10-26.md`)."""
+    base = project_dir()
+    guard = Path(args.guard) if args.guard else base / ".claude" / "hooks" / "guard.py"
+    funcs, tests = [f for f in args.functions.split(",") if f], [t for t in args.tests.split(",") if t]
+    if args.run_one is not None:
+        return _mutant_run(guard.resolve(), funcs, args.run_one, tests, base)
+    counter = GuardMutator(funcs)
+    counter.visit(ast.parse(guard.read_text(encoding="utf-8"), str(guard)))
+    sites = counter.sites
+    if not sites:
+        print(f"mutate-guard: không có chỗ đột biến trong {', '.join(funcs)} của {guard}", file=sys.stderr)
+        return 2
+    if args.list:
+        print("\n".join(f"{i:3}  {s}" for i, s in enumerate(sites)))
+        return 0
+    head = [sys.executable, str(Path(__file__).resolve()), "mutate-guard", "--guard", str(guard.resolve())]
+    head += ["--functions", ",".join(funcs), "--tests", ",".join(tests), "--run-one"]
+    if _mutant_outcome([*head, "-1"], base, args.timeout) != "survived":
+        print("mutate-guard: bộ test đỏ hoặc treo khi CHƯA đột biến — sửa test trước", file=sys.stderr)
+        return 2
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, args.jobs)) as pool:
+        outcomes = list(pool.map(lambda i: _mutant_outcome([*head, str(i)], base, args.timeout), range(len(sites))))
+    alive = [s for s, o in zip(sites, outcomes) if o == "survived"]
+    if args.json:
+        print(json.dumps({"guard": str(guard), "mutants": len(sites), "survived": alive, "outcomes": outcomes}))
+    else:
+        print(f"mutate-guard: {len(sites)} mutant · giết {len(sites) - len(alive)} · sống {len(alive)}")
+        print("\n".join(f"  ✗ sống — {s}" for s in alive))
+    return 1 if alive else 0
 
 
 def cmd_autonomy_bench(args: argparse.Namespace) -> int:
@@ -14315,7 +14770,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="thư mục framework/ (mặc định: cạnh scripts/)",
     )
     sub = p.add_subparsers(dest="cmd", required=True)
-    sub.add_parser("validate").set_defaults(fn=cmd_validate)
+    pv = sub.add_parser("validate")
+    pv.add_argument(
+        "--stale", type=int, metavar="N", help="cảnh báo mọi 'xác minh YYYY-MM-DD' cũ hơn N ngày (AUD-DOC-177)"
+    )
+    pv.add_argument("--today", help="ngày so cho --stale (YYYY-MM-DD; mặc định hôm nay)")
+    pv.set_defaults(fn=cmd_validate)
     pl = sub.add_parser("list")
     pl.add_argument("what", choices=["profiles", "industries", "modules"])
     pl.set_defaults(fn=cmd_list)
@@ -14482,6 +14942,18 @@ def build_parser() -> argparse.ArgumentParser:
         "--json", action="store_true", help="in JSON {revision, cases, false_green, groups, coverage, failures}"
     )
     pab.set_defaults(fn=cmd_autonomy_bench)
+    pmg = sub.add_parser(
+        "mutate-guard", help="đột biến chính sách guard, chạy bộ test guard mỗi mutant — exit 1 khi còn mutant sống"
+    )
+    pmg.add_argument("--guard", help="file guard (mặc định .claude/hooks/guard.py của dự án)")
+    pmg.add_argument("--functions", default=",".join(MUTATE_FUNCS), help="hàm được đột biến, cách nhau dấu phẩy")
+    pmg.add_argument("--tests", default=",".join(MUTATE_TESTS), help="tên test unittest, cách nhau dấu phẩy")
+    pmg.add_argument("--jobs", type=int, default=os.cpu_count() or 2, help="số mutant chạy song song")
+    pmg.add_argument("--timeout", type=float, default=300, help="giây tối đa mỗi mutant (quá = bị giết)")
+    pmg.add_argument("--list", action="store_true", help="chỉ liệt kê chỗ đột biến")
+    pmg.add_argument("--json", action="store_true", help="in JSON {guard, mutants, survived, outcomes}")
+    pmg.add_argument("--run-one", type=int, help=argparse.SUPPRESS)  # tiến trình con: một mutant (−1 = gốc)
+    pmg.set_defaults(fn=cmd_mutate_guard)
     pw = sub.add_parser("merge-watch", help="gọi merge-check định kỳ tới khi PR xong hoặc cần hành động (ADR-0021)")
     pw.add_argument("--pr", help="số/URL/nhánh của PR (mặc định PR của nhánh hiện tại)")
     pw.add_argument("--interval", type=int, default=30, help="giây giữa hai lần kiểm (mặc định 30)")
@@ -14561,6 +15033,13 @@ def build_parser() -> argparse.ArgumentParser:
     ls.add_argument("--json", action="store_true")
     lne = lsub.add_parser("next", help="task sẵn sàng theo `sau:` và cặp giao nhau `files:` (T-1511)")
     lne.add_argument("--json", action="store_true")
+    lru = lsub.add_parser(
+        "run", help="vòng lặp ngoài: gọi agent headless từng task, tiến triển đọc từ bằng chứng (ADR-0064)"
+    )
+    lru.add_argument("--agent", required=True, choices=list(LOOP_AGENTS))
+    lru.add_argument("--max-turns", type=int, default=20, help="số lượt tối đa (mặc định 20)")
+    lru.add_argument("--timeout", type=float, default=3600, help="giây tối đa mỗi lượt agent (mặc định 3600)")
+    lru.add_argument("--dry-run", action="store_true", help="in lệnh của lượt đầu, không chạy agent")
     lns = lsub.add_parser("next-step", help="bước kế của mục tiêu, chỉ đọc (ADR-0052 §5)")
     lns.add_argument("--objective", choices=NEXT_STEP_OBJECTIVES, default=NEXT_STEP_OBJECTIVES[0])
     lns.add_argument(

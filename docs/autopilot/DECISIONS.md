@@ -2069,8 +2069,70 @@
 - Chọn: Danh sách trắng (ADR-0063 lát C): thân chỉ là chữ nguyên văn, $(cat <<'EOF'…), $(cat tệp nguyên văn), tệp/stdin-chuyển-hướng trên chính gh ở thư mục biết; endpoint api đọc dấu; 17 ca đối chứng cũ thành chặn
 - Lý do (tiêu chí chất lượng cuối): (1) đúng và an toàn: dấu đi qua được tên tệp (ls), thông điệp commit (guard không chặn commit mang dấu: git log --oneline/%s, show --stat), tr/printf — danh sách đen không hội tụ (ADR-0063, #372). Đo 1567 lệnh Bash thật: luật gh mới đổi 0 quyết định; đường thay thế cho agent: ghi thân ra tệp rồi --body-file (lệnh riêng).
 - Đường lùi: Trả _gh_strict_why về a41e64c và expect của 17 ca guard-control-* trong tests/fixtures/autonomy/guard.json
+### D-302 · 2026-11-02T04:20:53+00:00 · Kế hoạch sửa sau audit toàn bộ 2026-11-02 (AUDIT-REPORT-2026-11-02-full.md): 3 🟠 mới + 21 🟢, 4 🔴 guard có từ trước — chủ dự án triển khai sau
 
-### D-302 · 2026-11-02T04:56:37+00:00 · AUD-XFEAT-039 (#401): PR Dependabot không ghi được review sạch — miễn luật năng lực cho tác giả bot thế nào?
+- Phương án: (1) Ba đợt theo tác động/chi phí: P0 trước 3.30.0 (4 🔴 guard lát C ADR-0063 + SEC-248 tiền tố docs/autopilot, CODE-036 khoá reviews.json, HAR-197 hàng go_no_go_file, HAR-036/198 matcher hook, CI-027 schedule secret-scan, DOC-175 PROGRESS); P1 2–4 tuần (DOC-180 lưu trữ sổ + trần docs, SEC-329 mã lý do làm khoá chính, PERF-013 cache guard kiểm sha256, HAR-199 đo chặn oan, CODE-037/038, CI-028, DEP-010, TEST-051); P2 cần ADR (sandbox/egress bắt buộc cho autopilot, tách xt.py theo lát, nội dung DOC-176…178/181, XFEAT-046) · (2) Gộp tất cả vào PLAN-harden-2026-11-01 đang chạy, không phân đợt · (3) Chỉ sửa 🔴 rồi cắt 3.30.0, hoãn toàn bộ 🟠/🟢
+- Chọn: Ba đợt theo tác động/chi phí: P0 trước 3.30.0 (4 🔴 guard lát C ADR-0063 + SEC-248 tiền tố docs/autopilot, CODE-036 khoá reviews.json, HAR-197 hàng go_no_go_file, HAR-036/198 matcher hook, CI-027 schedule secret-scan, DOC-175 PROGRESS); P1 2–4 tuần (DOC-180 lưu trữ sổ + trần docs, SEC-329 mã lý do làm khoá chính, PERF-013 cache guard kiểm sha256, HAR-199 đo chặn oan, CODE-037/038, CI-028, DEP-010, TEST-051); P2 cần ADR (sandbox/egress bắt buộc cho autopilot, tách xt.py theo lát, nội dung DOC-176…178/181, XFEAT-046)
+- Lý do (tiêu chí chất lượng cuối): (1) an toàn: 🔴 và 🟠 chạm merge/hàng rào đi trước, mỗi đợt một PR nhỏ đảo ngược được; (3) bền và test được: 🟠 có Gate đỏ trước; P2 đổi cấu trúc nên cần ADR riêng thay vì chèn vào PLAN đang chạy (PA2 phình phạm vi lát guard, PA3 để lại 🟠 CODE-036/HAR-197 làm lệch G7 lặp lại)
+- Đường lùi: Sửa thứ tự/đợt bằng D mới; mỗi PR revert độc lập
+
+### D-303 · 2026-11-02T05:16:50+00:00 · ADR-0064 harness đa nhà cung cấp — ba lựa chọn triển khai sau khi chủ dự án trả lời 2026-11-02 (1: cả 6 công cụ; 2: nâng LOOP-HARNESS-022 nếu không làm chậm code; 3: vị trí luật 'cái nào tốt thì làm')
+
+- Phương án: (1) Lát B làm cả 6 adapter (Codex, Gemini CLI, Cursor, Copilot CLI, Grok Build, OpenCode) theo thứ tự OSI trước; LOOP-HARNESS-022 nâng SHOULD → MUST@M chỉ cho phiên autopilot không người trực (doctor kiểm, chủ dự án chấp nhận chi phí cài một lần + allowlist); luật giữ ở .claude/hooks/guard.py làm nhà vật lý duy nhất, thêm chế độ core trung lập, adapter mỏng ở .xtemplates/harness/<tool>/ gọi lõi — không dời thư mục trong 3.x · (2) Như trên nhưng dời guard.py sang .xtemplates/harness/core.py ngay, .claude/hooks chỉ còn shim · (3) Chỉ Codex + Gemini đợt đầu, LOOP-HARNESS-022 giữ SHOULD
+- Chọn: Lát B làm cả 6 adapter (Codex, Gemini CLI, Cursor, Copilot CLI, Grok Build, OpenCode) theo thứ tự OSI trước; LOOP-HARNESS-022 nâng SHOULD → MUST@M chỉ cho phiên autopilot không người trực (doctor kiểm, chủ dự án chấp nhận chi phí cài một lần + allowlist); luật giữ ở .claude/hooks/guard.py làm nhà vật lý duy nhất, thêm chế độ core trung lập, adapter mỏng ở .xtemplates/harness/<tool>/ gọi lõi — không dời thư mục trong 3.x
+- Lý do (tiêu chí chất lượng cuối): (1) đúng và an toàn: MUST@M cho phiên không người trực đóng lỗ 'guard không phải sandbox' ở 5/7 công cụ tắt sandbox mặc định; chi phí là cài một lần + allowlist registry/git, không chạm vòng code (phiên tương tác không bị ép) nên không làm chậm tiến độ; (2) đường lùi: giữ guard.py tại chỗ là diff nhỏ nhất, revert từng adapter độc lập; dời thư mục (PA2) đụng DIR_CAPS, harness.sha256.json, hàng trăm tham chiếu test và cả 3 công cụ đang nạp .claude/settings.json — chỉ xét ở 4.0 cùng mốc 2027-01-21; (3) bền, test được: lõi một nơi, adapter là dữ liệu + fixture theo phiên bản; PA3 bỏ 4 công cụ chủ dự án đã chọn
+- Đường lùi: Mỗi adapter một PR revert độc lập; mức LOOP-HARNESS-022 hạ lại bằng D mới + CHANGELOG; dời thư mục làm ADR riêng khi cần
+
+### D-304 · 2026-11-02T05:23:27+00:00 · Gom mọi đề xuất/nâng cấp ngày 2026-11-02 (chủ dự án: 'cập nhật tất cả đề xuất, nâng cấp trong hôm nay rồi tối ưu lại và triển khai') thành một PLAN
+
+- Phương án: (1) Một PLAN-upgrade-2026-11-02 thay PLAN-harden-2026-11-01: 5 task mở của harden chép cùng ID + P0/P1/P2 của D-302 + lát A–E ADR-0064 (D-303), gộp việc trùng (SEC-329↔lát A, DOC-181↔lát A, HAR-036/198↔CI-027/028, TEST-051↔HAR-199), xếp 🔴 guard → 🟠 audit → lõi/sandbox → P1 → adapter → nội dung → sổ/phát hành; để ngoài ARCH-008, DOC-179, PERF-014 · (2) Ba PLAN song song (harden, audit, harness) chạy lần lượt · (3) Chỉ chạy PLAN-harden tới 3.30.0 rồi mới lập PLAN cho audit + ADR-0064
+- Chọn: Một PLAN-upgrade-2026-11-02 thay PLAN-harden-2026-11-01: 5 task mở của harden chép cùng ID + P0/P1/P2 của D-302 + lát A–E ADR-0064 (D-303), gộp việc trùng (SEC-329↔lát A, DOC-181↔lát A, HAR-036/198↔CI-027/028, TEST-051↔HAR-199), xếp 🔴 guard → 🟠 audit → lõi/sandbox → P1 → adapter → nội dung → sổ/phát hành; để ngoài ARCH-008, DOC-179, PERF-014
+- Lý do (tiêu chí chất lượng cuối): (1) đúng và an toàn: 🔴 guard vẫn đi đầu, không task nào làm yếu cổng; một sổ máy đọc (loop status) thay ba; (3) đơn giản, test được: gộp 4 cặp trùng bớt ~4 PR, phụ thuộc sau: rõ trong một file; PA2 ba vòng loop init chồng nhau, PA3 trì hoãn 🟠 CODE-036/HAR-197 làm lệch G7 ngay ở lần cắt 3.30.0; việc để ngoài cần ADR/research riêng (D-142, đợt nội dung)
+- Đường lùi: Tách lại PLAN bằng D mới; task giữ ID nên loop init mang bằng chứng theo
+
+### D-305 · 2026-11-02T08:39:37+00:00 · AUD-TEST-052: test_quote_like_repeat_not_cubic đỏ ngẫu nhiên khi cổng chạy song song — sửa test thế nào?
+
+- Phương án: (1) giữ ngưỡng tỉ lệ mặc định, chỉ đổi đồng hồ sang process_time · (2) dùng cpu_budget.assert_not_quadratic ratio 40 ở cỡ 16 (đồng hồ process_time) — chỉ canh bậc ba trở lên · (3) sửa _quote_exec_scripts thành tuyến tính rồi giữ ngưỡng cũ
+- Chọn: dùng cpu_budget.assert_not_quadratic ratio 40 ở cỡ 16 (đồng hồ process_time) — chỉ canh bậc ba trở lên
+- Lý do (tiêu chí chất lượng cuối): đo (review #405 R10): main và HEAD cùng bậc hai (n=16→64: 0,068→1,18 s CPU) do thân trích Θ(n²) theo đầu vào — có từ trước, không phải hồi quy; ngưỡng cũ chỉ xanh nhờ SLACK; tên test canh bậc ba và cpu_budget cho phép ratio 40 cho test canh hàm mũ; bậc ba vẫn bị bắt. Phương án 3 là việc tối ưu riêng, không thuộc lát sửa
+- Đường lùi: trả ratio mặc định trong test_quote_like_repeat_not_cubic khi _quote_exec_scripts tuyến tính (mở task PERF)
+
+### D-306 · 2026-11-02T08:59:29+00:00 · T-3653/AUD-CODE-038: gộp 4 runner subprocess (run_gate_shell, _git, _floor_run, _perf_run) thành một _run(cmd, cwd, timeout, env)?
+
+- Phương án: (1) gộp thành một _run theo PLAN · (2) giữ 4 runner (mỗi cái một giao ước riêng), chỉ gộp đường GET REST: latest_framework_tag qua _gh_api
+- Chọn: giữ 4 runner (mỗi cái một giao ước riêng), chỉ gộp đường GET REST: latest_framework_tag qua _gh_api
+- Lý do (tiêu chí chất lượng cuối): đọc mã 2026-11-02: _floor_run đã gọi run_gate_shell (không phải biến thể); run_gate_shell = bash pipefail + guard (LOOP-STOP-027) + nhóm tiến trình + output qua file tạm (review #220); _git = GIT_SAFE_READ + không grafts (AUD-SEC-158) + errors=replace; _perf_run = đo không lượng tử bằng thread waitpid (AUD-PERF-003). Gộp phải mang cờ cho từng giao ước — thêm nhánh, dễ làm mất bảo đảm an toàn đã sửa (tiêu chí 1 > 3); xác minh đối kháng của audit cũng ghi PARTIAL. Đường REST trùng thật nên gộp
+- Đường lùi: tách hàm chung khi có runner thứ năm cùng giao ước; phần AUD-CODE-038 về runner ghi bác bỏ kèm D này
+
+### D-307 · 2026-11-02T09:22:29+00:00 · T-3652/AUD-PERF-013: cache bytecode guard.py khoá theo sha256 nguồn để bớt ~0,13 s mỗi lệnh Bash?
+
+- Phương án: (1) cache marshal khoá sha256 nguồn trong thư mục do install/doctor tạo (theo PLAN) · (2) không cache; giữ compile từ nguồn (AUD-SEC-074), sổ ghi chấp nhận chi phí; tăng tốc thật đi qua tách guard/nạp lười (AUD-ARCH-008, cần ADR) · (3) tiến trình guard thường trú (daemon) giữ module đã nạp
+- Chọn: không cache; giữ compile từ nguồn (AUD-SEC-074), sổ ghi chấp nhận chi phí; tăng tốc thật đi qua tách guard/nạp lười (AUD-ARCH-008, cần ADR)
+- Lý do (tiêu chí chất lượng cuối): đọc mã + mô hình đe doạ 2026-11-02: khoá sha256 chỉ ràng buộc NGUỒN, không ràng buộc bytecode — ai ghi được file cache (đặt tên theo sha256 nguồn công khai) thì thay mã guard mà git diff không thấy (cache bị gitignore), đúng lớp lỗi AUD-SEC-074 (pyc giả khớp header). Không có bí mật nào để ký trong máy agent. Sửa thẳng guard.py thì hiện trong diff và review. Tiêu chí 1 (an toàn) > 5 (tốc độ): ~0,13 s × ~1.500 lệnh ≈ 3–4 phút/phiên được chấp nhận. Daemon thêm bề mặt tấn công và trạng thái sống lâu
+- Đường lùi: nếu có nơi lưu agent không ghi được (thư mục người dùng chỉ đọc, ký bằng khoá ngoài máy agent) thì làm phương án 1 qua ADR mới
+
+### D-308 · 2026-11-02T10:14:40+00:00 · T-3640/AUD-SEC-329: chính sách guard suy từ chuỗi lý do — sửa bằng cách mỗi luật trả code tường minh (PLAN) hay khoá bằng test?
+
+- Phương án: (1) mỗi luật (100+ chỗ trả lý do) trả code tường minh, REASON_CODES chỉ còn fallback · (2) giữ REASON_CODES; ReasonCodeLockTest: mỗi mã trong REASON_CODES có ≥ 1 lệnh thật chạy end-to-end và khẳng định mã — đổi câu chữ lý do làm test đỏ thay vì âm thầm cho qua
+- Chọn: giữ REASON_CODES; ReasonCodeLockTest: mỗi mã trong REASON_CODES có ≥ 1 lệnh thật chạy end-to-end và khẳng định mã — đổi câu chữ lý do làm test đỏ thay vì âm thầm cho qua
+- Lý do (tiêu chí chất lượng cuối): rủi ro của AUD-SEC-329 là đổi câu chữ làm deny thành cho qua MÀ KHÔNG AI BIẾT; test khoá biến lỗi im lặng thành CI đỏ với diff nhỏ (66 dòng test, 31 dòng guard cho chế độ core), tái hiện của sổ ('push thẳng nhánh chính' → 'đẩy thẳng…') nay đỏ ở ca PUSH_MAIN. Sửa 100+ luật chạm toàn guard 9,4k dòng — rủi ro hồi quy cao hơn lợi ích khi đã có khoá (tiêu chí 1–3). ADR-0017 §2 (AUD-DOC-181) chưa làm, giữ nợ
+- Đường lùi: khi đổi lớn bộ luật guard (tách guard_core) thì chuyển sang code tường minh từng luật, giữ ReasonCodeLockTest làm hàng rào
+
+### D-309 · 2026-11-02T11:12:12+00:00 · T-3645: git hook pre-commit chạy lại cổng commit trong phiên Claude Code (hook Bash của khung đã chạy cổng trước git commit) — chạy hai lần hay bỏ qua?
+
+- Phương án: (1) luôn chạy (cổng chạy hai lần mỗi commit trong phiên Claude) · (2) bỏ qua khi CLAUDECODE đặt VÀ dự án có .claude/hooks/pre-bash-guard.sh · (3) dấu tem (cây chỉ mục đã qua cổng) do hook Claude ghi, pre-commit so tem
+- Chọn: bỏ qua khi CLAUDECODE đặt VÀ dự án có .claude/hooks/pre-bash-guard.sh
+- Lý do (tiêu chí chất lượng cuối): Claude Code đặt CLAUDECODE cho shell của nó (kiểm 2026-11-02 trong phiên); hook Bash của khung đã chạy đúng cổng ngay trước commit, chạy lại chỉ tốn thời gian (gate-fast có thể vài phút). Tem trong .git cũng giả được như biến môi trường mà phức tạp hơn. Sàn git hook nhắm sai sót của công cụ không có hook chặn, không phải agent cố lách: agent đặt CLAUDECODE=1 để lách là hành vi lách (LOOP-STOP-025) — ghi giới hạn
+- Đường lùi: bỏ điều kiện trong pre-commit (luôn chạy) nếu thấy công cụ khác đặt CLAUDECODE hay bị lách
+
+### D-310 · 2026-11-02T11:25:40+00:00 · T-3642…3644 adapter: kiểm bằng gì và xử lý host tự đọc .claude/settings.json (Copilot, Cursor, Grok) thế nào?
+
+- Phương án: (1) theo PLAN: ≥ 10 ca autonomy-bench mỗi công cụ (nhóm bench mới) + tránh nạp hai lần · (2) test bảng tests/test_adapters.py (≥ 10 ca/host qua hàm thật, giao thức chặn từng host, plugin OpenCode chạy thật bằng bun) + chấp nhận hook Claude chạy thêm ở Copilot/Cursor/Grok
+- Chọn: test bảng tests/test_adapters.py (≥ 10 ca/host qua hàm thật, giao thức chặn từng host, plugin OpenCode chạy thật bằng bun) + chấp nhận hook Claude chạy thêm ở Copilot/Cursor/Grok
+- Lý do (tiêu chí chất lượng cuối): bench cần nhóm ca mới trong engine autonomy-bench (đọc payload từng host) — nhiều mã hơn cho cùng bảo đảm mà test bảng cho; test chạy đúng hàm của adapter và guard thật. Hai lần chạy không đổi quyết định (cùng một guard, deny thắng); Copilot/Cursor không có cơ chế khử trùng theo nguồn, công tắc duy nhất là tắt toàn cục (disableAllHooks, Third-Party Imports) sẽ tắt luôn hook của khung — tiêu chí 1 > 5
+- Đường lùi: thêm nhóm 'adapter' vào autonomy-bench khi số host/ca tăng; bỏ hook adapter của host nào đọc .claude/settings.json nếu đo được hook Claude chặn đúng ở host đó
+
+### D-311 · 2026-11-02T04:56:37+00:00 · AUD-XFEAT-039 (#401): PR Dependabot không ghi được review sạch — miễn luật năng lực cho tác giả bot thế nào?
 
 - Phương án: (1) Không miễn: steward/người merge PR bot · (2) Miễn khi tác giả PR và MỌI commit không phải merge là bot tin cậy (TRUSTED_BOTS), kiểm qua REST đúng PR/head mà sổ ghi; reviewer chỉ cần họ model rõ · (3) Miễn theo login người mở PR
 - Chọn: Miễn khi tác giả PR và MỌI commit không phải merge là bot tin cậy (TRUSTED_BOTS), kiểm qua REST đúng PR/head mà sổ ghi; reviewer chỉ cần họ model rõ

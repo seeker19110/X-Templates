@@ -83,10 +83,19 @@ strip_comment() { # bỏ comment YAML: `#` ở đầu giá trị hoặc sau kho�
   done
   printf '%s' "$out"
 }
-yaml_get() { # giá trị khoá $1 trong xt.yaml; bỏ comment, rồi bỏ nháy chỉ khi bọc cả hai đầu ("..." hoặc '...')
-  local v # khoá trùng: dòng cuối thắng như `_yaml_keys` của xt.py (AUD-XFEAT-002; `doctor` báo lỗi khoá trùng)
+yaml_get() { # giá trị khoá $1 trong xt.yaml; bỏ comment, rồi bỏ nháy chỉ khi cả giá trị là MỘT chuỗi nháy
+  # ("a" "b" giữ nguyên; 'it''s' → it's — AUD-CODE-037; giống `yaml_scalar` của xt.py, test so hai bên)
+  local v q="'" two="''" dq='^"([^"\\]|\\.)*"$' sq="^'([^']|'')*'\$"
+  # khoá trùng: dòng cuối thắng như `_yaml_keys` của xt.py (AUD-XFEAT-002; `doctor` báo lỗi khoá trùng)
   v="$(grep -E "^$1:" "$YAML" | tail -1 | sed -E "s/^$1:[[:space:]]*//")"
-  strip_comment "$v" | sed -E "s/[[:space:]]+\$//; s/^\"(.*)\"\$/\\1/; s/^'(.*)'\$/\\1/"
+  v="$(strip_comment "$v" | sed -E 's/[[:space:]]+$//')"
+  if [[ $v =~ $dq ]]; then
+    v="${v:1:${#v}-2}"
+  elif [[ $v =~ $sq ]]; then
+    v="${v:1:${#v}-2}"
+    v="${v//$two/$q}"
+  fi
+  printf '%s\n' "$v"
 }
 declared_cmd() {
   # In ra lệnh khai báo cho $1 nếu có, ngược lại rỗng. xt.yaml (phẳng) ưu tiên hơn file bash.

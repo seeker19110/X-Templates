@@ -2665,6 +2665,33 @@ class PrNextCliTest(unittest.TestCase):
         err = xt._debt_problem(self.base, "7", head, rec, ["AUD-SEC-001"], "zz")
         self.assertIn("clone nông? `git fetch --unshallow`", str(err))
 
+    def test_reviews_ledger_concurrent_writes_kept(self):
+        """AUD-CODE-036: hai lệnh ghi sổ review xen nhau (lệnh A đang đăng lên GitHub thì lệnh B ghi PR khác) không mất bản
+        ghi — đọc–sửa–ghi trong khoá như `state.json` (ADR-0054); đánh dấu `published` của A không đè bản ghi của B."""
+        other = "b" * 40
+
+        def publish(pr_arg, key, head, clean, inconclusive=False, debt=()):
+            if key == "7":  # lúc A đang đăng: B ghi sổ của PR 8 (tiến trình khác cùng thư mục dự án)
+                run_main("pr", "reviewed", "--pr", "8", "--head", other, "--blocking")
+            return 0
+
+        self.published.side_effect = publish
+        self.assertEqual(run_main("pr", "reviewed", "--pr", "7", "--head", self.head, "--clean", *MODELS)[0], 0)
+        data = xt.read_reviews(self.base)
+        self.assertEqual(sorted(data), ["7", "8"])
+        self.assertTrue(data["7"]["reviews"][-1]["published"])
+        self.assertEqual((data["8"]["reviews"][-1]["head"], data["8"]["reviews"][-1]["published"]), (other, True))
+        xt.update_reviews(self.base, "7", lambda rec: None)  # fn trả None: không ghi
+        self.assertEqual(xt.read_reviews(self.base), data)
+        # bản ghi đã bị thay trong lúc đăng: không đánh dấu nhầm bản khác
+        self.assertIsNone(xt._mark_published("không-có")({"reviews": [{"head": other, "at": "x"}]}))
+        # nhớ làn/head cập nhật nhánh đọc lại trong khoá: tiến trình khác đã nhớ → không ghi; chỉ làn chuẩn → không đụng merges
+        lane = {"lane": "chuẩn", "base_merge_of": [], "head": other}
+        self.assertIsNone(xt._remember(lane, {"standard_seen": True}))
+        self.assertEqual(xt._remember(lane, {}), {"standard_seen": True})
+        fast = {"lane": "nhanh", "base_merge_of": ["d" * 40], "head": other}
+        self.assertEqual(xt._remember(fast, {}), {"merges": {other: ["d" * 40]}})
+
     def test_reviewed_rerun_is_idempotent(self):
         """AUD-HAR-071 (BASE-DATA-008): chạy lại `pr reviewed` cùng kết quả (thông báo lỗi khuyên chạy lại) không thêm bản
         ghi thứ hai và không đăng comment trùng; lần đăng trước lỗi thì lần chạy lại chỉ đăng bù. Kết quả khác → bản mới."""
@@ -4294,7 +4321,9 @@ class PrStatsTest(unittest.TestCase):
         ):
             xt_calls: list[str] = []
             orig = xt._gh_api_once
-            with unittest.mock.patch.object(xt, "_gh_api_once", side_effect=lambda p: xt_calls.append(p) or orig(p)):
+            with unittest.mock.patch.object(
+                xt, "_gh_api_once", side_effect=lambda p, *a: xt_calls.append(p) or orig(p, *a)
+            ):
                 prs_, runs_, cut = xt._pr_stats_fetch("repos/o/r", now - xt._dt.timedelta(days=1))
         self.assertTrue(cut)
         self.assertEqual(len(runs_), 1)

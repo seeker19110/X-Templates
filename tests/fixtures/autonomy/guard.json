@@ -15562,6 +15562,799 @@
    "allowed": true
   },
   "note": "D-301 review #399 (lát C)"
+ },
+ {
+  "id": "t3637-309-opt",
+  "origin": "repro",
+  "refs": [
+   "AUD-SEC-309"
+  ],
+  "input": {
+   "command": "bash -o pipefail -c \"$(cat f)\""
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "T-3637 (ADR-0063, shell lồng theo argv)"
+ },
+ {
+  "id": "t3637-309-quoted-name",
+  "origin": "repro",
+  "refs": [
+   "AUD-SEC-309"
+  ],
+  "input": {
+   "command": "\"bash\" -c \"$(cat f)\""
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "T-3637 (ADR-0063, shell lồng theo argv)"
+ },
+ {
+  "id": "t3637-309-escaped-eval",
+  "origin": "repro",
+  "refs": [
+   "AUD-SEC-309"
+  ],
+  "input": {
+   "command": "\\eval \"$(cat f)\""
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "T-3637 (ADR-0063, shell lồng theo argv)"
+ },
+ {
+  "id": "t3637-310-herestring",
+  "origin": "repro",
+  "refs": [
+   "AUD-SEC-310"
+  ],
+  "input": {
+   "command": "bash <<< \"$(cat f)\""
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "T-3637 (ADR-0063, shell lồng theo argv)"
+ },
+ {
+  "id": "t3637-310-heredoc",
+  "origin": "repro",
+  "refs": [
+   "AUD-SEC-310"
+  ],
+  "input": {
+   "command": "bash <<X\n$(cat f)\nX"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "T-3637 (ADR-0063, shell lồng theo argv)"
+ },
+ {
+  "id": "t3637-310-procsub",
+  "origin": "repro",
+  "refs": [
+   "AUD-SEC-310"
+  ],
+  "input": {
+   "command": "source <(cat f)"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "T-3637 (ADR-0063, shell lồng theo argv)"
+ },
+ {
+  "id": "t3637-311-fd",
+  "origin": "repro",
+  "refs": [
+   "AUD-SEC-311"
+  ],
+  "input": {
+   "command": "cat f.sh | sh 2>&1"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "T-3637 (ADR-0063, shell lồng theo argv)"
+ },
+ {
+  "id": "t3637-311-wrapper",
+  "origin": "repro",
+  "refs": [
+   "AUD-SEC-311"
+  ],
+  "input": {
+   "command": "cat f.sh | timeout 9 sh"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "T-3637 (ADR-0063, shell lồng theo argv)"
+ },
+ {
+  "id": "t3637-311-middle",
+  "origin": "repro",
+  "refs": [
+   "AUD-SEC-311"
+  ],
+  "input": {
+   "command": "cat f.sh | cat | sh"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "T-3637 (ADR-0063, shell lồng theo argv)"
+ },
+ {
+  "id": "t3637-247-container",
+  "origin": "repro",
+  "refs": [
+   "AUD-SEC-247"
+  ],
+  "input": {
+   "command": "docker run -v /h:/w img sh -c 'gh pr merge --auto 5; echo \"$(true $(true)#)\"'"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "T-3637 (ADR-0063, shell lồng theo argv)"
+ },
+ {
+  "id": "t3637-control-literal-c",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-309"
+  ],
+  "input": {
+   "command": "bash -o pipefail -c 'make test'"
+  },
+  "expect": {
+   "allowed": true
+  },
+  "note": "T-3637 (ADR-0063, shell lồng theo argv)"
+ },
+ {
+  "id": "t3637-control-quoted-heredoc",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-310"
+  ],
+  "input": {
+   "command": "bash <<'X'\necho $HOME\nX"
+  },
+  "expect": {
+   "allowed": true
+  },
+  "note": "T-3637 (ADR-0063, shell lồng theo argv)"
+ },
+ {
+  "id": "t3637-control-echo-pipe",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-311"
+  ],
+  "input": {
+   "command": "echo 'ls' | sh"
+  },
+  "expect": {
+   "allowed": true
+  },
+  "note": "T-3637 (ADR-0063, shell lồng theo argv)"
+ },
+ {
+  "id": "t3637-control-base64",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-311"
+  ],
+  "input": {
+   "command": "echo bHMK | base64 -d | sh"
+  },
+  "expect": {
+   "allowed": true
+  },
+  "note": "T-3637 (ADR-0063, shell lồng theo argv)"
+ },
+ {
+  "id": "r404-330-decoy-echo-eval",
+  "origin": "repro",
+  "refs": [
+   "AUD-SEC-330"
+  ],
+  "input": {
+   "command": "echo eval; \"bash\" -c \"$(cat f)\""
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "review #404 (T-3637)"
+ },
+ {
+  "id": "r404-330-decoy-ansi",
+  "origin": "repro",
+  "refs": [
+   "AUD-SEC-330"
+  ],
+  "input": {
+   "command": "true eval; $'bash' -c \"$(cat f)\""
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "review #404 (T-3637)"
+ },
+ {
+  "id": "r404-330-control-quoted-literal",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-330"
+  ],
+  "input": {
+   "command": "\"bash\" -c 'echo $(date)'"
+  },
+  "expect": {
+   "allowed": true
+  },
+  "note": "review #404 (T-3637)"
+ },
+ {
+  "id": "r404-331-procsub-echo-dyn",
+  "origin": "repro",
+  "refs": [
+   "AUD-SEC-331"
+  ],
+  "input": {
+   "command": "bash <(echo \"$(cat f)\")"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "review #404 (T-3637)"
+ },
+ {
+  "id": "r404-331-procsub-printf-dyn",
+  "origin": "repro",
+  "refs": [
+   "AUD-SEC-331"
+  ],
+  "input": {
+   "command": "source <(printf \"%s\" \"$(cat f)\")"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "review #404 (T-3637)"
+ },
+ {
+  "id": "r404-331-control-procsub-literal",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-331"
+  ],
+  "input": {
+   "command": "bash <(echo 'echo hi')"
+  },
+  "expect": {
+   "allowed": true
+  },
+  "note": "review #404 (T-3637)"
+ },
+ {
+  "id": "t3633-248-cp-T",
+  "origin": "repro",
+  "refs": [
+   "AUD-SEC-248"
+  ],
+  "input": {
+   "command": "cp -rT src docs/autopilot"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "EVIDENCE_HANDWRITE"
+  },
+  "note": "T-3633"
+ },
+ {
+  "id": "t3633-248-tar-C",
+  "origin": "repro",
+  "refs": [
+   "AUD-SEC-248"
+  ],
+  "input": {
+   "command": "tar -C docs -xf src.tar"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "EVIDENCE_HANDWRITE"
+  },
+  "note": "T-3633"
+ },
+ {
+  "id": "t3633-248-glob",
+  "origin": "repro",
+  "refs": [
+   "AUD-SEC-248"
+  ],
+  "input": {
+   "command": "sed -i s/a/b/ docs/autopilot/*"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "EVIDENCE_HANDWRITE"
+  },
+  "note": "T-3633"
+ },
+ {
+  "id": "t3633-248-copytree",
+  "origin": "repro",
+  "refs": [
+   "AUD-SEC-248"
+  ],
+  "input": {
+   "command": "python3 -c 'import shutil; shutil.copytree(\"src\", \"docs/autopilot\", dirs_exist_ok=True)'"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "EVIDENCE_HANDWRITE"
+  },
+  "note": "T-3633"
+ },
+ {
+  "id": "t3633-248-control-plan",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-248"
+  ],
+  "input": {
+   "command": "sed -i s/a/b/ docs/autopilot/PLAN-*.md"
+  },
+  "expect": {
+   "allowed": true
+  },
+  "note": "T-3633"
+ },
+ {
+  "id": "t3633-307-subprocess-c",
+  "origin": "repro",
+  "refs": [
+   "AUD-SEC-307"
+  ],
+  "input": {
+   "command": "python3 -c 'import subprocess; subprocess.run([\"bash\",\"-c\",\"echo {#,a}; rm -rf {~,x}\"])'"
+  },
+  "expect": {
+   "allowed": false
+  },
+  "note": "T-3633"
+ },
+ {
+  "id": "t3633-307-control-system",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-307"
+  ],
+  "input": {
+   "command": "python3 -c 'import os; os.system(\"ls -la\")'"
+  },
+  "expect": {
+   "allowed": true
+  },
+  "note": "T-3633"
+ },
+ {
+  "id": "t3633-332-mksh",
+  "origin": "repro",
+  "refs": [
+   "AUD-SEC-332"
+  ],
+  "input": {
+   "command": "cat f.sh | mksh"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "T-3633"
+ },
+ {
+  "id": "t3633-332-busybox",
+  "origin": "repro",
+  "refs": [
+   "AUD-SEC-332"
+  ],
+  "input": {
+   "command": "cat f.sh | busybox sh"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "T-3633"
+ },
+ {
+  "id": "t3633-333-eval-procsub",
+  "origin": "repro",
+  "refs": [
+   "AUD-SEC-333"
+  ],
+  "input": {
+   "command": "eval <(cat f)"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "T-3633"
+ },
+ {
+  "id": "t3633-334-xargs-I",
+  "origin": "repro",
+  "refs": [
+   "AUD-SEC-334"
+  ],
+  "input": {
+   "command": "cat f.sh | xargs -I{} bash -c {}"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "T-3633"
+ },
+ {
+  "id": "t3633-334-control-xargs-echo",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-334"
+  ],
+  "input": {
+   "command": "printf 'a\\nb\\n' | xargs -I{} echo {}"
+  },
+  "expect": {
+   "allowed": true
+  },
+  "note": "T-3633"
+ },
+ {
+  "id": "t405-336-cp-t",
+  "origin": "repro",
+  "refs": [
+   "AUD-SEC-336"
+  ],
+  "input": {
+   "command": "cp -r -t docs/autopilot src/."
+  },
+  "expect": {
+   "allowed": false,
+   "code": "EVIDENCE_HANDWRITE"
+  },
+  "note": "review #405"
+ },
+ {
+  "id": "t405-336-tar-cluster",
+  "origin": "repro",
+  "refs": [
+   "AUD-SEC-336"
+  ],
+  "input": {
+   "command": "tar -xC docs -f a.tar"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "EVIDENCE_HANDWRITE"
+  },
+  "note": "review #405"
+ },
+ {
+  "id": "t405-336-tar-oldstyle",
+  "origin": "repro",
+  "refs": [
+   "AUD-SEC-336"
+  ],
+  "input": {
+   "command": "tar xfC a.tar docs"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "EVIDENCE_HANDWRITE"
+  },
+  "note": "review #405"
+ },
+ {
+  "id": "t405-336-tar-cumulative",
+  "origin": "repro",
+  "refs": [
+   "AUD-SEC-336"
+  ],
+  "input": {
+   "command": "tar -xf flat.tar -C docs -C autopilot"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "EVIDENCE_HANDWRITE"
+  },
+  "note": "review #405"
+ },
+ {
+  "id": "t405-336-tar-one-top-level",
+  "origin": "repro",
+  "refs": [
+   "AUD-SEC-336"
+  ],
+  "input": {
+   "command": "tar --one-top-level=docs/autopilot -xf flat.tar"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "EVIDENCE_HANDWRITE"
+  },
+  "note": "review #405"
+ },
+ {
+  "id": "t405-336-rsync-exclude",
+  "origin": "repro",
+  "refs": [
+   "AUD-SEC-336"
+  ],
+  "input": {
+   "command": "rsync -a src/ docs/autopilot --exclude .git"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "EVIDENCE_HANDWRITE"
+  },
+  "note": "review #405"
+ },
+ {
+  "id": "t405-336-control-tar-tmp",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-336"
+  ],
+  "input": {
+   "command": "tar -xf a.tar -C /tmp -C x"
+  },
+  "expect": {
+   "allowed": true
+  },
+  "note": "review #405"
+ },
+ {
+  "id": "t405-336-control-cp-t",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-336"
+  ],
+  "input": {
+   "command": "cp -r -t build src/."
+  },
+  "expect": {
+   "allowed": true
+  },
+  "note": "review #405"
+ },
+ {
+  "id": "t405-337-replace-bare",
+  "origin": "repro",
+  "refs": [
+   "AUD-SEC-337"
+  ],
+  "input": {
+   "command": "cat f.sh | xargs --replace sh -c {}"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "review #405"
+ },
+ {
+  "id": "t405-337-cluster",
+  "origin": "repro",
+  "refs": [
+   "AUD-SEC-337"
+  ],
+  "input": {
+   "command": "cat f.sh | xargs -0I{} sh -c {}"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "review #405"
+ },
+ {
+  "id": "t405-337-echo-fed",
+  "origin": "repro",
+  "refs": [
+   "AUD-SEC-337"
+  ],
+  "input": {
+   "command": "echo 'rm -rf ~' | xargs -I{} sh -c {}"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "RULE_DENY"
+  },
+  "note": "review #405"
+ },
+ {
+  "id": "t405-337-control-echo-ls",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-337"
+  ],
+  "input": {
+   "command": "echo 'ls' | xargs -I{} sh -c {}"
+  },
+  "expect": {
+   "allowed": true
+  },
+  "note": "review #405"
+ },
+ {
+  "id": "t405-338-lc",
+  "origin": "repro",
+  "refs": [
+   "AUD-SEC-338"
+  ],
+  "input": {
+   "command": "python3 -c 'import subprocess; subprocess.run([\"bash\",\"-lc\",\"echo {#,a}; rm -rf {~,x}\"])'"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "RULE_DENY"
+  },
+  "note": "review #405"
+ },
+ {
+  "id": "t405-338-env",
+  "origin": "repro",
+  "refs": [
+   "AUD-SEC-338"
+  ],
+  "input": {
+   "command": "python3 -c 'import subprocess; subprocess.run([\"/usr/bin/env\",\"bash\",\"-c\",\"echo {#,a}; rm -rf {~,x}\"])'"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "RULE_DENY"
+  },
+  "note": "review #405"
+ },
+ {
+  "id": "t405-338-triple",
+  "origin": "repro",
+  "refs": [
+   "AUD-SEC-338"
+  ],
+  "input": {
+   "command": "python3 -c 'import os; os.system(\"\"\"echo {#,a}; rm -rf {~,x}\"\"\")'"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "RULE_DENY"
+  },
+  "note": "review #405"
+ },
+ {
+  "id": "t405-338-control-lc",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-338"
+  ],
+  "input": {
+   "command": "python3 -c 'import subprocess; subprocess.run([\"bash\",\"-lc\",\"echo hi\"])'"
+  },
+  "expect": {
+   "allowed": true
+  },
+  "note": "review #405"
+ },
+ {
+  "id": "t405-339-copytree-dest",
+  "origin": "repro",
+  "refs": [
+   "AUD-SEC-339"
+  ],
+  "input": {
+   "command": "python3 -c 'import shutil; shutil.copytree(\"src\", \"docs/autopilot\", dirs_exist_ok=True)'"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "EVIDENCE_HANDWRITE"
+  },
+  "note": "review #405"
+ },
+ {
+  "id": "t405-339-control-copytree-src",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-339"
+  ],
+  "input": {
+   "command": "python3 -c 'import shutil; shutil.copytree(\"docs/autopilot\", \"/tmp/bak\")'"
+  },
+  "expect": {
+   "allowed": true
+  },
+  "note": "review #405"
+ },
+ {
+  "id": "t405-339-control-copytree-other",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-339"
+  ],
+  "input": {
+   "command": "python3 -c 'import shutil; shutil.copytree(\"src\", \"/tmp/x\"); print(\"docs\")'"
+  },
+  "expect": {
+   "allowed": true
+  },
+  "note": "review #405"
+ },
+ {
+  "id": "t407-329-push-main-code",
+  "origin": "repro",
+  "refs": [
+   "AUD-SEC-329"
+  ],
+  "input": {
+   "command": "git push origin main"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "PUSH_MAIN"
+  },
+  "note": "T-3640 (D-308)"
+ },
+ {
+  "id": "t407-329-stash-drop-code",
+  "origin": "repro",
+  "refs": [
+   "AUD-SEC-329"
+  ],
+  "input": {
+   "command": "git stash drop"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "STASH_DROP"
+  },
+  "note": "T-3640 (D-308)"
+ },
+ {
+  "id": "t407-329-control-push-branch",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-329"
+  ],
+  "input": {
+   "command": "git push origin feature/x"
+  },
+  "expect": {
+   "allowed": true
+  },
+  "note": "T-3640 (D-308)"
  }
  ]
 }

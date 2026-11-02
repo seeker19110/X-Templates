@@ -42,7 +42,8 @@ import time
 import unicodedata
 from typing import Any, Callable, Dict, FrozenSet, Iterator, List, NamedTuple, Optional, Set, Tuple, cast
 
-WRAPPERS = {"command", "builtin", "exec", "nohup", "time", "nice", "stdbuf", "xargs", "timeout", "setsid"}
+# `busybox <applet>`: applet là lệnh thật (`busybox sh`, `busybox rm …` — AUD-SEC-332)
+WRAPPERS = {"command", "builtin", "exec", "nohup", "time", "nice", "stdbuf", "xargs", "timeout", "setsid", "busybox"}
 # Tuỳ chọn của wrapper ăn thêm một token giá trị (`nice -n 5`) — không bóc thì giá trị bị hiểu là tên lệnh (AUD-SEC-011).
 WRAPPER_OPTS_WITH_VALUE: Dict[str, Set[str]] = {
     "nice": {"-n", "--adjustment"},
@@ -53,7 +54,7 @@ WRAPPER_OPTS_WITH_VALUE: Dict[str, Set[str]] = {
     "timeout": {"-s", "-k", "--signal", "--kill-after"},
     "exec": {"-a"},  # `exec -a <tên> git push --force` (AUD-SEC-024)
 }
-SHELLS = {"sh", "bash", "zsh", "dash", "ksh", "fish"}
+SHELLS = {"sh", "bash", "zsh", "dash", "ksh", "fish", "mksh", "ash"}  # mksh khớp cả `STRICT_SH` (AUD-SEC-332)
 INTERPRETERS = SHELLS | {"python", "python3", "node", "perl", "ruby", "php", "deno", "bun", "pwsh"}
 FETCHERS = {"curl", "wget"}
 MAIN_BRANCHES = {"main", "master"}
@@ -234,9 +235,17 @@ def _match_any(rel: str, patterns: Tuple[str, ...]) -> bool:
     return False
 
 
+def _glob_is_ledger(rel: str) -> bool:
+    """Đích ghi là glob mà shell bung ra được sổ giai đoạn (`docs/autopilot/*`, `STAGE.jso?` — AUD-SEC-248): khớp từng cấp."""
+    if not any(c in rel for c in "*?["):
+        return False
+    parts, want = rel.split("/"), STAGE_LEDGER.split("/")
+    return len(parts) == len(want) and all(map(fnmatch.fnmatchcase, want, parts))
+
+
 def classify_path(rel: str) -> str:
     """'secret' | 'gate' | 'evidence' | 'capability' | 'migration' | ''."""
-    if rel == ".autopilot" or rel.startswith(".autopilot/") or rel == STAGE_LEDGER:
+    if rel == ".autopilot" or rel.startswith(".autopilot/") or rel == STAGE_LEDGER or _glob_is_ledger(rel):
         return (
             "evidence"  # bằng chứng + trạng thái vòng/giai đoạn: chỉ `xt.py loop|stage …` ghi (AUD-HAR-024, ADR-0058)
         )
@@ -775,8 +784,11 @@ STRICT_RAW = ((re.compile(r"\w\[[^\]\n]*\$\((?!\()"), "thay lệnh trong chỉ s
 STRICT_IFS_RE = re.compile(r"(?<!\\)\$\{?[!#]?IFS\b")
 STRICT_SHELL_RE = re.compile(r"(?:^|[^\w.-])(?:(?:ba|da|z|k|mk)?sh|eval|source)(?![\w.-])")
 STRICT_SH = r"(?:\S*/)?(?:ba|da|z|k|mk)?sh"
+# `-o pipefail`/`-eo pipefail` (cờ gộp kết bằng `o` ăn giá trị — như `_shell_opt_width`), `--norc`, `-e`, `+x` (AUD-SEC-309)
+STRICT_SH_OPT = r"(?:[-+][A-Za-z]*[oO]\s+\S+|--[\w-]+(?:=\S*)?|[-+][A-Za-z]+)"
 STRICT_DYN_HEAD_RE = re.compile(
-    rf"(?:^|[\s;&|(])(?:{STRICT_SH}(?:\s+-[A-Za-z]+)*?\s+-[A-Za-z]*c[A-Za-z]*|(?P<eval>eval))\s+"
+    rf"(?:^|[\s;&|(])(?:{STRICT_SH}(?:\s+{STRICT_SH_OPT})*?\s+-[A-Za-z]*c[A-Za-z]*(?:\s+(?:--|[-+][A-Za-z]+))*"
+    r"|(?P<eval>eval))(?:\s+|(?=[;&|)\n])|$)"  # đầu đứng cuối lệnh (`eval`, `xargs bash -c`) vẫn là một đầu
 )
 STRICT_ARGV_CMD_RE = re.compile(r"(?:^|[;&|{(\n]|\b(?:then|do|else|elif)\b)\s*\"?\$\{?[@*0-9]")
 # Shell đọc script từ ống mà bên ghi là nhóm `{…}`/subshell `(…)` (guard không ghép được chữ — AUD-SEC-290) hoặc từ
@@ -951,6 +963,242 @@ def _dyn_text_why(v: _CodeView, live: str, bare: str) -> str:
     text = STRICT_SAFE_PROMPT_RE.sub("", v.s)  # tên: cả trong nháy (`env 'BASH_FUNC_x%%=…'`); ngữ cảnh: chỉ mã
     hit = any(name.search(text) and ctx.search(bare) for name, ctx in STRICT_SPECIAL)
     return "biến bash tự chạy cùng ngữ cảnh kích hoạt (AUD-SEC-287/291/299/300)" if hit else ""
+
+
+# ADR-0063 T-3637 — shell lồng theo argv đã chuẩn hoá (AUD-SEC-309…311): chữ và argv là hai cách đọc cùng lệnh; guard
+# chỉ cho chạy khi hai cách đọc khớp nhau. Lớp này chạy SAU luật cũ nên lệnh luật cũ đã chặn giữ mã của luật cũ.
+STRICT_DYN_HERE_RE = re.compile(r"\$[({\w]|`")  # mở rộng trong thân heredoc/here-string không nháy
+
+
+def _argv_shell_why(cmd: str, tokens: List[str]) -> str:
+    """Lý do chặn (rỗng = qua): (a) một đầu `sh -c`/`eval` theo argv đã chuẩn hoá (cả tên có nháy/thoát `\\bash`,
+    `"bash"`, `$'bash'`, `'eval'`) có thân dựng lúc chạy — xét TỪNG đầu trên token còn giữ nháy (`_raw_heads_why`), không so
+    tổng số đầu (đầu mồi `echo eval; "bash" -c …` — review #404 🔴); (b) shell đọc script từ `<(…)`, here-string hay heredoc
+    không nháy có mở rộng; (c) ống vào shell (`| sh 2>&1`, `| command sh`, `| cat | sh`, `g | sh`, `| xargs sh -c`) mà
+    guard không biết chữ đi vào."""
+    for argv in split_commands(tokens):
+        if _stdin_shell(argv) and "<<<" in argv[:-1] and STRICT_DYN_HERE_RE.search(argv[argv.index("<<<") + 1]):
+            return "shell đọc here-string có mở rộng (AUD-SEC-310)"
+    return _raw_heads_why(cmd) or _procsub_shell_why(tokens) or _heredoc_shell_why(cmd) or _pipe_shell_why(tokens)
+
+
+def _raw_tokens(cmd: str) -> Optional[List[str]]:
+    """Token GIỮ nháy/thoát (shlex không POSIX) của chữ đã nối dòng, gấp heredoc, giải `$'…'` thành chữ nháy, bỏ comment
+    — cùng tiền xử lý `tokenize` trừ viết lại `$IFS`/`$(pwd)`; nháy không đóng → None."""
+    s = strip_comments(expand_ansi_c(_fold_heredocs(join_continuations(cmd), False, True)), True)
+    out: List[str] = []
+    word: List[str] = []
+    i = 0
+    while i < len(s):
+        c = s[i]
+        if c in " \t\r" or c in PUNCT:
+            out += ["".join(word)] if word else []
+            word = []
+            j = i
+            while j < len(s) and s[j] in PUNCT:  # dãy dấu liền nhau là một token (như shlex `punctuation_chars`)
+                j += 1
+            out += [s[i:j]] if j > i else []
+            i = max(j, i + 1)
+            continue
+        j = _raw_word_part(s, i)
+        if j < 0:
+            return None
+        word.append(s[i:j])
+        i = j
+    return out + (["".join(word)] if word else [])
+
+
+def _raw_word_part(s: str, i: int) -> int:
+    """Cuối một mảnh từ bắt đầu ở `s[i]`: `\\x`, `'…'`, `"…"` (có `\\` và `$(…)` bên trong), `$(…)`/`${…}` cân ngoặc, hay
+    một ký tự; không đóng → -1."""
+    c = s[i]
+    if c == "\\":
+        return min(i + 2, len(s))
+    if c == "'":
+        j = s.find("'", i + 1)
+        return j + 1 if j >= 0 else -1
+    if c == '"':
+        return _raw_dq_end(s, i + 1)
+    if s.startswith(("$(", "${"), i):
+        return _raw_group_end(s, i + 2, "(" if s[i + 1] == "(" else "{")
+    return i + 1
+
+
+def _raw_dq_end(s: str, i: int) -> int:
+    """Vị trí ngay sau `"` đóng của chuỗi nháy kép bắt đầu ở `s[i]` (sau `"` mở); không đóng → -1."""
+    while i < len(s):
+        if s[i] == "\\":
+            i += 2
+        elif s[i] == '"':
+            return i + 1
+        elif s.startswith(("$(", "${"), i):
+            i = _raw_group_end(s, i + 2, "(" if s[i + 1] == "(" else "{")
+            if i < 0:
+                return -1
+        else:
+            i += 1
+    return -1
+
+
+def _raw_group_end(s: str, i: int, opener: str) -> int:
+    """Vị trí ngay sau ngoặc đóng của `$(`/`${` (đã qua phần mở): đếm ngoặc cùng loại, bỏ qua nháy và `\\`; không đóng → -1."""
+    closer, depth = ")" if opener == "(" else "}", 1
+    while i < len(s):
+        c = s[i]
+        if c in "\\'\"" or s.startswith(("$(", "${"), i):
+            i = _raw_word_part(s, i)
+            if i < 0:
+                return -1
+            continue
+        depth += (c == opener) - (c == closer)
+        i += 1
+        if not depth:
+            return i
+    return -1
+
+
+def _dequote(t: str) -> str:
+    """Từ bash sau khi bỏ nháy/thoát (`"bash"`, `\\bash`, `$'bash'`, `ev"al"` → tên lệnh)."""
+    try:
+        return "".join(shlex.split(expand_ansi_c(t)))
+    except ValueError:
+        return t
+
+
+def _raw_heads_why(cmd: str) -> str:
+    """AUD-SEC-309: mỗi lệnh đơn mà đầu (sau lệnh bọc/gán) là shell có `-c` hay `eval` — thân (chuỗi lệnh của `-c`; mọi
+    đối số của `eval`) đọc trên token còn nháy: thay lệnh/`$'…'`/backtick/biến gán từ thay lệnh ngoài nháy đơn → chặn."""
+    raw = _raw_tokens(cmd)
+    if raw is None:
+        return "nháy không tách được để xét đầu `sh -c`/`eval` (AUD-SEC-309)" if STRICT_SHELL_RE.search(cmd) else ""
+    for argv in split_commands(raw):
+        plain = [_dequote(t) for t in argv]
+        n = normalize(plain)
+        at = len(argv) - len(_strip_prefixes(plain))
+        if not n or not (n[0] == "eval" or (n[0] in SHELLS and _shell_script_arg(n)[0])):
+            continue
+        body = argv[at + 1 :] if n[0] == "eval" else argv[at + _shell_c_index(n) : at + _shell_c_index(n) + 1]
+        if any(_raw_word_dynamic(w, cmd) for w in body):
+            return "thân `sh -c`/`eval` dựng lúc chạy (đầu theo argv, tên có nháy/thoát) (AUD-SEC-309)"
+    return ""
+
+
+def _shell_c_index(n: List[str]) -> int:
+    """Vị trí chuỗi lệnh của `sh -c` trong argv đã chuẩn hoá (cùng cách duyệt cờ của `_shell_script_arg`)."""
+    i = 1
+    while i < len(n) and n[i] not in ("--", "-") and _shell_opt_width(n[i]):
+        i += _shell_opt_width(n[i])
+    return i + (i < len(n) and n[i] in ("--", "-"))
+
+
+def _raw_word_dynamic(word: str, whole: str) -> bool:
+    """Từ còn nháy là chữ dựng lúc chạy: ngoài nháy đơn có thay lệnh/`$'…'`/backtick, `\\$(` trong nháy kép, hay biến gán
+    từ thay lệnh trong lệnh này (`_dyn_word`). `$(cat <<'X' … X)` (thân heredoc có nháy) là chữ thấy được — như lớp chữ."""
+    v = _CodeView(STRICT_CAT_HEREDOC_RE.sub(lambda m: " " * len(m.group()), word))
+    live = "".join(ch if k != "q" else " " for ch, k in zip(v.s, v.kind))
+    return bool(v.why) or bool(STRICT_DYN_ESC_RE.search(word)) or _dyn_word(live, whole)
+
+
+def _argv_shell_check(cmd: str, tokens: List[str], strict: bool, asks: List[str]) -> None:
+    """Chặn (BUDGET) khi `_argv_shell_why` có lý do — trừ khi câu hỏi nguy hiểm của luật cũ đã làm lệnh bị chặn (giữ mã
+    của luật cũ: HOOK_BYPASS…). Chữ lỏng (guard tự dựng) không qua tập con."""
+    why = _argv_shell_why(cmd, tokens) if strict else ""
+    if why and not _asks_denied(asks):
+        raise ScanTooComplex(f"ngoài tập con guard đọc chắc — {why} (ADR-0063)")
+
+
+def _asks_denied(asks: List[str]) -> bool:
+    """Các câu hỏi đã gom mà chính sách mặc định biến thành chặn (ask nguy hiểm/unsure)."""
+    return (
+        bool(asks) and apply_policy({"decision": "ask", "reason": ASK_PREFIX + "; ".join(asks)})["decision"] == "deny"
+    )
+
+
+def _drop_fd_words(argv: List[str]) -> List[str]:
+    """Bỏ số fd đứng trước chuyển hướng (`2>&1` tách thành `2`, `>&`, `1`): không thì `2` bị đọc là tên script."""
+    return [a for i, a in enumerate(argv) if not (a.isdigit() and i + 1 < len(argv) and _is_redirect(argv[i + 1]))]
+
+
+def _procsub_shell_why(tokens: List[str]) -> str:
+    """Shell/`source` đọc script từ thay tiến trình: `bash <(…)`, `bash < <(…)`, `source <(…)`, `. <(…)`."""
+    start = 0
+    for i, t in enumerate(tokens):
+        if t != "<(":
+            start = i + 1 if _is_punct(t) and not _is_redirect(t) else start
+            continue
+        n = normalize(_drop_fd_words([a for a in tokens[start:i] if a != "<"]))
+        if _procsub_known(tokens, i):  # `bash <(echo '…')`: chữ guard thấy, luật cũ đã quét
+            start = i + 1
+            continue
+        if n[:1] in (["source"], ["."], ["eval"]) and len(n) == 1:  # `eval <(…)`: AUD-SEC-333
+            return "`source`/`.` đọc script từ `<(…)` (AUD-SEC-310)"
+        if n and n[0] in SHELLS and _shell_script_arg(n) == (False, None):
+            return "shell đọc script từ `<(…)` (AUD-SEC-310)"
+        start = i + 1
+    return ""
+
+
+def _procsub_known(tokens: List[str], i: int) -> bool:
+    """Thay tiến trình mở ở `tokens[i]` chỉ là MỘT lệnh ra chữ guard biết (`echo`/`printf` chữ — `_pipe_feed`)."""
+    depth, inner = 1, []
+    for t in tokens[i + 1 :]:
+        depth += t.endswith("(") - (t == ")")
+        if not depth:
+            break
+        inner.append(t)
+    cmds = split_commands(inner)
+    literal = not any(STRICT_DYN_HERE_RE.search(t) for t in inner)  # `<(echo "$(cat f)")`: chữ động (review #404 🔴)
+    return (
+        depth == 0
+        and literal
+        and len(cmds) == 1
+        and len(pipelines(inner)) == 1
+        and _pipe_feed(cmds[0], None) is not None
+    )
+
+
+def _heredoc_shell_why(cmd: str) -> str:
+    """Heredoc KHÔNG nháy vào shell mà thân có mở rộng (`$(…)`, `$X`, `${…}`, backtick): bash dựng script lúc chạy."""
+    lines = join_continuations(cmd).split("\n")
+    for opener, m, a, b, _ in _here_scan("\n".join(lines)):
+        if _heredoc_word(m)[1] or not STRICT_DYN_HERE_RE.search("\n".join(lines[a:b])):
+            continue
+        if any(_stdin_shell(c) for c in split_commands(tokenize(lines[opener][: m.start()]))):
+            return "shell đọc heredoc không nháy có mở rộng — dùng `<<'X'` (AUD-SEC-310)"
+    return ""
+
+
+def _xargs_replace_script(argv: List[str]) -> Optional[Tuple[str, str]]:
+    """`xargs -I X|-IX|-i[X]|-0I X|--replace[=X] … sh -c '…X…'` → (X, chuỗi lệnh): xargs thay X bằng từng dòng stdin rồi
+    chạy `sh -c` — chuỗi lệnh đến từ stdin như `xargs sh -c` không chuỗi lệnh (AUD-SEC-334; cụm `-0I{}`, `--replace`
+    trần = `{}` — review #405). Không phải dạng này → None."""
+    heads = [i for i, x in enumerate(argv) if posixpath.basename(x) == "xargs"]
+    rest: List[str] = argv[heads[0] + 1 :] if heads else []
+    opts: List[str] = []
+    while rest and rest[0].startswith("-") and rest[0] != "-":
+        opts.append(rest.pop(0))
+        m = XARGS_REPLACE_RE.fullmatch(opts[-1])
+        if ((m and m.group(1) == "I" and not m.group(2)) or opts[-1] in WRAPPER_OPTS_WITH_VALUE["xargs"]) and rest:
+            opts.append(rest.pop(0))
+    rep, n = _xargs_replace(opts), normalize(rest)
+    has_c, script = _shell_script_arg(n) if n and n[0] in SHELLS else (False, None)
+    return (rep, script) if rep and has_c and script and rep in script else None
+
+
+def _xargs_replace_shell(argv: List[str]) -> bool:
+    return _xargs_replace_script(argv) is not None
+
+
+def _pipe_shell_why(tokens: List[str]) -> str:
+    """Ống vào shell (stdin hay `xargs sh -c` không chuỗi lệnh) mà khâu trước không ra chữ guard biết (`_pipe_feeds`)."""
+    for pipe in pipelines(tokens):
+        feeds = _pipe_feeds(pipe)
+        for k in range(1, len(pipe)):
+            down = _drop_fd_words(pipe[k])
+            known = feeds[k - 1] is not None or _decoded_feed([*pipe[:k], down], k)[1] is not None  # giải mã: đã quét
+            if not known and (_stdin_shell(down) or _argless_shell_c(down) or _xargs_replace_shell(down)):
+                return "ống vào shell mà guard không biết chữ đi vào — chạy `bash <tệp>` (AUD-SEC-311)"
+    return ""
 
 
 def _dyn_word(word: str, whole: str) -> bool:
@@ -5848,7 +6096,95 @@ def _ledger_asks(n: List[str], argv: List[str], root: str, cwd: Optional[str]) -
         if pos[-1].endswith("/") or os.path.isdir(os.path.join(root, d)):
             joined = [posixpath.join(d, posixpath.basename(s.rstrip("/"))) for s in pos[:-1]]
             hits += [j for j in joined if _ledger_hit(_rel_dir(j, root))]
-    return [EVIDENCE_WHY.format(h) for h in hits]
+    hits += [x for t in _merge_roots(n) for x in _where(t, root, cwd) if _ledger_hit(_rel_dir(x, root))]
+    return [EVIDENCE_WHY.format(h) for h in dict.fromkeys(hits)]
+
+
+def _dot_source(s: str) -> bool:
+    """Nguồn `x/.` (hay `.`): cp/rsync chép NỘI DUNG vào đích, không tạo thư mục con."""
+    return s.rstrip("/").endswith("/.") or s.rstrip("/") == "."
+
+
+def _merge_roots(n: List[str]) -> List[str]:
+    """Thư mục mà lệnh GỘP nội dung không biết trước vào (AUD-SEC-248): `cp -T`/`--no-target-directory` và nguồn `x/.`
+    (đích nhận nội dung nguồn, không phải thư mục con; đích cuối hay `-t`/`--target-directory`), `rsync` nguồn kết `/`
+    hay `/.`, `tar -x` (`-C`/`--directory`/`--one-top-level`, vắng = thư mục đang đứng). Đích là sổ giai đoạn hay tổ
+    tiên của nó → ghi tay sổ (`_ledger_hit`)."""
+    name, args = (n[0], n[1:]) if n else ("", [])
+    if name in ("cp", "install"):
+        t_dir = _flag_value(args, "-t") or _flag_value(args, "--target-directory")
+        pos = _positionals(args, COPY_DEST_OPTS)
+        srcs, dest = (pos, t_dir) if t_dir else (pos[:-1], pos[-1] if len(pos) > 1 else "")
+        no_t = not t_dir and ("--no-target-directory" in args or "T" in _short_flags(args))
+        return [dest] if dest and (no_t or any(map(_dot_source, srcs))) else []
+    if name == "rsync":
+        pos = _positionals(args, COPY_VALUE_OPTS["rsync"])
+        return pos[-1:] if any(s.endswith("/") or _dot_source(s) for s in pos[:-1]) else []
+    return _tar_extract_dirs(args) if name == "tar" else []
+
+
+# Cờ ngắn của GNU tar ăn một giá trị (trong cụm `-xC d`: phần còn lại của cụm, không thì token kế; kiểu cũ `xfC a d`:
+# token kế theo thứ tự chữ). Cờ dài viết tắt được (getopt): tiền tố ≥ 3 chữ của tên dưới (`--dir=` = `--directory=`).
+TAR_SHORT_VALUE = "bCfFgHIKLNTVX"
+TAR_LONG_NAMES = ("directory", "extract", "one-top-level")
+TAR_LONG_VALUE = ("directory", "file")
+TAR_SUFFIX_RE = re.compile(r"\.(?:tar(?:\.\w+)?|t[gbx]z|tbz2|taz|tz2?|tlz|tzst)$")
+
+
+def _tar_long(a: str, args: List[str], i: int) -> Tuple[List[Tuple[str, Optional[str]]], int]:
+    name, eq, val = a[2:].partition("=")
+    name = next((x for x in TAR_LONG_NAMES if len(name) >= 3 and x.startswith(name)), name)
+    if eq or name not in TAR_LONG_VALUE or i >= len(args):
+        return [(name, val if eq else None)], i
+    return [(name, args[i])], i + 1
+
+
+def _tar_short(a: str, args: List[str], i: int, old: bool) -> Tuple[List[Tuple[str, Optional[str]]], int]:
+    out: List[Tuple[str, Optional[str]]] = []
+    for j, ch in enumerate(a.lstrip("-")):
+        if ch not in TAR_SHORT_VALUE:
+            out.append((ch, None))
+        elif not old and a[j + 2 :]:  # `-Cdocs`, `-xCdocs`: phần còn lại của cụm là giá trị
+            return out + [(ch, a[j + 2 :])], i
+        else:
+            out.append((ch, args[i] if i < len(args) else None))
+            i += 1
+            if not old:
+                break
+    return out, i
+
+
+def _tar_opts(args: List[str]) -> List[Tuple[str, Optional[str]]]:
+    """(cờ, giá trị) của `tar` theo thứ tự: chữ của cờ ngắn/kiểu cũ (`x`, `C`), tên dài đầy đủ (`directory`)."""
+    out: List[Tuple[str, Optional[str]]] = []
+    i = 0
+    while i < len(args):
+        a, i = args[i], i + 1
+        old = i == 1 and bool(re.fullmatch(r"[A-Za-z]+", a))
+        if a.startswith("--") and len(a) > 2:
+            got, i = _tar_long(a, args, i)
+        elif old or (a.startswith("-") and len(a) > 1):
+            got, i = _tar_short(a, args, i, old)
+        else:
+            got = []
+        out += got
+    return out
+
+
+def _tar_extract_dirs(args: List[str]) -> List[str]:
+    """Mọi thư mục `tar` có thể giải nén vào: `-C` cộng dồn (`-C docs -C autopilot` = `docs/autopilot`), cả thư mục
+    `--one-top-level[=D]` (vắng D = tên archive bỏ đuôi); không `-C` = `.`; không giải nén → rỗng (review #405)."""
+    opts = _tar_opts(args)
+    if not any(k in ("x", "extract", "get") for k, _ in opts):
+        return []
+    cur, dirs = ".", []
+    for k, v in opts:
+        if k in ("C", "directory") and v:
+            cur = posixpath.join(cur, v)
+            dirs.append(cur)
+    archive = posixpath.basename(next((v for k, v in opts if k in ("f", "file") and v), ""))
+    tops = [v if v is not None else TAR_SUFFIX_RE.sub("", archive) for k, v in opts if k == "one-top-level"]
+    return (dirs or ["."]) + [posixpath.join(cur, t) for t in tops if t]
 
 
 def _rel_dir(target: str, root: str) -> str:
@@ -6227,6 +6563,23 @@ def commit_subject_problem(message: str) -> str:
     if _opaque(subject) or len(subject) <= PR_TITLE_MAX:
         return ""
     return f"subject dài {len(subject)} ký tự > {PR_TITLE_MAX}"
+
+
+def commit_msg_problem(path: str, root: str) -> str:
+    """Lý do chặn cho git hook `commit-msg` (ADR-0064 lát C — sàn cho công cụ không có hook chặn): subject quá
+    PR_TITLE_MAX (LOOP-HARNESS-029); ghi công AI khi xt.yaml khai `ai_attribution: forbid` (LOOP-HARNESS-027). Dòng `#`
+    bị bỏ như git dọn message. '' = cho qua."""
+    text = "\n".join(ln for ln in _read_head(path).splitlines() if not ln.startswith("#"))
+    problem = commit_subject_problem(text)
+    if problem:
+        return f"Commit bị khung chặn ({problem} — LOOP-HARNESS-029): rút gọn dòng đầu ≤ {PR_TITLE_MAX} ký tự."
+    hit = AI_ATTRIBUTION_RE.search(text) if AI_ATTRIBUTION_KEY_RE.search(_read_head(_xt_yaml_for(root))) else None
+    if hit:
+        return (
+            f"Commit ghi công AI bị khung chặn (`{hit.group(0)}` — xt.yaml `ai_attribution: forbid`, LOOP-HARNESS-027): "
+            "bỏ dòng tên model/URL phiên."
+        )
+    return ""
 
 
 def _gh_pr_titles(args: List[str]) -> List[str]:
@@ -6908,15 +7261,14 @@ def _tool_runs_stdin(argv: List[str]) -> bool:
 
 def _stdin_exec_inputs(cmd: str, tokens: List[str], placed: PlacedCmds, budget: Optional[ScanBudget]) -> Placed:
     """Chữ thấy được đi vào stdin của awk/sed chạy lệnh từ đầu vào: here-string, ống từ echo/printf (AUD-SEC-279)."""
-    out: Placed = [
-        (c[i + 1], here) for c, here in placed if _tool_runs_stdin(c) for i, a in enumerate(c[:-1]) if a == "<<<"
-    ]
+    tools = [(c, here) for c, here in placed if _tool_runs_stdin(c)]  # một lần mỗi lệnh (AUD-PERF-010)
+    out: Placed = [(c[i + 1], here) for c, here in tools for i, a in enumerate(c[:-1]) if a == "<<<"]
     dirs, i = [here for _, here in placed], 0
     for pipe in pipelines(tokens):
         for feed, down, here in zip(_pipe_feeds(pipe), pipe[1:], dirs[i + 1 : i + len(pipe)]):
-            out += [(t, here) for t in feed or [] if _tool_runs_stdin(down)]
+            out += [(t, here) for t in feed or []] if feed and _tool_runs_stdin(down) else []  # một lần mỗi khâu
         i += len(pipe)
-    runs = list(dict.fromkeys(here for c, here in placed if _tool_runs_stdin(c)))  # heredoc vào awk/sed (review #392)
+    runs = list(dict.fromkeys(here for _, here in tools))  # heredoc vào awk/sed (review #392)
     bodies = _heredoc_scripts(cmd, _tool_runs_stdin, budget) if runs else []
     return out + [(body, d) for body in bodies for d in runs]
 
@@ -7146,6 +7498,8 @@ def _shell_feeds(tokens: List[str], placed: PlacedCmds) -> Placed:
         for feed, down, here in zip(_pipe_feeds(pipe), pipe[1:], dirs[i + 1 :]):
             if feed and (_stdin_shell(down) or _argless_shell_c(down)):
                 out += [(s, here) for s in feed]
+            elif feed and (rs := _xargs_replace_script(down)):  # `echo 'rm -rf ~' | xargs -I{} sh -c {}` (review #405)
+                out += [(rs[1].replace(rs[0], ln), here) for s in feed for ln in s.split("\n") if ln.strip()]
         i += len(pipe)
     return out
 
@@ -7713,6 +8067,8 @@ def _container_asks(ctr: List[Tuple[str, List[str]]], depth: int, budget: Option
     out: List[str] = []
     for script, dests in ctr:
         sub = bash_decision(script, CONTAINER_ROOT, CONTAINER_ROOT, depth + 1, budget)
+        if sub["decision"] == "deny" and sub.get("code") in (BUDGET, UNPARSED):  # không đọc chắc: không hạ thành hỏi
+            raise ScanTooComplex(f"lệnh trong container: {sub['reason']} (AUD-SEC-247)")
         why = str(sub["reason"]).removeprefix(ASK_PREFIX) if sub["decision"] in ("deny", "ask") else ""
         why = why or _wipes_bind(script, dests)
         out += [f"lệnh trong container: {why}"] if why else []
@@ -7802,6 +8158,9 @@ def _nested_sources(
     nested += [(s, here) for c, here in placed for s in _wrapped_scripts(c)[0]]
     interp = _interp_scripts_at(cmd, tokens, start, budget)
     loose = [(s, here) for raw, here in interp for s in _exec_api_scripts([raw])]
+    nested += [
+        (s, here) for raw, here in interp for s in _exec_api_verbatim([raw])
+    ]  # sh đọc nguyên văn: chặt (AUD-SEC-307)
     tool_nested, tool_asks = _tool_exec_sources(cmd, tokens, placed, interp, start, budget)
     loose += tool_nested
     opaque += tool_asks
@@ -8120,6 +8479,32 @@ WRITE_ANY_RE = re.compile(
 DIRECT_PROBES = 64  # số chuỗi canh được dò API ghi mỗi script (mỗi chuỗi một regex quét cả script); hơn → coi như ghi
 PERL_OPEN_MODE_RE = re.compile(r"^\+?(?:>>?|<)[ \t]*")
 RMTREE_RE = re.compile(r"\b(?:rmtree|remove_tree|rm_rf|rmSync|rimraf)\b")  # xoá đệ quy trong script (AUD-SEC-068)
+# ghi cả cây vào thư mục đích trong script (gộp nội dung không biết trước — AUD-SEC-248)
+TREE_WRITE_RE = re.compile(r"\b(copytree|copy_tree|unpack_archive|extractall|cpSync|cp_r|copy_entry)\b\s*(\(?)")
+
+
+def _call_args(script: str, m: "re.Match[str]") -> List[str]:
+    """Các đối số (chữ nguồn) của lời gọi bắt đầu ở `m`: trong ngoặc (`f(a, b)`), hay tới hết dòng/`;` khi gọi không
+    ngoặc (Ruby `FileUtils.cp_r 'a', 'b'`); tách ở dấu phẩy ngoài ngoặc/chuỗi (`_first_arg`)."""
+    rest = _balanced(script, m.end(), "(", ")") if m.group(2) else re.split(r"[\n;]", script[m.end() :], maxsplit=1)[0]
+    parts: List[str] = []
+    while rest.strip():
+        parts.append(_first_arg(rest))
+        rest = rest[len(parts[-1]) + 1 :]
+    return parts
+
+
+def _tree_write_dests(script: str) -> List[str]:
+    """Chuỗi nguyên văn ở đối số ĐÍCH của lời gọi ghi cả cây (`copytree(src, DST)`, `unpack_archive(f, DST)`,
+    `extractall(DST)`): nguồn hay chuỗi khác trong script không phải đích (review #405 — `copytree("docs", "/tmp/x")`
+    từng bị chặn oan)."""
+    out: List[str] = []
+    for m in TREE_WRITE_RE.finditer(script):
+        args = _call_args(script, m)
+        out += [_literal(x) for a in (args if m.group(1) == "extractall" else args[1:]) for x in LITERAL_RE.finditer(a)]
+    return out
+
+
 HOME_EXPR_RE = re.compile(
     r"expanduser\(\s*['\"]~/?['\"]\s*\)|Path\.home\(\)|environ(?:\[|\.get\()\s*['\"]HOME['\"]|getenv\(\s*['\"]HOME['\"]|homedir\(\)"
 )
@@ -8298,6 +8683,33 @@ def _first_arg(args: str) -> str:
     return args
 
 
+PLAIN_LITERAL_RE = re.compile(
+    r"""\s*[rRuU]?(?:'\'\'((?:(?!'\'\').)*)'\'\'|\"\"\"((?:(?!\"\"\").)*)\"\"\""""
+    r"""|'((?:[^'\\\n]|\\.)*)'|"((?:[^"\\\n]|\\.)*)")\s*""",
+    re.S,
+)  # một chuỗi (cả nháy ba — review #405), không f/ghép
+
+
+def _exec_api_verbatim(scripts: List[str]) -> List[str]:
+    """Chuỗi mà sh/bash đọc NGUYÊN VĂN trong lời gọi thực thi (AUD-SEC-307): đối số đầu là MỘT chuỗi trơn
+    (`os.system('…')`, `popen`, `subprocess.run('…', shell=True)`), hay phần tử sau `-c` của argv dạng danh sách mà phần
+    tử đầu là shell (`subprocess.run(["bash", "-c", "…"])`). Chuỗi ghép/f-string guard tự dựng → không (giữ lỏng)."""
+    out: List[str] = []
+    for script in map(_nfkc, scripts):
+        spans = [x.span() for x in STR_ANY_RE.finditer(script)]
+        for m in EXEC_CALL_RE.finditer(script):
+            if any(a <= m.start() < b for a, b in spans):
+                continue
+            first = _first_arg(_balanced(script, m.end(), "(", ")").lstrip())
+            if first[:1] == "[":  # bóc env/timeout/busybox, cờ như bash thật: `-lc`, `-c -x S` (review #405)
+                items = normalize([_literal(x) for x in LITERAL_RE.finditer(_balanced(first, 1, "[", "]"))])
+                has_c, s = _shell_script_arg(items) if items[:1] and items[0] in SHELLS else (False, None)
+                out += [s] if has_c and s is not None else []
+            elif lit := PLAIN_LITERAL_RE.fullmatch(first):
+                out.append(_literal(lit))
+    return out
+
+
 def _exec_api_scripts(scripts: List[str]) -> List[str]:
     """Chuỗi lệnh trong đối số ĐẦU của lời gọi thực thi: `os.system('…')` (kể cả `f'…'`, `r'…'`, nháy ba, ghép
     `'rm' + ' -rf ~'`) → lệnh shell; `subprocess.run([…])` → các phần tử ghép thành một lệnh. Chuỗi khác trong script
@@ -8371,6 +8783,11 @@ def interp_write_asks(cmd: str, tokens: List[str], root: str, cwd: Optional[str]
         ]  # AUD-SEC-068: `shutil.rmtree("/home/x")`, perl `rmtree(...)`
         if RMTREE_RE.search(script) and HOME_EXPR_RE.search(script):  # `rmtree(Path.home())`, `expanduser("~")`
             asks.append("xoá đệ quy ngoài thư mục dự án (thư mục home — script trình thông dịch)")
+        asks += [  # `copytree(…, "docs/autopilot")`, `unpack_archive(…, "docs")` — AUD-SEC-248
+            EVIDENCE_WHY.format(lit)
+            for lit in _tree_write_dests(script)
+            if any(_ledger_hit(_rel_dir(x, root)) for x in _where(lit, root, here))
+        ]
         hint, ro, probe = bool(WRITE_HINT_RE.search(script)), _ReadOnly(script, families), _WriteProbe(script)
         asks += [
             a
@@ -9329,7 +9746,7 @@ def bash_decision(
     try:
         return _bash_decision(cmd, root, cwd, depth, budget, rewrites)
     except ScanTooComplex as e:
-        reason = f"Lệnh quá phức tạp để guard quét hết ({e}): {clean_text(cmd)[:200]}"
+        reason = f"Lệnh quá phức tạp để guard quét hết ({e}): {clean_text(cmd)[:200]}{BUDGET_REWRITE}"
         return {
             "decision": "deny",
             "reason": reason,
@@ -9409,6 +9826,7 @@ def _bash_decision(
         res.update(decision="deny", reason=deny_reason)
         return res
     res.pop("exported", None)
+    _argv_shell_check(cmd, tokens, strict, asks)
     allow = res.pop("allow", "")
     # `allow` bỏ hỏi cho CẢ lệnh Bash → chỉ khi merge đứng một mình và trơn (không gì shell còn mở rộng/chạy thêm).
     if allow and (len(commands) > 1 or not PLAIN_MERGE_RE.fullmatch(cmd.strip())):
@@ -9429,6 +9847,34 @@ NO_OBJECTION = "NONE"  # guard không phản đối
 RULE_ALLOW = "RULE_ALLOW"  # allow rõ ràng (merge đã qua merge-check)
 UNPARSED = "UNPARSED"  # guard lỗi giữa chừng với hành động phải kiểm
 BUDGET = "BUDGET"
+# Lý do BUDGET kèm cách viết lại (AUD-HAR-199): agent bị chặn biết dạng nào guard đọc chắc thay vì thử lách (LOOP-STOP-025).
+BUDGET_REWRITE = (
+    " — viết lại: tách thành nhiều lệnh đơn; không lồng shell/heredoc có mở rộng; nội dung dài → ghi file bằng công cụ "
+    "Write rồi chạy file"
+)
+# Nhật ký quyết định của hook cho `xt.py loop stats` (AUD-HAR-199): chỉ ghi khi dự án có `.autopilot/` (vòng autopilot).
+GUARD_LOG = "guard-log.jsonl"
+LOGGED_MODES = ("bash", "edit", "mcp")
+
+
+def _log_decision(mode: str, payload: Any, out: Dict[str, object], root: str) -> None:
+    """Nối `{ts, session, mode, decision, code}` vào `.autopilot/guard-log.jsonl`. Không có `.autopilot/` → không ghi;
+    lỗi ghi bỏ qua — đếm không được đổi quyết định hay làm kẹt hook (fail-open về luồng, ADR-0002)."""
+    d = os.path.join(root, ".autopilot")
+    if mode not in LOGGED_MODES or not os.path.isdir(d):
+        return
+    session = payload.get("session_id") if isinstance(payload, dict) else None
+    rec = {
+        "ts": int(time.time()),
+        "session": str(session or "")[:80],
+        "mode": mode,
+        "decision": str(out.get("decision") or ""),
+        "code": str(out.get("code") or ""),
+    }
+    with contextlib.suppress(OSError), open(os.path.join(d, GUARD_LOG), "a", encoding="utf-8") as f:
+        f.write(json.dumps(rec) + "\n")
+
+
 BRACE_OVERFLOW = "BRACE_OVERFLOW"
 NEST_TOO_DEEP = "NEST_TOO_DEEP"
 UNRESOLVED_TARGET = "UNRESOLVED_TARGET"  # đích của hành động không đảo ngược guard không giải được (T-1523)
@@ -9538,7 +9984,7 @@ def apply_policy(out: Dict[str, object]) -> Dict[str, object]:
     return res
 
 
-PERMISSION_MODES = {"Bash": "bash", "Edit": "edit", "Write": "edit", "MultiEdit": "edit"}
+PERMISSION_MODES = {"Bash": "bash", "Edit": "edit", "Write": "edit", "MultiEdit": "edit", "NotebookEdit": "edit"}
 
 
 def permission_mode(tool: object) -> str:
@@ -9603,7 +10049,7 @@ def _rule_decision(mode: str, payload: Any, root: str) -> Dict[str, object]:
         cwd = cwd if isinstance(cwd, str) and posixpath.isabs(cwd) else None
         return bash_decision(cmd, root, cwd) if isinstance(cmd, str) and cmd else {"decision": ""}
     if mode == "edit":
-        path = tool_input.get("file_path")
+        path = tool_input.get("file_path") or tool_input.get("notebook_path")  # NotebookEdit (AUD-HAR-036)
         d, r = edit_decision(path, root, tool_input) if isinstance(path, str) and path else ("", "")
         return {"decision": d, "reason": r}
     if mode == "mcp":
@@ -9619,21 +10065,77 @@ def _payload_cmd(payload: Any) -> object:
     return ti.get("command") if isinstance(ti, dict) else None
 
 
+# ADR-0064 lát A: schema trung lập cho adapter của công cụ khác — `tool` → chế độ của bộ luật.
+# Tên tool (chữ thường) của Claude Code và các host (research 2026-11-02 §8, adapter lát B) → chế độ (AUD-SEC-346).
+CORE_MODES = {
+    **dict.fromkeys(("bash", "shell", "run_shell_command", "run_terminal_command", "exec_command"), "bash"),
+    **dict.fromkeys(("edit", "write", "multiedit", "notebookedit", "write_file", "replace", "create"), "edit"),
+    "mcp": "mcp",
+}
+CORE_ACTION_KEYS = ("command", "path", "tool_name")
+
+
+def _core_decision(raw: Any) -> Dict[str, object]:
+    """`{tool, command|path|tool_name, input, cwd, project_dir}` (ADR-0064) → quyết định của bộ luật. Không phải object →
+    không có gì để chặn (stdin rác, LOOP-HARNESS-018); có lệnh/đường/tool mà không suy ra chế độ, hay `command` không phải
+    chuỗi → deny UNPARSED — adapter truyền sai tên tool không được thành cho qua im lặng (AUD-SEC-346). Gốc dự án:
+    `project_dir` tuyệt đối → `CLAUDE_PROJECT_DIR` → cwd (AUD-HAR-201: host khác Claude không đặt biến đó)."""
+    if not isinstance(raw, dict):
+        return {"decision": ""}
+    tool = str(raw.get("tool") or "").strip().lower()
+    mode, cmd = CORE_MODES.get(tool, ""), raw.get("command")
+    if (cmd is not None and not isinstance(cmd, str)) or (not mode and any(raw.get(k) for k in CORE_ACTION_KEYS)):
+        why = f"core: không suy ra chế độ guard cho tool {tool!r} hay `command` không phải chuỗi — adapter gửi tool bash|edit|mcp"
+        return {"decision": "deny", "code": UNPARSED, "reason": why + " (AUD-SEC-346)"}
+    tool_input = dict(raw["input"]) if isinstance(raw.get("input"), dict) else {}
+    tool_input.setdefault("command", cmd)
+    tool_input.setdefault("file_path", raw.get("path"))
+    pd = raw.get("project_dir")
+    root = pd if isinstance(pd, str) and os.path.isabs(pd) else os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd()
+    return _rule_decision(
+        mode, {"tool_name": raw.get("tool_name"), "tool_input": tool_input, "cwd": raw.get("cwd")}, root
+    )
+
+
+def _core_output(out: Dict[str, object]) -> int:
+    """Đầu ra `core`: JSON `{decision: allow|deny, code, reason}` đã qua chính sách mặc định (không `ask` — Codex/Cursor không
+    cưỡng chế `ask`); deny → exit 2 (công cụ đọc exit chặn được) và lý do ở stderr."""
+    out = apply_policy(out)
+    deny = out.get("decision") == "deny"
+    doc = {"decision": "deny" if deny else "allow", "code": out.get("code"), "reason": out.get("reason") or ""}
+    sys.stdout.write(json.dumps(doc, ensure_ascii=False))
+    if deny:
+        sys.stderr.write(str(doc["reason"]) + "\n")
+    return 2 if deny else 0
+
+
 def main() -> int:
     """`guard.py bash|edit|mcp [nul]` cho PreToolUse; `guard.py permission` cho PermissionRequest (chế độ suy từ
-    `tool_name`; in JSON của hook hoặc không in gì)."""
+    `tool_name`; in JSON của hook hoặc không in gì); `guard.py core` cho adapter trung lập (ADR-0064); `guard.py
+    commit-msg <file>` cho git hook `commit-msg` (sàn ADR-0064 lát C)."""
     mode = sys.argv[1] if len(sys.argv) > 1 else ""
+    if mode == "commit-msg":  # git hook `commit-msg <file>` (ADR-0064 lát C): exit 1 + lý do ở stderr khi chặn
+        why = commit_msg_problem(sys.argv[2] if len(sys.argv) > 2 else "", os.getcwd())
+        sys.stderr.write(f"✗ {why}\n" if why else "")
+        return 1 if why else 0
     payload: Any = None
     try:
         payload = json.loads(sys.stdin.read() or "{}")
-        if mode == "permission":
-            mode = permission_mode(payload.get("tool_name"))
-        out = _rule_decision(mode, payload, os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd())
+        if mode == "core":
+            out = _core_decision(payload)
+        else:
+            if mode == "permission":
+                mode = permission_mode(payload.get("tool_name"))
+            out = _rule_decision(mode, payload, os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd())
     except Exception:  # fail-open về luồng: lỗi của hook không được kẹt phiên — trừ merge (AUD-SEC-032)
         out = _failure_decision(mode, payload, _payload_cmd(payload))
+    if sys.argv[1:2] == ["core"]:
+        return _core_output(out)
     # strict = hành vi cũ (hỏi): chỉ chặt hơn, không phải công tắc tắt hook.
     if os.environ.get("XT_GUARD_POLICY") != "strict":
         out = apply_policy(out)
+    if sys.argv[1:2] != ["permission"]:  # PermissionRequest lặp lại quyết định PreToolUse — đếm một lần
+        _log_decision(mode, payload, out, os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd())
     if sys.argv[1:2] == ["permission"]:
         sys.stdout.write(permission_output(out))
     elif sys.argv[2:3] == ["nul"]:

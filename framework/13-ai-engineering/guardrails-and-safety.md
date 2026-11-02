@@ -3,7 +3,7 @@ title: Guardrail runtime, chính sách nội dung, fallback, an toàn người d
 kind: module
 prefix: AI-GUARD
 applies_to: [ai-agent, agentic-system, data-ml, api-service, web-app]
-updated: 2026-11-01
+updated: 2026-11-02
 ---
 
 # Guardrail runtime, chính sách nội dung, fallback, an toàn người dùng
@@ -57,7 +57,7 @@ updated: 2026-11-01
 - [ ] `AI-GUARD-001` **MUST** Có tầng kiểm tất định (regex/từ khoá/allowlist/độ dài) cho input và output, chạy trước mọi tầng model. → Kiểm: test ca cấm rõ bị chặn khi tầng model tắt.
 - [ ] `AI-GUARD-002` **MUST@L** Tầng kiểm bằng model (phân loại) lỗi/timeout → fail-closed theo mức rủi ro (hạ cấp hoặc chặn), không bỏ qua; ngoại lệ ghi ADR. → Kiểm: test mock tầng 2 ném lỗi → hành vi fallback đúng bảng. · Nguồn: stored 12 §2
 - [ ] `AI-GUARD-003` **MUST@L** Chính sách nội dung viết thành bảng điều → tầng kiểm → ca test; mỗi điều có ≥ 5 ca dương và ca negative control. → Kiểm: file chính sách + dataset test tương ứng trong repo.
-- [ ] `AI-GUARD-004` **MUST** PII trong input được phát hiện và che/băm trước khi ghi log/trace/dataset; PII trong output được kiểm theo quyền của người nhận. → Kiểm: test log không chứa PII mẫu; xem [`../16-compliance-privacy/privacy-by-design.md`](../16-compliance-privacy/privacy-by-design.md).
+- [ ] `AI-GUARD-004` **MUST** PII trong input của model được phát hiện và che/băm trước khi vào log/trace/dataset (danh mục cấm ghi log: `BASE-ERR-007`, nhà — góc riêng ở đây là PII nằm trong văn bản tự do); PII trong output được kiểm theo quyền của người nhận. → Kiểm: test log không chứa PII mẫu; xem [`../16-compliance-privacy/privacy-by-design.md`](../16-compliance-privacy/privacy-by-design.md).
 - [ ] `AI-GUARD-005` **MUST** Guardrail chạy ở server; client không thể tắt hay bỏ qua; cấu hình guardrail là cấu hình cổng (đổi phải qua review). → Kiểm: endpoint không có tham số tắt kiểm; thay đổi config có PR.
 - [ ] `AI-GUARD-006` **MUST@L** Mọi lần chặn/hạ cấp được log với lý do, luật khớp, trace id (không log nội dung PII thô); có dashboard tỉ lệ chặn. → Kiểm: log mẫu; dashboard tồn tại. · Nguồn: [`observability-and-cost.md`](observability-and-cost.md)
 - [ ] `AI-GUARD-007` **MUST@L** Tính năng AI hướng người dùng có đường tới người thật và cách báo cáo nội dung AI sai/có hại; báo cáo đi vào hàng đợi xử lý có người nhận. Thông báo "đang tương tác với AI" và nhãn nội dung AI: xem [`CMP-AI-003`](../16-compliance-privacy/ai-regulation.md), `CMP-AI-004`. → Kiểm: E2E: nút báo cáo và lối gặp người thật hiện trong UI AI; gửi báo cáo → tạo bản ghi trong hàng đợi.
