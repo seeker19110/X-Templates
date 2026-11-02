@@ -13432,7 +13432,7 @@
  },
  {
   "id": "guard-control-sec241-ansi-quote-backtick-ok",
-  "origin": "control",
+  "origin": "audit",
   "refs": [
    "AUD-SEC-241"
   ],
@@ -13440,8 +13440,11 @@
    "command": "echo $'\\'' `date`"
   },
   "expect": {
-   "allowed": true
-  }
+   "allowed": false,
+   "decision": "deny",
+   "code": "BUDGET"
+  },
+  "note": "ADR-0063 (D-299): backtick ngoài nháy đơn ngoài tập con chuẩn → chặn; trước đó là đối chứng cho qua"
  },
  {
   "id": "guard-d279-here-tick-hash-rm",
@@ -13679,7 +13682,7 @@
  },
  {
   "id": "guard-control-d279-here-tick-hash-ok",
-  "origin": "control",
+  "origin": "audit",
   "refs": [
    "AUD-SEC-196"
   ],
@@ -13687,12 +13690,15 @@
    "command": "cat <<EOF\n`echo #` $(date)\nEOF"
   },
   "expect": {
-   "allowed": true
-  }
+   "allowed": false,
+   "decision": "deny",
+   "code": "BUDGET"
+  },
+  "note": "ADR-0063 (D-299): backtick ngoài nháy đơn ngoài tập con chuẩn → chặn; trước đó là đối chứng cho qua"
  },
  {
   "id": "guard-control-d279-here-arith-ok",
-  "origin": "control",
+  "origin": "audit",
   "refs": [
    "AUD-SEC-196"
   ],
@@ -13700,8 +13706,11 @@
    "command": "cat <<EOF\nit's $((1 + 2)) `date`\nEOF"
   },
   "expect": {
-   "allowed": true
-  }
+   "allowed": false,
+   "decision": "deny",
+   "code": "BUDGET"
+  },
+  "note": "ADR-0063 (D-299): backtick ngoài nháy đơn ngoài tập con chuẩn → chặn; trước đó là đối chứng cho qua"
  },
   {
    "id": "guard-sec195-paren-hash-rm",
@@ -14235,6 +14244,272 @@
   "expect": {
    "allowed": false
   }
+ },
+ {
+  "id": "guard-adr63-sec196-here-apos-subst",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-196"
+  ],
+  "input": {
+   "command": "cat <<X\nit's $(rm -rf ~)\nX"
+  },
+  "expect": {
+   "allowed": false,
+   "decision": "deny",
+   "code": "BUDGET"
+  },
+  "note": "ADR-0063 (D-299): tập con chuẩn của guard"
+ },
+ {
+  "id": "guard-adr63-sec202-dq-paren-in-subst",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-202"
+  ],
+  "input": {
+   "command": "echo \"$(echo \")\"; rm -rf ~)\""
+  },
+  "expect": {
+   "allowed": false,
+   "decision": "deny",
+   "code": "BUDGET"
+  },
+  "note": "ADR-0063 (D-299): tập con chuẩn của guard"
+ },
+ {
+  "id": "guard-adr63-sec231-backtick-sq",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-231"
+  ],
+  "input": {
+   "command": "echo `echo '`\nrm -rf ~\n# '"
+  },
+  "expect": {
+   "allowed": false,
+   "decision": "deny",
+   "code": "BUDGET"
+  },
+  "note": "ADR-0063 (D-299): tập con chuẩn của guard"
+ },
+ {
+  "id": "guard-adr63-sec232-ifs-hash",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-232"
+  ],
+  "input": {
+   "command": "echo $IFS#; rm -rf ~"
+  },
+  "expect": {
+   "allowed": false,
+   "decision": "deny",
+   "code": "BUDGET"
+  },
+  "note": "ADR-0063 (D-299): tập con chuẩn của guard"
+ },
+ {
+  "id": "guard-adr63-sec233-brace-hash",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-233"
+  ],
+  "input": {
+   "command": "echo {#,a}; rm -rf {~,x}"
+  },
+  "expect": {
+   "allowed": false,
+   "decision": "deny",
+   "code": "BUDGET"
+  },
+  "note": "ADR-0063 (D-299): tập con chuẩn của guard"
+ },
+ {
+  "id": "guard-adr63-sec234-ansi-brace-hash",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-234"
+  ],
+  "input": {
+   "command": "echo $'\\'' ' #' ; rm -rf {~,x}"
+  },
+  "expect": {
+   "allowed": false,
+   "decision": "deny",
+   "code": "BUDGET"
+  },
+  "note": "ADR-0063 (D-299): tập con chuẩn của guard"
+ },
+ {
+  "id": "guard-adr63-sec238-ifs-param",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-238"
+  ],
+  "input": {
+   "command": "rm${IFS-}-rf${IFS-}~"
+  },
+  "expect": {
+   "allowed": false,
+   "decision": "deny",
+   "code": "BUDGET"
+  },
+  "note": "ADR-0063 (D-299): tập con chuẩn của guard"
+ },
+ {
+  "id": "guard-adr63-sec239-ifs-nested",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-239"
+  ],
+  "input": {
+   "command": "bash -c 'echo $IFS'$()'#; rm -rf ~'"
+  },
+  "expect": {
+   "allowed": false,
+   "decision": "deny",
+   "code": "BUDGET"
+  },
+  "note": "ADR-0063 (D-299): tập con chuẩn của guard"
+ },
+ {
+  "id": "guard-adr63-sec240-tilde-stack",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-240"
+  ],
+  "input": {
+   "command": "rm -rf ~0"
+  },
+  "expect": {
+   "allowed": false,
+   "decision": "deny",
+   "code": "BUDGET"
+  },
+  "note": "ADR-0063 (D-299): tập con chuẩn của guard"
+ },
+ {
+  "id": "guard-adr63-sec242-paren-hash-assign",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-242"
+  ],
+  "input": {
+   "command": "a=(1)# rm -rf ~"
+  },
+  "expect": {
+   "allowed": false,
+   "decision": "deny",
+   "code": "BUDGET"
+  },
+  "note": "ADR-0063 (D-299): tập con chuẩn của guard"
+ },
+ {
+  "id": "guard-adr63-sec243-pid-paren",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-243"
+  ],
+  "input": {
+   "command": "echo \"$$( '$(rm -rf ~)' )\""
+  },
+  "expect": {
+   "allowed": false,
+   "decision": "deny",
+   "code": "BUDGET"
+  },
+  "note": "ADR-0063 (D-299): tập con chuẩn của guard"
+ },
+ {
+  "id": "guard-adr63-sec245-backtick-dq-escape",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-245"
+  ],
+  "input": {
+   "command": "echo \"`rm -rf \\\"$HOME\\\"`\""
+  },
+  "expect": {
+   "allowed": false,
+   "decision": "deny",
+   "code": "BUDGET"
+  },
+  "note": "ADR-0063 (D-299): tập con chuẩn của guard"
+ },
+ {
+  "id": "guard-adr63-sec246-param-nested-dq",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-246"
+  ],
+  "input": {
+   "command": "bash -c \"${x:-\"rm -rf ~/\"}\""
+  },
+  "expect": {
+   "allowed": false,
+   "decision": "deny",
+   "code": "BUDGET"
+  },
+  "note": "ADR-0063 (D-299): tập con chuẩn của guard"
+ },
+ {
+  "id": "guard-adr63-sec249-index-subst",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-249"
+  ],
+  "input": {
+   "command": "x='y[$(rm -rf ~)]'; echo $((x))"
+  },
+  "expect": {
+   "allowed": false,
+   "decision": "deny",
+   "code": "BUDGET"
+  },
+  "note": "ADR-0063 (D-299): tập con chuẩn của guard"
+ },
+ {
+  "id": "guard-adr63-control-subst-grep-parens",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-202"
+  ],
+  "input": {
+   "command": "ls $(ls tests | grep -E '^test_(a|b)')"
+  },
+  "expect": {
+   "allowed": true
+  },
+  "note": "ADR-0063 (D-299): tập con chuẩn của guard — đối chứng hợp lệ"
+ },
+ {
+  "id": "guard-adr63-control-arith-index",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-249"
+  ],
+  "input": {
+   "command": "arr=(1 2 3); echo ${arr[$((i+1))]}"
+  },
+  "expect": {
+   "allowed": true
+  },
+  "note": "ADR-0063 (D-299): tập con chuẩn của guard — đối chứng hợp lệ"
+ },
+ {
+  "id": "guard-adr63-control-ifs-assign",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-232"
+  ],
+  "input": {
+   "command": "IFS=$'\\t' read -r a b <<< \"$(printf 'x\\ty')\""
+  },
+  "expect": {
+   "allowed": true
+  },
+  "note": "ADR-0063 (D-299): tập con chuẩn của guard — đối chứng hợp lệ"
  }
  ]
 }

@@ -735,7 +735,7 @@ def _letter_forms(cmd: str) -> List[str]:
     return [re.sub(r"[^A-Za-z0-9]", "", y) for x in bases for y in (x, HEAD_EXPANSION_RE.sub("", x))]  # 8 dạng (D-276)
 
 
-def _shell_precheck(cmd: str) -> None:
+def _shell_precheck(cmd: str, strict: bool = True) -> None:
     """Trước khi quét (D-271), chỗ guard không đọc như bash → chặn:
     - dòng có `#` có thể mở comment mà kết bằng `\\` lẻ: bash KHÔNG nối dòng trong comment (`true # \\` ↵
       `git push --force origin main` chạy `push`) còn guard nối; đọc nháy để phân định cũng lệch (`"$(true # \\`, nháy
@@ -748,6 +748,151 @@ def _shell_precheck(cmd: str) -> None:
         raise ScanTooComplex("comment/nháy lẻ làm lệch `$'…'` của dòng sau (guard giải ANSI-C trước khi bỏ comment)")
     if any(ALIAS_TABLE_LETTERS in f for f in _letter_forms(cmd)):
         raise ScanTooComplex(f"`{ALIAS_TABLE}` định nghĩa alias")
+    why = _strict_why(cmd) if strict else ""
+    if why:
+        raise ScanTooComplex(f"ngoài tập con guard đọc chắc — {why} (ADR-0063)")
+
+
+# ADR-0063 (D-299): tập con chuẩn — chỗ bash đọc khác cách guard mô phỏng (nháy, comment, backtick, brace, tilde, IFS…)
+# → chặn BUDGET thay vì vá từng ca (AUD-SEC-196…246). Đo 2026-11-01 trên 1567 lệnh Bash thật của các phiên: chỉ backtick
+# trong thân commit nháy kép chạm luật — bash thực thi chúng thật, tức lỗi của chính lệnh đó.
+STRICT_PLAIN = {
+    "c": re.compile(r"[^\\`$'\"#()]+"),
+    '"': re.compile(r"[^\\`$\"]+"),
+    "${": re.compile(r"[^\\`$'\"}]+"),
+}
+STRICT_WORD_BREAK = " \t\n;&|()<>"
+STRICT_BRACE_RE = re.compile(r"\{[^{}\s]*(?:,|\.\.)[^{}\s]*\}")
+STRICT_LIVE = (
+    (re.compile(r"\$\$\("), "`$$(` (AUD-SEC-243)"),
+    (re.compile(r"\$\{?[!#]?IFS\b"), "mở rộng `IFS` (AUD-SEC-232/238/239)"),
+)
+# Chữ thô (cả trong nháy): chuỗi nháy gán vào biến có thể được đánh giá lại khi số học.
+STRICT_RAW = ((re.compile(r"\w\[[^\]\n]*\$\((?!\()"), "thay lệnh trong chỉ số mảng (AUD-SEC-249)"),)
+# `tokenize` thay `$IFS` trên toàn chuỗi, kể cả script nháy của shell lồng (`bash -c '…$IFS…'`, ghép nháy `'"'"'`): guard
+# nhận script đã đổi. `$IFS` ở đâu cũng vậy (cả trong nháy) mà lệnh có gọi shell/`eval` → chặn; thân commit nhắc `$IFS`
+# không gọi shell thì vẫn chạy.
+STRICT_IFS_RE = re.compile(r"(?<!\\)\$\{?[!#]?IFS\b")
+STRICT_SHELL_RE = re.compile(r"(?:^|[^\w.-])(?:(?:ba|da|z|k|mk)?sh|eval|source)(?![\w.-])")
+STRICT_BARE = (
+    (re.compile(r"(?:^|[\s=:;&|(<>])~[+-]?\d"), "`~N` ngăn xếp thư mục (AUD-SEC-240)"),  # `~+`/`~-`: guard đã giải
+    (re.compile(r"[{,]#|#[,}]"), "brace bung ra `#` (AUD-SEC-233)"),
+)
+
+
+class _CodeView:
+    """Đọc chuỗi (đã nối dòng, đã gấp heredoc) theo ngữ cảnh nháy của bash. `kind[i]`: `c` mã ngoài nháy (bash tách
+    từ, bung brace/tilde) · `d` chữ trong nháy kép · `p` trong `${…}` · `q` chữ nháy đơn/`$'…'`/`\\x`/comment. `why`: chỗ
+    đầu tiên guard không mô phỏng chắc (rỗng = trong tập con)."""
+
+    def __init__(self, s: str) -> None:
+        self.s, self.kind, self.stack, self.why = s, ["q"] * len(s), [""], ""
+        self.opens: List[int] = []  # vị trí `"` mở đang chờ đóng
+        i = 0
+        while i < len(s) and not self.why:
+            i = self._step(i)
+        if not self.why and len(self.stack) > 1:
+            self.why = "nháy/ngoặc không đóng (AUD-SEC-214)"
+
+    def _step(self, i: int) -> int:
+        s, ctx = self.s, self.stack[-1]
+        m = STRICT_PLAIN.get(ctx, STRICT_PLAIN["c"]).match(s, i)
+        if m:
+            self.kind[i : m.end()] = [{'"': "d", "${": "p"}.get(ctx, "c")] * (m.end() - i)
+            return m.end()
+        if s[i] == "`":
+            self.why = "backtick — dùng `$(…)` (AUD-SEC-181/231/245)"
+        if s[i] == "\\" or self.why:
+            return i + 2
+        if s.startswith(("$(", "${"), i):
+            self.kind[i : i + 2] = ["c" if ctx in ("", "(", "$(") else "d"] * 2
+            self.stack.append(s[i : i + 2])
+            return i + 2
+        return self._in_dq(i) if ctx == '"' else self._in_param(i) if ctx == "${" else self._in_code(i)
+
+    def _in_dq(self, i: int) -> int:
+        if self.s[i] == '"':
+            self.stack.pop()
+            self._paren_check(self.s[self.opens.pop() : i])
+        self.kind[i] = "d"
+        return i + 1
+
+    def _paren_check(self, body: str) -> None:
+        """Chuỗi nháy bên trong `$(…)` có ngoặc không cân: bộ tìm thay lệnh của guard đếm ngoặc thô (AUD-SEC-202)."""
+        if "$(" in self.stack and body.count("(") != body.count(")"):
+            self.why = "ngoặc lẻ trong chuỗi nháy bên trong `$(…)` (AUD-SEC-202)"
+
+    def _in_param(self, i: int) -> int:
+        c = self.s[i]
+        if c in "'\"":
+            self.why = "nháy lồng trong `${…}` (AUD-SEC-246)"
+        elif c == "}":
+            self.stack.pop()
+        self.kind[i] = "p"
+        return i + 1
+
+    def _in_code(self, i: int) -> int:
+        s, c = self.s, self.s[i]
+        if c == "'" or s.startswith("$'", i):
+            return self._quoted(i, c == "$")
+        if c == "#":
+            return self._hash(i)
+        self.kind[i] = "c"
+        if c == '"':
+            self.opens.append(i)
+        if c == '"' or c == "(":
+            self.stack.append(c)
+        elif c == ")" and len(self.stack) > 1:
+            self.stack.pop()
+        return i + 1
+
+    def _quoted(self, i: int, ansi: bool) -> int:
+        s, k = self.s, i + 1 + ansi
+        while k < len(s) and s[k] != "'":
+            k += 1 + (ansi and s[k] == "\\")
+        body = s[i + 1 + ansi : k]
+        if k >= len(s):
+            self.why = "nháy không đóng (AUD-SEC-214)"
+        elif ansi and "\\'" in body and "#" in s and STRICT_BRACE_RE.search(s):
+            self.why = "`$'…\\'…'` cùng brace và `#` (AUD-SEC-234)"
+        else:
+            self._paren_check(body)
+        return k + 1
+
+    def _hash(self, i: int) -> int:
+        s = self.s
+        if i and (s[i - 1] not in STRICT_WORD_BREAK or self.kind[i - 1] != "c"):  # `a#b`, `\)#`: chữ thường
+            self.kind[i] = "c"
+            return i + 1
+        end = s.find("\n", i)
+        end = len(s) if end < 0 else end
+        if i and s[i - 1] == ")":  # nháy trong comment: D-274…D-276 (`_comment_desyncs_ansi`) đã đóng AUD-SEC-229/230
+            self.why = "`#` ngay sau `)` (AUD-SEC-242)"
+        return end
+
+
+def _strict_why(cmd: str) -> str:
+    """ADR-0063: lý do lệnh ra ngoài tập con guard đọc chắc như bash (rỗng = trong tập con)."""
+    lines = join_continuations(cmd).split("\n")
+    for _, m, a, b, _ in _here_scan("\n".join(lines)):
+        body = "\n".join(lines[a:b])
+        if _heredoc_word(m)[1]:
+            continue
+        if "`" in body:
+            return "backtick trong thân heredoc không nháy — dùng `$(…)` (AUD-SEC-181/231/245)"
+        if "'" in body and "$(" in body:
+            return "thân heredoc không nháy có `'` cùng thay lệnh (AUD-SEC-196)"
+        lines[a:b] = [" " * len(x) for x in lines[a:b]]  # chữ (thay lệnh trong thân: `_heredoc_feed` của luật cũ)
+    v = _CodeView(_fold_heredocs("\n".join(lines), True))
+    if v.why:
+        return v.why
+    live = "".join(ch if k != "q" else " " for ch, k in zip(v.s, v.kind))
+    bare = "".join(ch if k == "c" else " " for ch, k in zip(v.s, v.kind))
+    checks = ((STRICT_RAW, v.s), (STRICT_LIVE, live), (STRICT_BARE, bare))
+    why = next((why for rules, text in checks for rx, why in rules if rx.search(text)), "")
+    if not why and STRICT_IFS_RE.search(v.s) and STRICT_SHELL_RE.search(v.s):
+        why = "`$IFS` trong script của shell lồng (AUD-SEC-239)"
+    return why
 
 
 def _may_be_alias(head: str) -> bool:
@@ -5939,6 +6084,9 @@ class ScanBudget:
         self.calls = SCAN_CALLS
         self.deadline = time.monotonic() + SCAN_SECONDS
         self.seen: Set[Tuple[str, Optional[str]]] = set()  # (script, thư mục chạy): cùng chuỗi ở thư mục khác vẫn quét
+        # Chữ trích theo chiều chặt từ chương trình khác (sed/awk/perl/m4, lời gọi thực thi trong Python/Node): bash không
+        # đọc nó như lệnh gốc nên tập con chuẩn (ADR-0063) không áp — luật nguy hiểm vẫn áp đủ.
+        self.loose: Set[str] = set()
         # Đọc bảng alias: ngân sách TỔNG của quyết định gốc — lệnh con của `find -exec` được quét bằng quyết định mới
         # (nested) vẫn tiêu chung, không được thêm ALIAS_SECONDS mỗi lần.
         if not nested or ScanBudget.current_alias is None:
@@ -7144,6 +7292,8 @@ def _scan_scripts(
         if not deeper and len(script) > REWRITE_MAX_CHARS:
             return f"Lệnh quá phức tạp để guard quét hết (bản thay biến dài {len(script)} ký tự): chia nhỏ lệnh."
         budget.seen.add((script, cwd))
+        if not deeper:  # bản guard ghép lại từ token (nháy heredoc mất): lệnh gốc đã qua tập con chuẩn (ADR-0063)
+            budget.loose.add(script)
         sub = bash_decision(script, root, cwd, depth + deeper, budget, 0 if deeper else rewrites + 1)
         if sub["decision"] == "deny":
             return str(sub["reason"])
@@ -7202,15 +7352,19 @@ def _nested_sources(
     nested = _nested_pairs(cmd, tokens, placed, start, budget)
     nested += [(s, here) for c, here in placed for s in _wrapped_scripts(c)[0]]
     interp = _interp_scripts_at(cmd, tokens, start, budget)
-    nested += [(s, here) for raw, here in interp for s in _exec_api_scripts([raw])]
+    loose = [(s, here) for raw, here in interp for s in _exec_api_scripts([raw])]
     tool_nested, tool_asks = _tool_exec_sources(cmd, tokens, placed, interp, start, budget)
-    nested += tool_nested
+    loose += tool_nested
+    nested += loose
     opaque += tool_asks
     nested += decoded + [(s, here) for c, here in placed for s in _ssh_local_scripts(c)]
     jobs = [(c, here, *_parallel_jobs(c)) for c, here in placed]
     nested += [(s, here) for _, here, scripts, _ in jobs for s in scripts]
     opaque += [f"{why}: {' '.join(c)[:200]}" for c, _, _, why in jobs if why]
-    return rewritten, nested + _ipython_nested(cmd, tokens, start) + alias_ns, opaque + alias_asks
+    nested += _ipython_nested(cmd, tokens, start) + alias_ns
+    if budget is not None:  # ADR-0063: chữ trích chiều chặt, và mọi con của chữ lỏng, không qua tập con chuẩn
+        budget.loose.update(s for s, _ in (nested if cmd in budget.loose else loose))
+    return rewritten, nested, opaque + alias_asks
 
 
 def _assign_values(tokens: List[str]) -> Dict[str, str]:
@@ -8729,6 +8883,16 @@ def bash_decision(
         }
 
 
+def _clean_strict(cmd: str, budget: ScanBudget) -> Tuple[str, bool]:
+    """(`clean_text(cmd)`, có áp tập con chuẩn không — ADR-0063). Chữ lỏng giữ lỏng sau khi làm sạch để script con của
+    nó cũng lỏng (`_nested_sources`)."""
+    strict = cmd not in budget.loose
+    cmd = clean_text(cmd)
+    if not strict:
+        budget.loose.add(cmd)
+    return cmd, strict
+
+
 def _bash_decision(
     cmd: str, root: str, cwd: Optional[str], depth: int, budget: Optional[ScanBudget], rewrites: int
 ) -> Dict[str, object]:
@@ -8736,7 +8900,7 @@ def _bash_decision(
     if budget is None:  # lời gọi gốc: không có `cwd` = gốc dự án; lệnh lồng nhận None = thư mục không biết (D-106)
         cwd = cwd or root
     budget = budget or ScanBudget(nested=depth > 0)
-    cmd = clean_text(cmd)
+    cmd, strict = _clean_strict(cmd, budget)
     res: Dict[str, object] = {"decision": "", "reason": "", "commit": False, "no_verify": False, "commit_dir": ""}
     if budget.exhausted() or len(cmd) > CMD_MAX_CHARS:
         res.update(
@@ -8745,7 +8909,7 @@ def _bash_decision(
             code=BUDGET,
         )
         return res
-    _shell_precheck(cmd)
+    _shell_precheck(cmd, strict)
     _heredoc_precheck(cmd, whole)
     tokens = tokenize(cmd)
     rx = remote_exec(cmd, tokens)
