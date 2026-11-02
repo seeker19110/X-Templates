@@ -9577,21 +9577,50 @@ _PA_SEG = r"(?:(?!" + _PA_FETCH + r")[^|\n])*+"
 _PA_WORD = r"[^\s|;&`()<>]++"
 _PA_PATH = r"(?:[\w.~-]*+/)*+"
 _PA_WRAP_ARG = r"|-[\w-]++(?:=[^\s|;&`()<>]*+)?|[A-Za-z_]\w*+=[^\s|;&`()<>]*+"
-_PA_WRAP = (
-    r"(?:"
-    + _PA_PATH
-    + r"(?:(?:sudo|doas)(?:\s++(?:-[AbEeHhiKklNnPSsVv]*+[CDgpRrtTUu]\s++"
+_PA_SUDO_ARGS = (
+    r"(?:\s++(?:-[AbEeHhiKklNnPSsVv]*+[CDgpRrtTUu]\s++"
     + _PA_WORD
     + r"|--(?:user|group|role|type|chdir|chroot|prompt|host|other-user|close-from|command-timeout)\s++"
     + _PA_WORD
     + _PA_WRAP_ARG
-    + r"))*+|env(?:\s++(?:-[iv0]*+[uCS]\s++"
+    + r"))*+"
+)
+_PA_WRAP = (
+    r"(?:"
+    + _PA_PATH
+    + r"(?:(?:sudo|doas)"
+    + _PA_SUDO_ARGS
+    + r"|env(?:\s++(?:-[iv0]*+[uCS]\s++"
     + _PA_WORD
     + r"|--(?:unset|chdir|split-string)\s++"
     + _PA_WORD
     + _PA_WRAP_ARG
     + r"))*+)\s++)*+"
 )
+# Nợ review PR-PA r2: `sudo -i`/`-s`/`--login`/`--shell`, `doas -s`, `su` (kèm `sudo`, `-`, `-l`, `-s SHELL`, tên user)
+# KHÔNG kèm lệnh ở cuối đoạn ống chạy shell đọc lệnh từ stdin. Cờ `-i`/`-s` là chữ đứng trước mọi chữ nhận giá trị của
+# cụm (`-iu deploy` là login, `-ui` là user `i`); lookahead tìm cờ không vượt dấu tách lệnh. Cuối đoạn: hết dòng, dấu
+# tách lệnh, chuyển hướng, `#`, backtick, nháy (lệnh trích trong văn bản/JSON). `su -c …` có lệnh — không khớp.
+_PA_SHELL_END = r"""\s*+(?=[;&|)`#<>"'\\]|$)"""
+_PA_LOGIN = (
+    r"(?:"
+    + _PA_PATH
+    + r"(?:sudo|doas)(?=[^|;&\n]*?\s-(?:[AbEeHhKklNnPSVv]*+[is]|-login\b|-shell\b))"
+    + _PA_SUDO_ARGS
+    + r"|(?:"
+    + _PA_PATH
+    + r"(?:sudo|doas)"
+    + _PA_SUDO_ARGS
+    + r"\s++)?"
+    + _PA_PATH
+    + r"su\b(?:\s++(?:-[lmp]*+s\s++"
+    + _PA_WORD
+    + r"|--shell(?:=|\s++)"
+    + _PA_WORD
+    + r"|--login|-[lmp]*+|[A-Za-z_][\w.-]*+))*+)"
+    + _PA_SHELL_END
+)
+_PA_PIPE_SHELL = r"(?:" + _PA_WRAP + _PA_PATH + _PA_SH + "|" + _PA_LOGIN + ")"
 # GNU `rm` nhận viết tắt tuỳ chọn dài (`--r`, `--rec` = `--recursive`).
 _PA_RM_RECURSIVE = r"(?=(?:\s++-[\w-]++)*?\s++(?:-[a-zA-Z]*?[rR]|--r(?:e(?:c(?:u(?:r(?:s(?:i(?:ve?)?)?)?)?)?)?)?\b))"
 # Đích `rm` là chính gốc/HOME (`/`, `~`, `$HOME`, `${HOME}`, `${HOME<toán tử>…}` trừ `:+` — AUD-SEC-367) kèm hậu tố
@@ -9610,7 +9639,7 @@ _PA_RM_TARGET = _PA_RM_QUOTE + r"(?:/|~|" + _PA_RM_HOME + r""")(?:[/*]|\\?["']|(
 _PA_RM_OPERAND = r"(?!#|" + _PA_RM_TARGET + r")(?:[^\s;|&`()<>r]|(?<=[\w-])r|r(?!m\s))++"
 # Cụm cờ gộp của shell (`-lc`, `-xec`): phần trước `c` đầu tiên possessive — không quay lui qua từng chữ (tuyến tính).
 PA_DANGER = (
-    _PA_FETCH + _PA_SEG + r"(?:\|\s*+tee\b" + _PA_SEG + r")*+\|\s*+" + _PA_WRAP + _PA_PATH + _PA_SH,
+    _PA_FETCH + _PA_SEG + r"(?:\|\s*+tee\b" + _PA_SEG + r")*+\|\s*+" + _PA_PIPE_SHELL,
     r"(?:\b(?:" + _PA_SH + r"|source)|(?<![^\s;&|({`\"'])\.)\s*+(?:<\s*+)?<\(\s*+" + _PA_FETCH,
     r"(?:\b" + _PA_SH + r"(?:\s++-(?!" + _PA_SH + r")[A-Za-z]++)*?\s++-[A-Za-bd-z]*+c[A-Za-z]*+|\beval)\s++"
     r"\\?[\"']?(?:\$\(|\\?`)\s*+" + _PA_FETCH,
@@ -9630,7 +9659,7 @@ PA_BYPASS = (
 _PA_PIN_END = r"(?![\w*^~<>=|-]|\.[\w*])"
 _PA_SEMVER = r"[0-9]++\.[0-9]++\.[0-9]++(?:-[0-9A-Za-z.-]++)?(?:\+[0-9A-Za-z.-]++)?" + _PA_PIN_END
 # Review #414 (AUD-SEC-361): nhãn PEP 440 dài đứng trước nhãn ngắn (nhóm possessive không quay lui `a` → `alpha`);
-# `===` là ghim; tuỳ chọn pip nhận giá trị (`pip install --help`, pip 24.0, 2026-11-02) nuốt cả giá trị (`--opt val`,
+# `===` là ghim; tuỳ chọn pip/uv nhận giá trị (`_PA_PIP_VALUE_OPTS`) nuốt cả giá trị (`--opt val`,
 # `--opt=val`); token ghim: tên `==`/`===` phiên bản, URL VCS `git+…@<SHA 40 hex>`, file `.whl`, đường dẫn cục bộ (có
 # `/`, không `:`). URL VCS/lưu trữ không ghim SHA vẫn bị báo; npx nhận `@v1.2.3` và `github:u/r#<SHA 40 hex>`.
 _PA_PEP440_TAG = r"(?:alpha|beta|preview|pre|post|rev|rc|dev|a|b|c|r)"
@@ -9643,25 +9672,39 @@ def _pa_abbrev(name: str, n: int) -> str:
     return re.escape(name[:n]) + "".join("(?:" + re.escape(c) for c in name[n:]) + ")?" * (len(name) - n)
 
 
-# AUD-SEC-370: tuỳ chọn dài nhận giá trị của `pip install` (pip 24.0 `InstallCommand().parser`, `takes_value()`,
-# 2026-11-02) kèm độ dài tiền tố duy nhất ngắn nhất — `--targ` = `--target`, `--log-file`/`--local-log` = `--log`. Tuỳ
-# chọn chọn nhà cung cấp khoá (Kiểm PRF-CLI-010 cấm tên đó trong scripts/) là tuỳ chọn duy nhất bắt đầu bằng `--k`.
+# AUD-SEC-370: tuỳ chọn dài nhận giá trị của `pip install` kèm độ dài tiền tố viết tắt — `--targ` = `--target`,
+# `--log-file`/`--local-log` = `--log`. Nguồn (2026-11-02): pip 24.0 và pip 26.3 (`InstallCommand().parser`,
+# `takes_value()`; pip 26.3 bản mới nhất trên PyPI) hợp tuỳ chọn nhận giá trị của `uv pip install --help` (uv 0.11.32;
+# clap không nhận viết tắt → khớp đúng tên). Độ dài = tiền tố ngắn nhất mà mọi tiền tố dài hơn, ở mỗi bản pip, là tên
+# đúng tuỳ chọn nhận giá trị hoặc không khớp/mơ hồ (pip báo lỗi) và không là tên cờ của uv — `--refresh` (cờ uv) không
+# là viết tắt của `--refresh-package`. Tuỳ chọn chọn nhà cung cấp khoá (Kiểm PRF-CLI-010 cấm tên đó trong scripts/) là
+# tuỳ chọn duy nhất bắt đầu bằng `--k`.
 _PA_PIP_VALUE_OPTS = (
-    ("abi", 1), ("cache-dir", 2), ("cert", 2), ("client-cert", 2), ("config-settings", 4), ("constraint", 4),
-    ("default-timeout", 3), ("editable", 2), ("exists-action", 3), ("extra-index-url", 3), ("find-links", 2),
-    ("global-option", 1), ("implementation", 2), ("index-url", 2), ("local-log", 3), ("log", 3), ("log-file", 4),
-    ("no-binary", 5), ("only-binary", 1), ("platform", 2), ("prefix", 5), ("progress-bar", 4), ("proxy", 4),
-    ("pypi-url", 3), ("python", 6), ("python-version", 7), ("report", 3), ("requirement", 8), ("retries", 3),
+    ("abi", 1), ("all-releases", 2), ("allow-insecure-host", 19), ("build-constraint", 2), ("build-constraints", 17),
+    ("cache-dir", 2), ("cert", 2), ("client-cert", 2), ("color", 5), ("config-file", 11), ("config-setting", 14),
+    ("config-settings", 4), ("config-settings-package", 23), ("constraint", 4), ("constraints", 11),
+    ("default-index", 13), ("default-timeout", 3), ("directory", 9), ("editable", 2), ("exclude-newer", 13),
+    ("exclude-newer-package", 21), ("excludes", 8), ("exists-action", 3), ("extra", 5), ("extra-index-url", 3),
+    ("find-links", 2), ("fork-strategy", 13), ("global-option", 1), ("group", 1), ("implementation", 2), ("index", 5),
+    ("index-strategy", 14), ("index-url", 2), ("link-mode", 9), ("local-log", 3), ("log", 3), ("log-file", 4),
+    ("no-binary", 5), ("no-build-isolation-package", 26), ("no-editable-package", 19), ("no-sources-package", 18),
+    ("only-binary", 1), ("only-final", 6), ("overrides", 9), ("platform", 2), ("prefix", 5), ("prerelease", 10),
+    ("progress-bar", 4), ("project", 7), ("proxy", 4), ("pypi-url", 3), ("python", 6), ("python-platform", 15),
+    ("python-version", 7), ("refresh-package", 8), ("reinstall-package", 17), ("report", 3), ("requirement", 8),
+    ("requirements", 12), ("requirements-from-script", 12), ("resolution", 10), ("resume-retries", 3), ("retries", 3),
     ("root", 4), ("root-user-action", 5), ("source", 6), ("source-dir", 10), ("source-directory", 11), ("src", 2),
-    ("target", 2), ("timeout", 2), ("trusted-host", 2), ("upgrade-strategy", 8), ("use-deprecated", 5),
+    ("target", 2), ("timeout", 2), ("torch-backend", 13), ("trusted-host", 2), ("upgrade-group", 13),
+    ("upgrade-package", 15), ("upgrade-strategy", 8), ("uploaded-prior-to", 3), ("use-deprecated", 5),
     ("use-feature", 5),
 )  # fmt: skip
+# Tuỳ chọn ngắn nhận giá trị: của pip (`-r -c -e -t -C -i -f`) và riêng `uv pip install` (`-p` python, `-P` gói nâng
+# cấp, `-b` ràng buộc build), đứng sau cụm cờ không giá trị (`-U -I -h -v -V -q`, `-n` của uv).
 # Token của lệnh pip không vượt dấu tách lệnh/chuyển hướng (`;|&()<>` — nợ review PR-PA: `-r req.txt; pytest`,
 # `Bash(pip install -e .), Read`); giá trị tuỳ chọn nhận nháy bao quanh, không vượt nháy đóng (`"pip install -r r.txt",`).
 _PA_PIP_CH = r"[^\s`;|&()<>"
 _PA_PIP_VALUE = r"[\"']?" + _PA_PIP_CH + r"\"'-]" + _PA_PIP_CH + r"\"']*+[\"']?"
 _PA_PIP_ARG = (
-    r"(?:-[UIhvVq]*+[rcetCif]|--(?:" + "|".join(_pa_abbrev(o, n) for o, n in _PA_PIP_VALUE_OPTS) + r"|k[\w-]*+))"
+    r"(?:-[UIhvVqn]*+[rcetCifpPb]|--(?:" + "|".join(_pa_abbrev(o, n) for o, n in _PA_PIP_VALUE_OPTS) + r"|k[\w-]*+))"
     r"(?=\s)\s++" + _PA_PIP_VALUE
 )
 # AUD-SEC-369: `.whl`/`@<SHA>` xét ở đường dẫn/revision pip dùng — dừng ở `?`/`#` (pip 24.0 `Link.is_wheel`,
