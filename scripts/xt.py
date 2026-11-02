@@ -11279,6 +11279,38 @@ def _pr_record(data: Dict[str, Any], pr: str) -> Dict[str, Any]:
     return rec if isinstance(rec, dict) else {}
 
 
+RecFn = Callable[[Dict[str, Any]], Optional[Dict[str, Any]]]
+
+
+def update_reviews(base: Path, key: str, fn: RecFn) -> Dict[str, Any]:
+    """Đọc–sửa–ghi bản ghi PR `key` của `reviews.json` trong khoá `state.lock` (AUD-CODE-036, như `update_state`): đọc
+    lại sổ TRONG khoá, `fn(bản sao bản ghi)` → bản ghi mới (None = không ghi), ghi cả sổ. Không gọi mạng trong `fn` —
+    đăng lên GitHub ở ngoài khoá rồi gọi lại hàm này để đánh dấu. Trả bản ghi sau cùng."""
+    with _state_lock(base):
+        data = read_reviews(base)
+        rec = _pr_record(data, key)
+        new = fn(copy.deepcopy(rec))
+        if new is None:
+            return rec
+        data[key] = new
+        _write_reviews(base, data)
+        return new
+
+
+def _mark_published(at: str) -> RecFn:
+    """`fn` cho `update_reviews`: đánh dấu đã đăng bản ghi review có thời điểm `at` (bản ghi khác giữ nguyên)."""
+
+    def fn(rec: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        reviews = _ledger_reviews(rec)
+        hit = [r for r in reviews if r.get("at") == at]
+        if not hit:
+            return None
+        hit[-1]["published"] = True
+        return {**rec, "reviews": reviews}
+
+    return fn
+
+
 def _ledger_reviews(rec: Dict[str, Any]) -> List[Dict[str, Any]]:
     """Bản ghi review của sổ cục bộ, đúng thứ tự ghi; sổ hỏng (`reviews` không phải list, phần tử lạ) → bỏ qua như
     `read_reviews` (AUD-CODE-019)."""
@@ -11996,6 +12028,12 @@ def _rethink_problem(
     return None
 
 
+def _rec_rethinks(rec: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """`rethinks[]` của bản ghi PR (sổ hỏng → rỗng)."""
+    old = rec.get("rethinks")
+    return [r for r in old if isinstance(r, dict)] if isinstance(old, list) else []
+
+
 def _pr_rethink(args: argparse.Namespace, base: Path) -> int:
     """`pr rethink` (ADR-0053/0059): mở thêm đúng một lần sửa (review chưa sạch cuối giữ làm lượt 1) — chỉ khi `pr next`
     đang trả `debt` (còn 🔴:
@@ -12013,9 +12051,7 @@ def _pr_rethink(args: argparse.Namespace, base: Path) -> int:
             f"✗ `pr next` của PR #{key} là `{action}`, không phải `debt`/`rethink` — làm bước đó trước", file=sys.stderr
         )
         return 2
-    local = _pr_record(data, key)
-    old = local.get("rethinks")
-    rethinks = [r for r in old if isinstance(r, dict)] if isinstance(old, list) else []
+    rethinks = _rec_rethinks(_pr_record(data, key))
     # ADR-0061: trần theo PR, kiểm TRƯỚC D-NNN (không bắt ghi quyết định vĩnh viễn rồi mới báo hết trần — review #380);
     # PR cắt bản miễn (ADR-0059 §6)
     if 0 < cap <= len(rethinks) and not d.get("release"):
@@ -12039,8 +12075,7 @@ def _pr_rethink(args: argparse.Namespace, base: Path) -> int:
         error, extra, _ = _review_drift(base, last, head, str(pr.get("baseRefName") or "main"))
         if not error and not extra:
             entry["head"] = head
-    data[key] = {**local, "rethinks": [*rethinks, entry]}
-    _write_reviews(base, data)
+    update_reviews(base, key, lambda r: {**r, "rethinks": [*_rec_rethinks(r), entry]})
     print(f"✓ PR #{key}: mở thêm một lần sửa theo {args.decision} — sửa hết, push, chạy lại `xt.py pr next --pr {key}`")
     return 0
 
@@ -12154,11 +12189,8 @@ def _pr_debt(args: argparse.Namespace, base: Path) -> int:
         if problem:
             print(f"✗ {problem}", file=sys.stderr)
             return 2
-        reviews.append(
-            {"head": head, "clean": True, "debt": ids, "at": now_iso(), **({"fixed": fixed} if fixed else {})}
-        )
-        data[key] = {**local, "reviews": reviews}
-        _write_reviews(base, data)
+        new = {"head": head, "clean": True, "debt": ids, "at": now_iso(), **({"fixed": fixed} if fixed else {})}
+        reviews = _ledger_reviews(update_reviews(base, key, lambda r: {**r, "reviews": [*_ledger_reviews(r), new]}))
     entry = reviews[-1]
     print(
         f"✓ PR #{key}: ghi nợ review ở {head[:7]} ({', '.join(ids) or '—'}"
@@ -12170,9 +12202,7 @@ def _pr_debt(args: argparse.Namespace, base: Path) -> int:
         return 0
     rc = _publish_review(str(args.pr or key), key, head, True, debt=[*ids, *fixed])
     if rc == 0:
-        entry["published"] = True
-        data[key] = {**local, "reviews": reviews}
-        _write_reviews(base, data)
+        update_reviews(base, key, _mark_published(str(entry.get("at"))))
     return rc
 
 
@@ -12189,12 +12219,9 @@ def _pr_reviewed(args: argparse.Namespace, base: Path) -> int:
     if err:
         print(f"✗ {err}", file=sys.stderr)
         return 2
-    data = read_reviews(base)
     key = _pr_key(args.pr)
     if key is None:
         return 2
-    rec = _pr_record(data, key)
-    reviews = _ledger_reviews(rec)  # sổ hỏng → ghi lại từ đầu (AUD-CODE-019)
     entry: Dict[str, Any] = {"head": args.head, "clean": args.clean, "at": now_iso()}
     if args.inconclusive:
         entry["inconclusive"] = True
@@ -12208,22 +12235,24 @@ def _pr_reviewed(args: argparse.Namespace, base: Path) -> int:
     # Idempotent (AUD-HAR-071, BASE-DATA-008): chạy lại cùng kết quả ở cùng head không thêm bản ghi, đã đăng thì không
     # đăng trùng; chỉ so bản ghi CUỐI — đổi kết quả rồi đổi lại vẫn là bản ghi mới.
     same = ("head", "clean", "inconclusive", "reviewer_model", "author_model", *REVIEW_EFFORT_KEYS)
-    again = bool(reviews) and all(reviews[-1].get(k) == entry.get(k) for k in same)
-    if again:
-        entry = reviews[-1]
-    else:
-        reviews.append(entry)
-        data[key] = {**rec, "reviews": reviews}
-        _write_reviews(base, data)
+    seen: List[Dict[str, Any]] = []
+
+    def add(rec: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        reviews = _ledger_reviews(rec)  # sổ hỏng → ghi lại từ đầu (AUD-CODE-019)
+        if reviews and all(reviews[-1].get(k) == entry.get(k) for k in same):
+            seen.append(reviews[-1])
+            return None
+        return {**rec, "reviews": [*reviews, entry]}
+
+    update_reviews(base, key, add)
+    cur = seen[0] if seen else entry
     word = "chưa kết luận (cần review khác)" if args.inconclusive else "sạch" if args.clean else "còn lỗi chặn"
-    print(f"✓ PR #{key}: review {word} ở {args.head[:7]}" + (" (đã ghi trước đó — không ghi thêm)" if again else ""))
-    if args.no_publish or entry.get("published"):
+    print(f"✓ PR #{key}: review {word} ở {args.head[:7]}" + (" (đã ghi trước đó — không ghi thêm)" if seen else ""))
+    if args.no_publish or cur.get("published"):
         return 0
     rc = _publish_review(str(args.pr), key, args.head, args.clean, bool(args.inconclusive))
     if rc == 0:
-        entry["published"] = True
-        data[key] = {**rec, "reviews": reviews}
-        _write_reviews(base, data)
+        update_reviews(base, key, _mark_published(str(cur.get("at"))))
     return rc
 
 
@@ -12764,22 +12793,35 @@ def cmd_pr_stats(args: argparse.Namespace) -> int:
     return 0
 
 
+def _remember_problem(d: Dict[str, Any], rec: Dict[str, Any]) -> bool:
+    """Sổ cục bộ cần nhớ thêm: làn chuẩn (push sau đó không hạ PR về làn nhanh) hay head cập nhật nhánh (AUD-HAR-136)."""
+    old = rec.get("merges")
+    merges: Dict[str, Any] = old if isinstance(old, dict) else {}
+    lane = d["lane"] == "chuẩn" and not rec.get("standard_seen")
+    return lane or bool(d["base_merge_of"] and merges.get(d["head"]) != d["base_merge_of"])
+
+
+def _remember(d: Dict[str, Any], rec: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """`fn` cho `update_reviews`: ghi `standard_seen`/`merges` vào bản ghi đọc lại trong khoá (None = không đổi)."""
+    if not _remember_problem(d, rec):
+        return None
+    if d["lane"] == "chuẩn":
+        rec = {**rec, "standard_seen": True}
+    old = rec.get("merges")
+    merges: Dict[str, Any] = old if isinstance(old, dict) else {}
+    if d["base_merge_of"] and merges.get(d["head"]) != d["base_merge_of"]:
+        rec = {**rec, "merges": dict(list({**merges, d["head"]: d["base_merge_of"]}.items())[-MERGES_KEEP:])}
+    return rec
+
+
 def _pr_next_state(pr: Dict[str, Any], base: Path) -> Tuple[Dict[str, Any], Dict[str, Any], Dict[str, Any]]:
     """(quyết định `merge-check`, sổ review cục bộ cả file, sổ của PR gộp dấu đã đăng) cho `pr next`/`pr rethink`."""
     d, _ = _merge_eval(pr)
     data = read_reviews(base)
     rec = _pr_record(data, str(d["pr"]))
-    if d["lane"] == "chuẩn" and not rec.get("standard_seen"):  # nhớ làn chuẩn: push sau đó không hạ PR về làn nhanh
-        rec = {**rec, "standard_seen": True}
+    if _remember_problem(d, rec):
+        rec = update_reviews(base, str(d["pr"]), lambda r: _remember(d, r))
         data[str(d["pr"])] = rec
-        _write_reviews(base, data)
-    old = rec.get("merges")
-    merges: Dict[str, Any] = old if isinstance(old, dict) else {}
-    if d["base_merge_of"] and merges.get(d["head"]) != d["base_merge_of"]:  # nhớ head cập nhật nhánh (AUD-HAR-136)
-        keep = dict(list({**merges, d["head"]: d["base_merge_of"]}.items())[-MERGES_KEEP:])
-        rec = {**rec, "merges": keep}
-        data[str(d["pr"])] = rec
-        _write_reviews(base, data)
     rec = {**rec, "standard_seen": True} if _standard_seen(pr) else rec
     return d, data, with_published(rec, pr.get("xtReviews"), bool(pr.get("reviewIdentity")))
 
