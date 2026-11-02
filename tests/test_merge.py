@@ -2560,6 +2560,59 @@ class PrNextCliTest(unittest.TestCase):
         self.assertFalse(xt._ledger_clean_valid({**rec, "debt": "x"}))
         self.assertFalse(xt._ledger_clean_valid({"head": head, "debt": []}))
 
+    def test_debt_fixed_refuses_row_already_fixed_at_review(self):
+        """AUD-HAR-182 (phần còn lại): `--fixed` không dùng lại dòng 🔴 đã `đã sửa` từ trước — mỗi ID phải CHƯA `đã sửa`
+        ở sổ tại head của review không sạch cuối (đọc bằng `git show`); dòng thêm sau review hay đang `mở` lúc review
+        thì nhận; không đọc được sổ ở head review → từ chối (fail-closed), sổ chưa có ở head review → không dòng nào cũ."""
+        note = "nợ-review: #7"
+        head_cols = "## Phát hiện\n\n| ID | Mức | Trạng thái | Tóm tắt | Ghi chú |\n|---|---|---|---|---|\n"
+
+        def ledger(*rows: tuple[str, str]) -> str:
+            return head_cols + "".join(f"| {i} | 🔴 | {st} | x | {note} |\n" for i, st in rows)
+
+        reviewed = self.commit(
+            {"src/a.py": "x = 1\n", xt.AUDIT_STATUS_DEFAULT: ledger(("AUD-SEC-002", "đã sửa"), ("AUD-SEC-004", "mở"))}
+        )
+        rows = (("AUD-SEC-002", "đã sửa"), ("AUD-SEC-004", "đã sửa"), ("AUD-SEC-007", "đã sửa"))
+        head = self.commit(
+            {"src/a.py": "x = 2\n", "tests/test_a.py": "assert 2\n", xt.AUDIT_STATUS_DEFAULT: ledger(*rows)}
+        )
+        p = {
+            **self.big,
+            "headRefOid": head,
+            "xtReviews": [{"head": reviewed, "clean": False, "at": "2026-11-02T01:00:00Z"}],
+        }
+
+        def debt(ids: str) -> tuple[int, str, str]:
+            return run_main("pr", "debt", "--pr-json", "-", "--fixed", ids, "--no-publish", stdin=json.dumps(p))
+
+        for ids in ("AUD-SEC-002", "AUD-SEC-002,AUD-SEC-004"):  # lời khai cũ, kể cả lẫn trong danh sách đúng
+            with self.subTest(ids=ids):
+                rc, _, err = debt(ids)
+                self.assertEqual(rc, 2)
+                self.assertIn(f"AUD-SEC-002 đã `đã sửa` ở {xt.AUDIT_STATUS_DEFAULT} tại review {reviewed[:7]}", err)
+                self.assertNotIn("AUD-SEC-004 đã", err)
+        self.assertEqual(xt.read_reviews(self.base)["7"].get("reviews", []), [])
+        real = xt._git
+
+        def broken(verb: str):
+            def fake(cwd: Path, *args: str, **kw: object) -> subprocess.CompletedProcess[str]:
+                if args[:1] == (verb,) and reviewed in " ".join(args):
+                    return subprocess.CompletedProcess(args, 128, "", "fatal: bad object\nhỏng")
+                return real(cwd, *args, **kw)
+
+            return fake
+
+        for verb in ("ls-tree", "show"):  # fail-closed: không đọc được sổ ở head review
+            with self.subTest(verb=verb), unittest.mock.patch.object(xt, "_git", broken(verb)):
+                rc, _, err = debt("AUD-SEC-004")
+                self.assertEqual(rc, 2)
+                self.assertIn(
+                    f"không đọc được {xt.AUDIT_STATUS_DEFAULT} ở review {reviewed[:7]} (fatal: bad object hỏng)", err
+                )
+        self.assertEqual(debt("AUD-SEC-004,AUD-SEC-007")[0], 0)  # `mở` lúc review / thêm sau review: bản sửa mới
+        self.assertEqual(xt.read_reviews(self.base)["7"]["reviews"][-1]["fixed"], ["AUD-SEC-004", "AUD-SEC-007"])
+
     def git(self, *args: str) -> str:
         git = ["git", "-C", str(self.base), "-c", "user.email=t@t", "-c", "user.name=t", "-c", "commit.gpgsign=false"]
         return subprocess.run([*git, *args], check=True, capture_output=True, text=True).stdout.strip()

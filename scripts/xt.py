@@ -7620,7 +7620,12 @@ def signoff_facts(
     base: Path, st: Dict[str, Any], release: Optional[Dict[str, Any]] = None, package: Optional[Dict[str, Any]] = None
 ) -> Dict[str, Any]:
     """Dữ kiện cho `signoff-package`: kết quả `release-check --json` và gói đã dựng (nếu có) kèm file đổi sau head của
-    chúng, vân tay bằng chứng hiện tại, việc `loop defer` còn chờ người."""
+    chúng, vân tay bằng chứng hiện tại, việc `loop defer` còn chờ người, và hàng `prod_switch` tính trực tiếp trên cây
+    (AUD-HAR-169: chỉ `--package` thì DECISIONS.md — ngoài vân tay gói — không ai xét): N/A BLOCKER (đề xuất `loop decide
+    --prod` chờ quyết) → `prod_switch` = ["prod_switch"], việc chờ người; FAIL (không đọc được) → `prod_switch_fail`, không
+    phải việc chờ người — `release-check` trên cây này sẽ NO-GO."""
+    row = _release_prod_switch(base)
+    blocker = row["level"] == "BLOCKER"
     return {
         "release": release,
         "release_changed": _changed_since(base, release["head"], DECISIONS_EXCLUDE) if release else None,
@@ -7628,6 +7633,8 @@ def signoff_facts(
         "package_changed": _changed_since(base, package["candidate_head"]) if package else None,
         "evidence_fp": evidence_fingerprint(base),
         "deferred": sorted(_deferred(st)),
+        "prod_switch": [row["id"]] if blocker and row["result"] == "N/A" else [],
+        "prod_switch_fail": blocker and row["result"] == "FAIL",
     }
 
 
@@ -7815,19 +7822,27 @@ def _signoff_rerun(f: Dict[str, Any], pkg: Optional[Dict[str, Any]], rel: Option
 
 def _signoff_kept(f: Dict[str, Any], pkg: Dict[str, Any], fresh_rel: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     """Gói còn khớp vân tay. Có `--release` mà lệch cây (chỉ DECISIONS.md đổi — ngoài vân tay gói) → chạy lại, không trình
-    gói với kết quả cũ: FAIL hay việc chờ người mới (`prod_switch`) của cây này chưa được xét (review #362, AUD-HAR-151)."""
+    gói với kết quả cũ: FAIL hay việc chờ người mới (`prod_switch`) của cây này chưa được xét (review #362, AUD-HAR-151).
+    Không có `--release` mà hàng `prod_switch` tính trực tiếp FAIL → cũng chạy lại (sẽ NO-GO → `replan`), không trình gói
+    với FAIL như việc chờ người (review AUD-HAR-169)."""
     s = f["signoff"]
-    if s["release"] is not None and fresh_rel is None:
-        note = _changed_note(s["release_changed"], s["release"]["head"])
+    if fresh_rel is None and (s["release"] is not None or s.get("prod_switch_fail")):
+        why = (
+            f"kết quả `release-check` cũ hơn cây ({_changed_note(s['release_changed'], s['release']['head'])})"
+            if s["release"] is not None
+            else "hàng `prod_switch` FAIL trên cây này (DECISIONS.md không đọc được — có thể giấu đề xuất `--prod`)"
+        )
         return {
             "action": "release-check",
-            "reason": f"gói nghiệm thu ở {pkg['candidate_head'][:12]} còn khớp vân tay nhưng kết quả `release-check` cũ hơn"
-            f" cây ({note}) — chạy lại trên HEAD trước khi trình ký",
+            "reason": f"gói nghiệm thu ở {pkg['candidate_head'][:12]} còn khớp vân tay nhưng {why} — chạy lại trên HEAD"
+            " trước khi trình ký",
             "missing": ["`release-check --json` trên HEAD"],
         }
     # `loop defer` thêm sau khi dựng gói nằm trong state (ngoài vân tay) — vẫn phải hiện là việc chờ người (review #326);
-    # `release-check` mới đúng cây: việc chờ người của nó (vd `prod_switch` do DECISIONS.md đổi) cũng hiện (AUD-HAR-151)
-    later = set(fresh_rel["human"]) if fresh_rel else set()
+    # `release-check` mới đúng cây: việc chờ người của nó (vd `prod_switch` do DECISIONS.md đổi) cũng hiện (AUD-HAR-151);
+    # không có `--release` (chỉ `--package`): hàng `prod_switch` tính trực tiếp trên cây (AUD-HAR-169) — gói vẫn còn hiệu
+    # lực (FLOW-17), chỉ thêm việc chờ người; đầu vào phát lại từ bản trước không có trường → []
+    later = set(fresh_rel["human"]) if fresh_rel else set(s.get("prod_switch") or [])
     pkg = {**pkg, "human_pending": sorted(set(pkg["human_pending"]) | set(s["deferred"]) | later)}
     return _signoff_part(pkg, f"gói nghiệm thu ở {pkg['candidate_head'][:12]} còn hiệu lực (vân tay khớp)")
 
@@ -9428,10 +9443,21 @@ PA_INJECTION = (
     r"<\|im_start\|>|<\|im_end\|>|\[INST\]",
     r"(?:reveal|print|output) (?:your|the) (?:system prompt|hidden instructions)",
 )
+# AUD-SEC-261/263: mọi lượng từ có thể chồng nhau là possessive (`*+`/`++`), một đoạn ống không vượt `|` lẫn lần gọi
+# curl/wget kế tiếp, và `rm` chỉ là từ lệnh (không đứng sau chữ/`-`, nên `rm` trong cờ `-rm`/`--rm` không là điểm bắt
+# đầu) — chuỗi cờ phía sau mỗi `rm` thuộc về đúng một điểm bắt đầu, nên tuyến tính trên dòng dài. `\\?["']?`: ngoặc có
+# thể là escape JSON (`\\"`) khi lệnh nằm trong chuỗi JSON chép vào tài liệu.
+_PA_SH = r"(?:ba|z|da|k)?sh\b"
+_PA_FETCH = r"\b(?:curl|wget)\b"
+_PA_SEG = r"(?:(?!" + _PA_FETCH + r")[^|\n])*+"
+_PA_RM_RECURSIVE = r"(?=(?:\s++-[\w-]++)*?\s++(?:-[a-zA-Z]*?[rR]|--recursive\b))"
+_PA_RM_TARGET = r"""\\?["']?(?:/|~|\$\{?HOME\}?)/?\*?\\?["']?(?![\w.~$/-])"""
 PA_DANGER = (
-    r"\b(?:curl|wget)\b[^\n|]*\|\s*(?:sudo\s+)?(?:ba|z|da)?sh\b",
-    r"\brm\s+-[a-z]*r[a-z]*\s+(?:/|~|\$HOME)(?:\s|$)",
-    r"\bchmod\s+(?:-R\s+)?777\b|--dangerously-skip-permissions|\bgit\s+push\s+(?:-f|--force)\b",
+    _PA_FETCH + _PA_SEG + r"(?:\|\s*+tee\b" + _PA_SEG + r")*+\|\s*+(?:sudo(?:\s++-[\w-]++)*+\s++)?" + _PA_SH,
+    r"\b(?:" + _PA_SH + r"|source)\s*+<\(\s*+" + _PA_FETCH,
+    r"\b(?:" + _PA_SH + r"\s++-c|eval)\s++\\?[\"']?\$\(\s*+" + _PA_FETCH,
+    r"(?<![\w-])rm" + _PA_RM_RECURSIVE + r"(?:\s++-[\w-]++)*+\s++" + _PA_RM_TARGET,
+    r"\bchmod\s++(?:-R\s++)?777\b|--dangerously-skip-permissions|\bgit\s++push\s++(?:-f|--force)\b",
 )
 PA_SECRET = (
     r"\bAKIA[0-9A-Z]{16}\b|\bgh[pousr]_[A-Za-z0-9]{36}\b|\bgithub_pat_\w{22,}|\bsk-(?:ant-)?[A-Za-z0-9_-]{20,}",
@@ -9441,10 +9467,16 @@ PA_BYPASS = (
     r"(?i)\b(?:do not|don't|never) ask (?:for |the user for )?(?:confirmation|permission|approval)",
     r"(?i)\bnever refuse\b|\bskip (?:the |all )?permission|\bquestion authori[sz]ation\b|không cần (?:hỏi|xác nhận)",
 )
+# AUD-SEC-262: ghim = phiên bản chính xác (npx: semver đủ ba số; uvx/pip: `==`/`@` số); `@latest`, dải (`^`, `~`, `>=`,
+# `.*`), `-U` không ghim, tên trong ngoặc kép vẫn là tên gói. Lượng từ possessive (AUD-SEC-263).
+_PA_PIN_END = r"(?![\w*^~<>=|-]|\.[\w*])"
+_PA_SEMVER = r"[0-9]++\.[0-9]++\.[0-9]++(?:-[0-9A-Za-z.-]++)?(?:\+[0-9A-Za-z.-]++)?" + _PA_PIN_END
+_PA_PEP440 = r"[0-9]++(?:\.[0-9]++)*+(?:[-+.]?(?:a|b|c|rc|alpha|beta|pre|dev|post)[0-9.]*+)*+" + _PA_PIN_END
+_PA_PIP_OPT = r"(?:\s++(?!-[rce]\b|--(?:requirement|constraint|editable)\b)-[\w-]++)*+"
 PA_UNPINNED = (
-    r"\bnpx\s+(?:-y|--yes)\s+(?:@[\w.-]+/)?[\w.-]+(?![\w.-]*@)(?=[\s`]|$)",
-    r"\buvx\s+(?!-)[\w.-]+(?![\w.-]*==)(?=[\s`]|$)",
-    r"\bpip3?\s+install\s+(?!-)[A-Za-z][\w.-]*(?![\w.-]*==)(?=[\s`]|$)",
+    r"\bnpx\s++(?:-y|--yes)\s++(?:@[\w.-]++/)?[\w.-]++(?!@" + _PA_SEMVER + ")",
+    r"\buvx\s++(?!-)[\w.-]++(?!(?:==|@)" + _PA_PEP440 + ")",
+    r"\bpip3?\s++install" + _PA_PIP_OPT + r"\s++[\"']?[A-Za-z][\w.-]*+(?:\[[\w,.-]*+\])?(?!==" + _PA_PEP440 + ")",
 )
 PA_URL = (
     r"raw\.githubusercontent\.com/[^/\s]+/[^/\s]+/(?:main|master|HEAD)/",
@@ -9457,7 +9489,10 @@ PA_RULES: Tuple[Tuple[str, str, Tuple[str, ...]], ...] = (
     ("unpinned", "chạy gói không ghim", PA_UNPINNED),
     ("unpinned-url", "chỉ dẫn từ URL nhánh không ghim (SEC-AI-028)", PA_URL),
 )
-PA_HIDDEN_RE = re.compile("[​⁠-⁤‪-‮⁦-⁩\U000e0000-\U000e007f]|(?<!^)﻿")
+PA_HIDDEN_RE = re.compile(
+    "[\u00ad\u200b\u200e\u200f\u2060-\u2064\u202a-\u202e\u2066-\u2069\U000e0000-\U000e007f\U000e0100-\U000e01ef]"
+    "|(?<!^)\ufeff"
+)
 PA_LEAK = (r"You are Claude Code|Claude Design|You are ChatGPT|You are Codex",)
 PA_LEAK_DIRS = ("vendor/", ".claude/skills/", "prompts/", "skills/")
 
@@ -9473,24 +9508,68 @@ def _pa_files(targets: Sequence[str]) -> List[Path]:
     return list(dict.fromkeys(out))
 
 
+PA_TEXT_RULES = ("hidden", "injection", "leak") + tuple(r[0] for r in PA_RULES if r[0] != "danger")  # trừ `danger`
+
+
+# Ký tự vô hình ngoài `Cf` (Default_Ignorable_Code_Point của Unicode — Python không có thuộc tính này — cộng U+2800
+# ô chữ nổi trống): gỡ cùng `Cf` trước luật văn bản (review T-3634).
+_PA_IGNORABLE_RE = re.compile(
+    "[\u034f\u115f\u1160\u17b4\u17b5\u180b-\u180f\u2060-\u206f\u2800\u3164\ufe00-\ufe0f\uffa0\ufff0-\ufff8\U0001bca0-\U0001bca3"
+    "\U0001d173-\U0001d17a\U000e0000-\U000e0fff]"
+)
+# Một chuỗi JSON trên dòng: đóng bằng `"` hoặc chạy tới cuối dòng (kể cả `\` lẻ cuối dòng) — mọi lần thử từ một `"` đều
+# khớp nên `finditer` không quét lại phần đã qua (tuyến tính, AUD-SEC-263).
+_PA_JSON_STR_RE = re.compile(r'"(?:[^"\\]|\\.)*+(?:"|\\?$)')
+
+
+def _pa_visible(line: str) -> str:
+    """`line` đã gỡ ký tự định dạng (Unicode `Cf`: ZWJ/ZWNJ/bidi/soft hyphen/tag) và ký tự vô hình khác
+    (`_PA_IGNORABLE_RE`) — chèn giữa từ không lách được luật văn bản (AUD-SEC-260); dòng ASCII giữ nguyên."""
+    if line.isascii():
+        return line
+    return _PA_IGNORABLE_RE.sub("", "".join(c for c in line if unicodedata.category(c) != "Cf"))
+
+
+def _pa_json_literal(m: "re.Match[str]") -> str:
+    """Giá trị đã giải mã của một chuỗi JSON; chuỗi hỏng/không đóng → nguyên văn."""
+    try:
+        return str(json.loads(m[0], strict=False))
+    except ValueError:
+        return m[0]
+
+
+def _pa_views(line: str, json_file: bool) -> List[str]:
+    """Các dạng của dòng để chạy luật: dòng gốc, và với file `.json` có escape thì thêm bản đã giải mã từng chuỗi JSON
+    trên dòng (`\\uXXXX`, `\\"` — review T-3634: escape không lách được luật, số dòng giữ nguyên)."""
+    if not json_file or "\\" not in line:
+        return [line]
+    return [line, _PA_JSON_STR_RE.sub(_pa_json_literal, line)]
+
+
 def _pa_line_findings(
-    rel: str, text: str, injection: Sequence[str], skip: Sequence[str] = (), line0: bool = False
+    rel: str, text: str, injection: Sequence[str], skip: Sequence[str] = ()
 ) -> List[Dict[str, object]]:
-    """Vi phạm theo dòng: ký tự ẩn, injection, năm luật regex, system prompt rò rỉ (chỉ dưới thư mục vendor/skill); bỏ
-    luật trong `skip`; `line0` = chữ không phải dòng thật của file (báo dòng 0)."""
+    """Vi phạm theo dòng: ký tự ẩn (trên dòng gốc), injection, năm luật regex, system prompt rò rỉ (chỉ dưới thư mục
+    vendor/skill) — các luật regex chạy trên dòng đã gỡ `Cf` (AUD-SEC-260); bỏ luật trong `skip`."""
     rules = [("injection", "mẫu injection", tuple("(?i)" + p for p in injection))] + list(PA_RULES)
-    rules = [r for r in rules if r[0] not in skip]
     rules += [("leak", "system prompt rò rỉ (CMP-LIC-024)", PA_LEAK)] if rel.startswith(PA_LEAK_DIRS) else []
+    rules = [r for r in rules if r[0] not in skip]
+    hidden = "hidden" not in skip
+    json_file = rel.endswith(".json")
     out: List[Dict[str, object]] = []
     for n, line in enumerate(text.splitlines(), 1):
-        hits = [("hidden", "ký tự ẩn (zero-width/bidi/tag)")] if PA_HIDDEN_RE.search(line) else []
-        hits += [(r, m) for r, m, pats in rules if any(re.search(p, line) for p in pats)]
-        out += [{"path": rel, "line": 0 if line0 else n, "rule": r, "msg": m} for r, m in hits]
+        views = _pa_views(line, json_file)
+        hidden_hit = hidden and any(PA_HIDDEN_RE.search(v) for v in views)
+        hits = [("hidden", "ký tự ẩn (zero-width/bidi/tag)")] if hidden_hit else []
+        seen = [_pa_visible(v) for v in views]
+        hits += [(r, m) for r, m, pats in rules if any(re.search(p, v) for p in pats for v in seen)]
+        out += [{"path": rel, "line": n, "rule": r, "msg": m} for r, m in hits]
     return out
 
 
 def _pa_scan_file(path: Path, injection: Sequence[str]) -> List[Dict[str, object]]:
-    """Vi phạm của một file: tên file system prompt dưới thư mục vendor/skill, không UTF-8, rồi theo dòng."""
+    """Vi phạm của một file: tên file system prompt dưới thư mục vendor/skill, không UTF-8, rồi theo dòng. Mọi luật
+    chạy trên văn bản gốc; riêng `danger` của `.claude/settings*.json` chạy trên bản đã bỏ `permissions.deny`."""
     rel = path.as_posix()
     out: List[Dict[str, object]] = []
     if rel.startswith(PA_LEAK_DIRS) and re.search(r"system[_ -]?prompt", path.name, re.I):
@@ -9499,34 +9578,67 @@ def _pa_scan_file(path: Path, injection: Sequence[str]) -> List[Dict[str, object
         text = path.read_bytes().decode("utf-8")
     except UnicodeDecodeError:
         return out + [{"path": rel, "line": 0, "rule": "hidden", "msg": "không phải UTF-8"}]
-    rest, deny = _pa_split_deny(rel, text)
-    return out + _pa_line_findings(rel, rest, injection) + _pa_line_findings(rel, deny, injection, ("danger",), True)
+    no_deny = _pa_without_deny(rel, text)
+    if no_deny is None:
+        return out + _pa_line_findings(rel, text, injection)
+    text_rules = _pa_line_findings(rel, text, injection, ("danger",))
+    return out + text_rules + _pa_line_findings(rel, no_deny, injection, PA_TEXT_RULES)
 
 
 PA_SETTINGS_RE = re.compile(r"(?:^|.*/)\.claude/settings(?:\.local)?\.json")
 
 
-def _pa_split_deny(rel: str, text: str) -> Tuple[str, str]:
-    """(phần quét đủ luật, các mục `permissions.deny`) của `.claude/settings*.json` harness: `deny` là danh sách lệnh bị
-    CẤM khung chép vào mọi dự án đích — chỉ miễn luật `danger` cho các mục đó (review #387, AUD-SEC-272); `ask`, `allow`
-    và file khác (kể cả `vendor/**/settings.json`) quét đủ. JSON hỏng/không có `deny` dạng mảng → quét nguyên văn."""
+def _pa_json_unique(pairs: List[Tuple[str, Any]]) -> Dict[str, Any]:
+    """`object_pairs_hook`: khoá trùng → ValueError (json.loads giữ giá trị sau, giá trị bị đè thoát luật — AUD-SEC-276)."""
+    keys = [k for k, _ in pairs]
+    if len(set(keys)) != len(keys):
+        raise ValueError("khoá JSON trùng")
+    return dict(pairs)
+
+
+def _pa_without_deny(rel: str, text: str) -> Optional[str]:
+    """Bản JSON đã bỏ `permissions.deny` của `.claude/settings*.json` harness để chạy luật `danger`: `deny` là danh sách
+    lệnh bị CẤM khung chép vào mọi dự án đích — chỉ miễn luật `danger` cho các mục đó (review #387, AUD-SEC-272); luật
+    khác quét văn bản gốc (AUD-SEC-276). File khác (kể cả `vendor/**/settings.json`), JSON hỏng, khoá trùng, không có
+    `deny` dạng mảng → None (quét nguyên văn mọi luật)."""
     if not PA_SETTINGS_RE.fullmatch(rel):
-        return text, ""
+        return None
     try:
-        data = json.loads(text)
+        data = json.loads(text, object_pairs_hook=_pa_json_unique)
     except ValueError:
-        return text, ""
+        return None
     perms = data.get("permissions") if isinstance(data, dict) else None
     deny = perms.get("deny") if isinstance(perms, dict) else None
     if not isinstance(deny, list) or not isinstance(perms, dict):
-        return text, ""
+        return None
     data["permissions"] = {k: v for k, v in perms.items() if k != "deny"}
-    return json.dumps(data, indent=1, ensure_ascii=False), "\n".join(map(str, deny))
+    return json.dumps(data, indent=1, ensure_ascii=False)
+
+
+PA_EXEMPT_KEYS = ("path", "rule", "reason", "expires")
+
+
+def _pa_exemption(item: object) -> Optional[Dict[str, str]]:
+    """Miễn trừ hợp lệ hoặc None: path/reason là chuỗi khác khoảng trắng, `rule` (nếu có) là chuỗi, expires là ngày có
+    thật dạng YYYY-MM-DD chữ số ASCII (AUD-SEC-259: `null`/`false`/`" "`, `２０２６-…`, `2026-13-45` không qua)."""
+    if not isinstance(item, dict) or not all(isinstance(item.get(k, ""), str) for k in PA_EXEMPT_KEYS):
+        return None
+    e: Dict[str, str] = {k: item[k] for k in PA_EXEMPT_KEYS if k in item}
+    exp = e.get("expires", "")
+    if not (
+        e.get("path", "").strip() and e.get("reason", "").strip() and re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", exp)
+    ):
+        return None
+    try:
+        _dt.date.fromisoformat(exp)
+    except ValueError:
+        return None
+    return e
 
 
 def _pa_exemptions(path: Optional[str], today: str) -> Tuple[List[Dict[str, str]], List[str]]:
     """(miễn trừ hiệu lực, lỗi) từ file JSON `[{"path": glob, "rule": id|"*", "reason", "expires": "YYYY-MM-DD"}]`:
-    thiếu path/reason/expires hoặc quá hạn → lỗi, miễn trừ đó không có hiệu lực."""
+    miễn trừ không hợp lệ (`_pa_exemption`) hoặc quá hạn → lỗi, miễn trừ đó không có hiệu lực."""
     if not path:
         return [], []
     raw = json.loads(Path(path).read_text(encoding="utf-8"))
@@ -9535,9 +9647,9 @@ def _pa_exemptions(path: Optional[str], today: str) -> Tuple[List[Dict[str, str]
     ok: List[Dict[str, str]] = []
     errors: List[str] = []
     for i, item in enumerate(raw):
-        e = {k: str(v) for k, v in item.items()} if isinstance(item, dict) else {}
-        if not (e.get("path") and e.get("reason") and re.fullmatch(r"\d{4}-\d{2}-\d{2}", e.get("expires", ""))):
-            errors.append(f"miễn trừ #{i}: cần path, reason, expires YYYY-MM-DD")
+        e = _pa_exemption(item)
+        if e is None:
+            errors.append(f"miễn trừ #{i}: cần path, reason (chuỗi), expires YYYY-MM-DD là ngày có thật")
         elif e["expires"] < today:
             errors.append(f"miễn trừ #{i} ({e['path']}) hết hạn {e['expires']}")
         else:
@@ -12443,7 +12555,29 @@ def _debt_problem(
     rows = {r.get("ID", ""): r for r in md_tables(ledger).get("Phát hiện", [])}
     probs = [_debt_row_problem(rows, key, head, i, False) for i in ids]
     probs += [_debt_row_problem(rows, key, head, i, True) for i in fixed]
-    return next((p for p in probs if p), None)
+    return next((p for p in probs if p), None) or (_debt_fixed_reused(base, last, fixed) if fixed else None)
+
+
+def _debt_fixed_reused(base: Path, last: str, fixed: Sequence[str]) -> Optional[str]:
+    """AUD-HAR-182: dòng 🔴 khai `--fixed` phải CHƯA `đã sửa` ở sổ tại head review không sạch cuối `last` — dòng đã sửa từ
+    trước (lượt/PR khác) không phải bản sửa sau review này. Sổ chưa có ở `last` → không dòng nào cũ; không đọc được cây/sổ
+    ở `last` → từ chối (fail-closed). Đường dẫn sổ tính từ dự án (`./`, như `_review_drift`)."""
+    listed = _git(base, "ls-tree", "--name-only", last, "--", AUDIT_STATUS_DEFAULT)
+    show = _git(base, "show", f"{last}:./{AUDIT_STATUS_DEFAULT}") if listed.stdout.strip() else listed
+    bad = next((r for r in (listed, show) if r.returncode), None)
+    if bad is not None:
+        return (
+            f"không đọc được {AUDIT_STATUS_DEFAULT} ở review {last[:7]} ({_one_line(bad.stderr)}) — không kiểm được"
+            " dòng --fixed chưa `đã sửa` lúc review; fetch nhánh PR rồi chạy lại"
+        )
+    rows = {r.get("ID", ""): r for r in md_tables(show.stdout).get("Phát hiện", [])}
+    old = [i for i in fixed if rows.get(i, {}).get("Trạng thái") == "đã sửa"]
+    if old:
+        return (
+            f"{', '.join(old)} đã `đã sửa` ở {AUDIT_STATUS_DEFAULT} tại review {last[:7]} — --fixed chỉ cho 🔴 sửa SAU"
+            " review đó (một commit kèm test, ADR-0062 §2), không dùng lại dòng đã sửa cũ"
+        )
+    return None
 
 
 def _pr_debt(args: argparse.Namespace, base: Path) -> int:

@@ -41,7 +41,7 @@ def facts(**over: Any) -> dict[str, Any]:
         "open_must": 0,
         "harden": [],
         "signoff": {"release": None, "release_changed": None, "package": None, "package_changed": None}
-        | {"evidence_fp": FP, "deferred": []},
+        | {"evidence_fp": FP, "deferred": [], "prod_switch": [], "prod_switch_fail": False},
         "stage": None,
         "state": {"rev": 3, "plan": "P.md", "iterations": 2, "max_iterations": 40, "deadline": None, "batches": []},
     }
@@ -311,6 +311,51 @@ class NextStepPureTest(unittest.TestCase):
                 self.assertIn("DECISIONS.md", stale["reason"])
         alone = self.step(objective=HARDEN, signoff={"package": pkg})
         self.assertEqual(alone["action"], "signoff-package")
+
+    def test_signoff_package_only_counts_prod_switch(self) -> None:
+        """AUD-HAR-169: chỉ `--package` (không `--release`) và gói khớp vân tay → hàng `prod_switch` tính trực tiếp trên cây
+        (`signoff.prod_switch`) vào `human_pending` — không trình "chờ người: không" khi DECISIONS.md có đề xuất `--prod`;
+        gói vẫn còn hiệu lực (FLOW-17). Có `release-check` mới đúng cây thì `human` của nó là nguồn, không hợp thêm."""
+        pkg = {"candidate_head": "c" * 40, "evidence_fp": FP, "human_pending": [], "release_verdict": "GO"}
+        out = self.step(objective=HARDEN, signoff={"package": pkg, "prod_switch": ["prod_switch"], "deferred": ["T-9"]})
+        self.assertEqual(out["action"], "signoff-package", out)
+        self.assertEqual(out["package"]["human_pending"], ["T-9", "prod_switch"])
+        self.assertIn("còn hiệu lực", out["reason"])
+        self.assertIn("chờ người: T-9, prod_switch", out["reason"])
+        self.assertIn("người xác nhận prod_switch", out["missing"])
+        clean = self.step(objective=HARDEN, signoff={"package": pkg})  # không đề xuất: như cũ
+        self.assertIn("chờ người: không", clean["reason"])
+        rel = {"head": "b" * 40, "fails": [], "human": [], "verdict": "GO"}
+        fresh = self.step(
+            objective=HARDEN, signoff={"package": pkg, "release": rel, "release_changed": [], "prod_switch": ["x"]}
+        )
+        self.assertEqual(fresh["package"]["human_pending"], [])
+        old = facts(objective=HARDEN, signoff={"package": pkg})
+        del old["signoff"]["prod_switch"], old["signoff"]["prod_switch_fail"]  # đầu vào từ bản trước (chưa có trường)
+        self.assertEqual(xt.next_step(old)["action"], "signoff-package")
+
+    def test_signoff_package_only_prod_switch_fail(self) -> None:
+        """Review AUD-HAR-169: hàng `prod_switch` FAIL (DECISIONS.md không đọc được) không phải việc chờ người — chỉ
+        `--package` thì không trình gói "còn hiệu lực; chờ người: prod_switch" mà đòi `release-check` trên HEAD (sẽ ra FAIL
+        → `replan`), như nhánh kết quả lệch cây; có `release-check` mới đúng cây thì kết quả đó là nguồn."""
+        pkg = {"candidate_head": "c" * 40, "evidence_fp": FP, "human_pending": [], "release_verdict": "GO"}
+        out = self.step(objective=HARDEN, signoff={"package": pkg, "prod_switch_fail": True, "deferred": ["T-9"]})
+        self.assertEqual(out["action"], "release-check", out)
+        self.assertIn("`prod_switch` FAIL", out["reason"])
+        self.assertIn("DECISIONS.md", out["reason"])
+        self.assertEqual(out["missing"], ["`release-check --json` trên HEAD"])
+        self.assertIsNone(out["package"])  # không trình gói
+        rel = {"head": "b" * 40, "fails": ["prod_switch"], "human": [], "verdict": "NO-GO"}
+        fresh = self.step(
+            objective=HARDEN, signoff={"package": pkg, "release": rel, "release_changed": [], "prod_switch_fail": True}
+        )
+        self.assertEqual(fresh["action"], "replan", fresh)
+        rel_ok = {**rel, "fails": [], "verdict": "GO"}  # kết quả đúng cây thắng dữ kiện trực tiếp
+        ok = self.step(
+            objective=HARDEN,
+            signoff={"package": pkg, "release": rel_ok, "release_changed": [], "prod_switch_fail": True},
+        )
+        self.assertEqual(ok["action"], "signoff-package", ok)
 
     def test_expired_package_with_fresh_release(self) -> None:
         """Review #326 lượt 3: gói hết hạn + `--release` mới đúng cây → không kẹt ở `release-check`: GO → gói mới, NO-GO →
@@ -904,6 +949,77 @@ class MonorepoFingerprintTest(unittest.TestCase):
         facts = xt.signoff_facts(self.web, {}, release={"head": sha}, package={"candidate_head": sha})
         self.assertEqual(facts["release_changed"], ["docs/autopilot/DECISIONS.md"])
         self.assertEqual(facts["package_changed"], [])
+
+    def test_prod_switch_fact_reads_project_decisions(self) -> None:
+        """AUD-HAR-169: hàng `prod_switch` của `release-check` trên cây dự án → `signoff_facts`: N/A BLOCKER (đề xuất
+        `--prod` chờ quyết) → `prod_switch` = ["prod_switch"] (việc chờ người); FAIL (DECISIONS.md không đọc được) →
+        `prod_switch_fail` (không phải việc chờ người — review); không có file/không có đề xuất → cả hai rỗng."""
+        dec = self.web / "docs" / "autopilot" / "DECISIONS.md"
+
+        def pair() -> tuple[list[str], bool]:
+            f = xt.signoff_facts(self.web, {})
+            return f["prod_switch"], f["prod_switch_fail"]
+
+        self.assertEqual(pair(), ([], False))  # không có file: N/A SHOULD
+        dec.write_text("## D-001\n", encoding="utf-8")
+        self.assertEqual(pair(), ([], False))  # PASS
+        dec.write_text(f"## D-002\n{xt.PROD_SWITCH_LABEL} SES\n", encoding="utf-8")
+        self.assertEqual(pair(), (["prod_switch"], False))
+        dec.write_bytes(b"\xff\xfe")  # không phải UTF-8: có thể giấu đề xuất → FAIL, không trình là chờ người
+        self.assertEqual(pair(), ([], True))
+
+
+class PackageOnlyProdSwitchTest(StateCase):
+    """AUD-HAR-169 đầu–cuối trong repo git tạm: gói dựng trước, `loop decide --prod` rồi commit (ngoài vân tay gói — gói
+    vẫn hiệu lực, FLOW-17) → `next-step --package` (không `--release`) phải nêu `prod_switch` chờ người như `release-check`
+    thật trên HEAD."""
+
+    def git(self, *args: str) -> str:
+        cfg = ["-c", "user.email=t@t", "-c", "user.name=t", "-c", "commit.gpgsign=false"]
+        return subprocess.run(
+            ["git", "-C", str(self.base), *cfg, *args], check=True, capture_output=True, text=True
+        ).stdout.strip()
+
+    def test_package_only_after_prod_decision(self) -> None:
+        (self.base / ".gitignore").write_text(".autopilot/\n", encoding="utf-8")
+        self.git("init", "-q")
+        self.git("add", "-A")
+        self.git("commit", "-qm", "khởi tạo")
+        pkg = {"candidate_head": self.git("rev-parse", "HEAD"), "evidence_fp": xt.evidence_fingerprint(self.base)}
+        path = Path(self.enterContext(tempfile.TemporaryDirectory())) / "package.json"  # ngoài cây
+        path.write_text(json.dumps({"package": {**pkg, "human_pending": []}}), encoding="utf-8")
+        xt.write_state(self.st(active=False, final_verdict={"verdict": "done", "reason": "x"}), self.base)
+        for name in ("_step_loop", "_step_prs", "_step_audit", "_step_harden"):  # bước trước gói: ca riêng
+            self.enterContext(unittest.mock.patch.object(xt, name, return_value=None))
+        args = ("loop", "next-step", "--objective", HARDEN, "--prs", "-", "--package", str(path), "--json")
+        before = json.loads(run_main(*args, stdin="[]")[1])
+        self.assertIn("chờ người: không", before["reason"])  # chưa có đề xuất: đúng là không
+        decide = ("loop", "decide", "--question", "Gửi mail?", "--option", "Mailpit", "--option", "SES")
+        rc, _, err = run_main(*decide, "--choice", "1", "--why", "tự host", "--revert", "đổi", "--prod", "SES")
+        self.assertEqual(rc, 0, err)
+        self.git("add", "-A")
+        self.git("commit", "-qm", "quyết định")
+        self.assertEqual(xt._release_prod_switch(self.base)["result"], "N/A")  # `release-check` thật: human có
+        rc, out, err = run_main(*args, stdin="[]")
+        self.assertEqual(rc, 0, err)
+        d = json.loads(out)
+        self.assertEqual(d["action"], "signoff-package", d)
+        self.assertIn("còn hiệu lực", d["reason"])  # FLOW-17: DECISIONS.md ngoài vân tay gói
+        self.assertIn("chờ người: prod_switch", d["reason"])
+        self.assertIn("người xác nhận prod_switch", d["missing"])
+        self.assertEqual(d["package"]["human_pending"], ["prod_switch"])
+        self.assertEqual(xt.next_step(d["inputs"]), d)  # phát lại cùng đầu vào → cùng kết quả
+        dec = self.base / "docs" / "autopilot" / "DECISIONS.md"
+        dec.write_bytes(b"## D-001\n\xff\xfe\n")  # review: không đọc được → FAIL, không phải "chờ người"
+        self.git("add", "-A")
+        self.git("commit", "-qm", "quyết định hỏng")
+        self.assertEqual(xt._release_prod_switch(self.base)["result"], "FAIL")  # `release-check` thật: NO-GO
+        rc, out, err = run_main(*args, stdin="[]")
+        self.assertEqual(rc, 0, err)
+        bad = json.loads(out)
+        self.assertEqual(bad["action"], "release-check", bad)
+        self.assertIn("`prod_switch` FAIL", bad["reason"])
+        self.assertNotIn("còn hiệu lực", bad["reason"])
 
 
 if __name__ == "__main__":
