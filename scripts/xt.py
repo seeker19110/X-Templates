@@ -7620,7 +7620,10 @@ def signoff_facts(
     base: Path, st: Dict[str, Any], release: Optional[Dict[str, Any]] = None, package: Optional[Dict[str, Any]] = None
 ) -> Dict[str, Any]:
     """Dữ kiện cho `signoff-package`: kết quả `release-check --json` và gói đã dựng (nếu có) kèm file đổi sau head của
-    chúng, vân tay bằng chứng hiện tại, việc `loop defer` còn chờ người."""
+    chúng, vân tay bằng chứng hiện tại, việc `loop defer` còn chờ người, và hàng `prod_switch` tính trực tiếp trên cây
+    (AUD-HAR-169: chỉ `--package` thì DECISIONS.md — ngoài vân tay gói — không ai xét): BLOCKER chưa PASS (đề xuất `loop
+    decide --prod` chờ quyết, hay không đọc được — fail-closed) → ["prod_switch"]."""
+    row = _release_prod_switch(base)
     return {
         "release": release,
         "release_changed": _changed_since(base, release["head"], DECISIONS_EXCLUDE) if release else None,
@@ -7628,6 +7631,7 @@ def signoff_facts(
         "package_changed": _changed_since(base, package["candidate_head"]) if package else None,
         "evidence_fp": evidence_fingerprint(base),
         "deferred": sorted(_deferred(st)),
+        "prod_switch": [row["id"]] if row["level"] == "BLOCKER" and row["result"] != "PASS" else [],
     }
 
 
@@ -7826,8 +7830,10 @@ def _signoff_kept(f: Dict[str, Any], pkg: Dict[str, Any], fresh_rel: Optional[Di
             "missing": ["`release-check --json` trên HEAD"],
         }
     # `loop defer` thêm sau khi dựng gói nằm trong state (ngoài vân tay) — vẫn phải hiện là việc chờ người (review #326);
-    # `release-check` mới đúng cây: việc chờ người của nó (vd `prod_switch` do DECISIONS.md đổi) cũng hiện (AUD-HAR-151)
-    later = set(fresh_rel["human"]) if fresh_rel else set()
+    # `release-check` mới đúng cây: việc chờ người của nó (vd `prod_switch` do DECISIONS.md đổi) cũng hiện (AUD-HAR-151);
+    # không có `--release` (chỉ `--package`): hàng `prod_switch` tính trực tiếp trên cây (AUD-HAR-169) — gói vẫn còn hiệu
+    # lực (FLOW-17), chỉ thêm việc chờ người; đầu vào phát lại từ bản trước không có trường → []
+    later = set(fresh_rel["human"]) if fresh_rel else set(s.get("prod_switch") or [])
     pkg = {**pkg, "human_pending": sorted(set(pkg["human_pending"]) | set(s["deferred"]) | later)}
     return _signoff_part(pkg, f"gói nghiệm thu ở {pkg['candidate_head'][:12]} còn hiệu lực (vân tay khớp)")
 
@@ -12443,7 +12449,29 @@ def _debt_problem(
     rows = {r.get("ID", ""): r for r in md_tables(ledger).get("Phát hiện", [])}
     probs = [_debt_row_problem(rows, key, head, i, False) for i in ids]
     probs += [_debt_row_problem(rows, key, head, i, True) for i in fixed]
-    return next((p for p in probs if p), None)
+    return next((p for p in probs if p), None) or (_debt_fixed_reused(base, last, fixed) if fixed else None)
+
+
+def _debt_fixed_reused(base: Path, last: str, fixed: Sequence[str]) -> Optional[str]:
+    """AUD-HAR-182: dòng 🔴 khai `--fixed` phải CHƯA `đã sửa` ở sổ tại head review không sạch cuối `last` — dòng đã sửa từ
+    trước (lượt/PR khác) không phải bản sửa sau review này. Sổ chưa có ở `last` → không dòng nào cũ; không đọc được cây/sổ
+    ở `last` → từ chối (fail-closed). Đường dẫn sổ tính từ dự án (`./`, như `_review_drift`)."""
+    listed = _git(base, "ls-tree", "--name-only", last, "--", AUDIT_STATUS_DEFAULT)
+    show = _git(base, "show", f"{last}:./{AUDIT_STATUS_DEFAULT}") if listed.stdout.strip() else listed
+    bad = next((r for r in (listed, show) if r.returncode), None)
+    if bad is not None:
+        return (
+            f"không đọc được {AUDIT_STATUS_DEFAULT} ở review {last[:7]} ({_one_line(bad.stderr)}) — không kiểm được"
+            " dòng --fixed chưa `đã sửa` lúc review; fetch nhánh PR rồi chạy lại"
+        )
+    rows = {r.get("ID", ""): r for r in md_tables(show.stdout).get("Phát hiện", [])}
+    old = [i for i in fixed if rows.get(i, {}).get("Trạng thái") == "đã sửa"]
+    if old:
+        return (
+            f"{', '.join(old)} đã `đã sửa` ở {AUDIT_STATUS_DEFAULT} tại review {last[:7]} — --fixed chỉ cho 🔴 sửa SAU"
+            " review đó (một commit kèm test, ADR-0062 §2), không dùng lại dòng đã sửa cũ"
+        )
+    return None
 
 
 def _pr_debt(args: argparse.Namespace, base: Path) -> int:
