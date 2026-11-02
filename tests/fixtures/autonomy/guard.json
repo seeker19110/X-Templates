@@ -14584,6 +14584,300 @@
    "allowed": true
   },
   "note": "review #395 (ADR-0063 lát A)"
+ },
+ {
+  "id": "guard-adr63-sec235-c-escaped-dollar",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-235"
+  ],
+  "input": {
+   "command": "bash -c \"\\$'rm' -rf ~\""
+  },
+  "expect": {
+   "allowed": false
+  },
+  "note": "ADR-0063 lát B (mã động)"
+ },
+ {
+  "id": "guard-adr63-sec237-c-subst",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-237"
+  ],
+  "input": {
+   "command": "bash -c \"$(echo 'rm -rf ~')\""
+  },
+  "expect": {
+   "allowed": false
+  },
+  "note": "ADR-0063 lát B (mã động)"
+ },
+ {
+  "id": "guard-adr63-sec252-eval-subst",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-252"
+  ],
+  "input": {
+   "command": "eval \"$(echo 'rm -rf ~')\""
+  },
+  "expect": {
+   "allowed": false
+  },
+  "note": "ADR-0063 lát B (mã động)"
+ },
+ {
+  "id": "guard-adr63-sec252-argv-cmd",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-252"
+  ],
+  "input": {
+   "command": "f() { \"$@\"; }; f bash -c 'rm -rf ~'"
+  },
+  "expect": {
+   "allowed": false
+  },
+  "note": "ADR-0063 lát B (mã động)"
+ },
+ {
+  "id": "guard-adr63-sec287-printf-v-ps4",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-287"
+  ],
+  "input": {
+   "command": "printf -v PS4 '\\x24(rm -rf ~)'; set -x; true"
+  },
+  "expect": {
+   "allowed": false
+  },
+  "note": "ADR-0063 lát B (mã động)"
+ },
+ {
+  "id": "guard-adr63-sec288-sed-e-stdin",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-288"
+  ],
+  "input": {
+   "command": "echo ' -rf ~' | sed 's/^/rm/e'"
+  },
+  "expect": {
+   "allowed": false
+  },
+  "note": "ADR-0063 lát B (mã động)"
+ },
+ {
+  "id": "guard-adr63-sec290-group-pipe-sh",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-290"
+  ],
+  "input": {
+   "command": "{ echo 'rm -rf ~'; } | sh"
+  },
+  "expect": {
+   "allowed": false
+  },
+  "note": "ADR-0063 lát B (mã động)"
+ },
+ {
+  "id": "guard-adr63-sec291-ps4-index",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-291"
+  ],
+  "input": {
+   "command": "PS4[0]='$(rm -rf ~)'; set -x; true"
+  },
+  "expect": {
+   "allowed": false
+  },
+  "note": "ADR-0063 lát B (mã động)"
+ },
+ {
+  "id": "guard-adr63-sec292-perl-open3",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-292"
+  ],
+  "input": {
+   "command": "perl -MIPC::Open3 -e 'open3(my $i, my $o, undef, \"rm -rf ~\")'"
+  },
+  "expect": {
+   "allowed": false
+  },
+  "note": "ADR-0063 lát B (mã động)"
+ },
+ {
+  "id": "guard-adr63-sec294-sed-letter-delim",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-294"
+  ],
+  "input": {
+   "command": "echo 'rm -rf ~' | sed 'sx^xxe'"
+  },
+  "expect": {
+   "allowed": false
+  },
+  "note": "ADR-0063 lát B (mã động)"
+ },
+ {
+  "id": "guard-adr63-sec295-sed-ie",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-295"
+  ],
+  "input": {
+   "command": "echo 'rm -rf ~' | sed '/r/Ie'"
+  },
+  "expect": {
+   "allowed": false
+  },
+  "note": "ADR-0063 lát B (mã động)"
+ },
+ {
+  "id": "guard-adr63-sec296-awk-dashdash",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-296"
+  ],
+  "input": {
+   "command": "echo 'rm -rf ~' | awk -- '-1 {system($0)}'"
+  },
+  "expect": {
+   "allowed": false
+  },
+  "note": "ADR-0063 lát B (mã động)"
+ },
+ {
+  "id": "guard-adr63-sec297-awk-procsub",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-297"
+  ],
+  "input": {
+   "command": "awk '{system($0)}' < <(echo 'rm -rf ~')"
+  },
+  "expect": {
+   "allowed": false
+  },
+  "note": "ADR-0063 lát B (mã động)"
+ },
+ {
+  "id": "guard-adr63-sec298-perl-list",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-298"
+  ],
+  "input": {
+   "command": "perl -e 'system(\"rm\", \"-rf\", \"/\")'"
+  },
+  "expect": {
+   "allowed": false
+  },
+  "note": "ADR-0063 lát B (mã động)"
+ },
+ {
+  "id": "guard-adr63-sec299-printf-v-bashenv",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-299"
+  ],
+  "input": {
+   "command": "printf -v BASH_ENV '%s' f.sh; export BASH_ENV; bash -c true"
+  },
+  "expect": {
+   "allowed": false
+  },
+  "note": "ADR-0063 lát B (mã động)"
+ },
+ {
+  "id": "guard-adr63-sec300-mapfile-ps4",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-300"
+  ],
+  "input": {
+   "command": "mapfile -t PS4 <<< '$(rm -rf ~)'; set -x; true"
+  },
+  "expect": {
+   "allowed": false
+  },
+  "note": "ADR-0063 lát B (mã động)"
+ },
+ {
+  "id": "guard-adr63-sec301-tee-procsub-bash",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-301"
+  ],
+  "input": {
+   "command": "echo 'rm -rf ~' | tee >(bash)"
+  },
+  "expect": {
+   "allowed": false
+  },
+  "note": "ADR-0063 lát B (mã động)"
+ },
+ {
+  "id": "guard-adr63-sec302-awk-f-stdin",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-302"
+  ],
+  "input": {
+   "command": "echo 'BEGIN{system(\"rm -rf ~\")}' | awk -f -"
+  },
+  "expect": {
+   "allowed": false
+  },
+  "note": "ADR-0063 lát B (mã động)"
+ },
+ {
+  "id": "guard-adr63-control-c-loop-var",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-237"
+  ],
+  "input": {
+   "command": "find src -type f -exec bash -c 'for f; do sh -c \"echo $f\"; done' _ {} +"
+  },
+  "expect": {
+   "allowed": true
+  },
+  "note": "ADR-0063 lát B (mã động)"
+ },
+ {
+  "id": "guard-adr63-control-ps4-literal",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-291"
+  ],
+  "input": {
+   "command": "PS4='+ '; set -x; true"
+  },
+  "expect": {
+   "allowed": true
+  },
+  "note": "ADR-0063 lát B (mã động)"
+ },
+ {
+  "id": "guard-adr63-control-awk-regex-alt",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-297"
+  ],
+  "input": {
+   "command": "awk '/a|b/ {print $1}' f"
+  },
+  "expect": {
+   "allowed": true
+  },
+  "note": "ADR-0063 lát B (mã động)"
  }
  ]
 }
