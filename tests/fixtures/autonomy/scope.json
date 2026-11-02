@@ -230,6 +230,12 @@
    "ids": [
     "AUD-HAR-197"
    ]
+  },
+  {
+   "reason": "Cô lập test khỏi `.autopilot/` thật (snapshot bỏ nhật ký hook `guard-log.jsonl` mà phiên khác ghi song song) — hạ tầng test, không phải quyết định cho/chặn; đỡ bằng Gate unittest `tests.test_xt_core.RealAutopilotGuardTest`",
+   "ids": [
+    "AUD-TEST-054"
+   ]
   }
  ]
 }
