@@ -33,7 +33,7 @@ DOC (CHANGELOG, PROGRESS, DECISIONS, PLAN-fix, sổ). CFG/DEP/CI/A11Y không đ�
 - Mỗi payload qua `guard.bash_decision` ở HEAD và base `d3e3e77`; công cụ thật (GNU sed 4.9, mawk 1.3.4, bash 5.2.21,
   perl/ruby/php) chạy tải vô hại `touch MARKn` trong thư mục scratch.
 
-## 4. Chi tiết 🟠 (tái hiện)
+## 4. Chi tiết (tái hiện)
 
 | ID | Tái hiện | Xác minh đối kháng |
 |---|---|---|
@@ -45,7 +45,8 @@ DOC (CHANGELOG, PROGRESS, DECISIONS, PLAN-fix, sổ). CFG/DEP/CI/A11Y không đ�
 | AUD-SEC-299 | `printf -v BASH_ENV '%s' f.sh; export BASH_ENV; bash -c true` | tái hiện được |
 | AUD-SEC-300 | `mapfile -t PS4 <<< '$(touch M)'; set -x; true` | tái hiện được |
 | AUD-SEC-301 | `echo 'touch M' \| tee >(bash)` | tái hiện được |
-| AUD-PERF-010 | `printf '%s\n' a0…aN \| sed '<~4000 ký tự>'` | không tái hiện được ở quy mô báo → 🟢 |
+| AUD-PERF-010 (🟢) | `printf '%s\n' a0…aN \| sed '<~4000 ký tự>'` | không tái hiện được ở quy mô báo → 🟢 |
+| AUD-SEC-302 (🟢) | `echo 'BEGIN{system("touch M")}' \| awk -f -`; `echo '1e touch M' \| sed -n -f - f` | tái hiện được |
 
 ## 5. Kế hoạch sửa (D-300)
 
