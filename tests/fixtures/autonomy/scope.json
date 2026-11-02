@@ -139,7 +139,13 @@
     "AUD-SEC-258",
     "AUD-SEC-272",
     "AUD-CODE-034",
-    "AUD-DOC-186"
+    "AUD-DOC-186",
+    "AUD-SEC-259",
+    "AUD-SEC-260",
+    "AUD-SEC-261",
+    "AUD-SEC-262",
+    "AUD-SEC-263",
+    "AUD-SEC-276"
    ]
   },
   {
@@ -162,7 +168,9 @@
     "AUD-HAR-135",
     "AUD-HAR-149",
     "AUD-HAR-151",
-    "AUD-HAR-155"
+    "AUD-HAR-155",
+    "AUD-CI-024",
+    "AUD-CI-026"
    ]
   },
   {
@@ -247,6 +255,13 @@
     "AUD-HAR-201",
     "AUD-SEC-349",
     "AUD-SEC-350"
+   ]
+  },
+  {
+   "reason": "Gói nghiệm thu `next-step --package` (hợp `prod_switch` từ DECISIONS.md, AUD-HAR-169) và `pr debt --fixed` từ chối dòng 🔴 đã sửa từ trước (đọc sổ ở head review qua `git show`, AUD-HAR-182) — cần repo git thật có lịch sử sổ, không phải ca cho/chặn của corpus; đỡ bằng Gate unittest tests.test_next_step -k package và tests.test_merge -k debt_fixed_refuses_row_already_fixed",
+   "ids": [
+    "AUD-HAR-169",
+    "AUD-HAR-182"
    ]
   }
  ]
