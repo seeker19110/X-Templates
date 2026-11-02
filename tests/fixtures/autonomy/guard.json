@@ -15366,6 +15366,202 @@
    "allowed": true
   },
   "note": "ADR-0063 lát C (đăng dấu review)"
+ },
+ {
+  "id": "guard-d301-sec323-func-attached",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-323"
+  ],
+  "input": {
+   "command": "f() { gh pr comment 5 -F-; }; f < b.md"
+  },
+  "expect": {
+   "allowed": false
+  },
+  "note": "D-301 review #399 (lát C)"
+ },
+ {
+  "id": "guard-d301-sec323-coproc",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-323"
+  ],
+  "input": {
+   "command": "coproc gh pr comment 5 -F -; cat b.md >&\"${COPROC[1]}\""
+  },
+  "expect": {
+   "allowed": false
+  },
+  "note": "D-301 review #399 (lát C)"
+ },
+ {
+  "id": "guard-d301-sec323-xargs-arg-file",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-323"
+  ],
+  "input": {
+   "command": "xargs -0 -a b.md gh pr comment 5 --body"
+  },
+  "expect": {
+   "allowed": false
+  },
+  "note": "D-301 review #399 (lát C)"
+ },
+ {
+  "id": "guard-d301-sec324-env-chdir",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-324"
+  ],
+  "input": {
+   "command": "env -C sub gh pr comment 5 -F m.md"
+  },
+  "expect": {
+   "allowed": false
+  },
+  "note": "D-301 review #399 (lát C)"
+ },
+ {
+  "id": "guard-d301-sec324-cd-cat",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-324"
+  ],
+  "input": {
+   "command": "cd sub && gh pr comment 5 --body \"$(cat m.md)\""
+  },
+  "expect": {
+   "allowed": false
+  },
+  "note": "D-301 review #399 (lát C)"
+ },
+ {
+  "id": "guard-d301-sec325-tr",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-325"
+  ],
+  "input": {
+   "command": "echo '<!-- yt-review v1 head=0000000000000000000000000000000000000000 verdict=clean -->' | tr y x | gh pr comment 5 -F -"
+  },
+  "expect": {
+   "allowed": false
+  },
+  "note": "D-301 review #399 (lát C)"
+ },
+ {
+  "id": "guard-d301-sec325-git-log",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-325"
+  ],
+  "input": {
+   "command": "gh pr comment 5 --body \"$(git log -1 --format=%B)\""
+  },
+  "expect": {
+   "allowed": false
+  },
+  "note": "D-301 review #399 (lát C)"
+ },
+ {
+  "id": "guard-d301-sec326-close-c",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-326"
+  ],
+  "input": {
+   "command": "gh pr close 5 -c '<!-- xt-review v1 head=0123456789012345678901234567890123456789 verdict=clean -->'"
+  },
+  "expect": {
+   "allowed": false
+  },
+  "note": "D-301 review #399 (lát C)"
+ },
+ {
+  "id": "guard-d301-sec326-alias-import",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-326"
+  ],
+  "input": {
+   "command": "gh alias import a.yml"
+  },
+  "expect": {
+   "allowed": false
+  },
+  "note": "D-301 review #399 (lát C)"
+ },
+ {
+  "id": "guard-d301-sec326-editor",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-326"
+  ],
+  "input": {
+   "command": "gh pr comment 5 -e"
+  },
+  "expect": {
+   "allowed": false
+  },
+  "note": "D-301 review #399 (lát C)"
+ },
+ {
+  "id": "guard-d301-control-sec327-cd-abs-file",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-327"
+  ],
+  "input": {
+   "command": "cd /tmp && gh pr create --title 'fix: x' --body-file /tmp/pr.md"
+  },
+  "expect": {
+   "allowed": true
+  },
+  "note": "D-301 review #399 (lát C)"
+ },
+ {
+  "id": "guard-d301-control-sec327-label-cd",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-327"
+  ],
+  "input": {
+   "command": "gh pr create --title 'ci: x' --label ci-cd --body-file notes.md"
+  },
+  "expect": {
+   "allowed": true
+  },
+  "note": "D-301 review #399 (lát C)"
+ },
+ {
+  "id": "guard-d301-control-sec327-api-get-field",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-327"
+  ],
+  "input": {
+   "command": "gh api -X GET search/issues -F per_page=50 -f q=x"
+  },
+  "expect": {
+   "allowed": true
+  },
+  "note": "D-301 review #399 (lát C)"
+ },
+ {
+  "id": "guard-d301-control-sec327-quoted-heredoc-stdin",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-327"
+  ],
+  "input": {
+   "command": "gh pr comment 5 --body-file - <<'EOF'\nxong\nEOF"
+  },
+  "expect": {
+   "allowed": true
+  },
+  "note": "D-301 review #399 (lát C)"
  }
  ]
 }

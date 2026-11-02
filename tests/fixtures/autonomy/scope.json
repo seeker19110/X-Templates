@@ -204,12 +204,13 @@
    ]
   },
   {
-   "reason": "Hiệu năng quyết định guard (thời gian, không phải cho/chặn) — đỡ bằng Gate unittest `cpu_budget.assert_not_quadratic` trong tests.test_guard_audit1019 (AuditPhase1101GuardTest.test_quote_like_repeat_not_cubic)",
+   "reason": "Hiệu năng quyết định guard (thời gian, không phải cho/chặn) — đỡ bằng Gate unittest `cpu_budget.assert_not_quadratic` trong tests.test_guard_audit1019 (AuditPhase1101GuardTest.test_quote_like_repeat_not_cubic); `GH_POST_RE` (AUD-PERF-012): tests.test_guard_strict -k gh_post_re_linear",
    "ids": [
     "AUD-PERF-004",
     "AUD-PERF-005",
     "AUD-TEST-044",
-    "AUD-SEC-320"
+    "AUD-SEC-320",
+    "AUD-PERF-012"
    ]
   }
  ]
