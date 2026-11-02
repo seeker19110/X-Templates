@@ -595,13 +595,44 @@ class ReasonCodeLockTest(unittest.TestCase):
         for code, const in self.MERGE_ONLY.items():
             self.assertIn(getattr(guard, const), markers, code)
 
-    def core(self, payload: dict) -> tuple[int, dict]:
+    def core(self, payload: object, env: dict | None = None) -> tuple[int, dict]:
         out = io.StringIO()
         argv = ["guard.py", "core"]
+        env = {"CLAUDE_PROJECT_DIR": str(ROOT)} if env is None else env
         with mock.patch.object(sys, "argv", argv), mock.patch.object(sys, "stdin", io.StringIO(json.dumps(payload))):
-            with mock.patch.object(sys, "stdout", out), mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(ROOT)}):
-                rc = guard.main()
+            with mock.patch.object(sys, "stdout", out), mock.patch.dict(os.environ, env, clear=env == {}):
+                with mock.patch.object(sys, "stderr", io.StringIO()):
+                    rc = guard.main()
         return rc, json.loads(out.getvalue())
+
+    def test_core_tool_names_and_unparsed(self):
+        """AUD-SEC-346 (review #407): tên tool kiểu Claude/host khác được chuẩn hoá; payload có lệnh/đường mà không suy ra
+        chế độ, hay `command` không phải chuỗi → deny UNPARSED (lời gọi tool thật, không phải stdin rác)."""
+        for tool in ("Bash", "BASH", "shell", "run_shell_command", "run_terminal_command", " bash "):
+            with self.subTest(tool=tool):
+                rc, out = self.core({"tool": tool, "command": "git push origin main"})
+                self.assertEqual((rc, out["code"]), (2, "PUSH_MAIN"))
+        for tool in ("Edit", "Write", "write_file", "replace", "MultiEdit"):
+            with self.subTest(tool=tool):
+                self.assertEqual(self.core({"tool": tool, "path": str(ROOT / ".env")})[0], 2)
+        for payload in (
+            {"command": "git push origin main"},
+            {"tool": "lạ", "path": "x"},
+            {"tool": "bash", "command": ["rm"]},
+        ):
+            with self.subTest(payload=payload):
+                rc, out = self.core(payload)
+                self.assertEqual((rc, out["code"]), (2, "UNPARSED"))
+        self.assertEqual(self.core({"tool": "lạ"})[0], 0)  # không lệnh, không đường: không có gì để chặn
+        self.assertEqual(self.core([1, 2])[0], 0)  # stdin rác (LOOP-HARNESS-018)
+
+    def test_core_project_dir(self):
+        """AUD-HAR-201 (review #407): gốc dự án lấy từ `project_dir` tuyệt đối của payload trước env/cwd — host khác Claude
+        không đặt `CLAUDE_PROJECT_DIR`."""
+        ledger = {"tool": "write", "path": str(ROOT / ".autopilot" / "state.json")}
+        with mock.patch.object(os, "getcwd", return_value=tempfile.gettempdir()):
+            self.assertEqual(self.core({**ledger, "project_dir": str(ROOT)}, env={})[0], 2)
+            self.assertEqual(self.core({**ledger, "project_dir": "tương/đối"}, env={})[0], 0)  # không tuyệt đối: bỏ
 
     def test_core_mode_neutral_schema(self):
         """ADR-0064 lát A: `guard.py core` nhận schema trung lập, trả `{decision: allow|deny, code, reason}` đã qua chính
