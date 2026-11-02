@@ -5502,16 +5502,24 @@ CODEX_SANDBOX_RE = re.compile(r'^\s*sandbox_mode\s*=\s*"([\w-]+)"', re.M)
 
 
 def _in_container() -> bool:
-    """Phiên đang chạy trong container/VM cô lập: dấu của docker/podman, hay biến môi trường của phiên Claude Code trên
-    cloud (`CLAUDE_CODE_CONTAINER_ID`, `IS_SANDBOX=1` — máy ảo dùng một lần, mạng qua proxy). Biến môi trường là lời khai
-    của tiến trình cha: doctor chỉ khuyên, không phải cổng chặn."""
-    if os.environ.get("CLAUDE_CODE_CONTAINER_ID") or os.environ.get("IS_SANDBOX") == "1":
+    """Phiên đang chạy trong container/VM/sandbox cô lập: dấu của docker/podman, biến môi trường của phiên Claude Code
+    trên cloud (`CLAUDE_CODE_CONTAINER_ID`, `IS_SANDBOX=1` — máy ảo dùng một lần, mạng qua proxy) hay của lệnh Cursor
+    chạy trong sandbox (`CURSOR_SANDBOX` = `seatbelt`/`native`, cursor.com/docs/agent/security/run-modes đọc 2026-11-02;
+    AUD-HAR-202). Biến môi trường là lời khai của tiến trình cha: doctor chỉ khuyên, không phải cổng chặn."""
+    env = os.environ
+    if env.get("CLAUDE_CODE_CONTAINER_ID") or env.get("IS_SANDBOX") == "1" or env.get("CURSOR_SANDBOX"):
         return True
     return any(os.path.exists(p) for p in CONTAINER_MARKS)
 
 
 CLAUDE_SETTINGS_ORDER = (".claude/settings.json", ".claude/settings.local.json")  # sau đè trước (local > project)
-DEVCONTAINER = ".devcontainer/devcontainer.json"
+# File có trong repo nhưng không chứng minh tiến trình đang bị cô lập (AUD-HAR-202) → chỉ gợi ý khi không thấy sandbox.
+# Cursor `sandbox.json` chỉ cấu hình phạm vi (mạng, đường dẫn), không có khoá bật — bật theo Run Mode trong Settings
+# (cursor.com/docs/reference/sandbox, đọc 2026-11-02).
+SANDBOX_FILE_HINTS = (
+    (".devcontainer/devcontainer.json", "container", "mở dự án trong devcontainer"),
+    (".cursor/sandbox.json", "sandbox", "sandbox Cursor bật theo Run Mode, lệnh trong sandbox có `CURSOR_SANDBOX`"),
+)
 
 
 def _claude_sandbox(base: Path) -> Dict[str, Any]:
@@ -5527,9 +5535,9 @@ def _claude_sandbox(base: Path) -> Dict[str, Any]:
 
 def _sandbox_sources(base: Path) -> List[str]:
     """Sandbox khai ở công cụ agent trong dự án (ADR-0064 lát E, nghiên cứu 2026-11-02): Claude `sandbox.enabled` (sau khi
-    gộp local > project), Codex `sandbox_mode` khác `danger-full-access`, Gemini `tools.sandbox`, Cursor
-    `.cursor/sandbox.json`. Devcontainer KHÔNG tính (AUD-HAR-202: file trong repo không chứng minh tiến trình chạy trong
-    container — container thật do `_in_container` thấy)."""
+    gộp local > project), Codex `sandbox_mode` khác `danger-full-access`, Gemini `tools.sandbox`. Devcontainer và Cursor
+    `.cursor/sandbox.json` KHÔNG tính (AUD-HAR-202: file trong repo không chứng minh tiến trình bị cô lập — container và
+    sandbox Cursor thật do `_in_container` thấy; xem `SANDBOX_FILE_HINTS`)."""
     found: List[str] = []
     if _claude_sandbox(base).get("enabled") is True:
         found.append(".claude/settings(.local).json sandbox.enabled")
@@ -5540,8 +5548,6 @@ def _sandbox_sources(base: Path) -> List[str]:
     tools = (_read_json_obj(base / ".gemini" / "settings.json") or {}).get("tools")
     if isinstance(tools, dict) and tools.get("sandbox"):
         found.append(".gemini/settings.json tools.sandbox")
-    if (base / ".cursor" / "sandbox.json").is_file():
-        found.append(".cursor/sandbox.json")
     return found
 
 
@@ -5573,14 +5579,12 @@ def _doctor_sandbox(base: Path) -> List[Finding]:
     st = read_state(base) or {}
     unattended = bool(st.get("active") and st.get("single_session"))
     msg = (
-        "không thấy sandbox (Claude `sandbox.enabled`, Codex `sandbox_mode`, Gemini `tools.sandbox`, Cursor "
-        "`sandbox.json`) và không chạy trong container/devcontainer — guard không chặn tiến trình con hay mạng "
-        "(LOOP-HARNESS-022)"
+        "không thấy sandbox (Claude `sandbox.enabled`, Codex `sandbox_mode`, Gemini `tools.sandbox`) và không chạy trong "
+        "container/devcontainer hay sandbox Cursor — guard không chặn tiến trình con hay mạng (LOOP-HARNESS-022)"
     )
-    if (base / DEVCONTAINER).is_file():
-        msg += (
-            f"; {DEVCONTAINER} có trong repo nhưng tiến trình không chạy trong container — mở dự án trong devcontainer"
-        )
+    for rel, where, hint in SANDBOX_FILE_HINTS:
+        if (base / rel).is_file():
+            msg += f"; {rel} có trong repo nhưng tiến trình không chạy trong {where} — {hint}"
     return out + [
         Finding(
             "sandbox", "error" if unattended else "warn", msg + (" — vòng một phiên đang chạy" if unattended else "")

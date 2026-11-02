@@ -288,8 +288,8 @@ class DoctorHooksTest(DoctorCase):
     def test_sandbox_group(self):
         """LOOP-HARNESS-022 (T-3641, ADR-0064 lát E): không thấy sandbox → cảnh báo `sandbox`; vòng một phiên đang chạy mà
         không có sandbox → lỗi; sandbox khai ở công cụ (Claude `sandbox.enabled`, Codex `sandbox_mode`, Gemini
-        `tools.sandbox`, Cursor `sandbox.json`, devcontainer) hay đang chạy trong container → không phát hiện; OpenCode
-        (không có sandbox chính chủ) → cảnh báo riêng; Codex `danger-full-access` không tính."""
+        `tools.sandbox`) hay đang chạy trong container/sandbox Cursor (`CURSOR_SANDBOX`) → không phát hiện; OpenCode (không
+        có sandbox chính chủ) → cảnh báo riêng; Codex `danger-full-access` không tính."""
         none = unittest.mock.patch.object(xt, "_in_container", return_value=False)
         with none:
             self.assertIn("sandbox", self.codes("warn", deep=False))
@@ -305,7 +305,6 @@ class DoctorHooksTest(DoctorCase):
             for rel, text in (
                 (".codex/config.toml", 'sandbox_mode = "workspace-write"\n'),
                 (".gemini/settings.json", '{"tools": {"sandbox": "docker"}}'),
-                (".cursor/sandbox.json", "{}"),
             ):
                 with self.subTest(rel):
                     p = self.write(rel, text)
@@ -319,7 +318,9 @@ class DoctorHooksTest(DoctorCase):
             self.assertTrue(any("OpenCode" in m for m in msgs), msgs)
         with unittest.mock.patch.object(xt, "_in_container", return_value=True):
             self.assertNotIn("sandbox", self.codes("error", deep=False))
-        env = {k: v for k, v in os.environ.items() if k not in ("CLAUDE_CODE_CONTAINER_ID", "IS_SANDBOX")}
+        env = {
+            k: v for k, v in os.environ.items() if k not in ("CLAUDE_CODE_CONTAINER_ID", "IS_SANDBOX", "CURSOR_SANDBOX")
+        }
         with unittest.mock.patch.dict(os.environ, env, clear=True):
             with unittest.mock.patch.object(xt.os.path, "exists", return_value=False):
                 self.assertFalse(self.real_in_container())
@@ -334,6 +335,35 @@ class DoctorHooksTest(DoctorCase):
                     self.assertTrue(self.real_in_container())
                 with unittest.mock.patch.dict(os.environ, {"IS_SANDBOX": "0"}):
                     self.assertFalse(self.real_in_container())
+                for value in ("native", "seatbelt"):  # Cursor đặt cho lệnh chạy trong sandbox của nó
+                    with unittest.mock.patch.dict(os.environ, {"CURSOR_SANDBOX": value}):
+                        self.assertTrue(self.real_in_container())
+
+    def test_sandbox_cursor_file_is_config_not_proof(self):
+        """AUD-HAR-202 (phần Cursor, review #PR-orange-harness): `.cursor/sandbox.json` chỉ cấu hình phạm vi của sandbox
+        Cursor (mạng, đường dẫn — cursor.com/docs/reference/sandbox, đọc 2026-11-02), không có khoá bật; sandbox bật theo
+        Run Mode trong Settings, ngoài repo. File có mặt (kể cả `{}`) mà tiến trình không chạy trong sandbox → vẫn báo,
+        kèm gợi ý; lệnh chạy trong sandbox Cursor có `CURSOR_SANDBOX` → `_in_container` thấy, không báo."""
+        xt.write_state({"active": True, "single_session": True}, self.base)
+        self.write(".cursor/sandbox.json", "{}")
+        with unittest.mock.patch.object(xt, "_in_container", return_value=False):
+            found = [(f.level, f.msg) for f in self.findings(deep=False) if f.code == "sandbox"]
+            self.assertEqual([lv for lv, _ in found], ["error"])
+            self.assertIn(".cursor/sandbox.json có trong repo nhưng tiến trình không chạy trong sandbox", found[0][1])
+            self.assertNotIn("devcontainer.json có", found[0][1])
+            self.write(".devcontainer/devcontainer.json", "{}")
+            msg = [f.msg for f in self.findings(deep=False) if f.code == "sandbox"][0]
+            self.assertIn("devcontainer.json có", msg)
+            self.assertIn(".cursor/sandbox.json có", msg)
+        env = {k: v for k, v in os.environ.items() if k not in ("CLAUDE_CODE_CONTAINER_ID", "IS_SANDBOX")}
+        with (
+            unittest.mock.patch.dict(os.environ, env, clear=True),
+            unittest.mock.patch.object(xt, "CONTAINER_MARKS", ()),
+            unittest.mock.patch.object(xt, "_in_container", self.real_in_container),
+        ):
+            self.assertIn("sandbox", self.codes("error", deep=False))  # máy chủ trần: không dấu nào
+            with unittest.mock.patch.dict(os.environ, {"CURSOR_SANDBOX": "native"}):
+                self.assertNotIn("sandbox", self.codes("error", deep=False) + self.codes("warn", deep=False))
 
     def test_sandbox_devcontainer_and_settings_precedence(self):
         """AUD-HAR-202: `.devcontainer/devcontainer.json` có trong repo không chứng minh tiến trình chạy trong container

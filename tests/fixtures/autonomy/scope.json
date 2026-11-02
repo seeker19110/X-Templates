@@ -255,7 +255,7 @@
    ]
   },
   {
-   "reason": "`doctor` nhóm `sandbox` đọc settings Claude (local đè project), file devcontainer và môi trường container của máy — công cụ khuyên, không phải quyết định cho/chặn; đỡ bằng Gate unittest tests.test_doctor -k sandbox",
+   "reason": "`doctor` nhóm `sandbox` đọc settings Claude (local đè project), file devcontainer/`.cursor/sandbox.json` (chỉ gợi ý) và môi trường container/sandbox Cursor của máy — công cụ khuyên, không phải quyết định cho/chặn; đỡ bằng Gate unittest tests.test_doctor -k sandbox",
    "ids": [
     "AUD-HAR-202",
     "AUD-HAR-203"
