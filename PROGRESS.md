@@ -1,8 +1,9 @@
 # PROGRESS.md — Khung X-Templates
 
-> Giai đoạn hiện tại: G8 Vận hành & tiến hoá (khung 3.29.0, pha `harden` — D-136) · Cập nhật: 2026-11-01 · Nhánh: main
+> Giai đoạn hiện tại: G8 Vận hành & tiến hoá (khung 3.29.0, pha `harden` — D-136) · Cập nhật: 2026-11-02 · Nhánh: main
 
 ## Đang làm
+- 2026-11-02 **Audit toàn bộ** (`AUDIT-REPORT-2026-11-02-full.md`, D-302): 3 🟠 mới (CODE-036 khoá `reviews.json`, HAR-197 hàng `go_no_go_file`, SEC-329 mã lý do guard) + 21 🟢; kế hoạch P0/P1/P2 chủ dự án triển khai.
 - 2026-11-01 **ADR-0062 review 1 lần** (D-295): #385/#386 + PLAN-upgrade #383/#384/#387. **Audit cuối pha** #388 (D-296) → PLAN-fix-2026-11-01 xong: #389 guard (SEC-270/271/254, PERF-004), #390 xt.py (SEC-272, CODE-034, HAR-181/182/189), #391 tài liệu, #392 guard lượt 2 (SEC-279…286, PERF-005); quét lại đủ 12 nhóm (T-3623/3625). `loop verify --all` XANH. D-298: không quét delta lặp các PR sửa; nợ 🟠 SEC-276/287/288/290/291/292, HAR-182 (phần còn lại) + 🔴 guard có từ trước → audit đầu `/complete` rồi PLAN mới trước 3.30.0.
 - 2026-10-31 **PLAN-harden-2026-10-31** (D-268…D-291): #358–#371 (#369/#370 Dependabot), #373, #375–#377 merge; #372 (guard `$IFS#`) đóng không merge sau 7 lượt review — bài học thành `max_rethink` (ADR-0061); #374 đóng (mở lại thành #375). `release-check` NO-GO: `audit --strict` (🔴 mở AUD-SEC-251 + họ 191…247), `review_debt` → sửa T-3610/T-3611 rồi mới cắt **3.30.0**. #370 (Dependabot) đã review sạch nhưng `pr reviewed` không nhận tác giả bot (AUD-XFEAT-039) → steward merge.
 - 2026-10-30 **3.29.0** đã phát hành (ADR-0058/0059, D-257/259); GO chờ người `prod_switch`. Kế: T-3557 → lát 3 `perf trial` → 3.30.0 (D-258).
