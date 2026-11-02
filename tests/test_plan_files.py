@@ -10,7 +10,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
-import xt  # noqa: E402
+import xt
 
 
 class RepoPlanFilesTest(unittest.TestCase):
