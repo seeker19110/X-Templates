@@ -170,6 +170,10 @@ cổng TCP/UDP, không lọc tên miền), `sandbox-exec` (Apple đánh dấu DE
 
 ## 6. Chưa xác minh (ghi để lần sau tra)
 
+> Cập nhật 2026-11-02: bốn mục — `SHELL`/`PATH` của shell tool, mã thoát headless, hook Cursor trong CLI/`-p`, Copilot
+> đọc `.claude/settings.json` và payload stdin — đã xác minh lại ở **§8** (phần còn mở ghi rõ ở đó). Các dòng dưới giữ
+> nguyên để thấy lịch sử.
+
 - Mọi công cụ: shell tool có tôn trọng `SHELL`/`PATH` để bọc lệnh; mã thoát của chế độ headless (trừ Gemini: 0/1/42/53);
   cờ `archived`/`pushed_at` qua API GitHub (403 trong phiên — không vượt rào); chưa chạy validator/test nào; hook có chạy
   trong sandbox hay ngoài (chỉ Claude Code nói rõ: ngoài).

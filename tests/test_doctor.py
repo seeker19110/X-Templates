@@ -75,6 +75,10 @@ class DoctorCase(unittest.TestCase):
             )
         )
         self.enterContext(unittest.mock.patch.object(xt, "SCRIPT_DIR", self.base / ".xtemplates" / "scripts"))
+        # Nhóm `sandbox` tuỳ máy chạy test (container cloud thì im, runner CI thì cảnh báo) — test khác không đếm nó;
+        # `test_sandbox_group` tự đặt lại (T-3641).
+        self.real_in_container = xt._in_container
+        self.enterContext(unittest.mock.patch.object(xt, "_in_container", return_value=True))
         self.enterContext(unittest.mock.patch.object(xt, "validate", _memo_validate))
 
     def run_doctor(self, *args: str) -> tuple[int, str, str]:
@@ -310,11 +314,11 @@ class DoctorHooksTest(DoctorCase):
         env = {k: v for k, v in os.environ.items() if k not in ("CLAUDE_CODE_CONTAINER_ID", "IS_SANDBOX")}
         with unittest.mock.patch.dict(os.environ, env, clear=True):
             with unittest.mock.patch.object(xt.os.path, "exists", return_value=False):
-                self.assertFalse(xt._in_container())
+                self.assertFalse(self.real_in_container())
             with unittest.mock.patch.object(xt.os.path, "exists", side_effect=lambda p: p == "/.dockerenv"):
-                self.assertTrue(xt._in_container())
+                self.assertTrue(self.real_in_container())
             with unittest.mock.patch.dict(os.environ, {"IS_SANDBOX": "1"}):
-                self.assertTrue(xt._in_container())
+                self.assertTrue(self.real_in_container())
 
     def test_pretool_matchers_cover_notebook_and_mcp_writes(self):
         """AUD-HAR-036/198 (T-3650): bản cài phủ `NotebookEdit` ở hook sửa file và các tool MCP ghi (tạo nhánh/repo, fork,
