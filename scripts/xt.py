@@ -7664,7 +7664,10 @@ def signoff_facts(
     base: Path, st: Dict[str, Any], release: Optional[Dict[str, Any]] = None, package: Optional[Dict[str, Any]] = None
 ) -> Dict[str, Any]:
     """Dữ kiện cho `signoff-package`: kết quả `release-check --json` và gói đã dựng (nếu có) kèm file đổi sau head của
-    chúng, vân tay bằng chứng hiện tại, việc `loop defer` còn chờ người."""
+    chúng, vân tay bằng chứng hiện tại, việc `loop defer` còn chờ người, và `prod_pending` — đề xuất "Khi chạy thật" của
+    DECISIONS.md đếm trực tiếp (hàng `prod_switch` không N/A-SHOULD/PASS; không đọc được = chờ người), để gói chỉ
+    `--package` vẫn thấy `loop decide --prod` sau khi dựng (AUD-HAR-169)."""
+    prod = _release_prod_switch(base)
     return {
         "release": release,
         "release_changed": _changed_since(base, release["head"], DECISIONS_EXCLUDE) if release else None,
@@ -7672,6 +7675,7 @@ def signoff_facts(
         "package_changed": _changed_since(base, package["candidate_head"]) if package else None,
         "evidence_fp": evidence_fingerprint(base),
         "deferred": sorted(_deferred(st)),
+        "prod_pending": prod["result"] != "PASS" and prod["level"] == "BLOCKER",
     }
 
 
@@ -7870,8 +7874,9 @@ def _signoff_kept(f: Dict[str, Any], pkg: Dict[str, Any], fresh_rel: Optional[Di
             "missing": ["`release-check --json` trên HEAD"],
         }
     # `loop defer` thêm sau khi dựng gói nằm trong state (ngoài vân tay) — vẫn phải hiện là việc chờ người (review #326);
-    # `release-check` mới đúng cây: việc chờ người của nó (vd `prod_switch` do DECISIONS.md đổi) cũng hiện (AUD-HAR-151)
-    later = set(fresh_rel["human"]) if fresh_rel else set()
+    # `release-check` mới đúng cây: việc chờ người của nó (vd `prod_switch` do DECISIONS.md đổi) cũng hiện (AUD-HAR-151);
+    # chỉ `--package`: `prod_switch` đếm trực tiếp từ DECISIONS.md (AUD-HAR-169)
+    later = set(fresh_rel["human"]) if fresh_rel else {"prod_switch"} if s["prod_pending"] else set()
     pkg = {**pkg, "human_pending": sorted(set(pkg["human_pending"]) | set(s["deferred"]) | later)}
     return _signoff_part(pkg, f"gói nghiệm thu ở {pkg['candidate_head'][:12]} còn hiệu lực (vân tay khớp)")
 

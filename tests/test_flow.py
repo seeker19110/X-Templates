@@ -690,6 +690,17 @@ class FlowTest(TmpRepoCase):
         self.assertEqual(rc, 0, err)
         self.assertIn("  gói: {", text)
         decisions = self.repo / "docs" / "autopilot" / "DECISIONS.md"
+        base_pkg = {**out["package"], "human_pending": []}  # AUD-HAR-169: gói dựng khi chưa có đề xuất `--prod`
+        pkg0 = self.outside / "package0.json"
+        pkg0.write_text(json.dumps(base_pkg), encoding="utf-8")
+        self.assertEqual(self.signoff("--package", str(pkg0))["package"]["human_pending"], [])
+        decisions.write_text(f"# D\n\n- D-001 ký\n- {xt.PROD_SWITCH_LABEL} bật thanh toán thật\n", encoding="utf-8")
+        self.git("add", "-A")
+        self.git("commit", "-q", "-m", "loop decide --prod")
+        self.assertEqual(self.loop("verify", "--all")[0], 0)
+        late = self.signoff("--package", str(pkg0))
+        self.assertEqual((late["action"], late["package"]["human_pending"]), ("signoff-package", ["prod_switch"]), late)
+        self.assertIn("chờ người: prod_switch", late["reason"])
         decisions.write_text("# D\n\n- D-001 ký\n- D-002 chưa commit\n", encoding="utf-8")  # như `loop decide` vừa ghi
         (self.repo / "PROGRESS.md").write_text("# P\n\n- bàn giao chưa commit\n", encoding="utf-8")
         self.assertEqual(self.loop("verify", "--all")[0], 0)

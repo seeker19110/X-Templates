@@ -41,7 +41,7 @@ def facts(**over: Any) -> dict[str, Any]:
         "open_must": 0,
         "harden": [],
         "signoff": {"release": None, "release_changed": None, "package": None, "package_changed": None}
-        | {"evidence_fp": FP, "deferred": []},
+        | {"evidence_fp": FP, "deferred": [], "prod_pending": False},
         "stage": None,
         "state": {"rev": 3, "plan": "P.md", "iterations": 2, "max_iterations": 40, "deadline": None, "batches": []},
     }
@@ -289,6 +289,20 @@ class NextStepPureTest(unittest.TestCase):
                 out = self.step(objective=HARDEN, signoff={"package": old, "package_changed": changed})
                 self.assertEqual((out["action"], out["package"]), ("release-check", None))
                 self.assertIn(f"gói nghiệm thu hết hạn: {note}", out["reason"])
+
+    def test_signoff_package_only_sees_prod_switch(self) -> None:
+        """AUD-HAR-169: chỉ `--package` (kiểm hiệu lực ở /complete), gói khớp vân tay mà DECISIONS.md có đề xuất "Khi chạy
+        thật" (`loop decide --prod` sau khi dựng gói — ngoài vân tay) → `prod_switch` vẫn là việc chờ người, không trình
+        "chờ người: không"; không có đề xuất → gói như cũ (FLOW-17)."""
+        pkg = {"candidate_head": "c" * 40, "evidence_fp": FP, "human_pending": [], "release_verdict": "GO"}
+        out = self.step(objective=HARDEN, signoff={"package": pkg, "prod_pending": True})
+        self.assertEqual(out["action"], "signoff-package")
+        self.assertEqual(out["package"]["human_pending"], ["prod_switch"])
+        self.assertIn("người xác nhận prod_switch", out["missing"])
+        self.assertIn("chờ người: prod_switch", out["reason"])
+        same = self.step(objective=HARDEN, signoff={"package": {**pkg, "human_pending": ["prod_switch"]}})
+        self.assertEqual(same["package"]["human_pending"], ["prod_switch"])  # không lặp
+        self.assertEqual(self.step(objective=HARDEN, signoff={"package": pkg})["package"], pkg)
 
     def test_signoff_fresh_release_human(self) -> None:
         """AUD-HAR-151: gói còn khớp vân tay + `release-check` mới đúng cây (`release_changed == []`) → việc chờ người mới
@@ -904,6 +918,18 @@ class MonorepoFingerprintTest(unittest.TestCase):
         facts = xt.signoff_facts(self.web, {}, release={"head": sha}, package={"candidate_head": sha})
         self.assertEqual(facts["release_changed"], ["docs/autopilot/DECISIONS.md"])
         self.assertEqual(facts["package_changed"], [])
+
+    def test_signoff_facts_prod_pending(self) -> None:
+        """AUD-HAR-169: `prod_pending` tính trực tiếp từ DECISIONS.md (cùng `_release_prod_switch` của `release-check`):
+        không có file/không có đề xuất → False; có đề xuất "Khi chạy thật" → True; không đọc được → True (chặt hơn)."""
+        dec = self.web / "docs" / "autopilot" / "DECISIONS.md"
+        self.assertFalse(xt.signoff_facts(self.web, {})["prod_pending"])
+        dec.write_text("## D-001\n", encoding="utf-8")
+        self.assertFalse(xt.signoff_facts(self.web, {})["prod_pending"])
+        dec.write_text(f"## D-002\n- {xt.PROD_SWITCH_LABEL} bật thanh toán thật\n", encoding="utf-8")
+        self.assertTrue(xt.signoff_facts(self.web, {})["prod_pending"])
+        dec.write_bytes(b"\xff")
+        self.assertTrue(xt.signoff_facts(self.web, {})["prod_pending"])
 
 
 if __name__ == "__main__":
