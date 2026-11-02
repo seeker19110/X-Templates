@@ -300,7 +300,9 @@ class ValidateTest(unittest.TestCase):
         self.assertRegex(errs[0], r"^08-backend/api\.md:\d+: trỏ BE-API-777 ")
 
     def test_stale_verifications(self):  # AUD-DOC-177 (T-3658): ngày "xác minh" quá hạn → cảnh báo, không lỗi
-        self._insert("- Một nguồn cũ (xác minh 2026-01-02); nguồn mới xác minh 2026-10-30; ngày hỏng xác minh 2026-13-45.")
+        self._insert(
+            "- Một nguồn cũ (xác minh 2026-01-02); nguồn mới xác minh 2026-10-30; ngày hỏng xác minh 2026-13-45."
+        )
         today = datetime.date(2026, 11, 2)
         old = xt.stale_verifications(self.fw, 180, today)
         self.assertEqual([d for _, d in old if d.startswith("2026-01")], ["2026-01-02"])
