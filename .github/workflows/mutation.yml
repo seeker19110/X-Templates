@@ -1,0 +1,27 @@
+name: Mutation guard
+
+# Đột biến CHÍNH SÁCH của guard (`decide`/`policy_action`/`apply_policy`/`_strict_why`) bằng `xt.py mutate-guard` (stdlib,
+# T-3655, AUD-TEST-051): mỗi mutant chạy bộ test guard; đỏ khi còn mutant sống — test chưa khoá hành vi đó. Coverage
+# 100 % không chứng minh điều này. Hằng tuần + chạy tay; ~4 phút với 4 tiến trình (đo cục bộ 2026-11-02, 37 mutant).
+on:
+  schedule:
+    - cron: "17 4 * * 0"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  mutate-guard:
+    name: mutate-guard
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false # job không push (AUD-CI-028)
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.14"
+      - name: Đột biến chính sách guard (đỏ khi còn mutant sống)
+        run: python3 scripts/xt.py mutate-guard --jobs 4 --timeout 300

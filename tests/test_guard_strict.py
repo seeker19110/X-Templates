@@ -749,5 +749,50 @@ class GhPostingStrictTest(unittest.TestCase):
                 self.assertEqual(guard._strict_why(cmd), "")
 
 
+class PolicyContractTest(unittest.TestCase):
+    """T-3655 (AUD-TEST-051): hợp đồng của `decide`/`policy_action`/`apply_policy` mà `xt.py mutate-guard` chỉ ra chưa
+    test nào khoá (15/37 mutant sống ở lượt đầu): lý do mặc định, unsure theo mã HOẶC khai báo, mã lạ → cho qua, lý do
+    viết lại khi ask thành deny và xoá khi ask thành cho qua — deny/allow/rỗng giữ nguyên lý do."""
+
+    def test_decide_defaults_and_unsure(self):
+        d = guard.decide({"decision": "ask"})
+        self.assertEqual((d.reason, d.code, d.confidence, d.missing), ("", "OTHER_ASK", "sure", ()))
+        d = guard.decide({"decision": "ask", "code": "BUDGET"})  # mã thuộc UNSURE_CODES, không khai confidence
+        self.assertEqual((d.confidence, d.missing), ("unsure", ("BUDGET",)))
+        d = guard.decide({"decision": "ask", "code": "DESTROY", "confidence": "unsure"})  # khai unsure, mã thường
+        self.assertEqual((d.confidence, d.missing), ("unsure", ("DESTROY",)))
+        self.assertEqual(guard.decide({"decision": "ask", "code": "DESTROY"}).confidence, "sure")
+
+    def test_policy_action_table(self):
+        cases = (
+            ({"decision": "", "code": "BUDGET"}, ""),  # unsure chỉ đổi nhóm chặn (ask/deny), không biến "" thành deny
+            ({"decision": "allow", "confidence": "unsure"}, "allow"),
+            ({"decision": "ask", "code": "KHONG_CO_MA_NAY"}, ""),  # mã lạ → cho qua (POLICY không có)
+            ({"decision": "ask", "code": "DESTROY"}, "deny"),
+            ({"decision": "ask", "code": "OTHER_ASK"}, ""),
+            ({"decision": "ask", "code": "OTHER_ASK", "confidence": "unsure"}, "deny"),
+            ({"decision": "deny", "code": "BUDGET"}, "deny"),
+        )
+        for out, want in cases:
+            with self.subTest(out=out):
+                self.assertEqual(guard.policy_action(guard.decide(out)), want)
+
+    def test_apply_policy_reason(self):
+        cases = (
+            (
+                {"decision": "ask", "code": "DESTROY", "reason": "xoá x"},
+                ("deny", "Lệnh bị khung chặn (nguy hiểm — DESTROY): xoá x"),
+            ),
+            ({"decision": "ask", "code": "OTHER_ASK", "reason": "hỏi"}, ("", "")),
+            ({"decision": "deny", "code": "DESTROY", "reason": "cấm"}, ("deny", "cấm")),
+            ({"decision": "", "reason": "ghi chú"}, ("", "ghi chú")),
+            ({"decision": "allow", "reason": "ok"}, ("allow", "ok")),
+        )
+        for out, want in cases:
+            with self.subTest(out=out):
+                r = guard.apply_policy(out)
+                self.assertEqual((r["decision"], r["reason"]), want)
+
+
 if __name__ == "__main__":
     unittest.main()

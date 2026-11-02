@@ -97,7 +97,9 @@ Thoát: 0 = ổn, 1 = vi phạm/chưa đạt, 2 = lỗi dùng lệnh.
 from __future__ import annotations
 
 import argparse
+import ast
 import base64
+import concurrent.futures
 import contextlib
 import copy
 import datetime as _dt
@@ -13655,6 +13657,131 @@ def _bench_print(out: Dict[str, Any]) -> None:
         print(f"  ✗ {r['status']}: {r['id']} ({', '.join(r['refs'])}) mong {r['expect']} — được {r['got']}")
 
 
+# --- mutate-guard (T-3655, AUD-TEST-051): coverage 100 % chưa chứng minh test bắt được đổi CHÍNH SÁCH của guard ---------
+MUTATE_FUNCS = ("decide", "policy_action", "apply_policy", "_strict_why")
+MUTATE_TESTS = ("tests.test_guard_corpus", "tests.test_guard_strict", "tests.test_guard_audit1019")
+MUTATE_WORDS = ("deny", "ask", "allow", "")
+MUTATE_FLIP: Dict[type, type] = {
+    ast.And: ast.Or,
+    ast.Or: ast.And,
+    ast.Eq: ast.NotEq,
+    ast.NotEq: ast.Eq,
+    ast.In: ast.NotIn,
+    ast.NotIn: ast.In,
+    ast.Is: ast.IsNot,
+    ast.IsNot: ast.Is,
+}
+
+
+class GuardMutator(ast.NodeTransformer):
+    """Đột biến chính sách trong các hàm `funcs` (kể cả hàm lồng): chữ quyết định `deny/ask/allow` → `""`, `""` →
+    `"deny"`, bỏ `not`, đảo `and↔or`, `==↔!=`, `in↔not in`, `is↔is not`. `target` = thứ tự chỗ đột biến được áp (−1 = chỉ
+    đếm); `sites` = mô tả từng chỗ theo thứ tự duyệt — lần đếm và lần áp duyệt cùng thứ tự nên số khớp nhau."""
+
+    def __init__(self, funcs: Sequence[str], target: int = -1) -> None:
+        self.funcs, self.target, self.depth = set(funcs), target, 0
+        self.sites: List[str] = []
+
+    def _site(self, node: ast.AST, desc: str, make: Callable[[], ast.AST]) -> ast.AST:
+        self.sites.append(f"dòng {getattr(node, 'lineno', 0)}: {desc}")
+        return ast.copy_location(make(), node) if len(self.sites) - 1 == self.target else node
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> ast.AST:
+        inside = int(node.name in self.funcs)
+        self.depth += inside
+        self.generic_visit(node)
+        self.depth -= inside
+        return node
+
+    def visit_Constant(self, node: ast.Constant) -> ast.AST:
+        if not self.depth or not isinstance(node.value, str) or node.value not in MUTATE_WORDS:
+            return node
+        new = "" if node.value else "deny"
+        return self._site(node, f"{node.value!r} → {new!r}", lambda: ast.Constant(new))
+
+    def visit_UnaryOp(self, node: ast.UnaryOp) -> ast.AST:
+        self.generic_visit(node)
+        if not self.depth or not isinstance(node.op, ast.Not):
+            return node
+        return self._site(node, "bỏ `not`", lambda: node.operand)
+
+    def visit_BoolOp(self, node: ast.BoolOp) -> ast.AST:
+        self.generic_visit(node)
+        flip = MUTATE_FLIP[type(node.op)]
+        if not self.depth:
+            return node
+        return self._site(node, f"{type(node.op).__name__} → {flip.__name__}", lambda: ast.BoolOp(flip(), node.values))
+
+    def visit_Compare(self, node: ast.Compare) -> ast.AST:
+        self.generic_visit(node)
+        flip = MUTATE_FLIP.get(type(node.ops[0]))
+        if not self.depth or flip is None or len(node.ops) != 1:
+            return node
+        op = flip
+        return self._site(
+            node,
+            f"{type(node.ops[0]).__name__} → {op.__name__}",
+            lambda: ast.Compare(node.left, [op()], node.comparators),
+        )
+
+
+def _mutant_run(guard: Path, funcs: Sequence[str], target: int, tests: Sequence[str], root: Path) -> int:
+    """MỘT mutant trong tiến trình này: nạp guard đã đột biến làm module `<tên file>` (test `import guard` nhận bản này)
+    rồi chạy `tests`; 0 = test vẫn xanh (mutant SỐNG), 1 = test đỏ (bị giết)."""
+    import unittest  # chỉ tiến trình con của mutate-guard cần
+
+    tree = GuardMutator(funcs, target).visit(ast.parse(guard.read_text(encoding="utf-8"), str(guard)))
+    mod = types.ModuleType(guard.stem)
+    mod.__file__ = str(guard)
+    sys.modules[guard.stem] = mod
+    exec(compile(ast.fix_missing_locations(tree), str(guard), "exec"), mod.__dict__)
+    sys.path[:0] = [str(root), str(guard.parent)]
+    suite = unittest.defaultTestLoader.loadTestsFromNames(list(tests))
+    return 0 if unittest.TextTestRunner(stream=io.StringIO(), failfast=True).run(suite).wasSuccessful() else 1
+
+
+def _mutant_outcome(cmd: List[str], root: Path, timeout: float) -> str:
+    try:
+        r = subprocess.run(cmd, cwd=root, capture_output=True, text=True, timeout=timeout, check=False)
+    except subprocess.TimeoutExpired:
+        return "timeout"  # tính là bị giết (test treo khi chính sách đổi — vẫn là phát hiện)
+    return "survived" if r.returncode == 0 else "killed"
+
+
+def cmd_mutate_guard(args: argparse.Namespace) -> int:
+    """`mutate-guard`: đột biến chính sách của guard, mỗi mutant một tiến trình con chạy bộ test guard. Exit 0 khi mọi
+    mutant bị giết; 1 khi còn mutant sống (test chưa khoá hành vi đó); 2 khi không có chỗ đột biến hoặc bộ test đỏ ngay
+    khi chưa đột biến. Chỉ stdlib (thay mutmut — spike 2026-10-26 không chấm được, `docs/ops/MUTATION-2026-10-26.md`)."""
+    base = project_dir()
+    guard = Path(args.guard) if args.guard else base / ".claude" / "hooks" / "guard.py"
+    funcs, tests = [f for f in args.functions.split(",") if f], [t for t in args.tests.split(",") if t]
+    if args.run_one is not None:
+        return _mutant_run(guard.resolve(), funcs, args.run_one, tests, base)
+    counter = GuardMutator(funcs)
+    counter.visit(ast.parse(guard.read_text(encoding="utf-8"), str(guard)))
+    sites = counter.sites
+    if not sites:
+        print(f"mutate-guard: không có chỗ đột biến trong {', '.join(funcs)} của {guard}", file=sys.stderr)
+        return 2
+    if args.list:
+        print("\n".join(f"{i:3}  {s}" for i, s in enumerate(sites)))
+        return 0
+    head = [sys.executable, str(Path(__file__).resolve()), "mutate-guard", "--guard", str(guard.resolve())]
+    head += ["--functions", ",".join(funcs), "--tests", ",".join(tests), "--run-one"]
+    if _mutant_outcome([*head, "-1"], base, args.timeout) != "survived":
+        print("mutate-guard: bộ test đỏ hoặc treo khi CHƯA đột biến — sửa test trước", file=sys.stderr)
+        return 2
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, args.jobs)) as pool:
+        outcomes = list(pool.map(lambda i: _mutant_outcome([*head, str(i)], base, args.timeout), range(len(sites))))
+    alive = [s for s, o in zip(sites, outcomes) if o == "survived"]
+    if args.json:
+        print(json.dumps({"guard": str(guard), "mutants": len(sites), "survived": alive, "outcomes": outcomes}))
+    else:
+        print(f"mutate-guard: {len(sites)} mutant · giết {len(sites) - len(alive)} · sống {len(alive)}")
+        print("\n".join(f"  ✗ sống — {s}" for s in alive))
+    return 1 if alive else 0
+
+
 def cmd_autonomy_bench(args: argparse.Namespace) -> int:
     """`autonomy-bench`: exit 1 khi có false-green; 2 khi corpus hỏng hoặc ca không chạy được; 1 khi có ca lệch
     (`mismatch` — kể cả `code`/`decision` khác mong đợi dù cổng đúng) hoặc ID bắt buộc chưa có ca; 0 còn lại."""
@@ -14630,6 +14757,18 @@ def build_parser() -> argparse.ArgumentParser:
         "--json", action="store_true", help="in JSON {revision, cases, false_green, groups, coverage, failures}"
     )
     pab.set_defaults(fn=cmd_autonomy_bench)
+    pmg = sub.add_parser(
+        "mutate-guard", help="đột biến chính sách guard, chạy bộ test guard mỗi mutant — exit 1 khi còn mutant sống"
+    )
+    pmg.add_argument("--guard", help="file guard (mặc định .claude/hooks/guard.py của dự án)")
+    pmg.add_argument("--functions", default=",".join(MUTATE_FUNCS), help="hàm được đột biến, cách nhau dấu phẩy")
+    pmg.add_argument("--tests", default=",".join(MUTATE_TESTS), help="tên test unittest, cách nhau dấu phẩy")
+    pmg.add_argument("--jobs", type=int, default=os.cpu_count() or 2, help="số mutant chạy song song")
+    pmg.add_argument("--timeout", type=float, default=300, help="giây tối đa mỗi mutant (quá = bị giết)")
+    pmg.add_argument("--list", action="store_true", help="chỉ liệt kê chỗ đột biến")
+    pmg.add_argument("--json", action="store_true", help="in JSON {guard, mutants, survived, outcomes}")
+    pmg.add_argument("--run-one", type=int, help=argparse.SUPPRESS)  # tiến trình con: một mutant (−1 = gốc)
+    pmg.set_defaults(fn=cmd_mutate_guard)
     pw = sub.add_parser("merge-watch", help="gọi merge-check định kỳ tới khi PR xong hoặc cần hành động (ADR-0021)")
     pw.add_argument("--pr", help="số/URL/nhánh của PR (mặc định PR của nhánh hiện tại)")
     pw.add_argument("--interval", type=int, default=30, help="giây giữa hai lần kiểm (mặc định 30)")
