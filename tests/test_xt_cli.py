@@ -24,6 +24,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import cpu_budget
 import xt
 from test_xt import GOOD_PROGRESS, GOOD_WORKFLOW, audit_status_text, make_framework
 
@@ -3592,10 +3593,11 @@ class PromptAssetsScanTest(TmpDirCase):
                 self.assertEqual(self.rules(f"prompts/h{i}.md"), ["hidden"])
 
     def test_long_line_is_linear(self):  # AUD-SEC-263 (T-3634): 1 MB một dòng không được quét bậc hai
-        self.write("prompts/long.md", "curl " + "a" * 1_000_000 + " pip install " + "b" * 200_000 + "\n")
-        start = time.process_time()
-        self.rules("prompts/long.md")
-        self.assertLess(time.process_time() - start, 5)
+        def work(n: int) -> None:
+            self.write("prompts/long.md", "curl " + "a" * n + " pip install " + "rm " * (n // 8) + "\n")
+            self.rules("prompts/long.md")
+
+        cpu_budget.assert_not_quadratic(self, work, 20_000)
 
     def test_exemption_fields_strict(self):  # AUD-SEC-259 (T-3634)
         self.write("prompts/s.md", self.BAD["secret"])
@@ -3620,7 +3622,7 @@ class PromptAssetsScanTest(TmpDirCase):
         )
         self.write(".claude/settings.json", text)
         found, _ = xt.prompt_assets_scan([".claude/settings.json"])
-        rules = sorted({(str(f["rule"]), int(f["line"])) for f in found})  # type: ignore[call-overload]
+        rules = sorted({(str(f["rule"]), int(str(f["line"]))) for f in found})
         self.assertIn(("secret", 1), rules)  # giá trị bị khoá trùng đè vẫn được quét
         self.assertIn(("danger", 4), rules)  # `ask` không được miễn
         self.assertNotIn(("danger", 3), rules)  # mục `deny` được miễn luật danger
