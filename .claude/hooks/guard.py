@@ -1168,22 +1168,25 @@ def _heredoc_shell_why(cmd: str) -> str:
     return ""
 
 
-def _xargs_replace_shell(argv: List[str]) -> bool:
-    """`xargs -I X|-IX|-i[X]|--replace[=X] … sh -c '…X…'`: xargs thay X bằng từng dòng stdin rồi chạy `sh -c` — chuỗi lệnh
-    đến từ stdin như `xargs sh -c` không chuỗi lệnh (AUD-SEC-334)."""
+def _xargs_replace_script(argv: List[str]) -> Optional[Tuple[str, str]]:
+    """`xargs -I X|-IX|-i[X]|-0I X|--replace[=X] … sh -c '…X…'` → (X, chuỗi lệnh): xargs thay X bằng từng dòng stdin rồi
+    chạy `sh -c` — chuỗi lệnh đến từ stdin như `xargs sh -c` không chuỗi lệnh (AUD-SEC-334; cụm `-0I{}`, `--replace`
+    trần = `{}` — review #405). Không phải dạng này → None."""
     heads = [i for i, x in enumerate(argv) if posixpath.basename(x) == "xargs"]
-    if not heads:
-        return False
-    rest, rep = argv[heads[0] + 1 :], ""
+    rest: List[str] = argv[heads[0] + 1 :] if heads else []
+    opts: List[str] = []
     while rest and rest[0].startswith("-") and rest[0] != "-":
-        opt = rest.pop(0)
-        if opt in ("-I", "--replace") or opt.startswith(("-I", "-i", "--replace=")):
-            rep = (rest.pop(0) if opt == "-I" and rest else opt.split("=", 1)[1] if "=" in opt else opt[2:]) or "{}"
-        elif opt in WRAPPER_OPTS_WITH_VALUE["xargs"] and rest:
-            rest.pop(0)
-    n = normalize(rest)
+        opts.append(rest.pop(0))
+        m = XARGS_REPLACE_RE.fullmatch(opts[-1])
+        if ((m and m.group(1) == "I" and not m.group(2)) or opts[-1] in WRAPPER_OPTS_WITH_VALUE["xargs"]) and rest:
+            opts.append(rest.pop(0))
+    rep, n = _xargs_replace(opts), normalize(rest)
     has_c, script = _shell_script_arg(n) if n and n[0] in SHELLS else (False, None)
-    return bool(rep) and has_c and rep in (script or "")
+    return (rep, script) if rep and has_c and script and rep in script else None
+
+
+def _xargs_replace_shell(argv: List[str]) -> bool:
+    return _xargs_replace_script(argv) is not None
 
 
 def _pipe_shell_why(tokens: List[str]) -> str:
@@ -6097,42 +6100,91 @@ def _ledger_asks(n: List[str], argv: List[str], root: str, cwd: Optional[str]) -
     return [EVIDENCE_WHY.format(h) for h in dict.fromkeys(hits)]
 
 
-TAR_EXTRACT_LONG = ("--extract", "--get")
+def _dot_source(s: str) -> bool:
+    """Nguồn `x/.` (hay `.`): cp/rsync chép NỘI DUNG vào đích, không tạo thư mục con."""
+    return s.rstrip("/").endswith("/.") or s.rstrip("/") == "."
 
 
 def _merge_roots(n: List[str]) -> List[str]:
     """Thư mục mà lệnh GỘP nội dung không biết trước vào (AUD-SEC-248): `cp -T`/`--no-target-directory` và nguồn `x/.`
-    (đích nhận nội dung nguồn, không phải thư mục con), `rsync` nguồn kết `/`, `tar -x` (`-C`/`--directory`, vắng = thư
-    mục đang đứng). Đích là sổ giai đoạn hay tổ tiên của nó → ghi tay sổ (`_ledger_hit`)."""
+    (đích nhận nội dung nguồn, không phải thư mục con; đích cuối hay `-t`/`--target-directory`), `rsync` nguồn kết `/`
+    hay `/.`, `tar -x` (`-C`/`--directory`/`--one-top-level`, vắng = thư mục đang đứng). Đích là sổ giai đoạn hay tổ
+    tiên của nó → ghi tay sổ (`_ledger_hit`)."""
     name, args = (n[0], n[1:]) if n else ("", [])
-    pos = _positionals(args, COPY_DEST_OPTS)
-    if name in ("cp", "install") and len(pos) > 1:
-        no_t = "--no-target-directory" in args or "T" in _short_flags(args)
-        return [pos[-1]] if no_t or any(s.rstrip("/").endswith("/.") or s in (".", "./") for s in pos[:-1]) else []
-    if name == "rsync" and len(pos) > 1:
-        return [pos[-1]] if any(s.endswith("/") for s in pos[:-1]) else []
-    if name == "tar":
-        return _tar_extract_dirs(args)
-    return []
+    if name in ("cp", "install"):
+        t_dir = _flag_value(args, "-t") or _flag_value(args, "--target-directory")
+        pos = _positionals(args, COPY_DEST_OPTS)
+        srcs, dest = (pos, t_dir) if t_dir else (pos[:-1], pos[-1] if len(pos) > 1 else "")
+        no_t = not t_dir and ("--no-target-directory" in args or "T" in _short_flags(args))
+        return [dest] if dest and (no_t or any(map(_dot_source, srcs))) else []
+    if name == "rsync":
+        pos = _positionals(args, COPY_VALUE_OPTS["rsync"])
+        return pos[-1:] if any(s.endswith("/") or _dot_source(s) for s in pos[:-1]) else []
+    return _tar_extract_dirs(args) if name == "tar" else []
+
+
+# Cờ ngắn của GNU tar ăn một giá trị (trong cụm `-xC d`: phần còn lại của cụm, không thì token kế; kiểu cũ `xfC a d`:
+# token kế theo thứ tự chữ). Cờ dài viết tắt được (getopt): tiền tố ≥ 3 chữ của tên dưới (`--dir=` = `--directory=`).
+TAR_SHORT_VALUE = "bCfFgHIKLNTVX"
+TAR_LONG_NAMES = ("directory", "extract", "one-top-level")
+TAR_LONG_VALUE = ("directory", "file")
+TAR_SUFFIX_RE = re.compile(r"\.(?:tar(?:\.\w+)?|t[gbx]z|tbz2|taz|tz2?|tlz|tzst)$")
+
+
+def _tar_long(a: str, args: List[str], i: int) -> Tuple[List[Tuple[str, Optional[str]]], int]:
+    name, eq, val = a[2:].partition("=")
+    name = next((x for x in TAR_LONG_NAMES if len(name) >= 3 and x.startswith(name)), name)
+    if eq or name not in TAR_LONG_VALUE or i >= len(args):
+        return [(name, val if eq else None)], i
+    return [(name, args[i])], i + 1
+
+
+def _tar_short(a: str, args: List[str], i: int, old: bool) -> Tuple[List[Tuple[str, Optional[str]]], int]:
+    out: List[Tuple[str, Optional[str]]] = []
+    for j, ch in enumerate(a.lstrip("-")):
+        if ch not in TAR_SHORT_VALUE:
+            out.append((ch, None))
+        elif not old and a[j + 2 :]:  # `-Cdocs`, `-xCdocs`: phần còn lại của cụm là giá trị
+            return out + [(ch, a[j + 2 :])], i
+        else:
+            out.append((ch, args[i] if i < len(args) else None))
+            i += 1
+            if not old:
+                break
+    return out, i
+
+
+def _tar_opts(args: List[str]) -> List[Tuple[str, Optional[str]]]:
+    """(cờ, giá trị) của `tar` theo thứ tự: chữ của cờ ngắn/kiểu cũ (`x`, `C`), tên dài đầy đủ (`directory`)."""
+    out: List[Tuple[str, Optional[str]]] = []
+    i = 0
+    while i < len(args):
+        a, i = args[i], i + 1
+        old = i == 1 and bool(re.fullmatch(r"[A-Za-z]+", a))
+        if a.startswith("--") and len(a) > 2:
+            got, i = _tar_long(a, args, i)
+        elif old or (a.startswith("-") and len(a) > 1):
+            got, i = _tar_short(a, args, i, old)
+        else:
+            got = []
+        out += got
+    return out
 
 
 def _tar_extract_dirs(args: List[str]) -> List[str]:
-    """Thư mục `tar` giải nén vào (`-C d`, `-Cd`, `--directory[=]d`; vắng = `.`); không giải nén → rỗng. Cụm cờ kiểu cũ
-    (`xf`, `-xzf`) đọc chữ `x`."""
-    extract = any(a in TAR_EXTRACT_LONG for a in args) or any(
-        re.fullmatch(r"-?[A-Za-z]+", a) and "x" in a and (a.startswith("-") or i == 0) for i, a in enumerate(args)
-    )
-    if not extract:
+    """Mọi thư mục `tar` có thể giải nén vào: `-C` cộng dồn (`-C docs -C autopilot` = `docs/autopilot`), cả thư mục
+    `--one-top-level[=D]` (vắng D = tên archive bỏ đuôi); không `-C` = `.`; không giải nén → rỗng (review #405)."""
+    opts = _tar_opts(args)
+    if not any(k in ("x", "extract", "get") for k, _ in opts):
         return []
-    dirs = []
-    for i, a in enumerate(args):
-        if a in ("-C", "--directory") and i + 1 < len(args):
-            dirs.append(args[i + 1])
-        elif a.startswith("--directory="):
-            dirs.append(a.split("=", 1)[1])
-        elif a.startswith("-C") and len(a) > 2:
-            dirs.append(a[2:])
-    return dirs[-1:] or ["."]
+    cur, dirs = ".", []
+    for k, v in opts:
+        if k in ("C", "directory") and v:
+            cur = posixpath.join(cur, v)
+            dirs.append(cur)
+    archive = posixpath.basename(next((v for k, v in opts if k in ("f", "file") and v), ""))
+    tops = [v if v is not None else TAR_SUFFIX_RE.sub("", archive) for k, v in opts if k == "one-top-level"]
+    return (dirs or ["."]) + [posixpath.join(cur, t) for t in tops if t]
 
 
 def _rel_dir(target: str, root: str) -> str:
@@ -7429,6 +7481,8 @@ def _shell_feeds(tokens: List[str], placed: PlacedCmds) -> Placed:
         for feed, down, here in zip(_pipe_feeds(pipe), pipe[1:], dirs[i + 1 :]):
             if feed and (_stdin_shell(down) or _argless_shell_c(down)):
                 out += [(s, here) for s in feed]
+            elif feed and (rs := _xargs_replace_script(down)):  # `echo 'rm -rf ~' | xargs -I{} sh -c {}` (review #405)
+                out += [(rs[1].replace(rs[0], ln), here) for s in feed for ln in s.split("\n") if ln.strip()]
         i += len(pipe)
     return out
 
@@ -8409,7 +8463,31 @@ DIRECT_PROBES = 64  # số chuỗi canh được dò API ghi mỗi script (mỗi
 PERL_OPEN_MODE_RE = re.compile(r"^\+?(?:>>?|<)[ \t]*")
 RMTREE_RE = re.compile(r"\b(?:rmtree|remove_tree|rm_rf|rmSync|rimraf)\b")  # xoá đệ quy trong script (AUD-SEC-068)
 # ghi cả cây vào thư mục đích trong script (gộp nội dung không biết trước — AUD-SEC-248)
-TREE_WRITE_RE = re.compile(r"\b(?:copytree|copy_tree|unpack_archive|extractall|cpSync|cp_r|copy_entry)\b")
+TREE_WRITE_RE = re.compile(r"\b(copytree|copy_tree|unpack_archive|extractall|cpSync|cp_r|copy_entry)\b\s*(\(?)")
+
+
+def _call_args(script: str, m: "re.Match[str]") -> List[str]:
+    """Các đối số (chữ nguồn) của lời gọi bắt đầu ở `m`: trong ngoặc (`f(a, b)`), hay tới hết dòng/`;` khi gọi không
+    ngoặc (Ruby `FileUtils.cp_r 'a', 'b'`); tách ở dấu phẩy ngoài ngoặc/chuỗi (`_first_arg`)."""
+    rest = _balanced(script, m.end(), "(", ")") if m.group(2) else re.split(r"[\n;]", script[m.end() :], maxsplit=1)[0]
+    parts: List[str] = []
+    while rest.strip():
+        parts.append(_first_arg(rest))
+        rest = rest[len(parts[-1]) + 1 :]
+    return parts
+
+
+def _tree_write_dests(script: str) -> List[str]:
+    """Chuỗi nguyên văn ở đối số ĐÍCH của lời gọi ghi cả cây (`copytree(src, DST)`, `unpack_archive(f, DST)`,
+    `extractall(DST)`): nguồn hay chuỗi khác trong script không phải đích (review #405 — `copytree("docs", "/tmp/x")`
+    từng bị chặn oan)."""
+    out: List[str] = []
+    for m in TREE_WRITE_RE.finditer(script):
+        args = _call_args(script, m)
+        out += [_literal(x) for a in (args if m.group(1) == "extractall" else args[1:]) for x in LITERAL_RE.finditer(a)]
+    return out
+
+
 HOME_EXPR_RE = re.compile(
     r"expanduser\(\s*['\"]~/?['\"]\s*\)|Path\.home\(\)|environ(?:\[|\.get\()\s*['\"]HOME['\"]|getenv\(\s*['\"]HOME['\"]|homedir\(\)"
 )
@@ -8589,8 +8667,10 @@ def _first_arg(args: str) -> str:
 
 
 PLAIN_LITERAL_RE = re.compile(
-    r"""\s*[rRuU]?(?:'((?:[^'\\\n]|\\.)*)'|"((?:[^"\\\n]|\\.)*)")\s*"""
-)  # một chuỗi, không f/ghép
+    r"""\s*[rRuU]?(?:'\'\'((?:(?!'\'\').)*)'\'\'|\"\"\"((?:(?!\"\"\").)*)\"\"\""""
+    r"""|'((?:[^'\\\n]|\\.)*)'|"((?:[^"\\\n]|\\.)*)")\s*""",
+    re.S,
+)  # một chuỗi (cả nháy ba — review #405), không f/ghép
 
 
 def _exec_api_verbatim(scripts: List[str]) -> List[str]:
@@ -8604,10 +8684,10 @@ def _exec_api_verbatim(scripts: List[str]) -> List[str]:
             if any(a <= m.start() < b for a, b in spans):
                 continue
             first = _first_arg(_balanced(script, m.end(), "(", ")").lstrip())
-            if first[:1] == "[":
-                items = [_literal(x) for x in LITERAL_RE.finditer(_balanced(first, 1, "[", "]"))]
-                if items and posixpath.basename(items[0]) in SHELLS and "-c" in items[:-1]:
-                    out.append(items[items.index("-c") + 1])
+            if first[:1] == "[":  # bóc env/timeout/busybox, cờ như bash thật: `-lc`, `-c -x S` (review #405)
+                items = normalize([_literal(x) for x in LITERAL_RE.finditer(_balanced(first, 1, "[", "]"))])
+                has_c, s = _shell_script_arg(items) if items[:1] and items[0] in SHELLS else (False, None)
+                out += [s] if has_c and s is not None else []
             elif lit := PLAIN_LITERAL_RE.fullmatch(first):
                 out.append(_literal(lit))
     return out
@@ -8686,13 +8766,11 @@ def interp_write_asks(cmd: str, tokens: List[str], root: str, cwd: Optional[str]
         ]  # AUD-SEC-068: `shutil.rmtree("/home/x")`, perl `rmtree(...)`
         if RMTREE_RE.search(script) and HOME_EXPR_RE.search(script):  # `rmtree(Path.home())`, `expanduser("~")`
             asks.append("xoá đệ quy ngoài thư mục dự án (thư mục home — script trình thông dịch)")
-        if TREE_WRITE_RE.search(script):  # `copytree(…, "docs/autopilot")`, `unpack_archive(…, "docs")` — AUD-SEC-248
-            lits = _script_literals(script, families)
-            asks += [
-                EVIDENCE_WHY.format(lit)
-                for lit in lits
-                if any(_ledger_hit(_rel_dir(x, root)) for x in _where(lit, root, here))
-            ]
+        asks += [  # `copytree(…, "docs/autopilot")`, `unpack_archive(…, "docs")` — AUD-SEC-248
+            EVIDENCE_WHY.format(lit)
+            for lit in _tree_write_dests(script)
+            if any(_ledger_hit(_rel_dir(x, root)) for x in _where(lit, root, here))
+        ]
         hint, ro, probe = bool(WRITE_HINT_RE.search(script)), _ReadOnly(script, families), _WriteProbe(script)
         asks += [
             a

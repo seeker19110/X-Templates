@@ -413,6 +413,10 @@ class NestedShellDebtTest(unittest.TestCase):
         "AUD-SEC-334 -n 1 -I{}": "cat f.sh | xargs -n 1 -I{} sh -c {}",
         "AUD-SEC-334 -i": "cat f.sh | xargs -i sh -c '{}'",
         "AUD-SEC-334 --replace": "cat f.sh | xargs --replace=@ sh -c 'echo; @'",
+        "review #405 R2 --replace trần": "cat f.sh | xargs --replace sh -c {}",
+        "review #405 R2 -0I{}": "cat f.sh | xargs -0I{} sh -c {}",
+        "review #405 R2 -tI{}": "cat f.sh | xargs -tI{} sh -c {}",
+        "review #405 R2 -rI{}": "cat f.sh | xargs -rI{} sh -c {}",
     }
     ALLOW = (
         "echo 'ls' | busybox sh",
@@ -426,6 +430,12 @@ class NestedShellDebtTest(unittest.TestCase):
             with self.subTest(name):
                 d = guard.bash_decision(cmd, str(ROOT))
                 self.assertEqual((d["decision"], d.get("code")), ("deny", guard.BUDGET), d)
+
+    def test_echo_fed_replace_scanned(self):  # review #405 R2: chữ echo thay vào `{}` là lệnh `sh -c` chạy
+        for cmd in ("echo 'rm -rf ~' | xargs -I{} sh -c {}", "echo 'rm -rf ~' | xargs -I@ bash -c 'cd /; @'"):
+            with self.subTest(cmd=cmd):
+                self.assertEqual(decide(cmd)["decision"], "deny", decide(cmd))
+        self.assertEqual(decide("echo 'ls' | xargs -I{} sh -c {}")["decision"], "")
 
     def test_allowed(self):
         for cmd in self.ALLOW:
@@ -453,6 +463,20 @@ class StageLedgerDirTest(unittest.TestCase):
         'python3 -c \'import shutil; shutil.unpack_archive("a.zip", "docs")\'',
         "sed -i s/a/b/ docs/autopilot/*",
         "cp x docs/autopilot/STAGE.jso?",
+        "cp -r -t docs/autopilot src/.",  # review #405 R1
+        "cp -r --target-directory=docs/autopilot src/.",
+        "cp -r --target-directory docs/autopilot src/.",
+        "tar -xC docs -f a.tar",
+        "tar xC docs -f a.tar",
+        "tar xfC a.tar docs",
+        "tar -xf flat.tar -C docs -C autopilot",
+        "tar -xf flat.tar -C docs -C .",
+        "tar --one-top-level=docs/autopilot -xf flat.tar",
+        "tar --one-top-level -xf docs.tar.gz",
+        "tar -xf a.tar --dir=docs",
+        "tar --extract --file a.tar --directory docs/autopilot",
+        "rsync -a src/. docs/autopilot",
+        "rsync -a src/ docs/autopilot --exclude .git",
     )
     ALLOW = (
         "cp notes.md docs/autopilot/PLAN-a.md",
@@ -464,6 +488,14 @@ class StageLedgerDirTest(unittest.TestCase):
         "cp -r src out/",
         "rsync -a src/ build/",
         'python3 -c \'import shutil; shutil.copytree("src", "build")\'',
+        'python3 -c \'import shutil; shutil.copytree("docs/autopilot", "/tmp/bak")\'',  # review #405 R4: nguồn
+        'python3 -c \'import shutil; shutil.copytree("docs", "build/docs")\'',
+        'python3 -c \'import shutil; shutil.copytree("src", "/tmp/x"); print("docs")\'',
+        "tar -xf a.tar -C /tmp -C x",
+        "tar -tvf a.tar -C docs",
+        "tar --extract --file docs.tar --directory /tmp/x",
+        "cp -r -t build src/.",
+        "rsync -a src/ build --exclude .git",
     )
 
     def test_denied(self):
@@ -488,6 +520,14 @@ class ExecCallStrictTest(unittest.TestCase):
         "python3 -c 'import os; os.system(\"echo {#,a}; rm -rf {~,x}\")'",
         "python3 -c 'import os; os.system(\"x=$(true)# rm -rf ~\")'",
         'python3 -c \'import subprocess; subprocess.run(["/bin/sh", "-c", "echo `id`"])\'',
+        'python3 -c \'import subprocess; subprocess.run(["bash","-lc","echo {#,a}; rm -rf {~,x}"])\'',  # review #405 R3
+        'python3 -c \'import subprocess; subprocess.run(["bash","-ec","echo {#,a}; rm -rf {~,x}"])\'',
+        'python3 -c \'import subprocess; subprocess.run(["bash","-c","-x","echo {#,a}; rm -rf {~,x}"])\'',
+        'python3 -c \'import subprocess; subprocess.run(["/usr/bin/env","bash","-c","echo {#,a}; rm -rf {~,x}"])\'',
+        'python3 -c \'import subprocess; subprocess.run(["timeout","5","bash","-c","echo {#,a}; rm -rf {~,x}"])\'',
+        'python3 -c \'import subprocess; subprocess.run(["busybox","sh","-c","echo {#,a}; rm -rf {~,x}"])\'',
+        'python3 -c \'import os; os.system("""echo {#,a}; rm -rf {~,x}""")\'',
+        'python3 -c \'import subprocess; subprocess.run("""echo {#,a}\nrm -rf {~,x}""", shell=True)\'',
     )
     ALLOW = (
         "python3 -c 'import os; os.system(\"ls -la\")'",

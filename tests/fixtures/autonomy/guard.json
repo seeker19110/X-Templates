@@ -16032,6 +16032,285 @@
    "allowed": true
   },
   "note": "T-3633"
+ },
+ {
+  "id": "t405-336-cp-t",
+  "origin": "repro",
+  "refs": [
+   "AUD-SEC-336"
+  ],
+  "input": {
+   "command": "cp -r -t docs/autopilot src/."
+  },
+  "expect": {
+   "allowed": false,
+   "code": "EVIDENCE_HANDWRITE"
+  },
+  "note": "review #405"
+ },
+ {
+  "id": "t405-336-tar-cluster",
+  "origin": "repro",
+  "refs": [
+   "AUD-SEC-336"
+  ],
+  "input": {
+   "command": "tar -xC docs -f a.tar"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "EVIDENCE_HANDWRITE"
+  },
+  "note": "review #405"
+ },
+ {
+  "id": "t405-336-tar-oldstyle",
+  "origin": "repro",
+  "refs": [
+   "AUD-SEC-336"
+  ],
+  "input": {
+   "command": "tar xfC a.tar docs"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "EVIDENCE_HANDWRITE"
+  },
+  "note": "review #405"
+ },
+ {
+  "id": "t405-336-tar-cumulative",
+  "origin": "repro",
+  "refs": [
+   "AUD-SEC-336"
+  ],
+  "input": {
+   "command": "tar -xf flat.tar -C docs -C autopilot"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "EVIDENCE_HANDWRITE"
+  },
+  "note": "review #405"
+ },
+ {
+  "id": "t405-336-tar-one-top-level",
+  "origin": "repro",
+  "refs": [
+   "AUD-SEC-336"
+  ],
+  "input": {
+   "command": "tar --one-top-level=docs/autopilot -xf flat.tar"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "EVIDENCE_HANDWRITE"
+  },
+  "note": "review #405"
+ },
+ {
+  "id": "t405-336-rsync-exclude",
+  "origin": "repro",
+  "refs": [
+   "AUD-SEC-336"
+  ],
+  "input": {
+   "command": "rsync -a src/ docs/autopilot --exclude .git"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "EVIDENCE_HANDWRITE"
+  },
+  "note": "review #405"
+ },
+ {
+  "id": "t405-336-control-tar-tmp",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-336"
+  ],
+  "input": {
+   "command": "tar -xf a.tar -C /tmp -C x"
+  },
+  "expect": {
+   "allowed": true
+  },
+  "note": "review #405"
+ },
+ {
+  "id": "t405-336-control-cp-t",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-336"
+  ],
+  "input": {
+   "command": "cp -r -t build src/."
+  },
+  "expect": {
+   "allowed": true
+  },
+  "note": "review #405"
+ },
+ {
+  "id": "t405-337-replace-bare",
+  "origin": "repro",
+  "refs": [
+   "AUD-SEC-337"
+  ],
+  "input": {
+   "command": "cat f.sh | xargs --replace sh -c {}"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "review #405"
+ },
+ {
+  "id": "t405-337-cluster",
+  "origin": "repro",
+  "refs": [
+   "AUD-SEC-337"
+  ],
+  "input": {
+   "command": "cat f.sh | xargs -0I{} sh -c {}"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "review #405"
+ },
+ {
+  "id": "t405-337-echo-fed",
+  "origin": "repro",
+  "refs": [
+   "AUD-SEC-337"
+  ],
+  "input": {
+   "command": "echo 'rm -rf ~' | xargs -I{} sh -c {}"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "RULE_DENY"
+  },
+  "note": "review #405"
+ },
+ {
+  "id": "t405-337-control-echo-ls",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-337"
+  ],
+  "input": {
+   "command": "echo 'ls' | xargs -I{} sh -c {}"
+  },
+  "expect": {
+   "allowed": true
+  },
+  "note": "review #405"
+ },
+ {
+  "id": "t405-338-lc",
+  "origin": "repro",
+  "refs": [
+   "AUD-SEC-338"
+  ],
+  "input": {
+   "command": "python3 -c 'import subprocess; subprocess.run([\"bash\",\"-lc\",\"echo {#,a}; rm -rf {~,x}\"])'"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "RULE_DENY"
+  },
+  "note": "review #405"
+ },
+ {
+  "id": "t405-338-env",
+  "origin": "repro",
+  "refs": [
+   "AUD-SEC-338"
+  ],
+  "input": {
+   "command": "python3 -c 'import subprocess; subprocess.run([\"/usr/bin/env\",\"bash\",\"-c\",\"echo {#,a}; rm -rf {~,x}\"])'"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "RULE_DENY"
+  },
+  "note": "review #405"
+ },
+ {
+  "id": "t405-338-triple",
+  "origin": "repro",
+  "refs": [
+   "AUD-SEC-338"
+  ],
+  "input": {
+   "command": "python3 -c 'import os; os.system(\"\"\"echo {#,a}; rm -rf {~,x}\"\"\")'"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "RULE_DENY"
+  },
+  "note": "review #405"
+ },
+ {
+  "id": "t405-338-control-lc",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-338"
+  ],
+  "input": {
+   "command": "python3 -c 'import subprocess; subprocess.run([\"bash\",\"-lc\",\"echo hi\"])'"
+  },
+  "expect": {
+   "allowed": true
+  },
+  "note": "review #405"
+ },
+ {
+  "id": "t405-339-copytree-dest",
+  "origin": "repro",
+  "refs": [
+   "AUD-SEC-339"
+  ],
+  "input": {
+   "command": "python3 -c 'import shutil; shutil.copytree(\"src\", \"docs/autopilot\", dirs_exist_ok=True)'"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "EVIDENCE_HANDWRITE"
+  },
+  "note": "review #405"
+ },
+ {
+  "id": "t405-339-control-copytree-src",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-339"
+  ],
+  "input": {
+   "command": "python3 -c 'import shutil; shutil.copytree(\"docs/autopilot\", \"/tmp/bak\")'"
+  },
+  "expect": {
+   "allowed": true
+  },
+  "note": "review #405"
+ },
+ {
+  "id": "t405-339-control-copytree-other",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-339"
+  ],
+  "input": {
+   "command": "python3 -c 'import shutil; shutil.copytree(\"src\", \"/tmp/x\"); print(\"docs\")'"
+  },
+  "expect": {
+   "allowed": true
+  },
+  "note": "review #405"
  }
  ]
 }
