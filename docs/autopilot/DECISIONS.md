@@ -162,3 +162,24 @@
 - Chọn: Loại file lưu trữ khỏi pathspec; trần = file đang dùng + 5 %; lưu trữ đóng băng, không trần
 - Lý do (tiêu chí chất lượng cuối): (1) đúng: mục tiêu AUD-DOC-180 là chặn sổ ĐANG ĐỌC/GHI phình (lint, audit check parse mỗi PR); đếm lưu trữ làm việc lưu trữ không bao giờ hạ tổng → trần chạm sau ~20 PR mà không có đường hợp lệ nào xuống dưới trừ xoá lịch sử (trái P1). (3) đơn giản: một pathspec loại trừ. Lưu trữ chỉ thêm khi chạy đợt lưu trữ có PR riêng
 - Đường lùi: Bỏ hai pathspec :(exclude) và đặt trần theo tổng gồm lưu trữ
+
+### D-315 · 2026-11-02T23:29:24+00:00 · AUD-DOC-183: D-303 ghi LOOP-HARNESS-022 → MUST@M nhưng ADR-0064/harness-files/CHANGELOG ghi MUST@L — đính chính mức nào?
+
+- Phương án: (1) Giữ MUST@L, ghi D này đính chính D-303; ADR-0064 và CHANGELOG trỏ D-303 + D này · (2) Đổi sang MUST@M như chữ D-303
+- Chọn: Giữ MUST@L, ghi D này đính chính D-303; ADR-0064 và CHANGELOG trỏ D-303 + D này
+- Lý do (tiêu chí chất lượng cuối): (1) đúng: harness-files.md đã có 4 MUST trơn; MUST@M thành 5 MUST hiệu lực ở M, `xt.py validate` đỏ "trần 4" (ADR-0004, review orange-docs đã chạy). (3) theo chuẩn khung: trần MUST/module là luật. D-303 sai chữ, không sai ý (chủ dự án chọn bắt buộc khi chạy không người trực)
+- Đường lùi: Hạ MUST khác của harness-files.md xuống SHOULD rồi đổi LOOP-HARNESS-022 sang MUST@M (cần D mới)
+
+### D-316 · 2026-11-02T23:29:25+00:00 · AUD-DOC-194: T-3649 làm hàng release-check `go_no_go` BLOCKER ở mọi quy mô, khác PLAN (`go_no_go_file`, BLOCKER ở M/L, S = SHOULD) — giữ bản đã làm?
+
+- Phương án: (1) Giữ: tên go_no_go, BLOCKER mọi quy mô; PLAN T-3649 ghi Đổi theo D này · (2) Sửa mã theo PLAN: S = SHOULD
+- Chọn: Giữ: tên go_no_go, BLOCKER mọi quy mô; PLAN T-3649 ghi Đổi theo D này
+- Lý do (tiêu chí chất lượng cuối): (1) đúng và an toàn: phát hành không có GO-NO-GO đã ký là lỗi ở mọi quy mô (3.29.0 thiếu file); chặt hơn PLAN. (3) đơn giản: một quy tắc; README, --help, mẫu GO-NO-GO đã khớp mã (orange-docs)
+- Đường lùi: Thêm nhánh quy mô S → SHOULD trong _release_go_no_go
+
+### D-317 · 2026-11-02T23:29:25+00:00 · AUD-DOC-228: validate --stale bỏ sót ~95 % ngày nguồn (dòng ghi đọc/rà YYYY-MM-DD) — sửa thế nào?
+
+- Phương án: (1) (a) nới VERIFIED_AT_RE nhận đọc/rà, loại chưa/không … lại, 403 · (2) (b) chuẩn hoá ~248 dòng Nguồn sang chữ xác minh theo conventions §5 · (3) (c) chấp nhận có hạn — --stale chỉ tham khảo, không ở cổng
+- Chọn: (c) chấp nhận có hạn — --stale chỉ tham khảo, không ở cổng
+- Lý do (tiêu chí chất lượng cuối): (1) đúng: --stale không thuộc gate/CI nên không có xanh giả ở cổng; (a) đổi nghĩa 'xác minh' theo chữ tự do dễ đếm sai lần nữa (AUD-DOC-216), (b) chạm ~248 dòng ở nhiều module — làm cùng đợt nội dung AUD-DOC-179 (PLAN riêng). (5) chi phí: phá hoà
+- Đường lùi: Làm (b) trong PLAN nội dung kế; hoặc (a) nếu đưa --stale vào cổng

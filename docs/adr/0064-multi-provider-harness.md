@@ -131,6 +131,8 @@ Chưa xác minh: shell tool tôn trọng `SHELL`/`PATH`; hook Cursor trong CLI; 
 - Lát D: `xt.py loop run --agent <x> --dry-run` in đúng lệnh headless; test với agent giả (script in JSON) xanh/đỏ theo bằng chứng.
 - Lát E: `doctor` đỏ khi `autopilot` không người trực mà không có sandbox; xanh khi có.
 - Mốc xét lại: 2027-01-21 hoặc khi một công cụ đổi hợp đồng hook (fixture đỏ).
+- **Ghi chú 2026-11-02** (AUD-DOC-183, D-315): D-303 ghi `LOOP-HARNESS-022` → MUST@M; mức đúng là **MUST@L** như ADR này và
+  `harness-files.md` — MUST@M vượt trần 4 MUST/module ở M (ADR-0004). D-315 đính chính, không đổi quyết định.
 - **Ghi chú 2026-11-02** (review #411, AUD-DOC-211): "đã làm cả năm lát" ở §Trạng thái triển khai là phần mã chính của mỗi lát. Lát B kiểm theo D-310 — test bảng `tests/test_adapters.py` (≥ 10 ca/host qua hàm thật, plugin OpenCode chạy bằng bun) thay `autonomy-bench` ≥ 10 ca/host; **chưa có**: fixture payload thật `tests/fixtures/harness/<tool>/` và cầu nối file hướng dẫn `GEMINI.md`, `.cursor/rules/xt.mdc`, `.github/copilot-instructions.md` (`XC-DOCAI-002`) — ghi ở PLAN `T-3642`…`T-3644`.
 
 ## Ưu / nhược từng phương án
