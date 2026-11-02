@@ -20,6 +20,8 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false # job không push (AUD-CI-028)
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.14"
@@ -27,6 +29,16 @@ jobs:
         run: pip install --quiet --require-hashes -r requirements-audit.txt
       - name: Quét lỗ hổng (đỏ khi có lỗ hổng đã biết)
         run: pip-audit --require-hashes --strict --disable-pip -r requirements-dev.txt -r requirements-audit.txt -r requirements-e2e.txt
+      # SBOM CycloneDX của mọi gói công cụ đã khoá (AUD-DEP-010): pip-audit 2.10.1 luôn ghi định dạng cyclonedx (is_manifest,
+      # đọc mã 2026-11-02) — chạy sau bước quét nên chỉ có SBOM khi quét xanh.
+      - name: SBOM CycloneDX (requirements-*.txt)
+        run: pip-audit --require-hashes --strict --disable-pip -r requirements-dev.txt -r requirements-audit.txt -r requirements-e2e.txt -f cyclonedx-json -o sbom.cdx.json
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: sbom-cyclonedx
+          path: sbom.cdx.json
+          if-no-files-found: error
+          retention-days: 90
       # Lint workflow (CL-5, T-1833): zizmor 1.31.1 chạy offline (không gọi GitHub API, không cần token), persona regular,
       # chỉ đỏ khi có finding mức high; ngoại lệ đã có lý do ngay tại workflow (`# zizmor: ignore[...]`).
       - name: Lint workflow bằng zizmor (đỏ khi có finding high)

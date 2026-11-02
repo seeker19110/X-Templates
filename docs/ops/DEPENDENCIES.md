@@ -53,6 +53,15 @@
   origin, CSP của app không đổi); không nằm trong `scripts/app`, không chép sang dự án đích; không sửa tệp nên nghĩa vụ
   MPL-2.0 là giữ nguyên tệp + thông báo bản quyền và chỉ nguồn. `license-check` chỉ đọc gói pip nên không cần ngoại lệ
   trong `license-allow.json`. Quyết định D-133.
+- **SBOM và provenance (T-3654, AUD-DEP-010):** job `dep-audit` sinh SBOM CycloneDX (`pip-audit … -f cyclonedx-json -o
+  sbom.cdx.json` — pip-audit 2.10.1 luôn ghi định dạng cyclonedx kể cả 0 lỗ hổng, đọc mã `_format/cyclonedx.py` 2026-11-02)
+  và tải lên artefact `sbom-cyclonedx` (giữ 90 ngày). `release-tag.yml` ký provenance cho `git archive` của commit gắn tag
+  bằng `actions/attest-build-provenance` **4.2.2** ghim `4d101475d8b20a2381f78447822ac1eab6504dd8` (MIT; tag nhẹ, phát hành
+  2026-08-06; từ v4 là vỏ của `actions/attest` — README khuyên dùng `actions/attest` cho bản mới, chưa đổi vì vỏ vẫn được
+  hỗ trợ; xác minh 2026-11-02). Quyền job: `id-token: write`, `attestations: write`; repo công khai dùng Sigstore
+  public-good (chứng chỉ, bản ghi minh bạch công khai). Kiểm: `gh attestation verify X-Templates-vX.Y.Z.tar.gz --repo
+  seeker19110/X-Templates`; tái tạo đúng byte bằng `git archive` ở máy khác: (chưa xác minh — gzip của git có thể khác
+  theo bản). Chưa chạy thật trên CI tới lần cắt bản kế.
 - Gói mới hoặc đổi license khi Dependabot nâng phiên bản: cập nhật bảng này trong cùng PR (`BASE-DEP-006`).
 - Máy kiểm: allowlist và ngoại lệ (`approved_by`, `expires`) ở [`license-allow.json`](../../license-allow.json);
   `python3 scripts/xt.py license-check` (trong `lint` của `xt.yaml`) đối chiếu gói đã cài của `requirements-dev.txt`,
