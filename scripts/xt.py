@@ -9853,16 +9853,19 @@ def _pa_at(rx: "re.Pattern[str]", line: str, pos: int) -> "re.Match[str]":
 @dataclass
 class _PaScanState:
     """Trạng thái quét YAML/TOML mang sang dòng sau: nháy còn mở, độ sâu `[`/`{` (YAML), ngưỡng thụt lề của khối
-    `|`/`>` (YAML — dòng thụt sâu hơn hoặc trống thuộc khối)."""
+    `|`/`>` (YAML — dòng thụt sâu hơn hoặc trống thuộc khối), ngưỡng thụt lề của plain scalar chạy tới hết dòng (YAML —
+    dòng không phải comment thụt sâu hơn là dòng tiếp của scalar; -1 trong ngoặc)."""
 
     quote: str = ""
     flow: int = 0
     block: Optional[int] = None
+    plain: Optional[int] = None
 
 
 # AUD-SEC-378: YAML — chuỗi nháy kép chỉ mở ở chỗ đặt nút: đầu dòng, sau tiền tố `- `/`? `/`---`, thuộc tính
 # `!tag`/`&anchor`, `[`/`{`, sau `key:` và (trong ngoặc) `,`. `"` trong plain scalar, comment, khối `|`/`>`, chuỗi nháy
-# đơn (kể cả nhiều dòng) không mở chuỗi. Plain scalar dừng ở `: `, ` #`, hết dòng; trong ngoặc dừng cả ở `,[]{}`. Mọi
+# đơn (kể cả nhiều dòng) không mở chuỗi. Plain scalar dừng ở `: `, ` #`, hết dòng; trong ngoặc dừng cả ở `,[]{}`; chạy
+# tới hết dòng thì dòng không phải comment thụt sâu hơn cột cha (trong ngoặc: mọi dòng) là dòng tiếp của nó. Mọi
 # lặp possessive, mỗi token đọc một lần (tuyến tính). Không đặt nhóm bắt trong lặp possessive (`re` của Python 3.11
 # ném SystemError "span of capturing group is wrong") — cột `-` cuối của tiền tố tìm lại bằng `_PA_YAML_DASH_RE`.
 _PA_YAML_DASH = r"(?:---|-|\?)(?=[ \t]|$)"
@@ -9889,6 +9892,16 @@ def _pa_yaml_quoted(st: _PaScanState, line: str, pos: int, quote: str, spans: Li
     return m.end()
 
 
+def _pa_yaml_plain(st: _PaScanState, line: str, pos: int, parent: int) -> int:
+    """Đọc plain scalar từ `pos` → vị trí sau nó; chạy tới hết dòng (không comment) → -1 và nhớ ngưỡng thụt lề của dòng
+    tiếp (`parent` trong ngữ cảnh khối, -1 trong ngoặc): `'`/`"` đầu dòng tiếp chỉ là chữ của scalar (review blk-pa)."""
+    end = _pa_at(_PA_YAML_PLAIN_RE[st.flow > 0], line, pos).end()
+    if line[end:].strip():
+        return end
+    st.plain = -1 if st.flow else parent
+    return -1
+
+
 def _pa_yaml_node(
     st: _PaScanState, line: str, pos: int, parent: int, spans: List[Tuple[int, int]]
 ) -> Tuple[int, int, int]:
@@ -9907,7 +9920,7 @@ def _pa_yaml_node(
         st.block = parent
     if m["block"] or m["end"] is not None:
         return -1, at, parent
-    return _pa_at(_PA_YAML_PLAIN_RE[st.flow > 0], line, at).end(), at, parent
+    return _pa_yaml_plain(st, line, at, parent), at, parent
 
 
 def _pa_yaml_after(
@@ -9926,14 +9939,18 @@ def _pa_yaml_after(
 
 def _pa_yaml_spans(st: _PaScanState, line: str) -> List[Tuple[int, int]]:
     """Khoảng thân chuỗi nháy kép YAML trên một dòng (cập nhật `st`): dòng trong khối `|`/`>` không có chuỗi; dòng
-    tiếp của chuỗi còn mở bắt đầu trong chuỗi; còn lại đọc nút → sau nút → … tới hết việc."""
+    tiếp của chuỗi còn mở bắt đầu trong chuỗi; dòng tiếp của plain scalar nhiều dòng (dòng trống giữa giữ scalar mở)
+    đọc tiếp scalar; còn lại đọc nút → sau nút → … tới hết việc."""
     spans: List[Tuple[int, int]] = []
     indent = len(line) - len(line.lstrip(" "))
-    if st.block is not None and (indent > st.block or not line.strip()):
+    text = line.strip()
+    if (st.block is not None and indent > st.block) or ((st.block, st.plain) != (None, None) and not text):
         return spans
-    st.block = None
+    st.block, plain, st.plain = None, st.plain, None
     if st.quote:
         pos, start, parent = _pa_yaml_quoted(st, line, 0, st.quote, spans), 0, indent - 1
+    elif plain is not None and indent > plain and text[0] != "#":
+        pos, start, parent = _pa_yaml_plain(st, line, 0, plain), indent, plain
     else:
         pos, start, parent = _pa_yaml_node(st, line, 0, indent - 1, spans)
     while pos >= 0 and not st.quote:
@@ -10004,9 +10021,15 @@ def _pa_json_views() -> Callable[[str], List[str]]:
 
 
 def _pa_yaml_views() -> Callable[[str], List[str]]:
-    """Bộ giải mã theo dòng của `.yaml`/`.yml`: chỉ chuỗi nháy kép thật (`_pa_yaml_spans`), bảng escape YAML."""
+    """Bộ giải mã theo dòng của `.yaml`/`.yml`: chỉ chuỗi nháy kép thật (`_pa_yaml_spans`), bảng escape YAML; BOM đầu
+    dòng (đầu luồng/tài liệu YAML) không thuộc nút (review blk-pa)."""
     st = _PaScanState()
-    return lambda line: _pa_splice(line, _pa_yaml_spans(st, line), _PA_YAML_ESC)
+
+    def views(line: str) -> List[str]:
+        bom = int(line[:1] == "﻿")
+        return _pa_splice(line, [(a + bom, b + bom) for a, b in _pa_yaml_spans(st, line[bom:])], _PA_YAML_ESC)
+
+    return views
 
 
 def _pa_toml_views() -> Callable[[str], List[str]]:
