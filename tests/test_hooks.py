@@ -4594,6 +4594,14 @@ class GuardStored1018Test(unittest.TestCase):
         ):
             self.assertIsNone(self.bash(cmd), cmd)
 
+    def test_trailing_python_m_does_not_crash_guard(self):
+        """Review #420 (🔴, AUD-SEC-382): `-m` đứng cuối lệnh python làm `_py_unpack_dirs` ném IndexError → guard thả cửa,
+        lệnh nguy hiểm phía sau (`rm -rf ~`, push force) được cho qua; base chặn đúng."""
+        for cmd in ("python3 -m; rm -rf ~", "python3 -m && git push --force origin main", "python -m\nrm -rf ~"):
+            self.assertEqual(self.bash(cmd), "deny", cmd)
+        for cmd in ("python3 -m", "python3 -m zipfile"):
+            self.assertIsNone(self.bash(cmd), cmd)
+
     def test_cursor_agent_binary_name(self):
         """AUD-SEC-377 (review #418): Cursor CLI cài binary `agent` (cùng `cursor-agent`); guard chỉ biết `cursor-agent`
         nên `agent -p --force` (tự duyệt mọi lệnh, LOOP-STOP-028) lọt — `loop run --agent cursor` từng tự bật `--force`."""

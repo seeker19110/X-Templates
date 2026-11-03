@@ -17546,6 +17546,48 @@
    "allowed": true
   },
   "note": "AUD-SEC-308: chặn thừa theo ADR-0063, cách viết thay ở LOOP-STOP §Điểm dừng"
+ },
+ {
+  "id": "og-382-trailing-m-rm",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-382"
+  ],
+  "input": {
+   "command": "python3 -m; rm -rf ~"
+  },
+  "expect": {
+   "allowed": false
+  },
+  "note": "review #420: -m cuối làm guard ném IndexError"
+ },
+ {
+  "id": "og-382-trailing-m-push",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-382"
+  ],
+  "input": {
+   "command": "python3 -m && git push --force origin main"
+  },
+  "expect": {
+   "allowed": false
+  },
+  "note": "review #420: -m cuối làm guard ném IndexError"
+ },
+ {
+  "id": "og-382-control-m",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-382"
+  ],
+  "input": {
+   "command": "python3 -m"
+  },
+  "expect": {
+   "allowed": true
+  },
+  "note": "review #420: -m cuối làm guard ném IndexError"
  }
  ]
 }

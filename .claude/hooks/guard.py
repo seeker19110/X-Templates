@@ -6212,7 +6212,15 @@ def _unzip_dirs(args: List[str]) -> List[str]:
 
 def _py_unpack_dirs(args: List[str]) -> List[str]:
     """`python -m zipfile|tarfile -e|--extract A [D]` (argparse nhận tiền tố `--ext`): D, vắng = thư mục đang đứng."""
-    mod = next((args[i + 1] if a == "-m" else a[2:] for i, a in enumerate(args) if a.startswith("-m")), "")
+    # `-m` đứng cuối: không có tên module (review #420, AUD-SEC-382 — IndexError từng làm guard thả cửa cả lệnh)
+    mod = next(
+        (
+            (args[i + 1] if i + 1 < len(args) else "") if a == "-m" else a[2:]
+            for i, a in enumerate(args)
+            if a.startswith("-m")
+        ),
+        "",
+    )
     if mod not in ("zipfile", "tarfile"):
         return []
     rest = args[args.index("-m") + 2 if "-m" in args else args.index("-m" + mod) + 1 :]
