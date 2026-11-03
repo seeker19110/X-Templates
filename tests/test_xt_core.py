@@ -1718,6 +1718,33 @@ class LoopRecordBranchesTest(TmpMixin, RealAutopilotUntouchedMixin, unittest.Tes
             with redirect_stderr(err):
                 xt.main(["loop", "record", "--task", "T-002", "--executor", "opus", "--", "true"])
 
+    def test_record_warns_executor_mismatch(self):
+        """AUD-HAR-174: `loop record --executor` khác lựa chọn harness (task `self` → không agent nào; task `parallel` →
+        `executor`) → cảnh báo stderr nhưng vẫn ghi như khai (LOOP-ORCH-020); khai đúng, không khai, task ngoài PLAN → im."""
+        write(
+            self.base / "docs" / "autopilot" / "PLAN.md",
+            """
+            ### Lát 1 — nền
+            - [ ] `T-001` tự làm (files: a) — Gate: `true`
+            - [ ] `T-002` song song (topo: parallel; files: b) — Gate: `true`
+            """,
+        )
+
+        def record(task: str, executor: str | None) -> str:
+            err = io.StringIO()
+            with redirect_stdout(io.StringIO()), redirect_stderr(err):
+                xt.loop_record(task, ["false"], self.base, executor)
+            return err.getvalue()
+
+        warn = record("T-001", "executor")
+        self.assertIn("⚠ --executor executor khác lựa chọn harness (phiên chính tự làm)", warn)
+        self.assertIn("LOOP-ORCH-020", warn)
+        self.assertEqual(xt.read_evidence("T-001", self.base)["executor"], "executor")  # vẫn ghi như khai
+        self.assertIn("⚠ --executor executor-deep khác lựa chọn harness (executor)", record("T-002", "executor-deep"))
+        for task, executor in (("T-002", "executor"), ("T-001", None), ("T-999", "executor")):
+            with self.subTest(task=task, executor=executor):
+                self.assertNotIn("⚠ --executor", record(task, executor))
+
     def test_topology_default_self_executor_null(self):
         """ADR-0061 / LOOP-ORCH-024: thiếu `topo:` = `self`, `executor: null` (kể cả khi có `exec: deep` mà không
         `parallel`); `review`/`audit` cũng `null`; task `self` đỏ 2 lần vẫn chuyển cấp lên `executor-deep` (ADR-0029);

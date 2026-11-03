@@ -142,7 +142,8 @@ def copy_tree_replace(src: Path, dst: Path) -> None:
     tmp.rename(dst)
 
 
-MD_LINK_RE = re.compile(r"\]\(([^)#\s]+)")
+# Đích liên kết như `LINK_RE` của check-links: `<…>` (cho phép khoảng trắng) hoặc không khoảng trắng (AUD-CODE-044).
+MD_LINK_RE = re.compile(r"\]\((<[^>]+>|[^)#\s]+)")
 # Trích dẫn trong backtick: `research/x.md` (từ gốc repo khung) hay `../../research/x.md` (từ file) — AUD-XFEAT-047.
 TICK_RESEARCH_RE = re.compile(r"`((?:\.\./)*research/[^`#\s]+)")
 
@@ -151,7 +152,7 @@ def _research_refs(md: Path, src: Path) -> list[Path]:
     """Đích có thể của mọi tham chiếu trong `md`: liên kết Markdown (từ thư mục của file), trích dẫn backtick (từ thư mục
     của file, rồi từ gốc `src`)."""
     text = md.read_text(encoding="utf-8")
-    refs = [md.parent / link for link in MD_LINK_RE.findall(text)]
+    refs = [md.parent / link.strip("<>").split("#")[0] for link in MD_LINK_RE.findall(text)]
     return refs + [base / tick for tick in TICK_RESEARCH_RE.findall(text) for base in (md.parent, src)]
 
 
@@ -987,13 +988,19 @@ def gemini_merged(dst: Path, src: Path) -> dict[str, Any] | None:
     if not isinstance(data, dict) or not isinstance(hooks, (dict, type(None))):
         return None
     entries = (hooks or {}).get("BeforeTool")
-    keep = [e for e in entries if GEMINI_HOOK_NAME not in json.dumps(e)] if isinstance(entries, list) else []
+    # `BeforeTool` dạng lạ của dự án (không phải danh sách): giữ nguyên file, không thay im lặng (AUD-HAR-207)
+    if entries is not None and not isinstance(entries, list):
+        return None
+    keep = [e for e in entries if GEMINI_HOOK_NAME not in json.dumps(e)] if entries else []
     data["hooks"] = {**(hooks or {}), "BeforeTool": keep + ours}
     return data
 
 
 def merge_gemini_settings(dst: Path, src: Path) -> str:
-    """Ghi bản gộp của `gemini_merged` vào `.gemini/settings.json` có sẵn. Trả 'merged' | 'kept' (không đọc được)."""
+    """Ghi bản gộp của `gemini_merged` vào `.gemini/settings.json` có sẵn. Trả 'merged' | 'kept' (không đọc được/dạng lạ)
+    | 'skipped-symlink' (không ghi xuyên liên kết ra ngoài dự án — AUD-HAR-207, như AUD-HAR-010)."""
+    if dst.is_symlink():
+        return "skipped-symlink"
     data = gemini_merged(dst, src)
     if data is None:
         return "kept"
@@ -1009,9 +1016,10 @@ def adapter_src(host: str) -> Path:
 
 
 def adapter_action(target: Path, host: str) -> str:
-    """Quyết định (không ghi) cho adapter của `host`: Gemini có sẵn → 'merged' | 'kept'; còn lại như `classify_copy`."""
+    """Quyết định (không ghi) cho adapter của `host`: Gemini có sẵn (không phải symlink) → 'merged' | 'kept'; còn lại như
+    `classify_copy` (symlink → 'skipped-symlink')."""
     dst = target / ADAPTERS[host][1]
-    if host == "gemini" and dst.is_file():
+    if host == "gemini" and dst.is_file() and not dst.is_symlink():
         return "merged" if gemini_merged(dst, adapter_src(host)) is not None else "kept"
     return classify_copy(adapter_src(host), dst)[0]
 
@@ -1227,6 +1235,30 @@ GITIGNORE_EQUIV = {
 }
 
 
+GITIGNORE_PROBE = {".autopilot/": ".autopilot/state.json", ".claude/settings.local.json": ".claude/settings.local.json"}
+
+
+def gitignore_blocks(target: Path, rel: str) -> bool | None:
+    """`rel` có bị một file `.gitignore` chặn không, theo `git check-ignore` (mọi mẫu git thật — `.claude/`, `.claude/*`,
+    `*.local.*`, BOM, `!` phủ định; AUD-HAR-179; cùng luật `gitignore_blocks` của xt.py). Chỉ tính `.gitignore` (exclude
+    toàn cục/`.git/info/exclude` chỉ có ở máy này). Không có git/không phải repo → None."""
+    cmd = ["git", "-C", str(target), "check-ignore", "-v", "-z", "--stdin", "--no-index"]
+    try:
+        r = subprocess.run(cmd, input=rel + "\0", capture_output=True, text=True, timeout=10, check=False)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if r.returncode not in (0, 1):
+        return None
+    src, _, pattern = (r.stdout.split("\0") + ["", "", ""])[:3]
+    return r.returncode == 0 and Path(src).name == ".gitignore" and not pattern.startswith("!")
+
+
+def _gitignore_has(target: Path, line: str, have: set[str]) -> bool:
+    """Dòng `line` của khung đã có hiệu lực: git nói đã chặn, hoặc (không hỏi được git) có dòng tương đương."""
+    blocked = gitignore_blocks(target, GITIGNORE_PROBE[line])
+    return bool(have & set(GITIGNORE_EQUIV[line])) if blocked is None else blocked
+
+
 def ensure_gitignore(target: Path) -> None:
     """Bước 4: .gitignore thêm `.autopilot/` và `.claude/settings.local.json` nếu thiếu (tạo mới nếu chưa có file)."""
     gi = target / ".gitignore"
@@ -1234,8 +1266,8 @@ def ensure_gitignore(target: Path) -> None:
         log(f"  ⚠ bỏ qua symlink {gi} — tự thêm dòng `{'`, `'.join(GITIGNORE_LINES)}` vào file thật")
         return
     if gi.exists():
-        have = {ln.strip() for ln in gi.read_text(encoding="utf-8").splitlines()}
-        missing = [ln for ln in GITIGNORE_LINES if not have & set(GITIGNORE_EQUIV[ln])]
+        have = {ln.strip() for ln in gi.read_text(encoding="utf-8", errors="replace").splitlines()}  # AUD-HAR-180
+        missing = [ln for ln in GITIGNORE_LINES if not _gitignore_has(target, ln, have)]
         if missing:
             with gi.open("a", encoding="utf-8") as fh:
                 fh.write(

@@ -1437,7 +1437,8 @@ TOPO_RE = re.compile(
     r"\btopo:\s*(self|review|parallel|audit)\b"
 )  # `(topo: …)` → cấu hình agent (ADR-0061, LOOP-ORCH-024)
 TOPO_DEFAULT = "self"  # thiếu `topo:` = phiên chính tự làm, không giao executor
-WAVE_MAX_DEFAULT = 4  # `plan waves --max` mặc định (ADR-0061); trần cứng 5 là LOOP-ORCH-008
+WAVE_MAX_DEFAULT = 4  # `plan waves --max` mặc định (ADR-0061)
+WAVE_MAX_HARD = 5  # trần cứng LOOP-ORCH-008: `--max` lớn hơn bị từ chối (AUD-XFEAT-041)
 EXECUTOR_AGENTS = {
     "default": "executor",
     "deep": "executor-deep",
@@ -1462,6 +1463,7 @@ def parse_plan(path: Path) -> List[Dict[str, Any]]:
         tier = EXEC_TIER_RE.search(head)
         topo = TOPO_RE.search(head)
         links, bad_links = _plan_link_parse(head)
+        bad_links += _loose_tag_keys(head)
         tasks.append(
             {
                 "id": m["id"],
@@ -1515,6 +1517,17 @@ def _link_value(group: str, pos: int) -> str:
 
 
 PLAN_LINK_LOOSE_RE = re.compile(r"\b(?:sau|files)(?::|\s+T-\d)", re.I)  # `SAU:`, `Files:`, `sau T-1` — gần đúng khoá
+PLAN_TAG_LOOSE_RE = re.compile(r"\b(topo|exec)\s*:\s*[\w-]*", re.I)  # `Topo: Parallel`, `topo : x`, `exec: Deep`…
+
+
+def _loose_tag_keys(head: str) -> List[str]:
+    """`topo:`/`exec:` viết sai (hoa thường, dấu cách trước `:`, giá trị lạ) — không lặng lẽ thành `self`/`default` (task
+    `review` mất bước reviewer mà không ai biết — AUD-XFEAT-040); thành ghi chú không đọc được như `sau:`/`files:`."""
+    return [
+        m[0]
+        for m in PLAN_TAG_LOOSE_RE.finditer(head)
+        if not (TOPO_RE if m[1].lower() == "topo" else EXEC_TIER_RE).fullmatch(m[0])
+    ]
 
 
 def _loose_link_keys(group: str) -> List[str]:
@@ -1741,7 +1754,7 @@ def plan_waves(
             waves.append(
                 {
                     "wave": len(waves) + 1,
-                    "tasks": [{k: t[k] for k in ("id", "title", "tier", "files")} for t in group],
+                    "tasks": [{k: t[k] for k in ("id", "title", "tier", "topology", "files")} for t in group],
                 }
             )
     return {"waves": waves, "blocked": [{"id": k, "reason": v} for k, v in blocked.items()]}
@@ -2956,6 +2969,7 @@ def loop_record(
     sig = None if code == 0 else failure_signature(task, code, out)
     rev = task_runs_rev(base, st, task)  # PLAN đọc ngoài khoá — `fn` dưới đây chỉ so chuỗi
     plan_t = next((x for x in _plan_tasks(base, st) if x["id"] == task), None)
+    _warn_executor_mismatch(executor, plan_t, base, st)  # trước `_append_run`: lựa chọn chưa tính lần chạy này
     # Chỉ lần xanh chạy ĐÚNG Gate của task trong PLAN mới đặt lại đếm lỗi lặp và `task_runs` — `-- true`, hay tạm bỏ task
     # khỏi PLAN rồi xanh, không gỡ chặn (review #294, D-206); task ngoài PLAN chỉ `loop unblock` gỡ.
     clears = plan_t is not None and same_command(cmd_str, str(plan_t.get("gate") or ""))
@@ -2968,6 +2982,22 @@ def loop_record(
     else:
         _tick_after_green(base, st, task, cmd_str, tick and not ev.get("zero_tests_red", False))
     return code
+
+
+def _warn_executor_mismatch(
+    executor: Optional[str], plan_t: Optional[Dict[str, Any]], base: Path, st: Dict[str, Any]
+) -> None:
+    """`--executor` khác lựa chọn của harness (`executor_choice`: task `self` → không agent nào) → cảnh báo stderr, vẫn ghi
+    như khai (LOOP-ORCH-020: lệch là quên cờ — AUD-HAR-174). Không khai `--executor` hay task ngoài PLAN → im."""
+    if not executor or plan_t is None:
+        return
+    want = executor_choice(plan_t, base, st)["executor"]
+    if want != executor:
+        print(
+            f"⚠ --executor {executor} khác lựa chọn harness ({want or 'phiên chính tự làm'}) — `loop stats` tính theo"
+            " lời khai này; kiểm `(topo: …)`/`(exec: …)` của task (LOOP-ORCH-020)",
+            file=sys.stderr,
+        )
 
 
 def _record_failure_count(
@@ -4612,10 +4642,13 @@ DOCTOR_PRETOOL_TOOLS: Tuple[str, ...] = (
 
 
 def _doctor_matchers(hooks: Dict[str, Any]) -> List[Finding]:
-    """Matcher PreToolUse (regex của Claude Code) có phủ các tool phải qua guard không — bản cài cũ thiếu thì cảnh báo."""
+    """Matcher PreToolUse (regex của Claude Code) có phủ các tool phải qua guard không — bản cài cũ thiếu thì cảnh báo.
+    Matcher vắng, `""` hay `"*"` là mọi tool (Claude Code) → phủ hết (AUD-CODE-039)."""
     entries = hooks.get("PreToolUse")
     pats = [e.get("matcher") for e in entries if isinstance(e, dict)] if isinstance(entries, list) else []
-    regs = [re.compile(p) for p in pats if isinstance(p, str) and _regex_ok(p)]
+    if any(p in (None, "", "*") for p in pats):
+        return []
+    regs = [r for r in map(_regex_or_none, pats) if r is not None]
     miss = [t for t in DOCTOR_PRETOOL_TOOLS if not any(r.fullmatch(t) for r in regs)]
     if not miss:
         return []
@@ -4623,12 +4656,14 @@ def _doctor_matchers(hooks: Dict[str, Any]) -> List[Finding]:
     return [Finding("hooks", "warn", msg)]
 
 
-def _regex_ok(p: str) -> bool:
+def _regex_or_none(p: object) -> "Optional[re.Pattern[str]]":
+    """Regex đã biên dịch (một lần) của matcher `p`; không phải chuỗi hay regex hỏng → None."""
+    if not isinstance(p, str):
+        return None
     try:
-        re.compile(p)
+        return re.compile(p)
     except re.error:
-        return False
-    return True
+        return None
 
 
 def _doctor_harness_parts(base: Path) -> List[Finding]:
@@ -5212,7 +5247,8 @@ def _doctor_orchestration(base: Path) -> List[Finding]:
 
 
 SETTINGS_LOCAL_REL = ".claude/settings.local.json"  # quyền/đường dẫn máy cá nhân — không commit (LOOP-HARNESS-032)
-# Dòng `.gitignore` tương đương (so sau `strip()`, như `AUTOPILOT_IGNORES`; install.py giữ cùng tập — review #381)
+# Dòng `.gitignore` tương đương (so sau `strip()`, như `AUTOPILOT_IGNORES`; install.py giữ cùng tập — review #381) — chỉ
+# là đường lùi khi không hỏi được git (`gitignore_blocks`, AUD-HAR-179)
 SETTINGS_LOCAL_IGNORES = (
     ".claude/settings.local.json",
     "/.claude/settings.local.json",
@@ -5259,12 +5295,28 @@ def _doctor_harness_settings(base: Path) -> List[Finding]:
     return out + _doctor_settings_local(base)
 
 
+def gitignore_blocks(base: Path, rel: str) -> Optional[bool]:
+    """`rel` có bị một file `.gitignore` của repo chặn không, theo `git check-ignore` (mọi mẫu git thật: `.claude/`,
+    `.claude/*`, `*.local.*`, BOM, `!` phủ định — AUD-HAR-179). Chỉ tính luật từ `.gitignore` — exclude toàn cục hay
+    `.git/info/exclude` chỉ có ở máy này, người khác clone vẫn commit được. Không có git/không phải repo → None."""
+    if not shutil.which("git"):
+        return None
+    r = _git(base, "check-ignore", "-v", "-z", "--stdin", "--no-index", stdin=rel + "\0")
+    if r.returncode not in (0, 1):
+        return None
+    src, _, pattern = (r.stdout.split("\0") + ["", "", ""])[:3]
+    return r.returncode == 0 and Path(src).name == ".gitignore" and not pattern.startswith("!")
+
+
 def _doctor_settings_local(base: Path) -> List[Finding]:
-    """`.claude/settings.local.json` có mà `.gitignore` không chặn (dòng tương đương nào cũng được), hoặc đã bị track
-    (dòng gitignore không gỡ track — ca XT-H-021). Không có git → chỉ kiểm dòng (fail-open)."""
+    """`.claude/settings.local.json` có mà `.gitignore` không chặn (`gitignore_blocks`; không có git/không phải repo →
+    so dòng tương đương `SETTINGS_LOCAL_IGNORES`), hoặc đã bị track (dòng gitignore không gỡ track — ca XT-H-021)."""
     out: List[Finding] = []
-    lines = {ln.strip() for ln in _read_text_or_empty(base / ".gitignore").splitlines()}
-    if (base / SETTINGS_LOCAL_REL).is_file() and not lines & set(SETTINGS_LOCAL_IGNORES):
+    blocked = gitignore_blocks(base, SETTINGS_LOCAL_REL)
+    if blocked is None:
+        lines = {ln.strip() for ln in _read_text_or_empty(base / ".gitignore").splitlines()}
+        blocked = bool(lines & set(SETTINGS_LOCAL_IGNORES))
+    if (base / SETTINGS_LOCAL_REL).is_file() and not blocked:
         out.append(
             Finding(
                 "orchestration",
@@ -5498,7 +5550,10 @@ def doctor_findings(base: Path, fw: Path, deep: bool = True) -> List[Finding]:
 
 
 CONTAINER_MARKS = ("/.dockerenv", "/run/.containerenv")  # docker, podman — phiên cloud cũng chạy trong container
-CODEX_SANDBOX_RE = re.compile(r'^\s*sandbox_mode\s*=\s*"([\w-]+)"', re.M)
+# Khoá gốc `sandbox_mode` của Codex — chuỗi TOML nháy kép hoặc đơn (AUD-CODE-042); chỉ xét phần trước bảng `[…]` đầu tiên
+# (`CODEX_TABLE_RE`): `[profiles.x]` chỉ áp khi profile đó được chọn.
+CODEX_SANDBOX_RE = re.compile(r"""^\s*sandbox_mode\s*=\s*(["'])([\w-]+)\1""", re.M)
+CODEX_TABLE_RE = re.compile(r"^\s*\[", re.M)
 
 
 def _in_container() -> bool:
@@ -5541,14 +5596,30 @@ def _sandbox_sources(base: Path) -> List[str]:
     found: List[str] = []
     if _claude_sandbox(base).get("enabled") is True:
         found.append(".claude/settings(.local).json sandbox.enabled")
-    codex = base / ".codex" / "config.toml"
-    m = CODEX_SANDBOX_RE.search(codex.read_text(encoding="utf-8", errors="replace")) if codex.is_file() else None
-    if m and m.group(1) != "danger-full-access":
-        found.append(f".codex/config.toml sandbox_mode={m.group(1)}")
+    mode = _codex_sandbox_mode(base / ".codex" / "config.toml")
+    if mode and mode != "danger-full-access":
+        found.append(f".codex/config.toml sandbox_mode={mode}")
     tools = (_read_json_obj(base / ".gemini" / "settings.json") or {}).get("tools")
-    if isinstance(tools, dict) and tools.get("sandbox"):
+    if isinstance(tools, dict) and _gemini_sandbox_on(tools.get("sandbox")):
         found.append(".gemini/settings.json tools.sandbox")
     return found
+
+
+def _codex_sandbox_mode(path: Path) -> Optional[str]:
+    """`sandbox_mode` gốc của `.codex/config.toml` (trước bảng đầu tiên); file vắng/không đọc được (EACCES…) → None,
+    doctor không sập (fail-open, AUD-CODE-041)."""
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+    table = CODEX_TABLE_RE.search(text)
+    m = CODEX_SANDBOX_RE.search(text[: table.start()] if table else text)
+    return m[2] if m else None
+
+
+def _gemini_sandbox_on(sb: object) -> bool:
+    """Gemini `tools.sandbox` bật: `true` hoặc tên lệnh/ảnh (chuỗi) — chuỗi `"false"`/`"0"`/rỗng là tắt (AUD-CODE-042)."""
+    return sb is True or (isinstance(sb, str) and sb.strip().lower() not in ("", "false", "0"))
 
 
 def _claude_sandbox_fail_open(base: Path) -> List[Finding]:
@@ -6814,7 +6885,23 @@ def load_pr(args: argparse.Namespace) -> Dict[str, Any]:
 # --------------------------------------------------------------------------- CLI
 
 
+def _validate_today(args: argparse.Namespace) -> Optional[_dt.date]:
+    """Ngày so cho `--stale`, kiểm TRƯỚC khi validate (AUD-CODE-043): `--today` không kèm `--stale` hay sai định dạng →
+    in lỗi, None (exit 2, không in "✓" trước)."""
+    if args.today and args.stale is None:
+        print("✗ --today chỉ dùng với --stale", file=sys.stderr)
+        return None
+    try:
+        return _dt.date.fromisoformat(args.today) if args.today else _dt.date.today()
+    except ValueError:
+        print(f"✗ --today phải là YYYY-MM-DD: {args.today}", file=sys.stderr)
+        return None
+
+
 def cmd_validate(args: argparse.Namespace) -> int:
+    today = _validate_today(args)
+    if today is None:
+        return 2
     errors = validate(args.framework)
     if errors:
         for e in errors:
@@ -6825,11 +6912,6 @@ def cmd_validate(args: argparse.Namespace) -> int:
     n_items = sum(len(d.items) for d in docs)
     print(f"✓ Khung hợp lệ: {len(docs)} file, {n_items} mục checklist.")
     if args.stale is not None:
-        try:
-            today = _dt.date.fromisoformat(args.today) if args.today else _dt.date.today()
-        except ValueError:
-            print(f"✗ --today phải là YYYY-MM-DD: {args.today}", file=sys.stderr)
-            return 2
         old = stale_verifications(args.framework, args.stale, today)
         for where, day in old:
             print(f"⚠ {where}: xác minh {day} — {(today - _dt.date.fromisoformat(day)).days} ngày")
@@ -7658,6 +7740,7 @@ def harden_work(base: Path, st: Dict[str, Any], status: str) -> List[Dict[str, A
 # Gói nghiệm thu nháp (ADR-0052 §5, nghiên cứu §6.2, T-3549): vân tay bằng chứng theo NỘI DUNG cây (không theo SHA HEAD),
 # trừ GO-NO-GO/DECISIONS — commit chỉ ghi chữ ký/quyết định không làm gói hết hạn (FLOW-17).
 DECISIONS_EXCLUDE = ":(exclude,glob)**/DECISIONS.md"
+DECISIONS_LOG = "docs/autopilot/DECISIONS.md"  # sổ quyết định mà hàng `prod_switch` của `release-check` đọc
 SIGNOFF_EXCLUDE = [":(exclude,glob)**/GO-NO-GO*.md", DECISIONS_EXCLUDE, ":(exclude)PROGRESS.md"]
 COMMIT_SHA_RE = re.compile(
     r"[0-9a-f]{40}|[0-9a-f]{64}"
@@ -7690,14 +7773,16 @@ def evidence_fingerprint(base: Path, skip: Tuple[str, ...] = ()) -> Optional[str
 
 def _changed_since(base: Path, sha: str, keep: str = "") -> Optional[List[str]]:
     """File khác giữa commit `sha` và cây làm việc (cả file chưa track), trừ GO-NO-GO/DECISIONS/thư mục trạng thái — `keep`
-    giữ lại một mẫu trong số đó (kết quả `release-check` đọc DECISIONS.md cho hàng `prod_switch`: đổi nó là kết quả hết
-    tươi, AUD-HAR-151); `sha` không phải commit có trong repo → None (không biết phần nào đổi = hết hạn toàn bộ)."""
+    giữ lại ĐÚNG một sổ DECISIONS.md (đường dẫn từ dự án): kết quả `release-check` đọc sổ đó cho hàng `prod_switch`, đổi
+    nó là kết quả hết tươi (AUD-HAR-151); DECISIONS.md khác (`research/DECISIONS.md`) vẫn bị loại (AUD-HAR-164). `sha`
+    không phải commit có trong repo → None (không biết phần nào đổi = hết hạn toàn bộ)."""
     if not COMMIT_SHA_RE.fullmatch(sha) or _git(base, "cat-file", "-e", f"{sha}^{{commit}}").returncode != 0:
         return None
-    spec = ["--", ".", ":(exclude).autopilot", *(x for x in SIGNOFF_EXCLUDE if x != keep)]
+    spec = ["--", ".", ":(exclude).autopilot", *(x for x in SIGNOFF_EXCLUDE if not (keep and x == DECISIONS_EXCLUDE))]
     diff = _git(base, "diff", "-z", "--no-renames", "--name-only", "--relative", sha, *spec).stdout  # AUD-HAR-149
     new = _git(base, "ls-files", "--others", "--exclude-standard", "-z", *spec).stdout
-    return sorted({n for n in f"{diff}\0{new}".split("\0") if n})
+    names = {n for n in f"{diff}\0{new}".split("\0") if n}
+    return sorted(n for n in names if n == keep or n.rsplit("/", 1)[-1] != "DECISIONS.md")
 
 
 def signoff_facts(
@@ -7712,7 +7797,7 @@ def signoff_facts(
     blocker = row["level"] == "BLOCKER"
     return {
         "release": release,
-        "release_changed": _changed_since(base, release["head"], DECISIONS_EXCLUDE) if release else None,
+        "release_changed": _changed_since(base, release["head"], DECISIONS_LOG) if release else None,
         "package": package,
         "package_changed": _changed_since(base, package["candidate_head"]) if package else None,
         "evidence_fp": evidence_fingerprint(base),
@@ -9267,11 +9352,19 @@ def cmd_loop(args: argparse.Namespace) -> int:
     return handler(args, base if args.loop_cmd in LOOP_HOOK_CMDS else loop_root(base))
 
 
+def _wave_label(t: Dict[str, Any]) -> str:
+    """Nhãn task trong dòng đợt: topology khác `self` (`[parallel]`, `[review]`, `[audit]`); `(deep)` chỉ khi `parallel`
+    — task tự làm ghi `exec: deep` không được giao agent nào (AUD-DOC-149)."""
+    topo = str(t.get("topology", TOPO_DEFAULT))
+    deep = " (deep)" if topo == "parallel" and t["tier"] == "deep" else ""
+    return str(t["id"]) + ("" if topo == TOPO_DEFAULT else f" [{topo}]") + deep
+
+
 def _plan_waves_print(out: Dict[str, Any]) -> None:
     """In văn bản: mỗi đợt một dòng, mỗi task bị chặn một dòng, một dòng tổng."""
     n = 0
     for w in out["waves"]:
-        names = [t["id"] + (" (deep)" if t["tier"] == "deep" else "") for t in w["tasks"]]
+        names = [_wave_label(t) for t in w["tasks"]]
         n += len(names)
         print(f"Đợt {w['wave']} ({len(names)} task): {' · '.join(names)}")
     for b in out["blocked"]:
@@ -9280,8 +9373,8 @@ def _plan_waves_print(out: Dict[str, Any]) -> None:
 
 
 def _plan_waves(args: argparse.Namespace, base: Path) -> int:
-    if args.max < 1:
-        print("✗ --max phải ≥ 1", file=sys.stderr)
+    if not 1 <= args.max <= WAVE_MAX_HARD:
+        print(f"✗ --max phải trong 1..{WAVE_MAX_HARD} (trần cứng LOOP-ORCH-008)", file=sys.stderr)
         return 2
     st = read_state(base) or {}
     plan = base / (args.plan or str(st.get("plan") or "docs/autopilot/PLAN.md"))
@@ -9756,12 +9849,14 @@ PA_RULES: Tuple[Tuple[str, str, Tuple[str, ...]], ...] = (
 # Mỗi dải ngoài BMP một lớp `[…]` riêng (AUD-CODE-046: CodeQL `py/overly-large-range` đọc nhầm khi trộn với dải BMP).
 # AUD-SEC-357: k\u00fd t\u1ef1 `str.splitlines()` coi l\u00e0 xu\u1ed1ng d\u00f2ng ngo\u00e0i `\n`/`\r` (VT, FF, FS/GS/RS, NEL, U+2028/U+2029) c\u0169ng l\u00e0
 # k\u00fd t\u1ef1 \u1ea9n \u2014 ch\u1ec9 `\n` t\u00e1ch d\u00f2ng.
+# U+FEFF (BOM) c\u0169ng \u1ea9n \u2014 ch\u1ec9 BOM \u1edf byte 0 c\u1ee7a file \u0111\u01b0\u1ee3c mi\u1ec5n, g\u1ee1 tr\u01b0\u1edbc khi qu\u00e9t (`_pa_scan_file`, AUD-SEC-266).
 PA_HIDDEN_RE = re.compile(
-    "[\x0b\x0c\x1c-\x1e\x85\u00ad\u200b\u200e\u200f\u2028\u2029\u2060-\u2064\u202a-\u202e\u2066-\u2069]"
-    "|[\U000e0000-\U000e007f]|[\U000e0100-\U000e01ef]|(?<!^)\ufeff"
+    "[\x0b\x0c\x1c-\x1e\x85\u00ad\u200b\u200e\u200f\u2028\u2029\u2060-\u2064\u202a-\u202e\u2066-\u2069\ufeff]"
+    "|[\U000e0000-\U000e007f]|[\U000e0100-\U000e01ef]"
 )
 PA_LEAK = (r"You are Claude Code|Claude Design|You are ChatGPT|You are Codex",)
-PA_LEAK_DIRS = ("vendor/", ".claude/skills/", "prompts/", "skills/")
+# Th\u01b0 m\u1ee5c vendor/skill \u1edf b\u1ea5t k\u1ef3 \u0111o\u1ea1n n\u00e0o c\u1ee7a \u0111\u01b0\u1eddng d\u1eabn \u2014 \u0111\u00edch tuy\u1ec7t \u0111\u1ed1i hay `../` kh\u00f4ng l\u00e1ch lu\u1eadt `leak` (AUD-SEC-265).
+PA_LEAK_DIR_RE = re.compile(r"(?:^|/)(?:vendor|\.claude/skills|prompts|skills)/")
 
 
 def _pa_files(targets: Sequence[str]) -> List[Path]:
@@ -9882,7 +9977,7 @@ def _pa_line_findings(
     (`_pa_views`) cùng các dạng nhìn thấy của chúng (`_pa_visible`) — hợp các dạng chỉ thêm khớp; bỏ luật trong
     `skip`."""
     rules = [("injection", "mẫu injection", tuple("(?i)" + p for p in injection))] + list(PA_RULES)
-    rules += [("leak", "system prompt rò rỉ (CMP-LIC-024)", PA_LEAK)] if rel.startswith(PA_LEAK_DIRS) else []
+    rules += [("leak", "system prompt rò rỉ (CMP-LIC-024)", PA_LEAK)] if PA_LEAK_DIR_RE.search(rel) else []
     rules = [r for r in rules if r[0] not in skip]
     hidden = "hidden" not in skip
     decode = next((d for ext, d in _PA_DECODERS.items() if rel.lower().endswith(ext)), None)
@@ -9897,15 +9992,16 @@ def _pa_line_findings(
 
 
 def _pa_scan_file(path: Path, injection: Sequence[str]) -> List[Dict[str, object]]:
-    """Vi phạm của một file: tên file system prompt dưới thư mục vendor/skill, không UTF-8, rồi theo dòng. Mọi luật
+    """Vi phạm của một file: tên file system prompt dưới thư mục vendor/skill (đoạn nào của đường dẫn cũng được —
+    AUD-SEC-265), không UTF-8, rồi theo dòng (BOM ở byte 0 gỡ trước — AUD-SEC-266). Mọi luật
     chạy trên văn bản gốc; riêng `danger` của `.claude/settings*.json` chạy trên bản đã che chuỗi trong
     `permissions.deny` (cùng số dòng — AUD-SEC-273)."""
     rel = path.as_posix()
     out: List[Dict[str, object]] = []
-    if rel.startswith(PA_LEAK_DIRS) and re.search(r"system[_ -]?prompt", path.name, re.I):
+    if PA_LEAK_DIR_RE.search(rel) and re.search(r"system[_ -]?prompt", path.name, re.I):
         out.append({"path": rel, "line": 0, "rule": "leak", "msg": "tên file system prompt (CMP-LIC-024)"})
     try:
-        text = path.read_bytes().decode("utf-8")
+        text = path.read_bytes().decode("utf-8").removeprefix("\ufeff")  # chỉ BOM ở byte 0 được miễn (AUD-SEC-266)
     except UnicodeDecodeError:
         return out + [{"path": rel, "line": 0, "rule": "hidden", "msg": "không phải UTF-8"}]
     no_deny = _pa_without_deny(rel, text)
@@ -9960,8 +10056,10 @@ def _pa_mask_deny(text: str) -> str:
 def _pa_without_deny(rel: str, text: str) -> Optional[str]:
     """Văn bản `.claude/settings*.json` harness đã che chuỗi trong `permissions.deny` (`_pa_mask_deny`, giữ số dòng —
     AUD-SEC-273) để chạy luật `danger`: `deny` là danh sách lệnh bị CẤM khung chép vào mọi dự án đích — chỉ miễn luật
-    `danger` cho các mục đó (review #387, AUD-SEC-272); luật khác quét văn bản gốc (AUD-SEC-276). File khác (kể cả
-    `vendor/**/settings.json`), JSON hỏng, khoá trùng, không có `deny` dạng mảng → None (quét nguyên văn mọi luật)."""
+    `danger` cho các mục đó (review #387, AUD-SEC-272); luật khác quét văn bản gốc (AUD-SEC-276). Áp cho MỌI
+    `.claude/settings*.json` ở mọi độ sâu (cả `vendor/x/.claude/` — `deny` ở đó cũng là danh sách cấm, AUD-SEC-277);
+    `settings.json` ngoài `.claude/` (`vendor/pack/settings.json`), JSON hỏng, khoá trùng, không có `deny` dạng mảng →
+    None (quét nguyên văn mọi luật)."""
     if not PA_SETTINGS_RE.fullmatch(rel):
         return None
     try:
@@ -9980,17 +10078,18 @@ PA_EXEMPT_KEYS = ("path", "rule", "reason", "expires")
 
 def _pa_exemption(item: object) -> Optional[Dict[str, str]]:
     """Miễn trừ hợp lệ hoặc None: chỉ có khoá trong `PA_EXEMPT_KEYS` (khoá gõ nhầm `"Rule"` không được nới thành miễn
-    mọi luật — AUD-SEC-364), path/reason là chuỗi khác khoảng trắng, `rule` (nếu có) là chuỗi, expires là ngày có thật
-    dạng YYYY-MM-DD chữ số ASCII (AUD-SEC-259: `null`/`false`/`" "`, `２０２６-…`, `2026-13-45` không qua)."""
+    mọi luật — AUD-SEC-364), path/rule/reason là chuỗi khác khoảng trắng (thiếu `rule` không còn nghĩa là mọi luật —
+    miễn mọi luật phải ghi `"*"`, AUD-SEC-267), expires là ngày có thật dạng YYYY-MM-DD chữ số ASCII (AUD-SEC-259:
+    `null`/`false`/`" "`, `２０２６-…`, `2026-13-45` không qua)."""
     if not isinstance(item, dict) or set(item) - set(PA_EXEMPT_KEYS):
         return None
     if not all(isinstance(item.get(k, ""), str) for k in PA_EXEMPT_KEYS):
         return None
     e: Dict[str, str] = {k: item[k] for k in PA_EXEMPT_KEYS if k in item}
     exp = e.get("expires", "")
-    if not (
-        e.get("path", "").strip() and e.get("reason", "").strip() and re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", exp)
-    ):
+    if not all(e.get(k, "").strip() for k in ("path", "rule", "reason")):
+        return None
+    if not re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", exp):
         return None
     try:
         _dt.date.fromisoformat(exp)
@@ -10001,7 +10100,8 @@ def _pa_exemption(item: object) -> Optional[Dict[str, str]]:
 
 def _pa_exemptions(path: Optional[str], today: str) -> Tuple[List[Dict[str, str]], List[str]]:
     """(miễn trừ hiệu lực, lỗi) từ file JSON `[{"path": glob, "rule": id|"*", "reason", "expires": "YYYY-MM-DD"}]`:
-    miễn trừ không hợp lệ (`_pa_exemption`) hoặc quá hạn → lỗi, miễn trừ đó không có hiệu lực."""
+    miễn trừ không hợp lệ (`_pa_exemption`) hoặc quá hạn → lỗi, miễn trừ đó không có hiệu lực. `path` khớp theo đoạn
+    đường dẫn (`_pa_glob`)."""
     if not path:
         return [], []
     raw = json.loads(Path(path).read_text(encoding="utf-8"))
@@ -10013,14 +10113,38 @@ def _pa_exemptions(path: Optional[str], today: str) -> Tuple[List[Dict[str, str]
         e = _pa_exemption(item)
         if e is None:
             errors.append(
-                f"miễn trừ #{i}: chỉ nhận khoá {'/'.join(PA_EXEMPT_KEYS)}; cần path, reason (chuỗi), expires YYYY-MM-DD"
-                " là ngày có thật"
+                f'miễn trừ #{i}: chỉ nhận khoá {"/".join(PA_EXEMPT_KEYS)}; cần path, rule (id hoặc "*"), reason'
+                " (chuỗi), expires YYYY-MM-DD là ngày có thật"
             )
         elif e["expires"] < today:
             errors.append(f"miễn trừ #{i} ({e['path']}) hết hạn {e['expires']}")
         else:
             ok.append(e)
     return ok, errors
+
+
+def _pa_glob(path: str, pattern: str) -> bool:
+    """`path` khớp glob miễn trừ theo từng đoạn `/`: `*`, `?`, `[…]` không vượt `/` (`vendor/*` không phủ `vendor/a/b.md`),
+    đoạn `**` khớp 0+ đoạn (AUD-SEC-267 — `fnmatch` cho `*` vượt `/`)."""
+    parts = path.split("/")
+    at = {0}  # các vị trí đoạn của `path` mà phần mẫu đã xét có thể kết thúc
+    for seg in pattern.split("/"):
+        if seg == "**":
+            at = set(range(min(at), len(parts) + 1)) if at else at
+        else:
+            at = {i + 1 for i in at if i < len(parts) and fnmatch.fnmatchcase(parts[i], seg)}
+    return len(parts) in at
+
+
+def _pa_target_problem(paths: Sequence[str]) -> Optional[str]:
+    """Đích khai tường minh mà không có, hoặc không có file tài sản prompt nào dưới chúng → lỗi cách dùng (exit 2, không
+    "✓" — AUD-SEC-264); không khai đích (mặc định `PA_DIRS`) → None (fail-open: dự án chưa có thư mục nào)."""
+    missing = [p for p in paths if not Path(p).exists()]
+    if missing:
+        return f"không có đích: {', '.join(missing)}"
+    if paths and not _pa_files(paths):
+        return f"không có file tài sản prompt nào ({'/'.join(sorted(PA_EXTS))}) dưới: {', '.join(paths)}"
+    return None
 
 
 def prompt_assets_scan(
@@ -10037,12 +10161,16 @@ def prompt_assets_scan(
     keep = [
         f
         for f in found
-        if not any(fnmatch.fnmatch(str(f["path"]), e["path"]) and e.get("rule", "*") in ("*", f["rule"]) for e in rules)
+        if not any(_pa_glob(str(f["path"]), e["path"]) and e["rule"] in ("*", f["rule"]) for e in rules)
     ]
     return keep, errors
 
 
 def cmd_prompt_assets_scan(args: argparse.Namespace) -> int:
+    problem = _pa_target_problem(args.paths or [])
+    if problem:
+        print(f"✗ prompt-assets-scan: {problem}", file=sys.stderr)
+        return 2
     try:
         found, errors = prompt_assets_scan(args.paths or PA_DIRS, args.exempt, args.patterns, args.today)
     except (ValueError, re.error) as exc:  # mẫu/miễn trừ hỏng: lỗi cấu hình, không phải "có vi phạm" (AUD-SEC-264)
@@ -11643,7 +11771,7 @@ def _release_tree(base: Path) -> Dict[str, str]:
     return _release_row("tree", "PASS", f"cây sạch, HEAD {head[:12]}")
 
 
-def _release_prod_switch(base: Path, log: str = "docs/autopilot/DECISIONS.md") -> Dict[str, str]:
+def _release_prod_switch(base: Path, log: str = DECISIONS_LOG) -> Dict[str, str]:
     """Đề xuất "Khi chạy thật" (`loop decide --prod`) là việc chủ dự án quyết ở G7 (GO-NO-GO #18) — máy chỉ đếm, trên sổ
     và các bản tháng của nó (T-3651). File vắng bỏ qua từng file (AUD-HAR-214: sổ chính dời hết sang bản tháng vẫn đếm
     bản tháng); N/A "không có" chỉ khi không file nào tồn tại."""
@@ -12311,17 +12439,22 @@ STANDARD_LABEL = (
 TRUSTED_BOTS = {"dependabot[bot]"}  # bot cùng repo được steward xử lý như người có quyền ghi
 
 
-def review_comment_body(head: str, clean: bool, inconclusive: bool = False, debt: Sequence[str] = ()) -> str:
+def review_comment_body(
+    head: str, clean: bool, inconclusive: bool = False, debt: Sequence[str] = (), fixed: Sequence[str] = ()
+) -> str:
     """Nội dung comment `pr reviewed`/`pr debt` đăng lên PR: một dòng cho người đọc + dấu cho máy (`pr next`, `pr steward`).
     `inconclusive` (ADR-0029): reviewer không kết luận được (diff bị cắt, hết ngân sách, thiếu file) — không phải lỗi chặn,
     cũng không phải sạch; PR làn chuẩn cần một review khác ở head này. `debt` (ADR-0059): hết lượt review, phát hiện còn lại
-    đã ghi nợ ở sổ audit — tính là review hợp lệ ở head này."""
-    verdict = "debt" if debt else "inconclusive" if inconclusive else "clean" if clean else "blocking"
+    đã ghi nợ ở sổ audit — tính là review hợp lệ ở head này; `fixed` (ADR-0062): 🔴 đã sửa kèm test — chữ cho người tách
+    khỏi nợ (AUD-HAR-184), dấu máy vẫn `verdict=debt`."""
+    verdict = "debt" if debt or fixed else "inconclusive" if inconclusive else "clean" if clean else "blocking"
+    parts = [f"phát hiện còn lại ghi nợ ở sổ audit ({', '.join(debt)}), sửa cuối pha"] if debt else []
+    parts += [f"🔴 đã sửa kèm test ({', '.join(fixed)})"] if fixed else []
     text = {
         "clean": "sạch — không còn lỗi chặn",
         "blocking": "còn lỗi chặn — sửa, push rồi rà lại",
         "inconclusive": "chưa kết luận được (diff cắt/hết ngân sách/thiếu bằng chứng) — cần review khác ở head này",
-        "debt": f"hết lượt review — phát hiện còn lại ghi nợ ở sổ audit ({', '.join(debt)}), sửa cuối pha",
+        "debt": "hết lượt review — " + "; ".join(parts),
     }[verdict]
     return f"Review ở `{head[:7]}`: {text}.\n\n<!-- xt-review v1 head={head} verdict={verdict} -->"
 
@@ -12441,8 +12574,11 @@ def unpublished_review(rec: Dict[str, Any]) -> Optional[Dict[str, Any]]:
 def _ledger_clean_valid(r: Dict[str, Any]) -> bool:
     """Bản ghi sạch của sổ còn qua `_review_models_error` (luật hiện hành, không cấu hình) — tức lệnh đăng lại chạy được;
     bản ghi nợ (`pr debt`, ADR-0059/0062) không mang model — hợp lệ khi có ID nợ hoặc ID 🔴 đã sửa (`fixed`)."""
-    if "debt" in r:
-        ids = [*(r["debt"] if isinstance(r["debt"], list) else [None]), *(r.get("fixed") or [])]
+    if "debt" in r:  # `debt`/`fixed` phải là danh sách chuỗi — chuỗi trần thành `--fixed A,U,D,…` (AUD-HAR-183)
+        debt, fixed = r["debt"], r.get("fixed") or []
+        if not isinstance(debt, list) or not isinstance(fixed, list):
+            return False
+        ids = [*debt, *fixed]
         return bool(ids) and all(isinstance(i, str) for i in ids)
     vals = {k: r.get(k) for k in ("reviewer_model", "author_model", *REVIEW_EFFORT_KEYS)}
     if not all(v is None or isinstance(v, str) for v in vals.values()):
@@ -12834,11 +12970,7 @@ def _pr_rethink(args: argparse.Namespace, base: Path) -> int:
     # ADR-0061: trần theo PR, kiểm TRƯỚC D-NNN (không bắt ghi quyết định vĩnh viễn rồi mới báo hết trần — review #380);
     # PR cắt bản miễn (ADR-0059 §6)
     if 0 < cap <= len(rethinks) and not d.get("release"):
-        print(
-            f"✗ PR #{key} đã dùng {len(rethinks)}/{cap} lần `pr rethink` (xt.yaml {MAX_RETHINK_KEY}, ADR-0061) — tách PR"
-            " nhỏ hơn hoặc đóng, ghi sổ phần đã học; không mở thêm lượt",
-            file=sys.stderr,
-        )
+        print(_rethink_cap_error(key, len(rethinks), cap), file=sys.stderr)
         return 2
     problem = _rethink_problem(base, args.decision, key, rec, rethinks)
     if problem:
@@ -12854,12 +12986,44 @@ def _pr_rethink(args: argparse.Namespace, base: Path) -> int:
         error, extra, _ = _review_drift(base, last, head, str(pr.get("baseRefName") or "main"))
         if not error and not extra:
             entry["head"] = head
-    update_reviews(base, key, lambda r: {**r, "rethinks": [*_rec_rethinks(r), entry]})
+    full: List[int] = []
+    update_reviews(base, key, _rethink_append(entry, 0 if d.get("release") else cap, full))
+    if full:  # tiến trình khác đã ghi lần rethink cuối trong lúc này (AUD-CODE-040)
+        print(_rethink_cap_error(key, full[0], cap), file=sys.stderr)
+        return 2
     print(f"✓ PR #{key}: mở thêm một lần sửa theo {args.decision} — sửa hết, push, chạy lại `xt.py pr next --pr {key}`")
     return 0
 
 
-QP_OFF = ("-c", "core.quotePath=false")  # tên file có dấu không bị bọc nháy/escape trong `--name-only`
+def _rethink_cap_error(key: str, used: int, cap: int) -> str:
+    return (
+        f"✗ PR #{key} đã dùng {used}/{cap} lần `pr rethink` (xt.yaml {MAX_RETHINK_KEY}, ADR-0061) — tách PR nhỏ hơn hoặc"
+        " đóng, ghi sổ phần đã học; không mở thêm lượt"
+    )
+
+
+def _rethink_append(entry: Dict[str, Any], cap: int, full: List[int]) -> RecFn:
+    """`fn` cho `update_reviews`: thêm `entry` vào `rethinks[]` sau khi kiểm lại trần TRÊN sổ đọc trong khoá — kiểm ngoài
+    khoá ở `_pr_rethink` để báo sớm; hai `pr rethink` đồng thời không cùng qua trần (AUD-CODE-040). Hết trần → None (không
+    ghi), số lần đã dùng vào `full`. `cap` 0 = không trần (cả PR cắt bản)."""
+
+    def fn(rec: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        rethinks = _rec_rethinks(rec)
+        if 0 < cap <= len(rethinks):
+            full.append(len(rethinks))
+            return None
+        return {**rec, "rethinks": [*rethinks, entry]}
+
+    return fn
+
+
+# Tên file đổi, tách bằng NUL: `-z` không bọc nháy/escape tên nào (`core.quotePath=false` vẫn bọc tên có `"`, `\` hay ký
+# tự điều khiển — so lệch với `--show-prefix` thô, AUD-HAR-165).
+NAMES_Z = ("diff", "-z", "--no-renames", "--name-only")
+
+
+def _z_names(out: str) -> Set[str]:
+    return set(out.split("\0")) - {""}
 
 
 def _book_rows_at(base: Path, rev: str, need: bool) -> Tuple[Optional[str], List[Dict[str, str]]]:
@@ -12881,13 +13045,13 @@ def _review_drift(
     """(lỗi đọc git, file mã đổi từ review `last` tới `head`, dòng sổ audit + lưu trữ ở head) — so cây `--no-renames`; miễn sổ audit, sổ lưu trữ (T-3651) và file
     giống hệt nhánh đích `origin/<target>` (cập nhật nhánh) trừ file PR đã đổi lúc review: trả nó về bản nhánh đích hay
     xoá file PR thêm là sửa thêm chưa ai rà (AUD-SEC-154). Dùng chung cho `pr debt` và `pr rethink` (AUD-HAR-135). Dự án
-    ở thư mục con (`apps/web`): sổ đọc từ dự án (`./`), miễn theo tiền tố dự án (thô, nên diff tắt quotePath); file ngoài
+    ở thư mục con (`apps/web`): sổ đọc từ dự án (`./`), miễn theo tiền tố dự án (thô, nên diff `-z`); file ngoài
     dự án vẫn tính (AUD-HAR-155)."""
-    since = _git(base, *QP_OFF, "diff", "--no-renames", "--name-only", last, head)
-    other = _git(base, *QP_OFF, "diff", "--no-renames", "--name-only", f"origin/{target}", head)
+    since = _git(base, *NAMES_Z, last, head)
+    other = _git(base, *NAMES_Z, f"origin/{target}", head)
     fork = _git(base, "merge-base", f"origin/{target}", last)
     prefix = _git(base, "rev-parse", "--show-prefix")
-    reviewed = _git(base, *QP_OFF, "diff", "--no-renames", "--name-only", fork.stdout.strip() or last, last)
+    reviewed = _git(base, *NAMES_Z, fork.stdout.strip() or last, last)
     bad = next((r for r in (since, other, fork, prefix, reviewed) if r.returncode), None)
     why, rows = (
         (_one_line(bad.stderr) or "không có tổ tiên chung — clone nông? `git fetch --unshallow`", [])
@@ -12901,9 +13065,9 @@ def _review_drift(
             [],
             [],
         )
-    mine = set(other.stdout.splitlines()) | set(reviewed.stdout.splitlines())
-    books = {prefix.stdout.strip() + b for b in (AUDIT_STATUS_DEFAULT, AUDIT_ARCHIVE_DEFAULT)}
-    return None, sorted({f for f in since.stdout.splitlines() if f in mine} - books), rows
+    mine = _z_names(other.stdout) | _z_names(reviewed.stdout)
+    books = {prefix.stdout.removesuffix("\n") + b for b in (AUDIT_STATUS_DEFAULT, AUDIT_ARCHIVE_DEFAULT)}
+    return None, sorted({f for f in _z_names(since.stdout) if f in mine} - books), rows
 
 
 def _debt_row_problem(rows: Dict[str, Dict[str, str]], key: str, head: str, i: str, fixed: bool) -> Optional[str]:
@@ -12922,6 +13086,14 @@ def _debt_row_problem(rows: Dict[str, Dict[str, str]], key: str, head: str, i: s
     if not fixed and r.get("Mức") == "🔴":
         return f"{i} là 🔴 — không ghi nợ: sửa trong một commit (kèm test), dòng sổ `đã sửa`, rồi khai --fixed {i}"
     return None
+
+
+def _regression_tests(base: Path, last: str, head: str, extra: Sequence[str]) -> List[str]:
+    """File test trong `extra` được THÊM/SỬA (`--diff-filter=AM`) từ review `last` tới `head`, trừ `fixtures/` — xoá file
+    test hay chỉ sửa fixture không phải test hồi quy (AUD-HAR-191). Lỗi git → [] (từ chối). Test rỗng/không kiểm gì
+    máy không bắt được — reviewer rà."""
+    added = _z_names(_git(base, *NAMES_Z, "--diff-filter=AM", last, head).stdout)
+    return [p for p in extra if p in added and _is_test_path(p) and "/fixtures/" not in f"/{p}"]
 
 
 def _debt_problem(
@@ -12943,10 +13115,10 @@ def _debt_problem(
     error, extra, ledger = _review_drift(base, last, head, target)  # dòng sổ + lưu trữ ở head (T-3651)
     if error:
         return error
-    if fixed and not any(_is_test_path(p) for p in extra):  # ADR-0062 §2: bản sửa 🔴 kèm test hồi quy (AUD-HAR-182)
+    if fixed and not _regression_tests(base, last, head, extra):  # ADR-0062 §2: 🔴 kèm test hồi quy (AUD-HAR-182)
         return (
-            f"--fixed cần bản sửa sau review ở {last[:7]} có đổi ít nhất một file test (test hồi quy cho 🔴) — đã đổi:"
-            f" {', '.join(extra[:5]) or 'không có file mã/test nào'}"
+            f"--fixed cần bản sửa sau review ở {last[:7]} có đổi ít nhất một file test (thêm/sửa — xoá test hay chỉ sửa"
+            f" `fixtures/` không tính; test hồi quy cho 🔴) — đã đổi: {', '.join(extra[:5]) or 'không có file mã/test nào'}"
         )
     if extra and not fixed:
         return (
@@ -13018,7 +13190,7 @@ def _pr_debt(args: argparse.Namespace, base: Path) -> int:
     )
     if args.no_publish or entry.get("published"):
         return 0
-    rc = _publish_review(str(args.pr or key), key, head, True, debt=[*ids, *fixed])
+    rc = _publish_review(str(args.pr or key), key, head, True, debt=ids, fixed=fixed)
     if rc == 0:
         update_reviews(base, key, _mark_published(str(entry.get("at"))))
     return rc
@@ -13144,11 +13316,17 @@ def _pr_reviewed(args: argparse.Namespace, base: Path) -> int:
 
 
 def _publish_review(
-    pr_arg: str, key: str, head: str, clean: bool, inconclusive: bool = False, debt: Sequence[str] = ()
+    pr_arg: str,
+    key: str,
+    head: str,
+    clean: bool,
+    inconclusive: bool = False,
+    debt: Sequence[str] = (),
+    fixed: Sequence[str] = (),
 ) -> int:
     """Đăng kết quả review lên PR (ADR-0027) để phiên khác và workflow pr-steward thấy; lỗi → exit 3 (sổ cục bộ đã ghi)."""
     repo, _ = _pr_target(pr_arg if PR_URL_RE.search(pr_arg) else key)
-    body = review_comment_body(head, clean, inconclusive, debt)
+    body = review_comment_body(head, clean, inconclusive, debt, fixed)
     cmd = ["gh", "api", "-X", "POST", f"{repo}/issues/{key}/comments", "-f", f"body={body}"]
     try:  # cwd = gốc dự án: `{owner}/{repo}` là repo của dự án, không phải thư mục shell đang đứng
         r = subprocess.run(cmd, capture_output=True, text=True, check=False, timeout=GH_TIMEOUT, cwd=project_dir())
@@ -13157,7 +13335,7 @@ def _publish_review(
     if r.returncode != 0:
         print(
             f"⚠ chưa đăng được review lên PR #{key} ({_one_line(r.stderr)}) — pr-steward không thấy review này; "
-            f"chạy lại `xt.py pr {'debt' if debt else 'reviewed'} …` khi có gh (comment tay mang dấu bị guard chặn)",
+            f"chạy lại `xt.py pr {'debt' if debt or fixed else 'reviewed'} …` khi có gh (comment tay mang dấu bị guard chặn)",
             file=sys.stderr,
         )
         return 3
@@ -14016,7 +14194,12 @@ PERF_MIN_EFFECT = 0.02  # sàn 2 %: ngưỡng cảnh báo của Mozilla cho benc
 PERF_DIFF_HEAD = "diff --git "
 PERF_DIFF_PLAIN = "diff --git a/"
 PERF_ODD_NAME = "(tên có ký tự đặc biệt)"
-PERF_GIT_ENV = ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR", "GIT_OBJECT_DIRECTORY")
+# Kèm biến đổi nghĩa pathspec (AUD-HAR-215): `GIT_LITERAL_PATHSPECS=1` làm magic `:(literal)`/`:(glob)` của
+# `_remote_decisions` không khớp gì → `loop decide` không thấy D-NNN ở nhánh remote, cấp trùng số.
+PERF_GIT_ENV = (
+    "GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR", "GIT_OBJECT_DIRECTORY",
+    "GIT_LITERAL_PATHSPECS", "GIT_GLOB_PATHSPECS", "GIT_NOGLOB_PATHSPECS", "GIT_ICASE_PATHSPECS",
+)  # fmt: skip
 PERF_UNTRACKED = ("ls-files", "-z", "--others", "--exclude-per-directory=.gitignore")
 PERF_RULE_FILES = {  # file luật git đổi/mới trong lượt: guard báo ⚠ (đổi luật = đổi thứ guard nhìn thấy)
     ".gitignore": "đổi luật ignore — có thể giấu file mới trong vùng khoá",
@@ -14707,7 +14890,8 @@ def perf_sample(cmd: List[str], runs: int, warmup: int, timeout: float) -> List[
 
 
 def _perf_env() -> Dict[str, str]:
-    """Môi trường cho git của `perf`: bỏ biến trỏ repo/worktree/index khác — đặt sẵn chúng là lái guard sang một clone sạch."""
+    """Môi trường cho git của `perf`: bỏ biến trỏ repo/worktree/index khác — đặt sẵn chúng là lái guard sang một clone sạch —
+    và biến đổi nghĩa pathspec (`PERF_GIT_ENV`, AUD-HAR-215)."""
     return {k: v for k, v in os.environ.items() if k not in PERF_GIT_ENV}
 
 

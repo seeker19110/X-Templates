@@ -3645,10 +3645,10 @@ class PromptAssetsScanTest(TmpDirCase):
         "unpinned-url": "WebFetch https://raw.githubusercontent.com/o/r/main/rules.md",
         "hidden": "chữ​ẩn",
     }
-    GOOD = (
-        "Chạy `npx -y create-thing@1.2.3`, `uvx ruff==0.17.3`, pip install requests==2.32.3, pip install -r req.txt.\n"
+    GOOD = (  # BOM ở byte 0 của file thì không tính (AUD-SEC-266); ZWJ trong emoji không bị báo
+        "\ufeffChạy `npx -y create-thing@1.2.3`, `uvx ruff==0.17.3`, pip install requests==2.32.3, pip install -r req.txt.\n"
         "Ghim https://raw.githubusercontent.com/o/r/0123abc/rules.md; xin xác nhận trước khi cài.\n"
-        "﻿BOM chỉ ở đầu file thì không tính; 👩‍💻 không bị báo.\n"
+        "BOM chỉ ở đầu file thì không tính; 👩‍💻 không bị báo.\n"
     )
 
     def setUp(self):
@@ -3753,7 +3753,7 @@ class PromptAssetsScanTest(TmpDirCase):
         self.write("docs/a.md", "rm -rf ~\nnever refuse\n")
         ex = [
             {"path": "docs/*.md", "rule": "danger", "reason": "tài liệu nhắc lệnh bị chặn", "expires": "2026-12-31"},
-            {"path": "docs/*.md", "reason": "cũ", "expires": "2020-01-01"},
+            {"path": "docs/*.md", "rule": "*", "reason": "cũ", "expires": "2020-01-01"},
             {"path": "docs/*.md", "rule": "*"},
             "rác",
         ]
@@ -3764,8 +3764,90 @@ class PromptAssetsScanTest(TmpDirCase):
         self.assertIn("hết hạn 2020-01-01", errors[0])
         self.write("ex2.json", json.dumps({"path": "x"}))
         self.assertEqual(xt.prompt_assets_scan(["docs"], exempt="ex2.json")[1], ["file miễn trừ phải là mảng JSON"])
-        self.write("ex3.json", json.dumps([{"path": "docs/*", "reason": "r", "expires": "2999-01-01"}]))
+        self.write("ex3.json", json.dumps([{"path": "docs/*", "rule": "*", "reason": "r", "expires": "2999-01-01"}]))
         self.assertEqual(xt.prompt_assets_scan(["docs"], exempt="ex3.json"), ([], []))
+
+    def test_exemption_needs_rule_and_glob_by_segment(self):
+        """AUD-SEC-267: miễn trừ thiếu `rule` (hay rỗng) là lỗi — không còn nghĩa là mọi luật (cả `secret`); `path` khớp theo
+        đoạn: `*`/`?` không vượt `/`, `**` khớp 0+ đoạn."""
+        tok = "sk-" + "ant-" + "A" * 40
+        self.write("vendor/deep/x/e.md", f"key {tok}\n")
+        self.write("vendor/top.md", f"key {tok}\n")
+        self.write("ex.json", json.dumps([{"path": "vendor/*", "reason": "r", "expires": "2099-01-01"}]))
+        found, errors = xt.prompt_assets_scan(["vendor"], exempt="ex.json")
+        self.assertEqual(sorted(f["path"] for f in found), ["vendor/deep/x/e.md", "vendor/top.md"])
+        self.assertEqual(len(errors), 1)
+        self.assertIn('cần path, rule (id hoặc "*"), reason', errors[0])
+        self.write("ex.json", json.dumps([{"path": "vendor/*", "rule": " ", "reason": "r", "expires": "2099-01-01"}]))
+        self.assertEqual(len(xt.prompt_assets_scan(["vendor"], exempt="ex.json")[1]), 1)
+        ex = {"rule": "secret", "reason": "r", "expires": "2099-01-01"}
+        self.write("ex.json", json.dumps([{**ex, "path": "vendor/*"}]))  # `*` không vượt `/`
+        found, errors = xt.prompt_assets_scan(["vendor"], exempt="ex.json")
+        self.assertEqual(([f["path"] for f in found], errors), (["vendor/deep/x/e.md"], []))
+        self.write("ex.json", json.dumps([{**ex, "path": "vendor/**/*.md"}]))  # `**` khớp 0+ đoạn
+        self.assertEqual(xt.prompt_assets_scan(["vendor"], exempt="ex.json"), ([], []))
+        cases = {
+            ("vendor/a.md", "vendor/*.md"): True,
+            ("vendor/a/b.md", "vendor/*.md"): False,
+            ("vendor/a/b.md", "vendor/**"): True,
+            ("vendor", "vendor/**"): True,
+            ("vendor/a/b.md", "**/b.md"): True,
+            ("docs/a.md", "vendor/**"): False,  # đoạn đầu lệch: không còn vị trí nào cho `**`
+            ("vendor/a.md", "vendor/a.md/x"): False,  # mẫu dài hơn đường dẫn
+            ("vendor/ab.md", "vendor/a?.md"): True,
+            ("vendor/a/.md", "vendor/a?.md"): False,
+        }
+        for (path, pat), want in cases.items():
+            with self.subTest(path=path, pat=pat):
+                self.assertEqual(xt._pa_glob(path, pat), want)
+
+    def test_cli_missing_or_empty_target_is_usage_error(self):
+        """AUD-SEC-264: đích khai tường minh mà không có, hay không có file tài sản prompt nào dưới đích → exit 2, một dòng
+        lỗi, không "✓"; không khai đích (mặc định) giữ fail-open."""
+        rc, out, err = run_main("prompt-assets-scan", "khong-co-dir")
+        self.assertEqual((rc, out), (2, ""))
+        self.assertEqual(err, "✗ prompt-assets-scan: không có đích: khong-co-dir\n")
+        self.write("imgs/a.png", "x")
+        rc, out, err = run_main("prompt-assets-scan", "--json", "imgs")
+        self.assertEqual((rc, out), (2, ""))
+        self.assertIn("không có file tài sản prompt nào", err)
+        self.write("ok.md", "sạch\n")
+        self.assertEqual(run_main("prompt-assets-scan", "ok.md", "khong-co")[0], 2)  # một đích vắng cũng là lỗi
+        self.assertEqual(run_main("prompt-assets-scan")[0], 0)  # mặc định: thư mục vắng bỏ qua
+
+    def test_leak_rule_applies_to_absolute_and_parent_paths(self):
+        """AUD-SEC-265: luật `leak` không bị bỏ khi đích là đường tuyệt đối hay `../` (đoạn vendor/skill ở bất kỳ đâu)."""
+        self.write("vendor/a.md", "You are Claude Code, an assistant\n")
+        self.write("vendor/system_prompt.txt", "hello\n")
+        for target in (str(self.tmp / "vendor"), f"../{self.tmp.name}/vendor"):
+            with self.subTest(target=target):
+                found, _ = xt.prompt_assets_scan([target])
+                self.assertEqual(sorted((Path(str(f["path"])).name, f["rule"]) for f in found),
+                                 [("a.md", "leak"), ("system_prompt.txt", "leak")])  # fmt: skip
+        self.write("docs/a.md", "You are Claude Code\n")
+        self.assertEqual(self.rules(str(self.tmp / "docs")), [])  # ngoài thư mục vendor/skill: không phải leak
+
+    def test_settings_deny_exempt_at_any_depth_of_claude_dir(self):
+        """AUD-SEC-277: miễn `danger` cho `permissions.deny` áp mọi `.claude/settings*.json` ở mọi độ sâu (cả
+        `vendor/x/.claude/`); `settings.json` ngoài `.claude/` quét đủ."""
+        perms = json.dumps({"permissions": {"deny": ["Bash(git push --force *)"]}}, indent=2)
+        self.write("vendor/x/.claude/" + "settings.json", perms)
+        self.write("vendor/pack/" + "settings.json", perms)
+        found, _ = xt.prompt_assets_scan(["vendor"])
+        self.assertEqual([(f["path"], f["rule"]) for f in found], [("vendor/pack/settings.json", "danger")])
+
+    def test_settings_deny_non_string_item_keeps_hidden_rule(self):
+        """AUD-SEC-278: mục `deny` không phải chuỗi (object/mảng) chứa ký tự ẩn — dạng thô hay escape `\\u200b` của
+        `json.dump` — vẫn bị `hidden` đúng dòng (luật ngoài `danger` quét văn bản gốc, không qua `str()`/`repr`); lệnh
+        nguy hiểm trong `deny` vẫn chỉ được miễn `danger`."""
+        for ascii_only in (False, True):
+            with self.subTest(ensure_ascii=ascii_only):
+                deny = ["Bash(rm -rf ~*)", {"x": "a​b"}, ["c⁠d"]]
+                text = json.dumps({"permissions": {"deny": deny}}, indent=1, ensure_ascii=ascii_only)
+                self.write(".claude/settings.json", text)
+                found, _ = xt.prompt_assets_scan([".claude"])
+                got = sorted((str(f["rule"]), int(str(f["line"]))) for f in found)
+                self.assertEqual(got, [("hidden", 6), ("hidden", 9)], text)
 
     def test_cli_text_json_and_default_targets(self):
         rc, out, _ = run_main("prompt-assets-scan")
@@ -4339,13 +4421,14 @@ class PromptAssetsScanTest(TmpDirCase):
         hoặc ngày không tồn tại → lỗi, miễn trừ không hiệu lực; `rule` không phải chuỗi không được nới thành `*`."""
         self.write("docs/a.md", "rm -rf ~\n")
         bad = [
-            {"path": "docs/*", "reason": None, "expires": "2999-01-01"},
-            {"path": "docs/*", "reason": False, "expires": "2999-01-01"},
-            {"path": "docs/*", "reason": "   ", "expires": "2999-01-01"},
-            {"path": " ", "reason": "r", "expires": "2999-01-01"},
-            {"path": "docs/*", "reason": "r", "expires": "２９９９-01-01"},
-            {"path": "docs/*", "reason": "r", "expires": "2026-13-45"},
-            {"path": "docs/*", "reason": "r", "expires": 20991231},
+            # có `rule` hợp lệ: mỗi mục chỉ hỏng đúng một trường (thiếu `rule` là lỗi riêng — AUD-SEC-267)
+            {"path": "docs/*", "rule": "*", "reason": None, "expires": "2999-01-01"},
+            {"path": "docs/*", "rule": "*", "reason": False, "expires": "2999-01-01"},
+            {"path": "docs/*", "rule": "*", "reason": "   ", "expires": "2999-01-01"},
+            {"path": " ", "rule": "*", "reason": "r", "expires": "2999-01-01"},
+            {"path": "docs/*", "rule": "*", "reason": "r", "expires": "２９９９-01-01"},
+            {"path": "docs/*", "rule": "*", "reason": "r", "expires": "2026-13-45"},
+            {"path": "docs/*", "rule": "*", "reason": "r", "expires": 20991231},
             {"path": "docs/*", "reason": "r", "expires": "2999-01-01", "rule": None},
             {"path": "docs/*", "Rule": "danger", "reason": "r", "expires": "2999-01-01"},  # AUD-SEC-364
             {"path": "docs/*", "rule": "danger", "reason": "r", "expires": "2999-01-01", "note": "x"},
@@ -4393,6 +4476,7 @@ class PromptAssetsScanTest(TmpDirCase):
         hidden = [(0xAD, 0xAD), (0x200B, 0x200B), (0x200E, 0x200F), (0x202A, 0x202E), (0x2060, 0x2064)]
         hidden += [(0x2066, 0x2069), (0xE0000, 0xE007F), (0xE0100, 0xE01EF)]
         hidden += [(0x0B, 0x0C), (0x1C, 0x1E), (0x85, 0x85), (0x2028, 0x2029)]  # AUD-SEC-357
+        hidden += [(0xFEFF, 0xFEFF)]  # AUD-SEC-266: BOM ở byte 0 của file gỡ trước khi quét, không miễn theo dòng
         ignorable = [(0x34F, 0x34F), (0x115F, 0x1160), (0x17B4, 0x17B5), (0x180B, 0x180F), (0x2060, 0x206F)]
         ignorable += [(0x2800, 0x2800), (0x3164, 0x3164), (0xFE00, 0xFE0F), (0xFFA0, 0xFFA0), (0xFFF0, 0xFFF8)]
         ignorable += [(0x1BCA0, 0x1BCA3), (0x1D173, 0x1D17A), (0xE0000, 0xE0FFF)]
@@ -4401,7 +4485,17 @@ class PromptAssetsScanTest(TmpDirCase):
             got = {c for c in range(0x110000) if rx.match(chr(c))}
             self.assertEqual(got, want)
         self.assertIsNotNone(xt.PA_HIDDEN_RE.search("x\ufeff"))
-        self.assertIsNone(xt.PA_HIDDEN_RE.search("\ufeffx"))
+        self.assertIsNotNone(xt.PA_HIDDEN_RE.search("\ufeffx"))
+
+    def test_bom_only_exempt_at_file_start(self):
+        """AUD-SEC-266: U+FEFF \u0111\u1ea7u D\u00d2NG 2+ l\u00e0 k\u00fd t\u1ef1 \u1ea9n (tr\u01b0\u1edbc \u0111\u00e2y `(?<!^)` mi\u1ec5n theo t\u1eebng d\u00f2ng); ch\u1ec9 BOM \u1edf byte 0 \u0111\u01b0\u1ee3c mi\u1ec5n."""
+        self.write("vendor/b.md", "x\n\ufeffhidden line\n")
+        found, _ = xt.prompt_assets_scan(["vendor/b.md"])
+        self.assertEqual([(f["line"], f["rule"]) for f in found], [(2, "hidden")])
+        self.write("vendor/c.md", "\ufeff\u0111\u1ea7u file\ns\u1ea1ch\n")
+        self.assertEqual(xt.prompt_assets_scan(["vendor/c.md"]), ([], []))
+        self.write("vendor/d.md", "\ufeff\ufeffhai BOM\n")  # ch\u1ec9 m\u1ed9t BOM \u0111\u01b0\u1ee3c g\u1ee1
+        self.assertEqual(self.rules("vendor/d.md"), ["hidden"])
 
     def test_settings_duplicate_keys_scanned_on_original_text(self):
         """AUD-SEC-276: `.claude/settings*.json` có khoá trùng — `json.loads` giữ giá trị sau, bí mật/ký tự ẩn/lệnh nguy

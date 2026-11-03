@@ -124,12 +124,13 @@ class PlanWavesTest(unittest.TestCase):
         self.assertEqual(self.waves([task("T-001", "x"), task("T-002", "~")]), {"waves": [], "blocked": []})
 
     def test_output_shape(self):
-        """Mỗi task có đúng id/title/tier/files; kết quả có đúng hai khoá."""
+        """Mỗi task có đúng id/title/tier/topology/files; kết quả có đúng hai khoá."""
         out = self.waves([task("T-001", files=["a.py"], extra=" (exec: deep)")])
         self.assertEqual(set(out), {"waves", "blocked"})
         t = out["waves"][0]["tasks"][0]
         self.assertEqual((out["waves"][0]["wave"], t["id"], t["tier"], t["files"]), (1, "T-001", "deep", ["a.py"]))
-        self.assertEqual(set(t), {"id", "title", "tier", "files"})
+        self.assertEqual(set(t), {"id", "title", "tier", "topology", "files"})
+        self.assertEqual(t["topology"], "self")
 
     def test_disjoint_files_share_wave(self):
         """Files không giao → cùng đợt; giao (thư mục chứa file) → tách đợt khác nhóm."""
@@ -234,15 +235,18 @@ class PlanWavesTest(unittest.TestCase):
 
     # (3) CLI
     def test_cli_text(self):
-        """Văn bản: dòng đợt (deep), dòng chặn, dòng tổng; exit 0 dù có blocked."""
+        """Văn bản: dòng đợt, dòng chặn, dòng tổng; exit 0 dù có blocked. AUD-DOC-149: nhãn topology khác `self`, `(deep)`
+        chỉ khi `parallel` — task `self` ghi `exec: deep` không được giao agent nào."""
         write(
             self.base / "docs" / "autopilot" / "PLAN.md",
             "\n".join(
                 [
-                    task("T-001", files=["a"], extra=" (exec: deep)"),
+                    task("T-001", files=["a"], extra=" (topo: parallel; exec: deep)"),
                     task("T-002", files=["b"]),
                     task("T-003", files=["c"]),
                     task("T-004", after=["T-003"], files=["d"]),
+                    task("T-005", files=["e"], extra=" (exec: deep)"),
+                    task("T-006", files=["f"], extra=" (topo: review)"),
                 ]
             ),
         )
@@ -252,10 +256,10 @@ class PlanWavesTest(unittest.TestCase):
         self.assertEqual(
             out.splitlines(),
             [
-                "Đợt 1 (2 task): T-001 (deep) · T-002",
+                "Đợt 1 (4 task): T-001 [parallel] (deep) · T-002 · T-005 · T-006 [review]",
                 "⛔ T-003 — đã defer: chờ người",
                 "⛔ T-004 — chờ T-003 bị chặn",
-                "4 task mở → 1 đợt (2 bị chặn)",
+                "6 task mở → 1 đợt (2 bị chặn)",
             ],
         )
 
@@ -278,13 +282,32 @@ class PlanWavesTest(unittest.TestCase):
         self.assertEqual([len(w) for w in self.ids(json.loads(out))], [5])
 
     def test_cli_errors(self):
-        """--max < 1 và PLAN thiếu → stderr, exit 2."""
-        rc, out, err = self.run_main("plan", "waves", "--max", "0")
-        self.assertEqual((rc, out), (2, ""))
-        self.assertIn("--max", err)
+        """--max ngoài 1..5 (AUD-XFEAT-041: trần cứng LOOP-ORCH-008) và PLAN thiếu → stderr, exit 2."""
+        for bad in ("0", "6"):
+            with self.subTest(max=bad):
+                rc, out, err = self.run_main("plan", "waves", "--max", bad)
+                self.assertEqual((rc, out), (2, ""))
+                self.assertIn("✗ --max phải trong 1..5 (trần cứng LOOP-ORCH-008)", err)
         rc, out, err = self.run_main("plan", "waves")
         self.assertEqual((rc, out), (2, ""))
         self.assertIn("✗ Không thấy PLAN:", err)
+
+    def test_loose_topo_exec_tags_are_bad_links(self):
+        """AUD-XFEAT-040: `topo:`/`exec:` viết sai (hoa thường, dấu cách trước `:`, giá trị lạ) không lặng lẽ thành
+        `self`/`default` — vào `bad_links`, task bị chặn như `sau:`/`files:` hỏng; dạng đúng không bị báo."""
+        bad = ("Topo: Parallel", "TOPO: audit", "topo : parallel", "topo: paralel", "exec: Deep", "Exec: deep")
+        good = ("topo: parallel", "topo:review", "exec: deep", "exec: default", "topo: audit; exec: deep")
+        lines = [task(f"T-1{i:02d}", files=[f"b{i}"], extra=f" ({tag})") for i, tag in enumerate(bad)]
+        lines += [task(f"T-2{i:02d}", files=[f"g{i}"], extra=f" ({tag})") for i, tag in enumerate(good)]
+        out = self.check_invariant(lines)
+        blocked = {b["id"]: b["reason"] for b in out["blocked"]}
+        self.assertEqual(sorted(blocked), [f"T-1{i:02d}" for i in range(len(bad))])
+        for i, tag in enumerate(bad):
+            with self.subTest(tag=tag):
+                self.assertIn(tag, blocked[f"T-1{i:02d}"])
+        tasks = xt.parse_plan(self.base / "plan.md")
+        self.assertEqual(tasks[0]["bad_links"], ["Topo: Parallel"])
+        self.assertTrue(all(t["bad_links"] == [] for t in tasks[len(bad) :]))
 
     def test_cli_unknown_subcommand_handler(self):
         """cmd_plan với lệnh con lạ → 2 (nhánh phòng thủ như cmd_loop)."""
