@@ -110,3 +110,7 @@ Revert PR của ADR này: `_allowlist_why` là một lời gọi OR cuối `_arg
 AUD-SEC-388 lượt 2 vẫn còn). Lớp A–D độc lập nhau (mỗi lớp một hàm `_dyn_head_why`/`_reread_why`/`_split_why`/
 `_here_shell_why`); chặn oan đo được đáng kể ở một lớp thì thu hẹp đúng lớp đó bằng ADR mới, không thêm miễn trừ theo cấu
 trúc.
+
+## Ghi chú 2026-11-03
+
+Thay một phần bởi [ADR-0067](0067-guard-static-limit-layered-defense.md) (D-331/D-332): CHỈ lớp tên tệp/mô-đun dựng lúc chạy trong lệnh tự ghi tệp được chấp nhận có hạn thay vì mở rộng điều kiện kích hoạt; mọi lớp khác giữ quyết định trên.
