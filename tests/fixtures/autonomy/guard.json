@@ -19831,15 +19831,17 @@
   "id": "r426-407-stdin-data",
   "origin": "control",
   "refs": [
-   "AUD-SEC-407"
+   "AUD-SEC-407",
+   "AUD-SEC-406"
   ],
   "input": {
    "command": "printf '1 2\\n' > in.txt; python3 sum.py < in.txt"
   },
   "expect": {
-   "allowed": true
+   "allowed": false,
+   "code": "BUDGET"
   },
-  "note": "review #426 🟠: chương trình đã cấp bằng `-c`/`-`/`-m`, stdin chỉ là script khi không có chương trình khác"
+  "note": "ADR-0066 Hệ quả: lệnh lạ (script có sẵn) đọc tệp vừa ghi — chặn có chủ đích (D-327)"
  },
  {
   "id": "r426-407-dash",
@@ -19859,15 +19861,17 @@
   "id": "r426-407-bash-stdin",
   "origin": "control",
   "refs": [
-   "AUD-SEC-407"
+   "AUD-SEC-407",
+   "AUD-SEC-406"
   ],
   "input": {
    "command": "echo data > in.txt && bash run.sh < in.txt"
   },
   "expect": {
-   "allowed": true
+   "allowed": false,
+   "code": "BUDGET"
   },
-  "note": "review #426 🟠: chương trình đã cấp bằng `-c`/`-`/`-m`, stdin chỉ là script khi không có chương trình khác"
+  "note": "ADR-0066 Hệ quả: lệnh lạ (script có sẵn) đọc tệp vừa ghi — chặn có chủ đích (D-327)"
  },
  {
   "id": "r426-408-agent-force",
@@ -19897,6 +19901,282 @@
    "allowed": true
   },
   "note": "review #426 🟠: binary trần `agent` giữ luật base (`-f` tự duyệt không cần `--print`)"
+ },
+ {
+  "id": "adr66-406-py-m",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-406"
+  ],
+  "input": {
+   "command": "printf 'import os; os.system(\"git push --force origin main\")\\n' > x.py; python3 -m x"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "ADR-0066: tệp do lệnh ghi được nhắc lại ở lệnh đơn khác (trình chạy ngoài danh sách của AUD-SEC-400) — BUDGET"
+ },
+ {
+  "id": "adr66-406-node-require",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-406"
+  ],
+  "input": {
+   "command": "printf 'require(\"child_process\").execSync(\"git push --force origin main\")' > x.js; node -e 'require(\"./x.js\")'"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "ADR-0066: tệp do lệnh ghi được nhắc lại ở lệnh đơn khác (trình chạy ngoài danh sách của AUD-SEC-400) — BUDGET"
+ },
+ {
+  "id": "adr66-406-path-dot",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-406"
+  ],
+  "input": {
+   "command": "printf 'git push --force origin main\\n' > s.sh; chmod +x s.sh; PATH=.:$PATH s.sh"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "ADR-0066: tệp do lệnh ghi được nhắc lại ở lệnh đơn khác (trình chạy ngoài danh sách của AUD-SEC-400) — BUDGET"
+ },
+ {
+  "id": "adr66-406-find-exec",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-406"
+  ],
+  "input": {
+   "command": "printf 'git push --force origin main\\n' > d/s.sh; find d -name s.sh -exec bash {} \\;"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "ADR-0066: tệp do lệnh ghi được nhắc lại ở lệnh đơn khác (trình chạy ngoài danh sách của AUD-SEC-400) — BUDGET"
+ },
+ {
+  "id": "adr66-406-rcfile",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-406"
+  ],
+  "input": {
+   "command": "printf 'git push --force origin main\\n' > s.sh; bash --rcfile s.sh -i"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "ADR-0066: tệp do lệnh ghi được nhắc lại ở lệnh đơn khác (trình chạy ngoài danh sách của AUD-SEC-400) — BUDGET"
+ },
+ {
+  "id": "adr66-406-pystartup",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-406"
+  ],
+  "input": {
+   "command": "printf 'import os; os.system(\"git push --force origin main\")\\n' > x.py; PYTHONSTARTUP=x.py python3 -i"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "ADR-0066: tệp do lệnh ghi được nhắc lại ở lệnh đơn khác (trình chạy ngoài danh sách của AUD-SEC-400) — BUDGET"
+ },
+ {
+  "id": "adr66-406-make-f",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-406"
+  ],
+  "input": {
+   "command": "printf 'all:\\n\\tgit push --force origin main\\n' > m.mk; make -f m.mk"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "ADR-0066: tệp do lệnh ghi được nhắc lại ở lệnh đơn khác (trình chạy ngoài danh sách của AUD-SEC-400) — BUDGET"
+ },
+ {
+  "id": "adr66-406-py-open",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-406"
+  ],
+  "input": {
+   "command": "python3 -c \"open('s.sh','w').write('git push --force origin main')\"; bash s.sh"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "ADR-0066: tệp do lệnh ghi được nhắc lại ở lệnh đơn khác (trình chạy ngoài danh sách của AUD-SEC-400) — BUDGET"
+ },
+ {
+  "id": "adr66-406-iconv-o",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-406"
+  ],
+  "input": {
+   "command": "iconv -f utf8 -t utf8 -o s.sh in; bash s.sh"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "ADR-0066: tệp do lệnh ghi được nhắc lại ở lệnh đơn khác (trình chạy ngoài danh sách của AUD-SEC-400) — BUDGET"
+ },
+ {
+  "id": "adr66-406-ok-grep",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-406"
+  ],
+  "input": {
+   "command": "git diff > p.diff && grep x p.diff"
+  },
+  "expect": {
+   "allowed": true
+  },
+  "note": "ADR-0066: nhắc lại ở lệnh chỉ đọc (tệp không đuôi script) / dữ liệu sau chương trình `-c` chỉ đọc — cho qua"
+ },
+ {
+  "id": "adr66-406-ok-c-data",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-406"
+  ],
+  "input": {
+   "command": "curl -sSL -o p.json https://example.com/p.json && python3 -c 'import json,sys; print(json.load(open(sys.argv[1])))' p.json"
+  },
+  "expect": {
+   "allowed": true
+  },
+  "note": "ADR-0066: nhắc lại ở lệnh chỉ đọc (tệp không đuôi script) / dữ liệu sau chương trình `-c` chỉ đọc — cho qua"
+ },
+ {
+  "id": "adr66-406-ok-cd-heredoc",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-406"
+  ],
+  "input": {
+   "command": "cd /tmp/w && cat > f.py <<'EOF'\nprint(1)\nEOF\npython3 f.py"
+  },
+  "expect": {
+   "allowed": true
+  },
+  "note": "ADR-0066: nhắc lại ở lệnh chỉ đọc (tệp không đuôi script) / dữ liệu sau chương trình `-c` chỉ đọc — cho qua"
+ },
+ {
+  "id": "adr66-270-sed-split",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-270"
+  ],
+  "input": {
+   "command": "sed -i 's/(e.g.)/vi du/' f && sed -n '/error/p' g"
+  },
+  "expect": {
+   "allowed": true
+  },
+  "note": "AUD-SEC-270: `(e.g.)` trong chỗ thay không phải lệnh `e` (ca cũ đổi theo ADR-0066: dùng tệp khác)"
+ },
+ {
+  "id": "adr66-410-question",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-410"
+  ],
+  "input": {
+   "command": "python3 scripts/xt.py loop decide --question 'a find -exec b' --option x"
+  },
+  "expect": {
+   "allowed": true
+  },
+  "note": "AUD-SEC-410: chữ `find -exec` trong đối số có nháy của lệnh khác không phải lệnh find (D-153)"
+ },
+ {
+  "id": "adr66-410-find-root",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-410"
+  ],
+  "input": {
+   "command": "fi\"\"nd . -exec chmod 644 {} +"
+  },
+  "expect": {
+   "allowed": false
+  },
+  "note": "AUD-SEC-410: chữ `find -exec` trong đối số có nháy của lệnh khác không phải lệnh find (D-153)"
+ },
+ {
+  "id": "adr66-d328-ok-harmless",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-406"
+  ],
+  "input": {
+   "command": "pytest > out.txt; mkdir -p out.d; echo out.txt; printf '%s\\n' out.txt; touch out.txt; chmod 644 out.txt; sha256sum out.txt; md5sum out.txt"
+  },
+  "expect": {
+   "allowed": true
+  },
+  "note": "D-328 (ADR-0066): lệnh không chạy mã theo tên tệp / `sed -n` chỉ in nhắc tệp vừa ghi — cho qua"
+ },
+ {
+  "id": "adr66-d328-ok-sed-n",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-406"
+  ],
+  "input": {
+   "command": "sed -i 's/a/b/' f.md && sed -n '4,6p' f.md"
+  },
+  "expect": {
+   "allowed": true
+  },
+  "note": "D-328 (ADR-0066): lệnh không chạy mã theo tên tệp / `sed -n` chỉ in nhắc tệp vừa ghi — cho qua"
+ },
+ {
+  "id": "adr66-d328-chmod-run",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-406"
+  ],
+  "input": {
+   "command": "printf 'git push --force origin main\\n' > s; chmod +x s; ./s"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "D-328 (ADR-0066): `chmod +x` không là chạy, nhưng lệnh chạy tệp sau đó vẫn bị bắt"
+ },
+ {
+  "id": "adr66-d328-sed-e",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-406"
+  ],
+  "input": {
+   "command": "printf 'git push --force origin main\\n' > c.txt; sed -n e c.txt"
+  },
+  "expect": {
+   "allowed": false
+  },
+  "note": "D-328: `sed` có lệnh `e` không phải chỉ in"
  }
  ]
 }
