@@ -941,89 +941,410 @@ def _strict_why(cmd: str, cwd: Optional[str] = None) -> str:
     v = _CodeView(_fold_heredocs("\n".join(lines), True))
     if v.why:
         return v.why
-    live = "".join(ch if k != "q" else " " for ch, k in zip(v.s, v.kind))
-    bare = "".join(ch if k == "c" else " " for ch, k in zip(v.s, v.kind))
+    live, bare = _code_views(v)
     checks = ((STRICT_RAW, v.s), (STRICT_LIVE, live), (STRICT_BARE, bare))
     why = next((why for rules, text in checks for rx, why in rules if rx.search(text)), "")
     if not why and STRICT_IFS_RE.search(v.s) and STRICT_SHELL_RE.search(v.s):
         why = "`$IFS` trong script của shell lồng (AUD-SEC-239)"
-    return why or _ifs_split_why(cmd, v.s, bare) or _dyn_text_why(v, live, bare) or _gh_strict_why(v.s, live, cwd)
+    return why or _ifs_split_why(cmd, live, bare) or _dyn_text_why(v, live, bare) or _gh_strict_why(v.s, live, cwd)
+
+
+def _code_views(v: _CodeView) -> Tuple[str, str]:
+    """(`live`: chữ bash còn mở rộng — bỏ nháy đơn/comment; `bare`: chỉ mã ngoài nháy), cùng độ dài với `v.s`."""
+    live = "".join(ch if k != "q" else " " for ch, k in zip(v.s, v.kind))
+    return live, "".join(ch if k == "c" else " " for ch, k in zip(v.s, v.kind))
 
 
 # AUD-SEC-388: bash tách mở rộng không nháy theo `IFS` hiện hành, guard tách theo khoảng trắng (`IFS=/; c=git/push/…;
-# $c`). OR với luật `$IFS` ở trên (bài học #372), không thay. `IFS` có thể bị gán khi tên xuất hiện ở bất kỳ dạng chỉ-chữ-số
-# nào (cả sau bung brace: `export {I,J}FS=/`) hoặc lệnh gán có tên đích động (`printf -v "$n"`, `declare -n`, `(( $n=1 ))`)
-# → mọi mở rộng không nháy là chỗ guard không đọc chắc. `IFS=… read` (gán chỉ cho `read`, không lưu lại) không tính trừ khi
-# lệnh có thể định nghĩa lại `read` (hàm, `enable`, `alias`).
-STRICT_SPLIT_RE = re.compile(r"\$[A-Za-z_{(@*0-9]")  # `$?`/`$#`/`$$`/`$!`/`$-` ra số/cờ: không tính
-STRICT_IFS_READ_RE = re.compile(
-    r"(?P<pre>^|[;&|({\n]|\b(?:while|until|do|then|else|if)[ \t]|!)[ \t]*IFS="
-    r"(?:'[^'\\]*'|\"[^\"$`\\]*\"|\$'(?:[^'\\]|\\.)*'|[^\s;&|$`\\'\"(){}<>]*)[ \t]+read(?=[ \t;&|)\n]|$)"
+# $c`). OR với luật `$IFS` ở trên (bài học #372), không thay. Lượt 2 (review blk-guard): xét trên CẤU TRÚC lệnh (token, vị
+# trí lệnh), không trên chữ thô — chữ nhắc `IFS` trong grep/commit/heredoc dữ liệu không tính. `IFS` có thể bị gán khi:
+# là đích gán ở vị trí mã (gán đầu lệnh trừ `IFS=… read`; đối số declare/export/local/readonly/typeset; tên của read/
+# mapfile/printf -v/wait -p/getopts; biến của for/select/coproc — mọi dạng chỉ-chữ-số, cả sau bung brace); tên đích không
+# nguyên văn (`"$n"=`, `declare -$f`); nameref `-n`, thuộc tính số `-i`; `${!n:=…}`; ngữ cảnh số học — bash đánh giá ĐỆ
+# QUY giá trị biến (`n=IFS=4; (( i < n ))` gán IFS; cả chỉ số mảng, `${x:n}`, `[[ n -eq 1 ]]`, `let`) — nhắc tên/biến khi
+# lệnh đưa vào biến giá trị có thể chứa `IFS` (`_ifs_tainted`), hay lấy chữ lúc chạy (`$(…)`, `$1`); mã cùng
+# shell guard không đọc (`source`/`.`, `mapfile -C`); thân `eval`/`trap`/`sh -c` xét như mã và chữ nháy của lệnh có
+# chúng cũng tính là mở rộng (`sh -c "IFS=/; …; \$c"`). Shell con không nhận IFS từ môi trường (đã thử bash 5.2, dash).
+IFS_SPLIT_WHY = (
+    "mở rộng không nháy khi `IFS` có thể bị gán — bash tách từ khác guard (AUD-SEC-388): đặt mở rộng trong nháy kép"
+    ' (`"$c"`, `"${a[@]}"`); nạp `.env` bằng `set -a; . ./.env; set +a` rồi dùng biến trong nháy'
 )
-STRICT_REDEF_RE = re.compile(r"\(\s*\)|\b(?:function|enable|alias)\b")
-STRICT_ARITH_DYN_RE = re.compile(r"\(\([^)]*\$[^)]*[^=!<>]=(?!=)")  # `(( $n = 47 ))`: gán số học tên đích động
-STRICT_ASSIGNERS = frozenset("declare typeset local export readonly read mapfile readarray getopts let printf".split())
-STRICT_NAMEREF_RE = re.compile(r"[-+][A-Za-z]*n[A-Za-z]*")
-STRICT_FOR_LIST_RE = re.compile(r"\b(?:for|select)[ \t]+\w+[ \t]+in\b([^;\n]*)")
+STRICT_SPLIT_RE = re.compile(r"\$(?!\{#)[A-Za-z_{(@*0-9]")  # `$?`/`$#`/`$$`/`$!`/`$-`/`${#x}` ra số/cờ: không tính
+# Lệnh mà đối số tầng ngoài là dữ liệu gán, không chạy: danh sách `for/select NAME in`, đối số declare/export/… — chỉ khi ở
+# VỊ TRÍ LỆNH (đầu, sau `;` `&` `|` `(` xuống dòng — không phải `>&` —, hay sau `do`/`then`/`else`/`elif`/`!`/`{`).
+STRICT_CMD_POS = r"(?:(?:^|(?<![<>])[;&|(\n])[ \t]*|(?:^|[\s;&|(])(?:do|then|else|elif|!|\{)[ \t]+)"
+STRICT_LIST_HEAD_RE = re.compile(
+    STRICT_CMD_POS + r"(?:(?:for|select)[ \t]+[A-Za-z_]\w*[ \t]+in|declare|typeset|local|export|readonly)(?=[\s;&|)]|$)"
+)
+# Giá trị gán đầu lệnh (`n=$(…)`, `A=1 B=$x cmd`) không bị tách từ.
+STRICT_ASSIGN_WORD = r"[A-Za-z_]\w*(?:\[[^\[\]\n]*\])?\+?="
+STRICT_ASSIGN_HEAD_RE = re.compile(STRICT_CMD_POS + STRICT_ASSIGN_WORD)
+STRICT_ASSIGN_NEXT_RE = re.compile(r"[ \t]+" + STRICT_ASSIGN_WORD)
+# `read` có thể bị định nghĩa lại (hàm `tên()`/`function`, `enable`, `alias`) → `IFS=… read` không còn chỉ gán cho builtin
+STRICT_REDEF_RE = re.compile(
+    r"[^\s;&|()<>=$`'\"][ \t]*\([ \t]*\)|\bfunction\s|(?:^|[\s;&|(])(?:enable|alias)(?=[\s;&|)]|$)"
+)
+ARITH_NAME_RE = re.compile(r"[$`]|(?<![0-9A-Za-z_#])[A-Za-z_]")  # tên/mở rộng; `0x1f`, `16#ff` là số
+ARITH_SAFE_RE = re.compile(r"\$[$#?!-]")  # tham số đặc biệt ra số/cờ
+ARITH_TEST_OP_RE = re.compile(r"(?<![\w$])-[A-Za-z]+\b")  # toán tử `[[ … ]]` (`-eq`, `-f`): không phải tên
+ARITH_TEST_RE = re.compile(r"-(?:eq|ne|lt|le|gt|ge)\b")  # `[[ a -eq b ]]`: toán hạng là biểu thức số học
+ARITH_LIVE_RES = (  # mỗi lớp `[^…\[\]$]` dừng ở dấu mở kế: một lượt quét tuyến tính
+    re.compile(r"\$\{!?[A-Za-z_]\w*\[([^\[\]\n]*)\]"),  # chỉ số trong `${a[i]}`
+    re.compile(r"\$\[([^\[\]\n]*)\]"),  # `$[…]` cũ
+    re.compile(r"\$\{[A-Za-z_@*0-9]\w*(?:\[[^\[\]\n$]*\])?:(?![-=+?])([^}$\n]*\$?)"),  # `${x:off:len}`
+)
+ARITH_BARE_RES = (
+    re.compile(r"\w\[([^\[\]\n]*)\]"),
+    re.compile(r"\[([^\[\]\n]*)\]\+?="),
+)  # `a[i]=`, `a=([k]=v)`
+ARITH_INDIRECT_RE = re.compile(r"\$\{![A-Za-z_]\w*(?:\[[^\[\]\n$]*\])?:?=")  # `${!n:=v}`: gán tên động
+ARITH_DEFAULT_RE = re.compile(r"\$\{[A-Za-z_]\w*(?:\[[^\[\]\n$]*\])?:?=")  # `${x:=v}`: gán giá trị mặc định
+ARITH_RAW_RE = re.compile(r"`|\$\((?!\()|\$\{?[0-9@*]")  # chữ lấy lúc chạy: thay lệnh, tham số vị trí
+IFS_ASSIGN_WORD_RE = re.compile(r"([A-Za-z_]\w*)(?:\[([^\]]*)\])?\+?=")  # gán đầu lệnh (cả `a[i]=`, `IFS[0]=`)
+IFS_DECLARERS = frozenset("declare typeset local".split())  # nhận `-n` (nameref) và `-i` (số học)
+IFS_SAME_SHELL = frozenset("eval trap source .".split())  # chữ nháy là mã chạy trong shell hiện hành
+# lệnh → (chữ cờ ăn toán hạng, chữ cờ mà toán hạng là tên đích, từ vị trí là tên đích)
+IFS_OPT_TARGETS: Dict[str, Tuple[str, str, bool]] = {
+    "read": ("dinNptu", "a", True),
+    "mapfile": ("dnOsucC", "", True),
+    "readarray": ("dnOsucC", "", True),
+    "printf": ("", "v", False),
+    "wait": ("", "p", False),
+    "unset": ("", "", True),
+}
+STRICT_EVAL_DEPTH = 4  # số tầng `eval`/`trap` lồng xét thân; sâu hơn → coi như gán được
+IFS_TAINT_HEADS = frozenset("read mapfile readarray getopts select coproc".split())  # gán chữ từ input
 
 
-def _ifs_split_why(cmd: str, text: str, bare: str) -> str:
-    """AUD-SEC-388: lý do chặn khi `IFS` có thể bị gán và có mở rộng không nháy (rỗng = qua). `text`: chữ đã gấp heredoc
-    (thân là dữ liệu). Lệnh gọi shell/`eval`: xét chữ thô, mở rộng ở đâu cũng tính (`sh -c "IFS=/; …; \\$c"`, thân
-    heredoc vào `| bash` — chữ nháy/thân là script bash đọc lại, như AUD-SEC-239)."""
-    shell = STRICT_SHELL_RE.search(cmd)
-    text = cmd if shell else text
-    if not STRICT_SPLIT_RE.search(_for_list_free(text if shell else bare)):
+def _ifs_split_why(cmd: str, live: str, bare: str) -> str:
+    """AUD-SEC-388: lý do chặn khi có mở rộng không nháy mà `IFS` có thể bị gán (rỗng = qua). Có `eval`/`trap`/`source`
+    (mã cùng shell, như AUD-SEC-239): mở rộng ở đâu cũng tính, cả trong nháy và thân heredoc."""
+    argvs = _ifs_argvs(cmd)
+    same = argvs is not None and any(_ifs_head(a)[0] in IFS_SAME_SHELL | SHELLS for a in argvs)
+    if not STRICT_SPLIT_RE.search(cmd if same else _split_free(live, bare)):
         return ""
-    kept = text if STRICT_REDEF_RE.search(text) else STRICT_IFS_READ_RE.sub(r"\g<pre>read", text)
-    texts = [kept, *(brace_variants(kept) or [])]
-    if any("IFS" in f for t in texts for f in _letter_forms(t)) or _dyn_assign_target(cmd):
-        return "mở rộng không nháy khi `IFS` có thể bị gán — bash tách từ khác guard (AUD-SEC-388)"
-    return ""
+    return IFS_SPLIT_WHY if argvs is None or _ifs_may_assign(argvs, live, bare, 0) else ""
 
 
-def _for_list_free(text: str) -> str:
-    """Danh sách từ của `for/select NAME in …` là dữ liệu gán cho biến vòng (`IFS=$'\\n'; for f in $(ls)` — dùng lại không
-    nháy thì bị xét ở chỗ dùng): bỏ `$` ở tầng ngoài của danh sách; `$` bên trong `$(…)` là mã chạy thật — giữ."""
-
-    def blank(m: "re.Match[str]") -> str:
-        out: List[str] = []
-        depth = 0
-        for ch in m[1]:
-            depth += (ch == "(") - (ch == ")")
-            out.append(" " if ch == "$" and depth == 0 else ch)
-        return m[0][: m.start(1) - m.start()] + "".join(out)
-
-    return STRICT_FOR_LIST_RE.sub(blank, text)
-
-
-def _dyn_assign_target(cmd: str) -> bool:
-    """Lệnh gán biến mà tên đích không phải chữ nguyên văn (có thể là `IFS`): `declare/export/local/read/… "$n"=…`,
-    `printf -v "$n"`, nameref `declare -n`, gán số học `(( $n=… ))`. Token không tách được → coi như có."""
+def _ifs_argvs(cmd: str) -> Optional[List[List[str]]]:
     raw = _raw_tokens(cmd)
-    if raw is None or STRICT_ARITH_DYN_RE.search(cmd):
-        return True
-    return any(_dyn_target_argv(argv) for argv in split_commands(raw))
+    return None if raw is None else split_commands(raw)
 
 
-def _dyn_target_argv(argv: List[str]) -> bool:
-    plain = [_dequote(t) for t in argv]
+def _ifs_head(argv: List[str]) -> Tuple[str, List[str]]:
+    """(tên lệnh đã chuẩn hoá, đối số còn nháy) — sau từ khoá, gán, chuyển hướng, lệnh bọc đứng đầu."""
+    rest = _ifs_prefix(argv)[1]
+    plain = [_dequote(t) for t in rest]
     n = normalize(plain)
-    if not n or n[0] not in STRICT_ASSIGNERS:
-        return False
-    words = _assign_names(argv[len(argv) - len(_strip_prefixes(plain)) + 1 :], n[0])
-    if n[0] in ("declare", "typeset", "local") and any(STRICT_NAMEREF_RE.fullmatch(w) for w in words):
-        return True  # nameref: tên đích có thể gán sau (`declare -n r; r=$x`)
-    return any(re.search(r"[$`]", w.split("=", 1)[0]) for w in words if not w.startswith(("-", "+")))
+    return (n[0], rest[len(rest) - len(_strip_prefixes(plain)) + 1 :]) if n else ("", [])
 
 
-def _assign_names(words: List[str], head: str) -> List[str]:
-    """Từ có thể là tên đích của lệnh gán `head` — bỏ chuyển hướng và đích của nó (`read a <<< "$s"`); `printf`: chỉ
-    toán hạng của `-v`."""
-    kept = [w for i, w in enumerate(words) if not _is_redirect(w) and not (i and _is_redirect(words[i - 1]))]
-    if head != "printf":
-        return kept
-    return [w[2:] or " ".join(kept[i + 1 : i + 2]) for i, w in enumerate(kept) if w.startswith("-v")]
+def _ifs_prefix(argv: List[str]) -> Tuple[List["re.Match[str]"], List[str]]:
+    """(các gán đầu lệnh, phần còn lại) — bỏ từ khoá/chuyển hướng đứng trước. Gán đọc trên token còn nháy (giá trị
+    `$'\\n'` đã giải thành xuống dòng — `ENV_ASSIGN_RE` không qua được)."""
+    words = _no_redirects(argv)
+    assigns: List["re.Match[str]"] = []
+    for i, w in enumerate(words):
+        m = IFS_ASSIGN_WORD_RE.match(w)
+        if m:
+            assigns.append(m)
+        elif _dequote(w) not in (*SHELL_KEYWORDS, "time", "-p"):
+            return assigns, words[i:]
+    return assigns, []
+
+
+def _split_free(live: str, bare: str) -> str:
+    """`bare` bỏ các `$` mà bash không tách từ khác guard: trong số học (`$((…))` ra số, tên bên trong; `$(…)` lồng là mã —
+    giữ), giá trị gán đầu lệnh, danh sách `for … in` và đối số declare/export/… ở tầng ngoài (dữ liệu gán; `$` trong
+    `$(…)`/`(…)` là mã — giữ)."""
+    chars = list(bare)
+    for a, b in _arith_spans(live):
+        _blank_arith(live, chars, a - (a > 0 and live[a - 1] == "$"), b)
+    pos = 0
+    while m := STRICT_LIST_HEAD_RE.search(bare, pos):
+        pos = _blank_list(bare, chars, m.end(), ";&|\n)")
+    pos = 0
+    while m := STRICT_ASSIGN_HEAD_RE.search(bare, pos):
+        pos = _blank_list(bare, chars, m.end(), ";&|\n) \t")
+        while n := STRICT_ASSIGN_NEXT_RE.match(bare, pos):
+            pos = _blank_list(bare, chars, n.end(), ";&|\n) \t")
+    return "".join(chars)
+
+
+def _blank_arith(s: str, chars: List[str], i: int, end: int) -> None:
+    """Xoá `$` ở tầng số học của `s[i:end]` — trừ bên trong thay lệnh `$(…)` lồng (lệnh thật, từ của nó vẫn bị tách)."""
+    sub = 0
+    while i < end:
+        opens = not sub and s.startswith("$(", i) and not s.startswith("$((", i)
+        if sub or opens:
+            sub += (s[i + opens] == "(") - (s[i + opens] == ")")
+        if s[i] == "$" and (opens or not sub):
+            chars[i] = " "
+        i += 1 + opens
+
+
+def _blank_list(s: str, chars: List[str], i: int, stop: str) -> int:
+    """Xoá `$` tầng ngoài của dãy từ bắt đầu ở `s[i]`, tới ký tự `stop` cùng tầng (toán tử điều khiển; với giá trị gán:
+    cả khoảng trắng); trả vị trí kết."""
+    depth = 0
+    while i < len(s) and (depth or s[i] not in stop):
+        depth += (s[i] == "(") - (s[i] == ")")
+        if s[i] == "$" and not depth:
+            chars[i] = " "
+        i += 1
+    return i
+
+
+def _arith_spans(s: str) -> List[Tuple[int, int]]:
+    """Vùng `((…))` ngoài cùng (cả `$((…))`; đóng bằng `))` — `((a) b)` là hai ngoặc thường) — một lượt, tuyến tính."""
+    stack: List[Tuple[bool, int]] = []
+    spans: List[Tuple[int, int]] = []
+    depth = i = 0  # số `((` số học đang mở
+    while i < len(s):
+        step = 1
+        if s.startswith("((", i):
+            stack.append((True, i))
+            depth, step = depth + 1, 2
+        elif s[i] == "(":
+            stack.append((False, i))
+        elif s[i] == ")" and stack:
+            arith, start = stack.pop()
+            depth -= arith
+            if arith and s.startswith(")", i + 1):
+                spans += [] if depth else [(start, i + 2)]
+                step = 2
+            elif arith:
+                stack.append((False, start))
+        i += step
+    return spans
+
+
+def _double_brackets(s: str) -> List[str]:
+    """Nội dung các `[[ … ]]` (tới `]]` kế tiếp hay hết chuỗi) — tuyến tính."""
+    out: List[str] = []
+    i = s.find("[[")
+    while i >= 0:
+        j = s.find("]]", i + 2)
+        out.append(s[i + 2 : j if j >= 0 else len(s)])
+        i = s.find("[[", j + 2) if j >= 0 else -1
+    return out
+
+
+def _arith_dyn(text: str) -> bool:
+    """Biểu thức số học nhắc tên biến/mở rộng (`$` đặc biệt ra số không tính)."""
+    return bool(ARITH_NAME_RE.search(ARITH_SAFE_RE.sub("0", text)))
+
+
+def _arith_assigns(argvs: List[List[str]], live: str, bare: str) -> bool:
+    """Ngữ cảnh số học có thể gán `IFS` — bash đánh giá ĐỆ QUY giá trị biến (`n=IFS=4; (( i < n ))`): nhắc `IFS`, chữ
+    lấy lúc chạy (thay lệnh, backtick, tham số vị trí — `bash -c '(( $1 ))' _ IFS=4`), hay nhắc tên/biến khi lệnh đưa vào
+    biến một giá trị có thể chứa `IFS` (`_ifs_tainted`); `${!n:=…}`. Biến môi trường (không gán trong lệnh) là của người
+    dùng — tin như shell khởi đầu với `IFS` mặc định."""
+    if ARITH_INDIRECT_RE.search(live):
+        return True
+    dyn = [t for t in _arith_texts(argvs, live, bare) if _arith_dyn(t)]
+    if any(ARITH_RAW_RE.search(t) or any("IFS" in f for f in _letter_forms(t)) for t in dyn):
+        return True
+    return bool(dyn) and _ifs_tainted(argvs, live, bare)
+
+
+def _arith_texts(argvs: List[List[str]], live: str, bare: str) -> List[str]:
+    """Biểu thức số học của lệnh: `((…))`/`$((…))`, `[[ … -eq … ]]`, chỉ số mảng, `${x:off:len}`, `$[…]`, đối số `let`."""
+    texts = [live[a:b] for a, b in _arith_spans(live)]
+    texts += [ARITH_TEST_OP_RE.sub(" ", t) for t in _double_brackets(live) if ARITH_TEST_RE.search(t)]
+    texts += [m[1] for rx in ARITH_LIVE_RES for m in rx.finditer(live)]
+    texts += [m[1] for rx in ARITH_BARE_RES for m in rx.finditer(bare)]
+    texts += [m[2] for argv in argvs for m in _ifs_prefix(argv)[0] if m[2]]  # `a["$k"]=1`: nháy che khỏi `bare`
+    return texts + [w for head, args in map(_ifs_head, argvs) if head == "let" for w in args]
+
+
+def _ifs_tainted(argvs: List[List[str]], live: str, bare: str) -> bool:
+    """Lệnh đưa vào biến giá trị có thể chứa `IFS`: giá trị gán không nguyên văn (`$`/backtick ngoài `$((…))`), có chữ
+    `IFS` (mọi hoa/thường), nối `+=`; đích của read/mapfile/getopts/select/coproc/printf -v/wait -p (chữ từ input);
+    danh sách `for` có mở rộng/glob/chữ `IFS`; thuộc tính đổi chữ `-u`/`-l`/`-c`; `${x:=…}`; hàm (đối số vị trí)."""
+    if STRICT_REDEF_RE.search(bare) or ARITH_DEFAULT_RE.search(live):
+        return True
+    return any(map(_argv_tainted, argvs))
+
+
+def _argv_tainted(argv: List[str]) -> bool:
+    head, args = _ifs_head(argv)
+    if any(_value_tainted(m.string) for m in _ifs_prefix(argv)[0]) or head in IFS_TAINT_HEADS:
+        return True
+    rule = IFS_TAINT_RULES.get(head)
+    return rule is not None and rule(head, args)
+
+
+def _value_tainted(word: str) -> bool:
+    """Từ gán `NAME[+]=VALUE`: nối `+=`, hay giá trị có thể chứa `IFS`."""
+    name, _, value = word.partition("=")
+    return name.endswith("+") or _text_tainted(value)
+
+
+def _text_tainted(text: str) -> bool:
+    """Chữ có thể chứa `IFS`: mở rộng/thay lệnh (ngoài `$((…))` ra số), hay chữ `IFS` ở dạng chỉ-chữ-số (mọi hoa/thường)."""
+    spans = _arith_spans(text)
+    cuts = zip([0, *(b for _, b in spans)], [a - (a > 0 and text[a - 1] == "$") for a, _ in spans] + [len(text)])
+    rest = "".join(text[x:y] for x, y in cuts)
+    return bool(re.search(r"[$`]", rest)) or any("IFS" in f.upper() for f in _letter_forms(text))
+
+
+def _taint_declare(head: str, args: List[str]) -> bool:
+    words = _no_redirects(args)
+    if re.search(r"[ulc]", "".join(_dequote(w)[1:] for w in words if _is_opt(w))):
+        return True  # `declare -u n=ifs=4` → `IFS=4`
+    return any(_value_tainted(_dequote(w)) for w in words if not _is_opt(w) and "=" in w)
+
+
+def _taint_opts(head: str, args: List[str]) -> bool:
+    _, names, _ = IFS_OPT_TARGETS[head]
+    return bool(_opt_targets(_no_redirects(args), names, names, False))
+
+
+def _taint_for(head: str, args: List[str]) -> bool:
+    words = args[2:] if [_dequote(w) for w in args[1:2]] == ["in"] else []
+    return any(_text_tainted(w) or bool(re.search(r"[*?\[]", w)) for w in words)
+
+
+def _ifs_may_assign(argvs: List[List[str]], live: str, bare: str, depth: int) -> bool:
+    """`IFS` có thể bị gán ở đâu đó trong lệnh (ngữ cảnh số học, hay một lệnh đơn gán nó)."""
+    if _arith_assigns(argvs, live, bare):
+        return True
+    read_ok = not STRICT_REDEF_RE.search(bare)
+    return any(_argv_may_assign(a, read_ok, depth) for a in argvs)
+
+
+def _argv_may_assign(argv: List[str], read_ok: bool, depth: int) -> bool:
+    head, args = _ifs_head(argv)
+    if _prefix_may_assign(argv, read_ok and head == "read"):
+        return True
+    rule = IFS_HEAD_RULES.get(head)
+    return rule is not None and rule(head, args, depth)
+
+
+def _prefix_may_assign(argv: List[str], read_only: bool) -> bool:
+    """Gán đầu lệnh (sau từ khoá/chuyển hướng) `IFS=`/`IFS[0]=`, trừ khi lệnh là `read` (`read_only` — gán chỉ cho lần
+    chạy đó). Chỉ số mảng (số học) xét ở `_arith_texts`."""
+    return not read_only and any(m[1] == "IFS" for m in _ifs_prefix(argv)[0])
+
+
+def _is_opt(w: str) -> bool:
+    d = _dequote(w)
+    return len(d) > 1 and d[0] in "-+"
+
+
+def _ifs_target(word: str, subs_only: bool = False) -> bool:
+    """Từ là đích gán có thể là `IFS`: tên không nguyên văn (`$`/backtick), tên dạng chỉ-chữ-số `IFS` (cả sau bung
+    brace), hay chỉ số nhắc tên/biến (đánh giá số học). `subs_only` (`unset`): chỉ xét chỉ số."""
+    name, _, sub = _dequote(word).partition("=")[0].partition("[")
+    if _arith_dyn(sub):
+        return True
+    return not subs_only and (bool(re.search(r"[$`]", name)) or _names_ifs(name))
+
+
+def _names_ifs(name: str) -> bool:
+    variants = brace_variants(name)
+    if variants is None:
+        return True
+    return any(f == "IFS" for v in variants or [name] for p in v.split() or [v] for f in _letter_forms(p))
+
+
+def _rule_var_name(head: str, args: List[str], depth: int) -> bool:
+    """`for/select/coproc NAME`: biến vòng/tên coproc."""
+    return bool(args) and _ifs_target(args[0])
+
+
+def _rule_declare(head: str, args: List[str], depth: int) -> bool:
+    """declare/typeset/local/export/readonly: cờ động, `-n`/`-i` (declare/typeset/local), hay từ đích có thể là IFS."""
+    words = _no_redirects(args)
+    flags = "".join(_dequote(w)[1:] for w in words if _is_opt(w))
+    if re.search(r"[$`]", flags) or (head in IFS_DECLARERS and re.search(r"[in]", flags)):
+        return True
+    return any(_ifs_target(w) for w in words if not _is_opt(w))
+
+
+def _rule_opts(head: str, args: List[str], depth: int) -> bool:
+    """read/mapfile/printf -v/wait -p/unset: tên đích theo bảng `IFS_OPT_TARGETS`; `mapfile -C`: callback là mã."""
+    takes, names, positional = IFS_OPT_TARGETS[head]
+    words = _no_redirects(args)
+    if "C" in takes and any("C" in _dequote(w)[1:] for w in words if _is_opt(w)):
+        return True
+    return any(_ifs_target(w, head == "unset") for w in _opt_targets(words, takes + names, names, positional))
+
+
+def _opt_targets(words: List[str], takes: str, names: str, positional: bool) -> List[str]:
+    """Tên đích: toán hạng của cờ trong `names` (`-a NAME`, `-vNAME`), từ vị trí nếu `positional`."""
+    out: List[str] = []
+    rest = iter(words)
+    for w in rest:
+        if _is_opt(w):
+            out += _cluster_target(_dequote(w), rest, takes, names)
+        elif positional:
+            out.append(w)
+    return out
+
+
+def _cluster_target(d: str, rest: Iterator[str], takes: str, names: str) -> List[str]:
+    """Cờ gộp (`-rp …`, `-ra NAME`): chữ đầu tiên ăn toán hạng (phần còn lại của từ hay từ kế) — tên đích nếu chữ thuộc
+    `names`."""
+    for j, ch in enumerate(d[1:], 2):
+        if ch in takes:
+            val = d[j:] or next(rest, "")
+            return [val] if ch in names else []
+    return []
+
+
+def _rule_getopts(head: str, args: List[str], depth: int) -> bool:
+    words = _no_redirects(args)
+    return len(words) > 1 and _ifs_target(words[1])
+
+
+def _rule_body(head: str, args: List[str], depth: int) -> bool:
+    """Thân `eval`/`trap` là mã chạy trong shell này: xét như một lệnh (tối đa `STRICT_EVAL_DEPTH` tầng)."""
+    words = [d for d in map(_dequote, _no_redirects(args)) if d != "--"]
+    if head == "trap":
+        words = words[:1] if len(words) > 1 and words[0] not in ("-", "-p", "-l") else []
+    return bool(words) and _body_may_assign(" ".join(words), depth)
+
+
+def _rule_shell(head: str, args: List[str], depth: int) -> bool:
+    """`sh -c BODY`: thân là script (dòng lệnh thô của nó cũng là mở rộng — `_ifs_split_why`); file/stdin: lớp lồng xét."""
+    has_c, script = _shell_script_arg([head, *map(_dequote, _no_redirects(args))])
+    return has_c and (script is None or _body_may_assign(script, depth))
+
+
+def _body_may_assign(body: str, depth: int) -> bool:
+    return depth >= STRICT_EVAL_DEPTH or _text_may_assign(body, depth + 1)
+
+
+def _rule_unseen(head: str, args: List[str], depth: int) -> bool:
+    """`source`/`.`: script chạy trong shell này mà guard không đọc."""
+    return True
+
+
+def _text_may_assign(text: str, depth: int) -> bool:
+    v = _CodeView(_fold_heredocs(join_continuations(text), True))
+    argvs = _ifs_argvs(text)
+    if v.why or argvs is None:
+        return True
+    live, bare = _code_views(v)
+    return _ifs_may_assign(argvs, live, bare, depth)
+
+
+IFS_HEAD_RULES: Dict[str, Callable[[str, List[str], int], bool]] = {
+    **dict.fromkeys(("for", "select", "coproc"), _rule_var_name),
+    **dict.fromkeys(("declare", "typeset", "local", "export", "readonly"), _rule_declare),
+    **dict.fromkeys(IFS_OPT_TARGETS, _rule_opts),
+    **dict.fromkeys(("eval", "trap"), _rule_body),
+    **dict.fromkeys(("source", "."), _rule_unseen),
+    **dict.fromkeys(SHELLS, _rule_shell),
+    "getopts": _rule_getopts,
+}
+IFS_TAINT_RULES: Dict[str, Callable[[str, List[str]], bool]] = {
+    **dict.fromkeys(("declare", "typeset", "local", "export", "readonly"), _taint_declare),
+    **dict.fromkeys(("printf", "wait"), _taint_opts),
+    "for": _taint_for,
+}
 
 
 def _dyn_text_why(v: _CodeView, live: str, bare: str) -> str:
@@ -6474,14 +6795,26 @@ def _existing_test(target: str, root: str) -> bool:
 def _commit_hooks_path(argv: List[str]) -> bool:
     """Lệnh commit/push đặt `core.hooksPath` qua `-c`, biến `GIT_CONFIG_KEY_<n>` (git ≥ 2.31) hay `GIT_CONFIG_PARAMETERS`
     (git đọc như `-c`: `'core.hooksPath'='/dev/null'` — review lượt 2 AUD-SEC-352). `--config-env=core.hooksPath=VAR`
-    (`=` dính liền) bóc tiền tố trước khi so (AUD-SEC-383/389)."""
+    (`=` dính liền) bóc tiền tố trước khi so (AUD-SEC-383/389). Khoá không nguyên văn sau `-c`/`--config-env`
+    (`k=$(echo core.hooksPath); git -c "$k=/dev/null" commit` — review blk-guard) có thể là `core.hooksPath` → tính."""
     low = [a.lower().removeprefix("--config-env=") for a in argv]
     return any(
         a.startswith("core.hookspath=")
         or re.fullmatch(r"git_config_key_\d+\+?=core\.hookspath", a)
         or (a.startswith("git_config_parameters") and "core.hookspath" in a)
         for a in low
+    ) or any(_dyn_config_key(a, b) for a, b in zip(argv, argv[1:] + [""]))
+
+
+def _dyn_config_key(opt: str, nxt: str) -> bool:
+    """`-c KEY=…`, `--config-env KEY=…`, `--config-env=KEY=…` mà KEY có mở rộng chưa giải (`$`, backtick)."""
+    key = (
+        opt.removeprefix("--config-env=") if opt.startswith("--config-env=") else nxt if opt in GIT_CONFIG_OPTS else ""
     )
+    return bool(re.search(r"[$`]", key.partition("=")[0]))
+
+
+GIT_CONFIG_OPTS = ("-c", "--config-env")
 
 
 PUSH_NO_VERIFY_RE = re.compile(r"--no-veri(?:fy?)?")  # git nhận tiền tố duy nhất của cờ dài (`--no-ver` mơ hồ)
@@ -7872,7 +8205,8 @@ def _xargs_evidence(tokens: List[str]) -> List[str]:
                 or posixpath.basename(inner[0]) not in XARGS_WRITERS
             ):
                 continue
-            ledger = any(map(_names_ledger, up)) and _xargs_fed_dest(down, inner) and not _find_skips_ledger(up)
+            skips = _xargs_file_editor(down, inner) and _find_skips_ledger(up)
+            ledger = any(map(_names_ledger, up)) and _xargs_fed_dest(down, inner) and not skips
             if any(map(_names_evidence, up)) or ledger:
                 asks.append(EVIDENCE_WHY.format(f"đích từ ống `{' '.join(up)[:60]}` vào xargs {inner[0]}"))
     return asks
@@ -7889,6 +8223,20 @@ FIND_TESTS_0 = frozenset("-a -and -empty -readable -writable -executable -true -
 FIND_PRINTS = ("-print", "-print0")
 LEDGER_FIND_NAME = ("-name", "-iname")  # tên khác `FIND_NAME_TESTS` (luật `.autopilot` cũ) — không ghi đè
 LEDGER_FIND_PATH = ("-path", "-ipath", "-wholename", "-iwholename")
+# Lượt 2 (review blk-guard): find còn in THƯ MỤC tổ tiên của sổ (`-name autopilot`, `-path docs/autopilot`, nhánh `-prune`
+# in ngầm) — lệnh ghép đường (`xargs -I{} cp x {}/STAGE.json`) hay ghi vào thư mục (cp/mv/install/ln, perl/sh chạy mã) ghi
+# được sổ. Chỉ miễn cho lệnh sửa NỘI DUNG file tại chỗ, thư mục không ghi được: `sed` không `-I`/`--replace`, không theo
+# symlink (`--follow-symlinks`: file `.md` là symlink tới sổ).
+XARGS_FILE_EDITORS = ("sed",)
+
+
+def _xargs_file_editor(down: List[str], inner: List[str]) -> bool:
+    """Lệnh sau xargs chỉ sửa nội dung từng file nhận từ ống (thư mục/tổ tiên của sổ in ra thì lỗi, không ghi)."""
+    return (
+        posixpath.basename(inner[0]) in XARGS_FILE_EDITORS
+        and _xargs_replace(down[1 : len(down) - len(inner)]) is None
+        and not any(a.startswith("--f") for a in inner[1:])
+    )
 
 
 def _find_skips_ledger(up: List[str]) -> bool:
@@ -7933,8 +8281,11 @@ def _find_branch_skips(branch: List[Tuple[str, str]], explicit: bool) -> bool:
 
 def _find_pat_may_match(test: str, pat: str) -> bool:
     """Mẫu `-name`/`-path` có thể khớp sổ: `-name` so tên sổ; `-path` (`*` khớp cả `/`) so phần chữ sau `*` cuối với đuôi
-    đường dẫn sổ. `[`/`?`/`\\` (fnmatch của find khác Python: `[^…]`, `\\.`) → coi như khớp."""
+    đường dẫn sổ. `[`/`?`/`\\` (fnmatch của find khác Python: `[^…]`, `\\.`) → coi như khớp; mẫu không nguyên văn (`$(…)`,
+    `$VAR` chưa giải, backtick — review blk-guard) → coi như khớp."""
     name, pat = (LEDGER_NAME.lower(), pat.lower()) if test.startswith("-i") else (LEDGER_NAME, pat)
+    if re.search(r"[$`]", pat):
+        return True
     if test in LEDGER_FIND_NAME:
         return bool(re.search(r"[\[\\]", pat)) or fnmatch.fnmatchcase(name, pat)
     tail = pat.rsplit("*", 1)[-1]

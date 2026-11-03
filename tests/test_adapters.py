@@ -252,6 +252,11 @@ class AdapterHostTest(unittest.TestCase):
                 ("git --config-env core.hooksPath=HOME commit -m x", True),
                 ("git --config-env=user.name=USER push origin feat", False),
                 ("git --config-env=user.name=USER commit -m x", False),
+                # review blk-guard (có từ trước): khoá không nguyên văn có thể là core.hooksPath — git nhận khoá đã mở rộng
+                ('k=$(echo core.hooksPath); git -c "$k=/dev/null" commit -m x', True),
+                ('k=$(echo core.hooksPath); HP=/dev/null git --config-env="$k=HP" commit -m x', True),
+                ('git --config-env "$K=HP" push origin feat', True),
+                ('git -c "user.name=$U" commit -m x', False),
             ):
                 with self.subTest(host=host, cmd=cmd):
                     out, code = ad.run(host, _shell(host, cmd, str(ROOT)))

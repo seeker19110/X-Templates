@@ -621,7 +621,9 @@ class StageLedgerFindFilterTest(unittest.TestCase):
     """AUD-SEC-384 (review #420): nguồn ống `find` có token `docs` nhưng bộ lọc tên/đường dẫn không thể khớp sổ giai đoạn
     (`-name '*.md'`, `-prune` nhánh docs rồi `-print` nhánh lọc) → không chạm sổ, cho chạy. Giữ chặn khi mẫu có thể khớp
     sổ, không lọc, có `-o` nhánh không lọc, phủ định/ngoặc, hành động in chữ tuỳ ý (`-printf`, `-exec`), mẫu có `\\`.
-    `git ls-files docs`/`git grep -l … -- docs` thật sự có thể liệt kê sổ → giữ chặn; lọc pathspec theo đuôi thì chạy."""
+    `git ls-files docs`/`git grep -l … -- docs` thật sự có thể liệt kê sổ → giữ chặn; lọc pathspec theo đuôi thì chạy.
+    Lượt 2 (review blk-guard): find in được thư mục tổ tiên của sổ → chỉ miễn cho `sed` sửa file tại chỗ (không `-I`,
+    không `--follow-symlinks`); mẫu không nguyên văn coi như khớp sổ."""
 
     DENY = (
         "find docs | xargs sed -i s/a/b/",
@@ -643,6 +645,31 @@ class StageLedgerFindFilterTest(unittest.TestCase):
         "find docs -name '*.md' -name | xargs sed -i s/a/b/",
         "git ls-files docs | xargs sed -i s/a/b/",
         "git grep -l foo -- docs framework | xargs perl -pi -e s/a/b/",
+        # review blk-guard 🔴: mẫu không nguyên văn (thay lệnh, biến môi trường) — bash ra `STAGE.json` lúc chạy
+        'find docs -name "$(echo STAGE.json)" | xargs sed -i s/a/b/',
+        'find docs -iname "$(echo stage.json)" -print0 | xargs -0 rm -f',
+        'find docs -path "$(echo "*STAGE.json")" | xargs sed -i s/a/b/',
+        'find docs -name "$LEDGER_NAME" | xargs sed -i s/a/b/',
+        # review blk-guard 🔴: find in THƯ MỤC tổ tiên của sổ (`docs`, `docs/autopilot`, nhánh `-prune` in ngầm) — lệnh
+        # sau xargs ghép đường (`-I{}` → `{}/STAGE.json`) hay ghi vào thư mục (cp/mv/install/ln/perl/sh)
+        "find docs -type d -name autopilot | xargs -I{} cp evil {}/STAGE.json",
+        "find docs -maxdepth 1 -name autopilot | xargs -I{} perl -pi -e s/G4/G8/ {}/STAGE.json",
+        "find . -maxdepth 1 -name docs | xargs -I% cp evil %/autopilot/STAGE.json",
+        "find docs -maxdepth 0 -name docs | xargs -I{} sed -i 's/a/b/' {}/autopilot/STAGE.json",
+        "find docs -type d -name autopilot | xargs mv evildir/STAGE.json",
+        "find docs -type d -name autopilot | xargs cp -r evildir/.",
+        "find docs -name autopilot | xargs -I{} cp /tmp/forged/STAGE.json {}/",
+        "find docs -name autopilot -type d | xargs -I{} cp -r /tmp/forged/. {}",
+        "find docs -name autopilot | xargs -I{} mv {} /tmp/gone",
+        "find . -path ./docs/autopilot | xargs -I{} cp /tmp/forged/STAGE.json {}/",
+        "find docs -path '*/autopilot' | xargs -I{} cp /tmp/forged/STAGE.json {}/",
+        "find docs -path docs/autopilot -prune -o -name '*.md' | xargs -I{} cp -r /tmp/forged/. {}",
+        "find docs -name autopilot | xargs -I{} install -m 644 /tmp/forged/STAGE.json {}",
+        "find docs -name autopilot | xargs -I{} ln -sf /tmp/forged/STAGE.json {}/",
+        'find docs -name autopilot | xargs perl -e \'open F, ">", "$ARGV[0]/STAGE.json"\'',
+        "find docs -name '*.md' | xargs perl -pi -e s/a/b/",
+        "find docs -name '*.md' | xargs --replace sed -i s/a/b/ {}",
+        "find docs -name '*.md' | xargs sed -i --follow-symlinks s/a/b/",
     )
     ALLOW = (
         "find docs -name '*.md' | xargs sed -i s/a/b/",
