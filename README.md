@@ -265,6 +265,7 @@ python3 -m unittest discover -s tests    # chỉ test (cổng test còn đòi co
 - [ADR-0063](docs/adr/0063-guard-canonical-subset.md): guard chỉ cho chạy tập con bash nó đọc chắc (backtick, nháy/ngoặc không đóng, `$IFS`, `~N`, brace bung `#`, mã động, đăng dấu review…) — ngoài tập con thì chặn (`BUDGET`) thay vì vá từng ca lách (D-299).
 - [ADR-0064](docs/adr/0064-multi-provider-harness.md) (D-303): harness đa nhà cung cấp — một lõi chính sách trung lập, adapter mỏng theo công cụ (Codex, Gemini CLI, Cursor, Copilot CLI, Grok Build, OpenCode), sàn chung bằng git hook, vòng lặp ngoài `loop run --agent`, sandbox kiểm bằng `doctor`; nghiên cứu `research/2026-11-02-multi-provider-harness.md`.
 - [ADR-0065](docs/adr/0065-guard-allowlist-dynamic-expansion.md) (D-322): guard xét mở rộng động theo danh sách trắng — từ lệnh dựng lúc chạy, tách/gán theo tên động (`IFS`), heredoc đọc lại, dữ liệu thành mã (`mapfile -C`, `${x@P}`) → `BUDGET`; không suy cấu trúc lệnh để miễn.
+- [ADR-0066](docs/adr/0066-guard-written-file-reuse.md) (D-327): tệp do chính lệnh ghi mà tên được nhắc lại ở chỗ khác của lệnh (trừ lệnh chỉ đọc trong danh sách trắng) → `BUDGET` — không liệt kê trình chạy (AUD-SEC-406).
 
 Nghiên cứu nền ngày 2026-10-13 ở [`research/`](research/): phân tích khung cũ, trích xuất catalog `seeker19110/stored`,
 AI agent và giao thức, cơ chế Claude Code. Khung cũ khôi phục được bằng `git archive 1b80fe4`.

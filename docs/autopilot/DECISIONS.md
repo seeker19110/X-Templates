@@ -114,3 +114,31 @@
 - Chọn: Sửa mọi dạng do mã mới cho qua (D-324 thu hẹp: không miễn khi có cd/pushd/popd, stdin/here-string/đối số của trình chạy, writer ngoài cat/tee; /dev/ chỉ bỏ null/std*/fd/tty; mảng chữ thay phần tử vào argv rồi áp luật, $@ sau set --/hàm là mảng nhiễm) thành ID 🔴 mới đã sửa; lỗ liệt kê có từ trước ghi ID 🔴 mở riêng (chặn phát hành, PLAN kế); 🟠/🟢 sửa luôn
 - Lý do (tiêu chí chất lượng cuối): (1) đóng mọi lỗ do PR này mở ra, ghi trung thực phần còn lại (không khai đóng sớm — bài học #423); (4) giữ gỡ chặn oan D-324; lỗ liệt kê là giới hạn mô hình danh sách đen, cần ADR riêng (sandbox/allowlist trình chạy) — không vá tiếp trong lát này
 - Đường lùi: Revert commit sửa review #426
+
+### D-327 · 2026-11-03T13:21:18+00:00 · AUD-SEC-406: lỗ liệt kê trình chạy/trình ghi của luật ghi-rồi-chạy (AUD-SEC-400) — đóng bằng cách nào; và chặn oan 'cd trước cat > f' của D-326?
+
+- Phương án: (1) Vá tiếp danh sách trình chạy/trình ghi · (2) ADR-0066: xét theo TÊN tệp đích ghi được nhắc lại ở chỗ khác của lệnh (trừ lệnh chỉ đọc trong danh sách trắng với tệp không đuôi script), thêm -o/--output và đích ghi của bộ quét script; miễn D-324 chỉ mất khi cd nằm giữa ghi và chạy · (3) Bắt buộc sandbox Claude Code
+- Chọn: ADR-0066: xét theo TÊN tệp đích ghi được nhắc lại ở chỗ khác của lệnh (trừ lệnh chỉ đọc trong danh sách trắng với tệp không đuôi script), thêm -o/--output và đích ghi của bộ quét script; miễn D-324 chỉ mất khi cd nằm giữa ghi và chạy
+- Lý do (tiêu chí chất lượng cuối): (1) không phụ thuộc danh sách trình chạy — lệnh lạ bị tính (hướng an toàn); sandbox không chặn force-push qua mạng; (4) gỡ chặn oan cd-trước của D-326; (3) dùng dữ liệu đích ghi sẵn có, không suy cấu trúc mới (ADR-0065)
+- Đường lùi: Revert PR triển khai; AUD-SEC-406 về mở
+
+### D-328 · 2026-11-03T14:26:55+00:00 · ADR-0066 chặn mới 340/5237 lệnh (6,5 %): giữ nguyên, thêm lệnh không chạy mã vào danh sách trắng (B), miễn tệp dữ liệu đưa cho script có sẵn (C), hay B+C? Giữ 3 miễn theo giá trị (p.json đối số dữ liệu của -c chỉ đọc; tên gốc bỏ đuôi không tính với đuôi dữ liệu; tệp nội dung gh -F/--body-file/< F)?
+
+- Phương án: (1) A: giữ nguyên · (2) B: thêm mkdir/echo/printf/chmod/sha*sum/md5sum/touch/sed -n chỉ in vào danh sách trắng; giữ 3 miễn theo giá trị · (3) B+C: thêm cả miễn tệp dữ liệu cho script có sẵn
+- Chọn: B: thêm mkdir/echo/printf/chmod/sha*sum/md5sum/touch/sed -n chỉ in vào danh sách trắng; giữ 3 miễn theo giá trị
+- Lý do (tiêu chí chất lượng cuối): (1) B chỉ thêm lệnh không chạy mã — không mở đường thực thi; C đảo phần AUD-SEC-407 vừa siết và tin vào nội dung script có sẵn (có thể exec đối số) → loại; 3 miễn theo giá trị có kiểm _read_only_script/đuôi dữ liệu/đọc nội dung — giữ (giữ 6 ca D-270); (4) bớt chặn oan ~24 ca
+- Đường lùi: Bỏ các lệnh B khỏi danh sách trắng
+
+### D-329 · 2026-11-03T15:12:36+00:00 · #427 review chặn: 7 🔴 (3 hồi quy do miễn mới — AUD-SEC-410 trả sớm mở lại find . -delete qua rebase --exec/make --eval; D-324 cd bỏ mất gán CDPATH; -oVALUE dính; 3 lỗ miễn mới — perl do $ARGV, chiếm tên lệnh đọc qua PATH, LESSOPEN/GIT_EXTERNAL_DIFF; AUD-SEC-406 khai đóng sai với tên dựng lúc chạy) — đổi chiến lược thế nào (max_rethink, ADR-0061)?
+
+- Phương án: (1) Vá tiếp từng 🔴 trong PR · (2) Thu PR về luật CHẶN, bỏ/siết mọi miễn mới: AUD-SEC-410 về hành vi base (bỏ trả sớm); D-324 về hành vi #426 (có cd/pushd/popd/gán biến trước writer là mất miễn); _reuse_data_arg chỉ họ python; lệnh đọc mất miễn khi tên lệnh trùng tên gốc tệp vừa ghi hoặc lệnh có gán/export biến (GIT_*, LESS*, PATH), bỏ less; -o đọc cụm cờ kiểu getopt (miễn git grep theo n[:2]); AUD-SEC-406 giữ MỞ (tên dựng lúc chạy) — T-3635 bỏ tick, sửa câu ADR · (3) Đóng PR, giữ AUD-SEC-406 mở
+- Chọn: Thu PR về luật CHẶN, bỏ/siết mọi miễn mới: AUD-SEC-410 về hành vi base (bỏ trả sớm); D-324 về hành vi #426 (có cd/pushd/popd/gán biến trước writer là mất miễn); _reuse_data_arg chỉ họ python; lệnh đọc mất miễn khi tên lệnh trùng tên gốc tệp vừa ghi hoặc lệnh có gán/export biến (GIT_*, LESS*, PATH), bỏ less; -o đọc cụm cờ kiểu getopt (miễn git grep theo n[:2]); AUD-SEC-406 giữ MỞ (tên dựng lúc chạy) — T-3635 bỏ tick, sửa câu ADR
+- Lý do (tiêu chí chất lượng cuối): (1) gỡ mọi hồi quy và lỗ do miễn mới, giữ phần chặn đã chứng minh; khai trung thực 406 còn mở (bài học #423/#426); (2) đường lùi: revert PR; vá tiếp từng 🔴 (phương án 1) là mô hình #372 không điểm dừng
+- Đường lùi: Đóng PR #427, revert về main
+
+### D-330 · 2026-11-03T15:40:20+00:00 · docs/ops còn 6 B dưới trần (ADR-0043) và mọi dòng đã sửa có ở tag v3.29.0 đã lưu trữ hết — lấy chỗ cho sổ nợ review #427 thế nào?
+
+- Phương án: (1) Nới trần docs/ops · (2) Lưu trữ đợt 2: dòng đã sửa có nguyên văn trên origin/main (PR sửa đã merge), cũ nhất trước, dời nguyên văn sang AUDIT-STATUS-ARCHIVE.md; ghi tiêu chí mới ở đầu file lưu trữ · (3) Rút gọn chữ các dòng đang mở
+- Chọn: Lưu trữ đợt 2: dòng đã sửa có nguyên văn trên origin/main (PR sửa đã merge), cũ nhất trước, dời nguyên văn sang AUDIT-STATUS-ARCHIVE.md; ghi tiêu chí mới ở đầu file lưu trữ
+- Lý do (tiêu chí chất lượng cuối): (1)(3) không nới cổng (LOOP-CI-001), không sửa chữ người khác; dòng đã sửa trên main là lịch sử đóng băng, máy đọc cả hai file; tiêu chí tag chỉ là mốc thuận tiện, mốc main vẫn bất biến
+- Đường lùi: Dời các dòng về AUDIT-STATUS.md
