@@ -204,3 +204,10 @@
 - Chọn: Ghi theo phân loại; 11 dòng bỏ qua → chấp nhận hạn 2026-12-15 (đợt kế), chủ phiên chính
 - Lý do (tiêu chí chất lượng cuối): (1) đúng: mỗi dòng có lý do/bằng chứng phân loại đã chạy (reviewer agent, chỉ đọc); 11 dòng chưa sửa không được ghi đã sửa (P1). (2) giữ đường lùi: hạn ngắn, chủ rõ; PR này đã lớn (hai lô ~1.100 dòng), thêm sửa làm review kém (bài học #372). (3) audit check --strict nhận chấp nhận có chủ + hạn
 - Đường lùi: Mở lại từng dòng (đổi chấp nhận → mở) khi có lô sửa
+
+### D-321 · 2026-11-03T05:19:35+00:00 · AUD-SEC-388 lượt 2: 7 lệnh dạng n=$(…) + $((n±k)) + $var không nháy còn bị chặn (BUDGET) — giữ chặn hay tin lệnh chỉ in số (wc, date +%s, grep -c)?
+
+- Phương án: (1) Giữ chặn; lý do chặn gợi viết "$var" · (2) Tin lệnh chỉ in số (heuristic)
+- Chọn: Giữ chặn; lý do chặn gợi viết "$var"
+- Lý do (tiêu chí chất lượng cuối): (1) an toàn: bash đánh giá đệ quy giá trị biến trong số học nên n=$(…) gán được IFS (đã tái hiện bash 5.2.21); danh sách lệnh 'chỉ in số' là danh sách trắng dễ lách (ADR-0063, bài học #372). (4) UX: đường viết thay một bước (nháy biến), đo 3884 lệnh thật chỉ 9 đổi quyết định
+- Đường lùi: Thêm danh sách trắng lệnh đếm khi đo được chặn oan đáng kể

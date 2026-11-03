@@ -17588,6 +17588,809 @@
    "allowed": true
   },
   "note": "review #420: -m cuối làm guard ném IndexError"
- }
+ },
+{
+ "id": "og-388-ifs-assign-split",
+ "origin": "adversarial-reviewer",
+ "refs": [
+  "AUD-SEC-388"
+ ],
+ "input": {
+  "command": "IFS=/; c=\"git/push/--force/origin/main\"; $c"
+ },
+ "expect": {
+  "allowed": false,
+  "code": "BUDGET"
+ },
+ "note": "review #420: bash tách mở rộng không nháy theo IFS đã gán, guard tách theo khoảng trắng"
+},
+{
+ "id": "og-388-ifs-export-arg",
+ "origin": "adversarial-reviewer",
+ "refs": [
+  "AUD-SEC-388"
+ ],
+ "input": {
+  "command": "export IFS=/; c=push/--force/origin/main; git $c"
+ },
+ "expect": {
+  "allowed": false
+ },
+ "note": "review #420: bash tách mở rộng không nháy theo IFS đã gán, guard tách theo khoảng trắng"
+},
+{
+ "id": "og-388-ifs-brace-name",
+ "origin": "adversarial-reviewer",
+ "refs": [
+  "AUD-SEC-388"
+ ],
+ "input": {
+  "command": "export {I,J}FS=/; c=git/push/--force/origin/main; $c"
+ },
+ "expect": {
+  "allowed": false
+ },
+ "note": "review #420: bash tách mở rộng không nháy theo IFS đã gán, guard tách theo khoảng trắng"
+},
+{
+ "id": "og-388-ifs-printf-dyn",
+ "origin": "adversarial-reviewer",
+ "refs": [
+  "AUD-SEC-388"
+ ],
+ "input": {
+  "command": "printf -v \"$(printf '\\x49FS')\" /; c=git/push/--force/origin/main; $c"
+ },
+ "expect": {
+  "allowed": false
+ },
+ "note": "review #420: bash tách mở rộng không nháy theo IFS đã gán, guard tách theo khoảng trắng"
+},
+{
+ "id": "og-388-control-read-loop",
+ "origin": "control",
+ "refs": [
+  "AUD-SEC-388"
+ ],
+ "input": {
+  "command": "while IFS= read -r f; do wc -l $f; done < list.txt"
+ },
+ "expect": {
+  "allowed": true
+ },
+ "note": "review #420: bash tách mở rộng không nháy theo IFS đã gán, guard tách theo khoảng trắng"
+},
+{
+ "id": "og-388-control-quoted",
+ "origin": "control",
+ "refs": [
+  "AUD-SEC-388"
+ ],
+ "input": {
+  "command": "IFS=/; echo \"$HOME\""
+ },
+ "expect": {
+  "allowed": true
+ },
+ "note": "review #420: bash tách mở rộng không nháy theo IFS đã gán, guard tách theo khoảng trắng"
+},
+{
+ "id": "og-389-config-env-commit",
+ "origin": "adversarial-reviewer",
+ "refs": [
+  "AUD-SEC-389"
+ ],
+ "input": {
+  "command": "git --config-env=core.hooksPath=HOME commit -m x",
+  "policy": "strict"
+ },
+ "expect": {
+  "allowed": false
+ },
+ "note": "review #420: --config-env=core.hooksPath=VAR dạng = dính liền bỏ git hook như --no-verify"
+},
+{
+ "id": "og-389-control-config-env-user",
+ "origin": "control",
+ "refs": [
+  "AUD-SEC-389"
+ ],
+ "input": {
+  "command": "git --config-env=user.name=USER commit -m x",
+  "policy": "strict"
+ },
+ "expect": {
+  "allowed": true
+ },
+ "note": "review #420: --config-env=core.hooksPath=VAR dạng = dính liền bỏ git hook như --no-verify"
+},
+{
+ "id": "og-384-find-json",
+ "origin": "adversarial-reviewer",
+ "refs": [
+  "AUD-SEC-384"
+ ],
+ "input": {
+  "command": "find docs -name '*.json' | xargs sed -i s/a/b/"
+ },
+ "expect": {
+  "allowed": false
+ },
+ "note": "review #420: nguồn find có token docs nhưng bộ lọc tên không thể khớp sổ giai đoạn"
+},
+{
+ "id": "og-384-find-not",
+ "origin": "adversarial-reviewer",
+ "refs": [
+  "AUD-SEC-384"
+ ],
+ "input": {
+  "command": "find docs ! -name '*.md' | xargs sed -i s/a/b/"
+ },
+ "expect": {
+  "allowed": false
+ },
+ "note": "review #420: nguồn find có token docs nhưng bộ lọc tên không thể khớp sổ giai đoạn"
+},
+{
+ "id": "og-384-find-print-before-filter",
+ "origin": "adversarial-reviewer",
+ "refs": [
+  "AUD-SEC-384"
+ ],
+ "input": {
+  "command": "find . -path ./src -prune -o -print -path docs | xargs sed -i s/a/b/"
+ },
+ "expect": {
+  "allowed": false
+ },
+ "note": "review #420: nguồn find có token docs nhưng bộ lọc tên không thể khớp sổ giai đoạn"
+},
+{
+ "id": "og-384-git-ls-files-docs",
+ "origin": "adversarial-reviewer",
+ "refs": [
+  "AUD-SEC-384"
+ ],
+ "input": {
+  "command": "git ls-files docs | xargs sed -i s/a/b/"
+ },
+ "expect": {
+  "allowed": false
+ },
+ "note": "review #420: nguồn find có token docs nhưng bộ lọc tên không thể khớp sổ giai đoạn"
+},
+{
+ "id": "og-384-control-find-md",
+ "origin": "control",
+ "refs": [
+  "AUD-SEC-384"
+ ],
+ "input": {
+  "command": "find docs -name '*.md' | xargs sed -i s/a/b/"
+ },
+ "expect": {
+  "allowed": true
+ },
+ "note": "review #420: nguồn find có token docs nhưng bộ lọc tên không thể khớp sổ giai đoạn"
+},
+{
+ "id": "og-384-control-find-prune",
+ "origin": "control",
+ "refs": [
+  "AUD-SEC-384"
+ ],
+ "input": {
+  "command": "find . -path ./docs -prune -o -name '*.py' -print | xargs sed -i s/a/b/"
+ },
+ "expect": {
+  "allowed": true
+ },
+ "note": "review #420: nguồn find có token docs nhưng bộ lọc tên không thể khớp sổ giai đoạn"
+},
+{
+ "id": "og-384-control-git-pathspec",
+ "origin": "control",
+ "refs": [
+  "AUD-SEC-384"
+ ],
+ "input": {
+  "command": "git ls-files 'docs/*.md' | xargs sed -i s/a/b/"
+ },
+ "expect": {
+  "allowed": true
+ },
+ "note": "review #420: nguồn find có token docs nhưng bộ lọc tên không thể khớp sổ giai đoạn"
+},
+{
+ "id": "t329-wipe-mount-code",
+ "origin": "repro",
+ "refs": [
+  "AUD-SEC-329"
+ ],
+ "input": {
+  "command": "docker run -v \"$PWD\":/app img rm -rf /app"
+ },
+ "expect": {
+  "allowed": false,
+  "code": "WIPE_OUTSIDE"
+ },
+ "note": "nợ review #407: khoá theo dấu lý do của mã nhiều dấu"
+},
+{
+ "id": "t329-wipe-xargs-code",
+ "origin": "repro",
+ "refs": [
+  "AUD-SEC-329"
+ ],
+ "input": {
+  "command": "ls | xargs rm -rf"
+ },
+ "expect": {
+  "allowed": false,
+  "code": "WIPE_OUTSIDE"
+ },
+ "note": "nợ review #407: khoá theo dấu lý do của mã nhiều dấu"
+},
+{
+ "id": "og-388-control-for-list",
+ "origin": "control",
+ "refs": [
+  "AUD-SEC-388"
+ ],
+ "input": {
+  "command": "IFS=$'\\n'; for f in $(ls); do echo \"$f\"; done"
+ },
+ "expect": {
+  "allowed": true
+ },
+ "note": "review #420: bash tách mở rộng không nháy theo IFS đã gán, guard tách theo khoảng trắng"
+},
+{
+ "id": "og-388-for-list-subst",
+ "origin": "adversarial-reviewer",
+ "refs": [
+  "AUD-SEC-388"
+ ],
+ "input": {
+  "command": "IFS=/; c=push/--force/origin/main; for f in $(git $c); do :; done"
+ },
+ "expect": {
+  "allowed": false
+ },
+ "note": "review #420: bash tách mở rộng không nháy theo IFS đã gán, guard tách theo khoảng trắng"
+},
+{
+ "id": "og-388-for-arg-andand",
+ "origin": "adversarial-reviewer",
+ "refs": [
+  "AUD-SEC-388"
+ ],
+ "input": {
+  "command": "IFS=/; c=git/push/--force/origin/main; echo for x in && $c"
+ },
+ "expect": {
+  "allowed": false,
+  "code": "BUDGET"
+ },
+ "note": "review blk-guard: AUD-SEC-388 lượt 2 — từ khoá ở vị trí lệnh, tên đích động, ngữ cảnh số học, mã cùng shell"
+},
+{
+ "id": "og-388-for-arg-pipe",
+ "origin": "adversarial-reviewer",
+ "refs": [
+  "AUD-SEC-388"
+ ],
+ "input": {
+  "command": "IFS=/; c=git/push/--force/origin/main; : for x in | $c"
+ },
+ "expect": {
+  "allowed": false,
+  "code": "BUDGET"
+ },
+ "note": "review blk-guard: AUD-SEC-388 lượt 2 — từ khoá ở vị trí lệnh, tên đích động, ngữ cảnh số học, mã cùng shell"
+},
+{
+ "id": "og-388-select-arg",
+ "origin": "adversarial-reviewer",
+ "refs": [
+  "AUD-SEC-388"
+ ],
+ "input": {
+  "command": "IFS=/; c=git/push/--force/origin/main; echo select x in && $c"
+ },
+ "expect": {
+  "allowed": false,
+  "code": "BUDGET"
+ },
+ "note": "review blk-guard: AUD-SEC-388 lượt 2 — từ khoá ở vị trí lệnh, tên đích động, ngữ cảnh số học, mã cùng shell"
+},
+{
+ "id": "og-388-export-if-read",
+ "origin": "adversarial-reviewer",
+ "refs": [
+  "AUD-SEC-388"
+ ],
+ "input": {
+  "command": "export if IFS=/ read; c=git/push/--force/origin/main; $c"
+ },
+ "expect": {
+  "allowed": false,
+  "code": "BUDGET"
+ },
+ "note": "review blk-guard: AUD-SEC-388 lượt 2 — từ khoá ở vị trí lệnh, tên đích động, ngữ cảnh số học, mã cùng shell"
+},
+{
+ "id": "og-388-export-bang-read",
+ "origin": "adversarial-reviewer",
+ "refs": [
+  "AUD-SEC-388"
+ ],
+ "input": {
+  "command": "export ! IFS=/ read; c=git/push/--force/origin/main; $c"
+ },
+ "expect": {
+  "allowed": false,
+  "code": "BUDGET"
+ },
+ "note": "review blk-guard: AUD-SEC-388 lượt 2 — từ khoá ở vị trí lệnh, tên đích động, ngữ cảnh số học, mã cùng shell"
+},
+{
+ "id": "og-388-declare-int-dyn",
+ "origin": "adversarial-reviewer",
+ "refs": [
+  "AUD-SEC-388"
+ ],
+ "input": {
+  "command": "n=IF; n+=S; declare -i x; x=$n=4; c=git4push4--force4origin4main; $c"
+ },
+ "expect": {
+  "allowed": false,
+  "code": "BUDGET"
+ },
+ "note": "review blk-guard: AUD-SEC-388 lượt 2 — từ khoá ở vị trí lệnh, tên đích động, ngữ cảnh số học, mã cùng shell"
+},
+{
+ "id": "og-388-dbl-bracket-dyn",
+ "origin": "adversarial-reviewer",
+ "refs": [
+  "AUD-SEC-388"
+ ],
+ "input": {
+  "command": "n=IF; n+=S; [[ $n=4 -eq 4 ]]; c=git4push4--force4origin4main; $c"
+ },
+ "expect": {
+  "allowed": false,
+  "code": "BUDGET"
+ },
+ "note": "review blk-guard: AUD-SEC-388 lượt 2 — từ khoá ở vị trí lệnh, tên đích động, ngữ cảnh số học, mã cùng shell"
+},
+{
+ "id": "og-388-subscript-dyn",
+ "origin": "adversarial-reviewer",
+ "refs": [
+  "AUD-SEC-388"
+ ],
+ "input": {
+  "command": "n=IF; n+=S; a[$n=4]=1; c=git4push4--force4origin4main; $c"
+ },
+ "expect": {
+  "allowed": false,
+  "code": "BUDGET"
+ },
+ "note": "review blk-guard: AUD-SEC-388 lượt 2 — từ khoá ở vị trí lệnh, tên đích động, ngữ cảnh số học, mã cùng shell"
+},
+{
+ "id": "og-388-arith-paren-dyn",
+ "origin": "adversarial-reviewer",
+ "refs": [
+  "AUD-SEC-388"
+ ],
+ "input": {
+  "command": "n=IF; n+=S; (( (0), $n=4 )); c=git4push4--force4origin4main; $c"
+ },
+ "expect": {
+  "allowed": false,
+  "code": "BUDGET"
+ },
+ "note": "review blk-guard: AUD-SEC-388 lượt 2 — từ khoá ở vị trí lệnh, tên đích động, ngữ cảnh số học, mã cùng shell"
+},
+{
+ "id": "og-388-arith-expansion-dyn",
+ "origin": "adversarial-reviewer",
+ "refs": [
+  "AUD-SEC-388"
+ ],
+ "input": {
+  "command": "n=IF; n+=S; : $(( (0), $n=4 )); c=git4push4--force4origin4main; $c"
+ },
+ "expect": {
+  "allowed": false,
+  "code": "BUDGET"
+ },
+ "note": "review blk-guard: AUD-SEC-388 lượt 2 — từ khoá ở vị trí lệnh, tên đích động, ngữ cảnh số học, mã cùng shell"
+},
+{
+ "id": "og-388-offset-dyn",
+ "origin": "adversarial-reviewer",
+ "refs": [
+  "AUD-SEC-388"
+ ],
+ "input": {
+  "command": "n=IF; n+=S; : \"${x:$n=4:1}\"; c=git4push4--force4origin4main; $c"
+ },
+ "expect": {
+  "allowed": false,
+  "code": "BUDGET"
+ },
+ "note": "review blk-guard: AUD-SEC-388 lượt 2 — từ khoá ở vị trí lệnh, tên đích động, ngữ cảnh số học, mã cùng shell"
+},
+{
+ "id": "og-388-indirect-assign",
+ "origin": "adversarial-reviewer",
+ "refs": [
+  "AUD-SEC-388"
+ ],
+ "input": {
+  "command": "n=$(echo SFI | rev); unset \"$n\"; : ${!n:=/}; c=git/push/--force/origin/main; $c"
+ },
+ "expect": {
+  "allowed": false,
+  "code": "BUDGET"
+ },
+ "note": "review blk-guard: AUD-SEC-388 lượt 2 — từ khoá ở vị trí lệnh, tên đích động, ngữ cảnh số học, mã cùng shell"
+},
+{
+ "id": "og-388-declare-dyn-flag",
+ "origin": "adversarial-reviewer",
+ "refs": [
+  "AUD-SEC-388"
+ ],
+ "input": {
+  "command": "n=IF; n+=S; f=n; declare -$f r=$n; r=/; c=git/push/--force/origin/main; $c"
+ },
+ "expect": {
+  "allowed": false,
+  "code": "BUDGET"
+ },
+ "note": "review blk-guard: AUD-SEC-388 lượt 2 — từ khoá ở vị trí lệnh, tên đích động, ngữ cảnh số học, mã cùng shell"
+},
+{
+ "id": "og-388-arith-recursive-name",
+ "origin": "adversarial-reviewer",
+ "refs": [
+  "AUD-SEC-388"
+ ],
+ "input": {
+  "command": "n=$(echo SFI | rev)=4; (( i < n )); c=git4push4--force4origin4main; $c"
+ },
+ "expect": {
+  "allowed": false,
+  "code": "BUDGET"
+ },
+ "note": "review blk-guard: AUD-SEC-388 lượt 2 — từ khoá ở vị trí lệnh, tên đích động, ngữ cảnh số học, mã cùng shell"
+},
+{
+ "id": "og-388-sh-c-dq-body",
+ "origin": "adversarial-reviewer",
+ "refs": [
+  "AUD-SEC-388"
+ ],
+ "input": {
+  "command": "sh -c \"IFS=/; c=git/push/--force/origin/main; \\$c\""
+ },
+ "expect": {
+  "allowed": false
+ },
+ "note": "review blk-guard: AUD-SEC-388 lượt 2 — từ khoá ở vị trí lệnh, tên đích động, ngữ cảnh số học, mã cùng shell"
+},
+{
+ "id": "og-388-eval-body",
+ "origin": "adversarial-reviewer",
+ "refs": [
+  "AUD-SEC-388"
+ ],
+ "input": {
+  "command": "eval 'declare -n r=$x'; r=/; c=git/push/--force/origin/main; $c"
+ },
+ "expect": {
+  "allowed": false,
+  "code": "BUDGET"
+ },
+ "note": "review blk-guard: AUD-SEC-388 lượt 2 — từ khoá ở vị trí lệnh, tên đích động, ngữ cảnh số học, mã cùng shell"
+},
+{
+ "id": "og-388-trap-body",
+ "origin": "adversarial-reviewer",
+ "refs": [
+  "AUD-SEC-388"
+ ],
+ "input": {
+  "command": "trap 'IFS=/' DEBUG; c=git/push/--force/origin/main; $c"
+ },
+ "expect": {
+  "allowed": false,
+  "code": "BUDGET"
+ },
+ "note": "review blk-guard: AUD-SEC-388 lượt 2 — từ khoá ở vị trí lệnh, tên đích động, ngữ cảnh số học, mã cùng shell"
+},
+{
+ "id": "og-388-source-file",
+ "origin": "adversarial-reviewer",
+ "refs": [
+  "AUD-SEC-388"
+ ],
+ "input": {
+  "command": ". ./x.sh; c=git/push/--force/origin/main; $c"
+ },
+ "expect": {
+  "allowed": false,
+  "code": "BUDGET"
+ },
+ "note": "review blk-guard: AUD-SEC-388 lượt 2 — từ khoá ở vị trí lệnh, tên đích động, ngữ cảnh số học, mã cùng shell"
+},
+{
+ "id": "og-388-control-grep-ifs",
+ "origin": "control",
+ "refs": [
+  "AUD-SEC-388"
+ ],
+ "input": {
+  "command": "for f in .claude/hooks/*.py scripts/*.sh; do grep -c IFS $f; done"
+ },
+ "expect": {
+  "allowed": true
+ },
+ "note": "review blk-guard: AUD-SEC-388 lượt 2 — từ khoá ở vị trí lệnh, tên đích động, ngữ cảnh số học, mã cùng shell"
+},
+{
+ "id": "og-388-control-git-log-s",
+ "origin": "control",
+ "refs": [
+  "AUD-SEC-388"
+ ],
+ "input": {
+  "command": "git log -S IFS --oneline -- $(git ls-files '*.sh')"
+ },
+ "expect": {
+  "allowed": true
+ },
+ "note": "review blk-guard: AUD-SEC-388 lượt 2 — từ khoá ở vị trí lệnh, tên đích động, ngữ cảnh số học, mã cùng shell"
+},
+{
+ "id": "og-388-control-heredoc-data",
+ "origin": "control",
+ "refs": [
+  "AUD-SEC-388"
+ ],
+ "input": {
+  "command": "cat > /tmp/pr-body.md <<'EOF'\n`IFS=/; c=...; $c` — bash tách\nEOF\nls $HOME"
+ },
+ "expect": {
+  "allowed": true
+ },
+ "note": "review blk-guard: AUD-SEC-388 lượt 2 — từ khoá ở vị trí lệnh, tên đích động, ngữ cảnh số học, mã cùng shell"
+},
+{
+ "id": "og-388-control-export-env",
+ "origin": "control",
+ "refs": [
+  "AUD-SEC-388"
+ ],
+ "input": {
+  "command": "export $(grep -v '^#' .env | xargs) && npm run dev"
+ },
+ "expect": {
+  "allowed": true
+ },
+ "note": "review blk-guard: AUD-SEC-388 lượt 2 — từ khoá ở vị trí lệnh, tên đích động, ngữ cảnh số học, mã cùng shell"
+},
+{
+ "id": "og-388-control-read-prompt",
+ "origin": "control",
+ "refs": [
+  "AUD-SEC-388"
+ ],
+ "input": {
+  "command": "read -r -p \"Nhánh [$def]: \" b; git checkout $b"
+ },
+ "expect": {
+  "allowed": true
+ },
+ "note": "review blk-guard: AUD-SEC-388 lượt 2 — từ khoá ở vị trí lệnh, tên đích động, ngữ cảnh số học, mã cùng shell"
+},
+{
+ "id": "og-388-control-ifs-pipe-read",
+ "origin": "control",
+ "refs": [
+  "AUD-SEC-388"
+ ],
+ "input": {
+  "command": "while IFS=\\| read -r a b; do echo $a; done < table.txt"
+ },
+ "expect": {
+  "allowed": true
+ },
+ "note": "review blk-guard: AUD-SEC-388 lượt 2 — từ khoá ở vị trí lệnh, tên đích động, ngữ cảnh số học, mã cùng shell"
+},
+{
+ "id": "og-388-control-ifs-newline-read",
+ "origin": "control",
+ "refs": [
+  "AUD-SEC-388"
+ ],
+ "input": {
+  "command": "files=(); while IFS= read -r -d '' f; do files+=(\"$f\"); done < <(git ls-files -z '*.py'); echo ${#files[@]}"
+ },
+ "expect": {
+  "allowed": true
+ },
+ "note": "review blk-guard: AUD-SEC-388 lượt 2 — từ khoá ở vị trí lệnh, tên đích động, ngữ cảnh số học, mã cùng shell"
+},
+{
+ "id": "og-384-find-subst-name",
+ "origin": "adversarial-reviewer",
+ "refs": [
+  "AUD-SEC-384"
+ ],
+ "input": {
+  "command": "find docs -name \"$(echo STAGE.json)\" | xargs sed -i s/a/b/"
+ },
+ "expect": {
+  "allowed": false,
+  "code": "EVIDENCE_HANDWRITE"
+ },
+ "note": "review blk-guard: AUD-SEC-384 lượt 2 — mẫu không nguyên văn, find in thư mục tổ tiên của sổ"
+},
+{
+ "id": "og-384-find-env-name",
+ "origin": "adversarial-reviewer",
+ "refs": [
+  "AUD-SEC-384"
+ ],
+ "input": {
+  "command": "find docs -name \"$LEDGER_NAME\" | xargs sed -i s/a/b/"
+ },
+ "expect": {
+  "allowed": false,
+  "code": "EVIDENCE_HANDWRITE"
+ },
+ "note": "review blk-guard: AUD-SEC-384 lượt 2 — mẫu không nguyên văn, find in thư mục tổ tiên của sổ"
+},
+{
+ "id": "og-384-find-dir-cp-replace",
+ "origin": "adversarial-reviewer",
+ "refs": [
+  "AUD-SEC-384"
+ ],
+ "input": {
+  "command": "find docs -type d -name autopilot | xargs -I{} cp evil {}/STAGE.json"
+ },
+ "expect": {
+  "allowed": false,
+  "code": "EVIDENCE_HANDWRITE"
+ },
+ "note": "review blk-guard: AUD-SEC-384 lượt 2 — mẫu không nguyên văn, find in thư mục tổ tiên của sổ"
+},
+{
+ "id": "og-384-find-dir-mv",
+ "origin": "adversarial-reviewer",
+ "refs": [
+  "AUD-SEC-384"
+ ],
+ "input": {
+  "command": "find docs -type d -name autopilot | xargs mv evildir/STAGE.json"
+ },
+ "expect": {
+  "allowed": false,
+  "code": "EVIDENCE_HANDWRITE"
+ },
+ "note": "review blk-guard: AUD-SEC-384 lượt 2 — mẫu không nguyên văn, find in thư mục tổ tiên của sổ"
+},
+{
+ "id": "og-384-find-dir-cp-r",
+ "origin": "adversarial-reviewer",
+ "refs": [
+  "AUD-SEC-384"
+ ],
+ "input": {
+  "command": "find docs -type d -name autopilot | xargs cp -r evildir/."
+ },
+ "expect": {
+  "allowed": false,
+  "code": "EVIDENCE_HANDWRITE"
+ },
+ "note": "review blk-guard: AUD-SEC-384 lượt 2 — mẫu không nguyên văn, find in thư mục tổ tiên của sổ"
+},
+{
+ "id": "og-384-find-prune-implicit",
+ "origin": "adversarial-reviewer",
+ "refs": [
+  "AUD-SEC-384"
+ ],
+ "input": {
+  "command": "find docs -path docs/autopilot -prune -o -name '*.md' | xargs -I{} cp -r /tmp/forged/. {}"
+ },
+ "expect": {
+  "allowed": false,
+  "code": "EVIDENCE_HANDWRITE"
+ },
+ "note": "review blk-guard: AUD-SEC-384 lượt 2 — mẫu không nguyên văn, find in thư mục tổ tiên của sổ"
+},
+{
+ "id": "og-384-find-perl-argv",
+ "origin": "adversarial-reviewer",
+ "refs": [
+  "AUD-SEC-384"
+ ],
+ "input": {
+  "command": "find docs -name autopilot | xargs perl -e 'open F, \">\", \"$ARGV[0]/STAGE.json\"'"
+ },
+ "expect": {
+  "allowed": false,
+  "code": "EVIDENCE_HANDWRITE"
+ },
+ "note": "review blk-guard: AUD-SEC-384 lượt 2 — mẫu không nguyên văn, find in thư mục tổ tiên của sổ"
+},
+{
+ "id": "og-384-find-sed-replace",
+ "origin": "adversarial-reviewer",
+ "refs": [
+  "AUD-SEC-384"
+ ],
+ "input": {
+  "command": "find docs -maxdepth 0 -name docs | xargs -I{} sed -i 's/a/b/' {}/autopilot/STAGE.json"
+ },
+ "expect": {
+  "allowed": false,
+  "code": "EVIDENCE_HANDWRITE"
+ },
+ "note": "review blk-guard: AUD-SEC-384 lượt 2 — mẫu không nguyên văn, find in thư mục tổ tiên của sổ"
+},
+{
+ "id": "og-384-find-sed-follow",
+ "origin": "adversarial-reviewer",
+ "refs": [
+  "AUD-SEC-384"
+ ],
+ "input": {
+  "command": "find docs -name '*.md' | xargs sed -i --follow-symlinks s/a/b/"
+ },
+ "expect": {
+  "allowed": false,
+  "code": "EVIDENCE_HANDWRITE"
+ },
+ "note": "review blk-guard: AUD-SEC-384 lượt 2 — mẫu không nguyên văn, find in thư mục tổ tiên của sổ"
+},
+{
+ "id": "og-389-config-dyn-key-commit",
+ "origin": "adversarial-reviewer",
+ "refs": [
+  "AUD-SEC-389"
+ ],
+ "input": {
+  "command": "k=$(echo core.hooksPath); git -c \"$k=/dev/null\" commit -m x",
+  "policy": "strict"
+ },
+ "expect": {
+  "allowed": false
+ },
+ "note": "review blk-guard: khoá -c/--config-env không nguyên văn có thể là core.hooksPath"
+},
+{
+ "id": "og-389-control-config-dyn-value",
+ "origin": "control",
+ "refs": [
+  "AUD-SEC-389"
+ ],
+ "input": {
+  "command": "git -c \"user.name=$U\" commit -m x",
+  "policy": "strict"
+ },
+ "expect": {
+  "allowed": true
+ },
+ "note": "review blk-guard: khoá -c/--config-env không nguyên văn có thể là core.hooksPath"
+}
  ]
 }

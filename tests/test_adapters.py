@@ -242,6 +242,29 @@ class AdapterHostTest(unittest.TestCase):
                     if deny:
                         self.assertIn("NO_VERIFY", out)
 
+    def test_config_env_hooks_path_denied(self):
+        """AUD-SEC-383/389 (review #420): `git --config-env=core.hooksPath=HOME push|commit` — dạng `=` dính liền — git
+        nhận như `-c core.hooksPath=$HOME` nên bỏ git hook như `--no-verify`; khoá khác qua `--config-env=` vẫn chạy."""
+        for host in ad.HOSTS:
+            for cmd, deny in (
+                ("git --config-env=core.hooksPath=HOME push origin feat", True),
+                ("git --config-env=CORE.HOOKSPATH=HOME push origin feat", True),
+                ("git --config-env=core.hooksPath=HOME commit -m x", True),
+                ("git --config-env core.hooksPath=HOME commit -m x", True),
+                ("git --config-env=user.name=USER push origin feat", False),
+                ("git --config-env=user.name=USER commit -m x", False),
+                # review blk-guard (có từ trước): khoá không nguyên văn có thể là core.hooksPath — git nhận khoá đã mở rộng
+                ('k=$(echo core.hooksPath); git -c "$k=/dev/null" commit -m x', True),
+                ('k=$(echo core.hooksPath); HP=/dev/null git --config-env="$k=HP" commit -m x', True),
+                ('git --config-env "$K=HP" push origin feat', True),
+                ('git -c "user.name=$U" commit -m x', False),
+            ):
+                with self.subTest(host=host, cmd=cmd):
+                    out, code = ad.run(host, _shell(host, cmd, str(ROOT)))
+                    self.assertEqual(verdict(host, out, code), deny, out)
+                    if deny:
+                        self.assertIn("NO_VERIFY", out)
+
     def test_opencode_mcp_names(self):
         self.assertEqual(ad.mcp_name("opencode", "github_merge_pull_request"), "mcp__github__merge_pull_request")
         self.assertEqual(ad.mcp_name("opencode", "_github_get_me_"), "mcp__github__get_me")
