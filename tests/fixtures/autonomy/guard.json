@@ -21412,6 +21412,34 @@
    "allowed": true
   },
   "note": "nợ review #432 (AUD-SEC-432/434/435, T-3666, D-336)"
+ },
+ {
+  "id": "r433-436-push-cfg",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-436"
+  ],
+  "input": {
+   "command": "cd r && GIT_CONFIG_GLOBAL=../cfg_push git push"
+  },
+  "expect": {
+   "allowed": false
+  },
+  "note": "review #433: luật phía đọc cấu hình git hở (đã chạy git thật)"
+ },
+ {
+  "id": "r433-436-for-home",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-436"
+  ],
+  "input": {
+   "command": "for HOME in .; do git status; done"
+  },
+  "expect": {
+   "allowed": false
+  },
+  "note": "review #433: luật phía đọc cấu hình git hở (đã chạy git thật)"
  }
  ]
 }
