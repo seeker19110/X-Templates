@@ -20183,7 +20183,7 @@
   "id": "r427-find-rebase",
   "origin": "adversarial-reviewer",
   "refs": [
-   "AUD-SEC-406"
+   "AUD-SEC-411"
   ],
   "input": {
    "command": "git rebase --exec 'find . -delete' HEAD~1"
@@ -20197,7 +20197,7 @@
   "id": "r427-find-make-eval",
   "origin": "adversarial-reviewer",
   "refs": [
-   "AUD-SEC-406"
+   "AUD-SEC-411"
   ],
   "input": {
    "command": "make --eval='x:; find . -delete' x"
@@ -20211,7 +20211,7 @@
   "id": "r427-cdpath",
   "origin": "adversarial-reviewer",
   "refs": [
-   "AUD-SEC-406"
+   "AUD-SEC-411"
   ],
   "input": {
    "command": "CDPATH=.claude; cd hooks && cat > x.sh <<'EOF'\nprintf 'exit 0' > guard.py\nEOF\nbash x.sh"
@@ -20225,7 +20225,7 @@
   "id": "r427-o-glued",
   "origin": "adversarial-reviewer",
   "refs": [
-   "AUD-SEC-406"
+   "AUD-SEC-411"
   ],
   "input": {
    "command": "printf 'git push --force origin main\\n' | iconv -f utf8 -t utf8 -os.sh; bash s.sh"
@@ -20240,7 +20240,7 @@
   "id": "r427-o-cluster",
   "origin": "adversarial-reviewer",
   "refs": [
-   "AUD-SEC-406"
+   "AUD-SEC-411"
   ],
   "input": {
    "command": "printf 'git push --force origin main\\n' | sort -mos.sh; bash s.sh"
@@ -20255,7 +20255,7 @@
   "id": "r427-perl-do",
   "origin": "adversarial-reviewer",
   "refs": [
-   "AUD-SEC-406"
+   "AUD-SEC-412"
   ],
   "input": {
    "command": "printf 'system(\"git push --force origin main\");' > p.txt; perl -e 'do $ARGV[0]' ./p.txt"
@@ -20270,7 +20270,7 @@
   "id": "r427-shadow-ls",
   "origin": "adversarial-reviewer",
   "refs": [
-   "AUD-SEC-406"
+   "AUD-SEC-412"
   ],
   "input": {
    "command": "printf '#!/bin/sh\\ngit push --force origin main\\n' > ~/.local/bin/ls; chmod +x ~/.local/bin/ls; ls"
@@ -20285,7 +20285,7 @@
   "id": "r427-git-ext-diff",
   "origin": "adversarial-reviewer",
   "refs": [
-   "AUD-SEC-406"
+   "AUD-SEC-412"
   ],
   "input": {
    "command": "export GIT_EXTERNAL_DIFF=sh; printf 'touch PWNED\\n' > s.txt; git add -N s.txt; git diff s.txt"
@@ -20299,7 +20299,7 @@
   "id": "r427-git-grep-o",
   "origin": "control",
   "refs": [
-   "AUD-SEC-406"
+   "AUD-SEC-411"
   ],
   "input": {
    "command": "git grep -o TODO -- a; git grep -c TODO -- b"

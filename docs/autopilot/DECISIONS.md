@@ -135,3 +135,10 @@
 - Chọn: Thu PR về luật CHẶN, bỏ/siết mọi miễn mới: AUD-SEC-410 về hành vi base (bỏ trả sớm); D-324 về hành vi #426 (có cd/pushd/popd/gán biến trước writer là mất miễn); _reuse_data_arg chỉ họ python; lệnh đọc mất miễn khi tên lệnh trùng tên gốc tệp vừa ghi hoặc lệnh có gán/export biến (GIT_*, LESS*, PATH), bỏ less; -o đọc cụm cờ kiểu getopt (miễn git grep theo n[:2]); AUD-SEC-406 giữ MỞ (tên dựng lúc chạy) — T-3635 bỏ tick, sửa câu ADR
 - Lý do (tiêu chí chất lượng cuối): (1) gỡ mọi hồi quy và lỗ do miễn mới, giữ phần chặn đã chứng minh; khai trung thực 406 còn mở (bài học #423/#426); (2) đường lùi: revert PR; vá tiếp từng 🔴 (phương án 1) là mô hình #372 không điểm dừng
 - Đường lùi: Đóng PR #427, revert về main
+
+### D-330 · 2026-11-03T15:40:20+00:00 · docs/ops còn 6 B dưới trần (ADR-0043) và mọi dòng đã sửa có ở tag v3.29.0 đã lưu trữ hết — lấy chỗ cho sổ nợ review #427 thế nào?
+
+- Phương án: (1) Nới trần docs/ops · (2) Lưu trữ đợt 2: dòng đã sửa có nguyên văn trên origin/main (PR sửa đã merge), cũ nhất trước, dời nguyên văn sang AUDIT-STATUS-ARCHIVE.md; ghi tiêu chí mới ở đầu file lưu trữ · (3) Rút gọn chữ các dòng đang mở
+- Chọn: Lưu trữ đợt 2: dòng đã sửa có nguyên văn trên origin/main (PR sửa đã merge), cũ nhất trước, dời nguyên văn sang AUDIT-STATUS-ARCHIVE.md; ghi tiêu chí mới ở đầu file lưu trữ
+- Lý do (tiêu chí chất lượng cuối): (1)(3) không nới cổng (LOOP-CI-001), không sửa chữ người khác; dòng đã sửa trên main là lịch sử đóng băng, máy đọc cả hai file; tiêu chí tag chỉ là mốc thuận tiện, mốc main vẫn bất biến
+- Đường lùi: Dời các dòng về AUDIT-STATUS.md
