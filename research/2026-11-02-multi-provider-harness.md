@@ -1,7 +1,7 @@
 ---
 title: Harness đa nhà cung cấp — hook, sandbox, file hướng dẫn của 7 agent CLI (nghiên cứu 2026-11-02)
 kind: research
-updated: 2026-11-02
+updated: 2026-11-03
 ---
 
 # Harness đa nhà cung cấp: đối chiếu hook · sandbox · file hướng dẫn của 7 agent CLI — nghiên cứu 2026-11-02
@@ -189,6 +189,7 @@ cổng TCP/UDP, không lọc tên miền), `sandbox-exec` (Apple đánh dấu DE
 - OpenCode: ngữ nghĩa chặn ngoài ví dụ `throw`; chữ ký TypeScript; telemetry/share; đổi tên sst → anomalyco chỉ suy từ
   WebFetch.
 - Landlock GPL-2.0 (theo trí nhớ); kernel của ABI 7–12; telemetry sandbox-runtime.
+- Mốc "Copilot CLI GA 02/2026" và "Grok Build beta 05/2026" ở §7 (thêm 2026-11-03, AUD-DOC-191): không có nguồn ở §3 (chỉ có bản npm 1.0.105).
 
 ## 7. Rủi ro giấy phép/trạng thái
 
@@ -197,7 +198,7 @@ cổng TCP/UDP, không lọc tên miền), `sandbox-exec` (Apple đánh dấu DE
 - Gemini CLI README ghi gói cá nhân chuyển sang Antigravity CLI (`agy`) từ 2026-06-18 — tên lệnh/đường dẫn cấu hình có thể đổi.
 - Grok Build: auto-update bật mặc định, `install.sh` `curl | bash`; xung đột tên lệnh `grok` với gói cộng đồng.
 - sandbox-runtime "Beta Research Preview": API/cấu hình có thể đổi; `sandbox-exec` đã DEPRECATED theo Apple.
-- Tốc độ đổi API hook rất nhanh (Claude 33 sự kiện, Copilot GA 02/2026, Grok beta 05/2026): mọi adapter cần mốc xét lại —
+- Tốc độ đổi API hook rất nhanh (Claude 33 sự kiện, Copilot GA 02/2026, Grok beta 05/2026 — hai mốc sau: (chưa xác minh) — không có nguồn ở §3, AUD-DOC-191): mọi adapter cần mốc xét lại —
   trùng mốc hàng rào 2027-01-21 (`LOOP-DESIGN-014`).
 
 ## 8. Bổ sung 2026-11-02 — xác minh lại bốn mục chưa xác minh (T-3647)

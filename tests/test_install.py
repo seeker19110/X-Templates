@@ -2277,6 +2277,28 @@ class GitHooksTest(unittest.TestCase):
         xt_yaml.write_text(self.GATES.format(lint="false"), encoding="utf-8")
         self.assertEqual(self.commit("fix: hai", env={**self.env, "CLAUDECODE": "1"}).returncode, 0)
 
+    def test_pre_commit_xt_error_falls_back_to_full_gate(self):
+        """AUD-HAR-206: `xt.py commit-gate` lỗi hoặc in giá trị lạ → cổng ĐẦY ĐỦ (`gate`), như `commit_gate_mode`
+        (vắng/lạ = full); chỉ đúng `fast` mới chạy `gate-fast`."""
+        self.init_repo()
+        xt = self.target / ".xtemplates" / "scripts"
+        xt.mkdir(parents=True)
+        ran = self.target / "ran.txt"
+        (xt / "dev-task.sh").write_text(f'#!/bin/sh\nprintf %s "$1" > "{ran}"\n', encoding="utf-8")
+        (xt / "dev-task.sh").chmod(0o755)
+        hook = ROOT / "framework" / "templates" / "git-hooks" / "pre-commit"
+        for body, want in (
+            ("raise SystemExit(1)", "gate"),
+            ("print('fast')", "gate-fast"),
+            ("print('full')", "gate"),
+            ("print('lạ')", "gate"),
+        ):
+            with self.subTest(body=body):
+                (xt / "xt.py").write_text(body + "\n", encoding="utf-8")
+                r = subprocess.run(["bash", str(hook)], cwd=self.target, env=self.env, capture_output=True, text=True)
+                self.assertEqual(r.returncode, 0, r.stderr)
+                self.assertEqual(ran.read_text(encoding="utf-8"), want)
+
     def test_pre_push_blocks_main_force_and_delete(self):
         self.init_repo()
         self.install()

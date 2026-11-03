@@ -416,6 +416,36 @@ class PrReviewDiffTest(unittest.TestCase):
         self.assertIn("COMPLETE: ${{ steps.diff.outputs.complete }}", record)
         self.assertLess(record.index("--inconclusive"), record.index("jq -er '.verdict'"))
 
+    def run_record(self, author: str, logins: str, gh_rc: int = 0) -> List[str]:
+        """Chạy bước ghi kết quả với `gh`/`jq`/`python3` giả → đối số `xt.py pr reviewed` (mỗi dòng một đối số)."""
+        tmp = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        (tmp / "bin").mkdir()
+        fakes = {
+            "gh": f'printf "%s" "$FAKE_LOGINS"\nexit {gh_rc}\n',
+            "jq": 'case "$2" in .verdict) echo clean ;; esac\n',
+            "python3": 'printf "%s\\n" "$@" > "$ARGS_OUT"\n',
+        }
+        for name, body in fakes.items():
+            (tmp / "bin" / name).write_text("#!/bin/sh\n" + body, encoding="utf-8")
+            (tmp / "bin" / name).chmod(0o755)
+        env = dict(os.environ, PATH=f"{tmp / 'bin'}:{os.environ['PATH']}", GITHUB_STEP_SUMMARY=str(tmp / "sum"))
+        env.update(GH_REPO="o/r", PR="7", HEAD_SHA="a" * 40, STRUCT="{}", REVIEW_MODEL="m", COMPLETE="true")
+        env.update(PR_AUTHOR=author, FAKE_LOGINS=logins, ARGS_OUT=str(tmp / "args"))
+        r = subprocess.run(["bash", "-c", step_run(self.body, "record")], env=env, capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return (tmp / "args").read_text(encoding="utf-8").splitlines()
+
+    def test_pr_review_bot_flag_only_when_all_commits_by_bot(self):
+        """AUD-HAR-213: PR Dependabot chỉ gắn `--author-model dependabot[bot]` khi MỌI commit của PR là của bot; có commit
+        agent/người, hoặc đọc commit lỗi → không cờ (họ tác giả theo `author_model_family` của xt.yaml, như trước #413)."""
+        bot = "dependabot[bot]"
+        self.assertIn("--author-model", self.run_record(bot, f"{bot}\n{bot}\n"))
+        self.assertEqual(self.run_record(bot, f"{bot}\n{bot}\n")[-2:], [bot, "--clean"])
+        for logins, rc in ((f"{bot}\nclaude\n", 0), ("", 0), (f"{bot}\n", 1), ("?\n", 0)):
+            with self.subTest(logins=logins, rc=rc):
+                self.assertNotIn("--author-model", self.run_record(bot, logins, rc))
+        self.assertNotIn("--author-model", self.run_record("someone", f"{bot}\n"))
+
 
 @unittest.skipIf(shutil.which("bash") is None, "cần bash")
 class TestShardTest(unittest.TestCase):

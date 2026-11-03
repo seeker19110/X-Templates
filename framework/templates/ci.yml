@@ -67,6 +67,10 @@ jobs:
         run: python3 .xtemplates/scripts/xt.py ci-check
       # SEC-AI-018 (MUST@L)/SEC-AI-028/CMP-LIC-024: bật bằng cách tạo `prompt-assets-exempt.json` (`[]` hoặc miễn trừ có
       # `reason` + `expires`); bộ lọc injection runtime có file mẫu riêng thì thêm `--patterns <file>` (cùng nguồn sự thật).
+      # Tài liệu bảo mật/audit TRÍCH lệnh tấn công (sổ audit, ADR, runbook sự cố) sẽ khớp luật `danger` — miễn theo file,
+      # đúng luật, có lý do và hạn, không miễn cả `docs/` (AUD-SEC-360), vd:
+      #   {"path": "docs/ops/AUDIT-*.md", "rule": "danger", "reason": "sổ audit trích lệnh tái hiện", "expires": "YYYY-MM-DD"}
+      #   {"path": "docs/adr/*", "rule": "danger", "reason": "ADR trích lệnh bị chặn làm ví dụ", "expires": "YYYY-MM-DD"}
       - name: Tài sản prompt (injection, ký tự ẩn, lệnh nguy hiểm, bí mật, bỏ hàng rào, gói/URL không ghim) — `xt.py prompt-assets-scan`
         if: hashFiles('prompt-assets-exempt.json') != ''
         run: python3 .xtemplates/scripts/xt.py prompt-assets-scan --exempt prompt-assets-exempt.json

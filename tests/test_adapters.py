@@ -8,6 +8,7 @@ from __future__ import annotations
 import io
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -284,6 +285,26 @@ class InstallAdaptersTest(unittest.TestCase):
         self.assertEqual(gem.read_text(encoding="utf-8"), "{hỏng")
         gem.write_text(json.dumps({"hooks": "lạ"}), encoding="utf-8")
         self.assertIn("(kept)", self.install("--harness", "gemini")[1])
+
+
+class TemplateMatcherTest(unittest.TestCase):
+    """AUD-HAR-209: matcher mẫu của host gồm tên tool thật mà adapter nhận (không chỉ dựa bí danh tên Claude)."""
+
+    def matcher(self, name: str) -> "re.Pattern[str]":
+        data = json.loads((ROOT / "framework" / "templates" / "harness" / name).read_text(encoding="utf-8"))
+        return re.compile(data["hooks"]["PreToolUse"][0]["matcher"])
+
+    def test_matchers_cover_adapter_tool_names(self):
+        cases = {
+            "codex-hooks.json": ("Bash", "shell", "exec_command", "apply_patch", "Edit", "Write", "mcp__s__t"),
+            "grok-xt.json": ("run_terminal_command", "search_replace", "Bash", "write_file", "server__tool"),
+        }
+        known = ad.SHELL_TOOLS | ad.EDIT_TOOLS | ad.PATCH_TOOLS
+        for name, tools in cases.items():
+            for tool in tools:
+                with self.subTest(name=name, tool=tool):
+                    self.assertTrue(self.matcher(name).fullmatch(tool))
+                    self.assertTrue(tool.lower() in known or "__" in tool)  # adapter nhận tên này
 
 
 if __name__ == "__main__":

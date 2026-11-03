@@ -10,8 +10,9 @@ xt="$root/.xtemplates/scripts"
 if [ -n "${CLAUDECODE:-}" ] && [ -f "$root/.claude/hooks/pre-bash-guard.sh" ]; then
   exit 0
 fi
-case "$(python3 "$xt/xt.py" commit-gate 2>/dev/null || echo fast)" in
-  full) task=gate ;;
-  *) task=gate-fast ;;
+# xt.py lỗi/giá trị lạ → cổng đầy đủ, như `commit_gate_mode` (vắng/lạ = full; AUD-HAR-206)
+case "$(python3 "$xt/xt.py" commit-gate 2>/dev/null || echo full)" in
+  fast) task=gate-fast ;;
+  *) task=gate ;;
 esac
 CLAUDE_PROJECT_DIR="$root" exec "$xt/dev-task.sh" "$task"

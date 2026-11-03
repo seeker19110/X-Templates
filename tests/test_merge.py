@@ -2950,7 +2950,11 @@ class PrNextCliTest(unittest.TestCase):
         self.assertEqual(self.calls, ["repos/o/r/pulls/7"])
         self.assertEqual(run(target="7")[0], 0)
         self.assertEqual(self.calls, ["repos/{owner}/{repo}/pulls/7"])
-        self.assertEqual(run(target="7\u0665")[0], 2)  # chữ số Unicode: `_pr_key` từ chối trước khi gọi GitHub
+        # AUD-TEST-057: chữ số Unicode — `_pr_key("7\u0665")` = "75" (không từ chối); GitHub giả VẪN được gọi và trả PR 7
+        # ≠ 75 → exit 2 do so số PR
+        rc, _, err = run(target="7\u0665")
+        self.assertEqual((rc, self.calls), (2, ["repos/{owner}/{repo}/pulls/75"]))
+        self.assertIn("không phải #75", err)
         last = xt.read_reviews(self.base)["7"]["reviews"][-1]
         self.assertEqual((last["clean"], last["author_model"]), (True, "dependabot[bot]"))
         rc, _, err = run_main(  # bot không tin cậy: luật họ model thường

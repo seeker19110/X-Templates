@@ -3,7 +3,7 @@ title: File harness: PLAN · PROGRESS · BLUEPRINT · evidence · state
 kind: module
 prefix: LOOP-HARNESS
 applies_to: [all]
-updated: 2026-11-02
+updated: 2026-11-03
 ---
 
 # File harness: PLAN · PROGRESS · BLUEPRINT · evidence · state
@@ -168,6 +168,11 @@ OS/devcontainer có egress allowlist (`LOOP-HARNESS-022`) và việc phiên chí
   x > config` dù `$X` không phải `.git`). `env -C DIR`/`--chdir=DIR` dời thư mục của lệnh sau `env` như `cd` (kèm chuyển
   hướng thì thư mục là không biết; tuỳ chọn dài viết tắt duy nhất như `--ch=DIR` cũng tính); `dd of=<đích>`, lệnh chỉ
   gồm chuyển hướng (`exec 3> .env`) và chuyển hướng đọc-ghi `<>` (`exec 3<> .env`) là ghi.
+- **Thân lệnh dựng lúc chạy bị chặn theo thiết kế — viết thay** (ADR-0063 lát B, AUD-SEC-322): `eval`/`sh -c` có thân lấy từ
+  `$(…)`/biến và hàm gọi `"$@"` không chứng minh được lệnh sẽ chạy nên bị chặn. Cách viết thay qua guard:
+  `eval "$(ssh-agent -s)"` → `ssh-agent -a "$HOME/.ssh/agent.sock" >/dev/null; export SSH_AUTH_SOCK="$HOME/.ssh/agent.sock"`;
+  `bash -c "cd $TMP"` → truyền đối số `bash -c 'cd "$1"' _ "$TMP"`; `retry(){ "$@"; }; retry ls` → vòng lặp tường minh
+  `for i in 1 2 3; do ls && break; sleep 1; done` (khoá bằng `tests/test_guard_strict.py`).
 - **Hook `TaskCompleted` chỉ chạy khi phiên có tool Task** (AUTO-02, D-068): `TaskCreate`/`TaskUpdate` không bật mặc định
   trên Opus 5.5/Sonnet 5.5/Haiku 5.5/Fable ở CLI — cần `CLAUDE_CODE_ENABLE_TODO_TOOLS=1` hoặc nêu tool trong
   `--allowedTools`; phiên nền và phiên cloud luôn có. Thiếu tool thì không có sự kiện `TaskCompleted`, hook không bao giờ
@@ -177,7 +182,7 @@ OS/devcontainer có egress allowlist (`LOOP-HARNESS-022`) và việc phiên chí
 
 ### Agent khác Claude Code (ADR-0064)
 
-Lõi chặn là `guard.py` chế độ trung lập (`guard.py core`: JSON `{tool, command|path|tool_name, input, cwd}` vào, `{decision,
+Lõi chặn là `guard.py` chế độ trung lập (`guard.py core`: JSON `{tool, command|path|tool_name, input, cwd, project_dir}` vào (`project_dir` vắng → gốc lấy từ `CLAUDE_PROJECT_DIR` rồi `cwd`), `{decision,
 code, reason}` ra, exit 2 khi deny); mỗi công cụ một adapter mỏng. Ma trận đầy đủ, nguồn và ngày:
 `research/2026-11-02-multi-provider-harness.md` §2 và §8. Adapter, sàn git hook và vòng lặp ngoài `loop run --agent` làm
 theo lát của ADR-0064 — trạng thái ở dòng *Trạng thái triển khai* của ADR. Điều harness dựa vào:
