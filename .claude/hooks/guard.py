@@ -391,7 +391,6 @@ def _git_config_env_asks(tokens: List[str], commands: List[Tuple[List[str], Opti
 # alias — AUD-SEC-352, review #306): tính chúng làm `GIT_CONFIG_PARAMETERS="'user.name'='x'" git push` bị sàn adapter
 # chặn và hỏng alias `GIT_CONFIG_KEY_0=alias.st … git st` (câu hỏi mở cho phiên chính).
 GIT_READ_ENV_RE = re.compile(r"HOME|XDG_CONFIG_HOME|GIT_CONFIG_(?:GLOBAL|SYSTEM)")
-GIT_READ_ENV_HINT_RE = re.compile(r"(?<![\w$])(?:HOME|XDG_CONFIG_HOME|GIT_CONFIG_GLOBAL|GIT_CONFIG_SYSTEM)\+?=")
 GIT_HOOK_SUBCMDS = frozenset("commit push merge rebase am cherry-pick revert".split())  # lệnh con chạy git hook
 GIT_CFG_ENV_ASK = (
     "git {} với biến cấu hình git ({}) — tệp cấu hình khác có thể bỏ git hook (AUD-SEC-434); cần người xác nhận"
@@ -413,20 +412,47 @@ def _git_cfg_vars(env: Dict[str, str]) -> List[str]:
     )
 
 
+GIT_CFG_NAMES = ("HOME", "XDG_CONFIG_HOME", "GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM")
+GIT_CFG_NAME_RE = re.compile(r"HOME|XDG_CONFIG_HOME|GIT_CONFIG_GLOBAL|GIT_CONFIG_SYSTEM")  # lọc nhanh trên chữ thô
+GIT_CFG_VAR_HEADS = frozenset({"read", "mapfile", "readarray", "getopts"})  # nhận TÊN biến làm đối số
+GIT_CFG_DYN = "$?"  # giá trị không biết (đặt bằng `for`/`read`/`printf -v`/`eval`)
+
+
+def _git_cfg_set(words: List[str]) -> Dict[str, str]:
+    """Biến cấu hình git mà lệnh đơn đặt ngoài phép gán trần (review #433 R2b): `for V in`, `read V`, `printf -v V`,
+    `wait -p V`, `eval '…V=…'` → giá trị không biết."""
+    if words[:1] in (["for"], ["select"]):
+        return {words[1]: GIT_CFG_DYN} if words[1:2] and words[1] in GIT_CFG_NAMES else {}
+    head, args = (posixpath.basename(words[0]), words[1:]) if words else ("", [])
+    names = [a for a in args if a in GIT_CFG_NAMES] if head in GIT_CFG_VAR_HEADS else []
+    flag = HOME_VAR_FLAG_HEADS.get(head)
+    names += [w for p, w in zip(args, args[1:]) if flag and p == flag and w in GIT_CFG_NAMES]
+    names += [v for v in GIT_CFG_NAMES for a in args if head == "eval" and re.search(rf"(?<![\w$]){v}\+?=", a)]
+    return dict.fromkeys(names, GIT_CFG_DYN)
+
+
+def _git_cfg_body_git(s: List[str]) -> bool:
+    """Lệnh `sh|bash -c BODY`/`eval BODY` mà BODY có lệnh git (R2c: gán tiền tố đi vào shell con)."""
+    bodies = [b for b in [_shell_c_script(s)] if b] + (_eval_scripts(s) if s[:1] == ["eval"] else [])
+    return any(normalize(cc)[:1] == ["git"] for b in bodies for cc in split_commands(tokenize(b)))
+
+
 def _git_cfg_env_why(cmd: str) -> str:
-    """AUD-SEC-434: lệnh git (trừ lệnh con chạy hook — câu hỏi bỏ hook ở `_scan_command`) có biến cấu hình git."""
-    if "git" not in cmd or not GIT_READ_ENV_HINT_RE.search(cmd):
+    """AUD-SEC-434: lệnh git (mọi lệnh con — review #433 R1; câu hỏi/cờ bỏ hook ở `_scan_command`) có biến cấu hình git;
+    lọc trên token đã chuẩn hoá (`g''it`), cả phép gán qua `for`/`read`/`printf -v`/`eval` và gán tiền tố đi vào
+    `sh -c`/`eval` có git (review #433 R2)."""
+    if not GIT_CFG_NAME_RE.search(cmd):
         return ""
     env: Dict[str, str] = {}
     for c in split_commands(tokenize(cmd)):
+        c = list(itertools.dropwhile(lambda t: t in SHELL_KEYWORDS, c))  # `do git …`, `then git …`
         s = _strip_prefixes(c)
+        env.update(_git_cfg_set(s))
         if not s or s[0] in DECLARE_CMDS:
             env.update(_assign_values(c))
             continue
-        n = normalize(c)
-        if n[:1] != ["git"] or n[1:2] and n[1] in GIT_HOOK_SUBCMDS:
-            continue
-        if _git_cfg_vars({**env, **_assign_values(c[: len(c) - len(s)])}):
+        risky = _git_cfg_vars({**env, **_assign_values(c[: len(c) - len(s)])})
+        if risky and (normalize(c)[:1] == ["git"] or _git_cfg_body_git(s)):
             return GIT_CFG_ENV_WHY
     return ""
 
@@ -464,6 +490,11 @@ def _realpath_safe(p: str) -> str:
         return p
 
 
+# Phần đuôi từ thư mục cha tới tệp cấu hình git: `/etc`+`gitconfig`, `~`+`.gitconfig`/`.config/git/config`,
+# `~/.config`+`git/config`, `~/.config/git`+`config` (review #433 R3)
+GIT_CFG_TAILS = ("gitconfig", ".gitconfig", ".config/git/config", "git/config", "config")
+
+
 def _git_config_links(commands: List[Tuple[List[str], Optional[str]]], root: str) -> Set[str]:
     """Đường dẫn của symlink mà `ln -s NGUỒN ĐÍCH` trong lệnh tạo tới tệp cấu hình git (đích, và đích/tên nguồn khi
     đích là thư mục) — dạng nguyên văn và đã giải theo thư mục đang đứng (AUD-SEC-435)."""
@@ -478,9 +509,13 @@ def _git_config_links(commands: List[Tuple[List[str], Optional[str]]], root: str
             continue
         pos = _positionals(n[1:], ("-t", "--target-directory", "-S", "--suffix"))
         src, dsts = (pos[0], pos[1:]) if len(pos) > 1 else (pos[0], ["."]) if pos else ("", [])
-        if not _global_git_config(src):
+        # review #433 R3: NGUỒN là thư mục cha của tệp cấu hình (`/etc`, `$(prefix)/etc`, `~/.config/git`) → `ĐÍCH/<đuôi>`
+        if not src:
             continue
-        for d in dsts + [posixpath.join(x, posixpath.basename(src)) for x in dsts]:
+        tails = [t for t in GIT_CFG_TAILS if _global_git_config(posixpath.join(src, t))]
+        cands = dsts + [posixpath.join(x, posixpath.basename(src)) for x in dsts]
+        cands = [posixpath.join(x, t) for x in cands for t in tails] if not _global_git_config(src) else cands
+        for d in cands:
             out |= {_norm_path(x) for x in [d, *_where(d, root, here)]}
     return out
 
@@ -3152,12 +3187,17 @@ def _raw_word_dynamic(word: str, whole: str) -> bool:
     return bool(v.why) or bool(STRICT_DYN_ESC_RE.search(word)) or _dyn_word(live, whole)
 
 
-def _argv_shell_check(cmd: str, tokens: List[str], strict: bool, asks: List[str]) -> None:
+def _argv_shell_check(
+    cmd: str, tokens: List[str], strict: bool, asks: List[str], res: Optional[Dict[str, object]] = None
+) -> None:
     """Chặn (BUDGET) khi `_argv_shell_why` có lý do — trừ khi câu hỏi nguy hiểm của luật cũ đã làm lệnh bị chặn (giữ mã
-    của luật cũ: HOOK_BYPASS…). Chữ lỏng (guard tự dựng) không qua tập con."""
+    của luật cũ: HOOK_BYPASS…). Chữ lỏng (guard tự dựng) không qua tập con. Cờ bỏ hook đã đặt trong `res` đi theo lỗi
+    (review #433 R1 — adapter host khác đọc `push_no_verify`)."""
     why = _argv_shell_why(cmd, tokens) if strict else ""
     if why and not _asks_denied(asks):
-        raise ScanTooComplex(f"ngoài tập con guard đọc chắc — {why} (ADR-0063)")
+        err = ScanTooComplex(f"ngoài tập con guard đọc chắc — {why} (ADR-0063)")
+        setattr(err, "flags", {k: True for k in ("no_verify", "push_no_verify") if (res or {}).get(k)})
+        raise err
 
 
 def _asks_denied(asks: List[str]) -> bool:
@@ -12494,7 +12534,7 @@ def bash_decision(
         return _bash_decision(cmd, root, cwd, depth, budget, rewrites)
     except ScanTooComplex as e:
         reason = f"Lệnh quá phức tạp để guard quét hết ({e}): {clean_text(cmd)[:200]}{BUDGET_REWRITE}"
-        return {
+        out: Dict[str, object] = {
             "decision": "deny",
             "reason": reason,
             "commit": False,
@@ -12502,6 +12542,8 @@ def bash_decision(
             "commit_dir": "",
             "code": BUDGET,
         }
+        out.update(getattr(e, "flags", {}))  # review #433 R1: giữ cờ bỏ hook (`no_verify`/`push_no_verify`) cho adapter
+        return out
 
 
 def _clean_strict(cmd: str, budget: ScanBudget) -> Tuple[str, bool]:
@@ -12583,7 +12625,7 @@ def _bash_decision(
         res.update(decision="deny", reason=deny_reason)
         return res
     res.pop("exported", None)
-    _argv_shell_check(cmd, tokens, strict, asks)
+    _argv_shell_check(cmd, tokens, strict, asks, res)
     allow = res.pop("allow", "")
     # `allow` bỏ hỏi cho CẢ lệnh Bash → chỉ khi merge đứng một mình và trơn (không gì shell còn mở rộng/chạy thêm).
     if allow and (len(commands) > 1 or not PLAIN_MERGE_RE.fullmatch(cmd.strip())):

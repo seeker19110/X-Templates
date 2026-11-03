@@ -3175,6 +3175,73 @@ class GuardDebt432Test(unittest.TestCase):
         self.assertEqual(decide("ln -s ~/.gitconfig lnk2 && cat lnk2")["decision"], "")
 
 
+class GuardReview433Test(unittest.TestCase):
+    """Review #433 (lượt sửa duy nhất): R1 — lệnh con chạy hook cũng BUDGET (giữ cờ); R2 — lọc trên token đã chuẩn hoá,
+    phép gán qua `for`/`read`/`printf -v`/`eval`, tiền tố trước `sh -c`/`eval`; R3 — `ln -s` thư mục cha của tệp cấu hình
+    git. Mọi ca đỏ ở 30dce390."""
+
+    assert_budget = GuardStrictDebtTest.assert_budget
+    assert_hook_bypass = GuardDebt431Test.assert_hook_bypass
+
+    def test_r433_r1_hook_subcommands_budget(self):
+        """R1: commit/push/merge/rebase/am/cherry-pick/revert với biến trỏ tệp cấu hình → BUDGET, cờ vẫn đặt."""
+        cmds = (
+            "cd r && GIT_CONFIG_GLOBAL=../cfg_push git push",
+            "GIT_CONFIG_GLOBAL=../cfg_fsm git merge --ff-only feat",
+            "GIT_CONFIG_GLOBAL=../cfg git revert HEAD",
+            "HOME=. git cherry-pick abc",
+            "XDG_CONFIG_HOME=. git rebase main",
+            "HOME=. git am x.mbox",
+        )
+        self.assert_budget(cmds, ("GIT_CONFIG_GLOBAL=/dev/null git push origin feat",), "AUD-SEC-434")
+        with mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(ROOT)}):
+            raw = guard.bash_decision("export HOME=.; git push origin feat", str(ROOT))
+        self.assertTrue(raw.get("push_no_verify"), raw)
+
+    def test_r433_r2_tokens_setters_shell_prefix(self):
+        """R2: (a) `g''it`/`"gi"t`; (b) `for`/`printf -v`/`read`/`eval` đặt biến; (c) tiền tố trước `sh -c`/`eval`."""
+        self.assert_budget(
+            (
+                "HOME=. g''it log -1",
+                'HOME=. "gi"t diff',
+                "for HOME in .; do git status; done",
+                "printf -v HOME %s .; git status",
+                "read HOME <<< .; git status",
+                "eval HOME=.; git status",
+                "export GIT_CONFIG_GLOBAL; for GIT_CONFIG_GLOBAL in cfg; do git status; done",
+                "for HOME in .; do git push origin feat; done",
+                "HOME=. sh -c 'git status'",
+                "GIT_CONFIG_GLOBAL=cfg sh -c 'git log -1'",
+                "env -i HOME=. sh -c 'git status'",
+                "HOME=. bash -c 'git push'",
+                "HOME=. eval 'git status'",
+            ),
+            (
+                "HOME=. sh -c 'ls'",
+                "for x in a b; do git status; done",
+                "printf -v y %s .; git status",
+                "GIT_CONFIG_GLOBAL=/dev/null sh -c 'git status'",
+            ),
+            "AUD-SEC-434",
+        )
+
+    def test_r433_r3_ln_s_parent_dir(self):
+        """R3: `ln -s` THƯ MỤC cha của tệp cấu hình git rồi ghi qua nó (không chạy thật ghi /etc)."""
+        g = "printf '[core]\\n\\thooksPath = /dev/null\\n'"
+        self.assert_hook_bypass(
+            (
+                f"ln -s /etc e && {g} >> e/gitconfig",
+                f"ln -s /usr/local/etc pe && {g} >> pe/gitconfig",
+                f"ln -s ~ h; {g} >> h/.gitconfig",
+                f"ln -s ~/.config c; {g} >> c/git/config",
+                f"ln -s ~/.config/git cg; {g} >> cg/config",
+                f"ln -s $HOME hh && {g} >> hh/.gitconfig",
+            )
+        )
+        self.assertEqual(decide("ln -s /etc e && cat e/gitconfig")["decision"], "")
+        self.assertEqual(guard._git_config_links([(["ln", "-s"], str(ROOT))], str(ROOT)), set())
+
+
 class LedgerMatchesGuardTest(unittest.TestCase):
     """Review #428 🔴 (AUD-DOC-243): sổ không được ghi `chấp nhận`/`đã sửa` cho phát hiện mà guard còn cho qua DẠNG
     NGUYÊN VĂN của nó — `audit check --strict` xanh giả. Ca nguyên văn còn lọt thì hàng sổ phải `mở`; khi T-3663 sửa
