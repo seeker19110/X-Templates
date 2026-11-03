@@ -25,7 +25,7 @@ STUB = WORKFLOWS / "merge-gate.yml"
 RULESET = ROOT / ".github" / "rulesets" / "main.json"
 AGGREGATE = "quality"
 OUTSIDE_QUALITY = {"protection-guard"}  # required check riêng, không phải cổng chất lượng
-# ADR-0036: `pull_request_target` chỉ còn ở reviewer trên GitHub (đang tắt) — GitHub chặn mặc định ở repo public từ 2026-11-02.
+# ADR-0036: `pull_request_target` chỉ còn ở reviewer trên GitHub (đang tắt) — GitHub chặn mặc định ở repo public từ 2026-12-02 (dời từ 2026-11-02 — ADR-0035 Ghi chú 2026-11-03).
 PR_TARGET_ALLOWED = {"pr-review.yml"}
 PR_TARGET_RE = re.compile(r"(?<![\w-])pull_request_target(?![\w-])")
 
