@@ -3,7 +3,7 @@ title: Điểm dừng bắt buộc, mức tin cậy T0–T4, leo thang
 kind: module
 prefix: LOOP-STOP
 applies_to: [all]
-updated: 2026-11-01
+updated: 2026-11-03
 ---
 
 # Điểm dừng bắt buộc, mức tin cậy T0–T4, leo thang
@@ -95,6 +95,16 @@ chuyên môn. Guard **không hỏi người** (ADR-0018): bộ luật vẫn tín
 | Merge thay đổi rủi ro cao | Chạm auth, mật mã, dữ liệu nhạy cảm, luật ngành | Luôn làn kiến trúc; `merge-check` `hard` → agent merge bị **deny** (`merge_hard_exceptions: auto` → CI + reviewer máy, ADR-0020); máy chỉ merge ghim head sau `merge-check` ở đúng head và không bao giờ bật auto-merge, nên push commit `hard` vào PR đang mở không tự merge (ADR-0036); `risk_tags` ≠ rỗng → thêm review bảo mật (`LOOP-STOP-005`) | Người phê duyệt bảo mật |
 | Duyệt giai đoạn sản phẩm | Nghiệm thu MVP/hoàn thiện/tối ưu, công nhận dự án đã chạy (ADR-0058) | `xt.py stage approve`/`init --adopt` từ chối trong phiên agent; guard **deny** lệnh đó và ghi tay `docs/autopilot/STAGE.json`; agent `stage submit` rồi dừng; `loop init/next/record` từ chối PLAN của giai đoạn khoá; xoá/dời sổ đã có trong git → chặn | Người: `stage approve --sha <bản đã trình> --note …` ở terminal riêng |
 | Bế tắc máy | Cùng chữ ký lỗi lần 3, ngân sách/hạn hết | `loop record` tự đặt `blocked`; verdict `budget` | Lỗi lặp: người xem rồi `loop unblock --reason …`; hết ngân sách/hạn: `loop init --plan <đợt kế>` |
+
+**Lệnh ngoài tập con guard (ADR-0063) và cách viết thay.** Guard chỉ cho chạy chữ bash nó đọc chắc; cấu trúc ngoài tập con
+bị **deny** mã `BUDGET` (lý do có "ngoài tập con guard đọc chắc"), kể cả khi lệnh vô hại — chặn thừa được chọn thay vì mô
+phỏng bash sai. Đây không phải điểm dừng: viết lại cùng ý bằng dạng trong tập con (không phải tìm lệnh khác cho hiệu ứng
+mà luật nguy hiểm đã chặn — `LOOP-STOP-025`).
+
+| Bị chặn (lý do) | Viết thay (guard cho chạy) | Lưu ý |
+|---|---|---|
+| `"${f#"$ROOT"/}"` — nháy lồng trong `${…}` (AUD-SEC-246; ShellCheck SC2295 khuyên dạng này) | `"${f:${#ROOT}+1}"` | Chỉ tương đương khi `$f` chắc bắt đầu bằng `$ROOT/` (vd. `for f in "$ROOT"/*`); không chắc thì bọc `case $f in "$ROOT"/*) … esac` |
+| `${DIR:-'.'}` — nháy lồng trong `${…}` (AUD-SEC-246) | `${DIR:-.}` hoặc `"${DIR:-.}"` | Giá trị mặc định là chữ thường thì không cần nháy |
 
 ### Thang tin cậy T0–T4 cho mỗi việc giao (stored 23 §4.5)
 

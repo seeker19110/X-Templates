@@ -145,7 +145,7 @@ class AdapterHostTest(unittest.TestCase):
         self.assertTrue(verdict("codex", out, 0))
         cores = ad.to_core("codex", "apply_patch", {"command": patch}, str(ROOT), str(ROOT))
         self.assertEqual([c["path"] for c in cores], [str(ROOT / "README.md"), str(ROOT / ".env")])
-        self.assertEqual(ad.to_core("cursor", "Delete", {}, "/w", "/w")[0]["path"], "")
+        self.assertEqual(ad.to_core("cursor", "Delete", {}, "/w", "/w")[0]["tool"], ad.UNPARSED)  # AUD-SEC-351
         self.assertEqual(ad.to_core("cursor", "Read", {"file_path": "x"}, "/w", "/w"), [])  # đọc: không xét
 
     def test_no_guard_allows_and_rule_error_fails_open_except_merge(self):
@@ -180,6 +180,64 @@ class AdapterHostTest(unittest.TestCase):
         ):
             out, code = ad.run("codex", payloads("codex")[7][1], lambda r: g)
         self.assertTrue(verdict("codex", out, code), out)
+
+    def test_unparsed_shell_or_edit_denies(self):
+        """AUD-SEC-351 (nợ review #411): tool shell/ghi mà adapter không trích được lệnh/đường (khoá đối số lệch) → deny
+        UNPARSED, không cho qua im lặng; khoá thay thế đã biết (`cmd`, `file`, `filename`, `paths`, `patch`) được đọc."""
+        cwd = str(ROOT)
+        for host, raw in (
+            ("grok", {"toolName": "run_terminal_command", "toolInput": {"cwd": cwd}}),
+            ("cursor", {"tool_name": "Delete", "tool_input": {}}),
+            ("copilot", {"toolName": "edit", "toolArgs": {"old_str": "a", "new_str": "b"}}),
+            ("codex", {"tool_name": "exec_command", "tool_input": {"command": ""}}),
+            ("codex", {"tool_name": "apply_patch", "tool_input": {"input": "không phải patch"}}),
+            ("gemini", {"tool_name": "write_file", "tool_input": {"content": "x"}}),
+        ):
+            with self.subTest(host=host, raw=raw):
+                out, code = ad.run(host, {**raw, "cwd": cwd})
+                self.assertTrue(verdict(host, out, code), out)
+                self.assertIn("UNPARSED", out)
+        for host, raw, deny in (
+            ("grok", {"toolName": "run_terminal_command", "toolInput": {"cmd": "rm -rf ~"}}, True),
+            ("grok", {"toolName": "run_terminal_command", "toolInput": {"cmd": "ls -la"}}, False),
+            ("codex", {"tool_name": "exec_command", "tool_input": {"cmd": "git push origin main"}}, True),
+            ("grok", {"toolName": "search_replace", "toolInput": {"file": str(ENV)}}, True),
+            ("copilot", {"toolName": "edit", "toolArgs": {"filename": str(LEDGER)}}, True),
+            ("copilot", {"toolName": "edit", "toolArgs": {"filename": str(NOTES)}}, False),
+            ("cursor", {"tool_name": "Delete", "tool_input": {"paths": [str(NOTES), str(ENV)]}}, True),
+            ("cursor", {"tool_name": "Delete", "tool_input": {"paths": [str(NOTES)]}}, False),
+            ("codex", {"tool_name": "apply_patch", "tool_input": {"patch": "*** Add File: .env\n+x\n"}}, True),
+            ("codex", {"tool_name": "apply_patch", "tool_input": {"patch": "*** Add File: a.md\n+x\n"}}, False),
+        ):
+            with self.subTest(host=host, raw=raw):
+                out, code = ad.run(host, {**raw, "cwd": cwd})
+                self.assertEqual(verdict(host, out, code), deny, out)
+
+    def test_push_no_verify_denied(self):
+        """AUD-SEC-352 (nợ review #411): `git push --no-verify` bỏ sàn git hook `pre-push` (nhánh chính, xoá nhánh từ xa)
+        như `commit --no-verify` → deny NO_VERIFY ở mọi host; push thường và `push -n` (thử) vẫn chạy."""
+        for host in ad.HOSTS:
+            for cmd, deny in (
+                ("git push --no-verify origin :feat", True),
+                ("git push origin feat --no-verify", True),
+                ("git -c core.hooksPath=/dev/null push origin feat", True),
+                ("git push --no-veri origin feat", True),
+                ("cd /tmp && git push --no-verify origin feat", True),
+                ("bash -c 'git push --no-verify origin feat'", True),
+                # AUD-SEC-352 (review lượt 2): git đọc `-c` từ biến này (`git config --get core.hooksPath` in /dev/null)
+                ("GIT_CONFIG_PARAMETERS=\"'core.hooksPath'='/dev/null'\" git push origin :feat", True),
+                ("GIT_CONFIG_PARAMETERS=\"'CORE.HOOKSPATH'='/x'\" git push origin feat", True),
+                ("GIT_CONFIG_PARAMETERS=\"'core.hooksPath'='/dev/null'\" git commit -m x", True),
+                ("GIT_CONFIG_PARAMETERS=\"'user.name'='x'\" git push origin feat", False),
+                ("git push origin feat", False),
+                ("git push -n origin feat", False),
+                ("git push origin -- --no-verify", False),
+            ):
+                with self.subTest(host=host, cmd=cmd):
+                    out, code = ad.run(host, _shell(host, cmd, str(ROOT)))
+                    self.assertEqual(verdict(host, out, code), deny, out)
+                    if deny:
+                        self.assertIn("NO_VERIFY", out)
 
     def test_opencode_mcp_names(self):
         self.assertEqual(ad.mcp_name("opencode", "github_merge_pull_request"), "mcp__github__merge_pull_request")

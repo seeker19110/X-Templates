@@ -4608,6 +4608,7 @@ DOCTOR_PRETOOL_TOOLS: Tuple[str, ...] = (
     "mcp__github__fork_repository",
     "mcp__github__issue_write",
     "mcp__github__sub_issue_write",
+    "mcp__github__actions_run_trigger",  # AUD-SEC-344
 )
 
 
@@ -4956,6 +4957,9 @@ def _doctor_xt_yaml(base: Path, fw: Path) -> List[Finding]:
     gate_err = commit_gate_error(scalars)
     if gate_err:
         out.append(Finding("xt-yaml", "error", gate_err + " — sửa thành fast hoặc full"))
+    rethink_err = max_rethink_error(scalars)
+    if rethink_err:
+        out.append(Finding("xt-yaml", "warn", f"{rethink_err} — đang dùng trần mặc định {MAX_RETHINK_DEFAULT}"))
     missing = [k for k in DOCTOR_YAML_KEYS if k not in keys]
     if missing:
         out.append(
@@ -9164,7 +9168,7 @@ LOOP_AGENTS: Dict[str, List[str]] = {
     "claude": ["claude", "-p", "--permission-mode", "auto"],
     "codex": ["codex", "exec"],
     "gemini": ["gemini", "-p"],
-    "cursor": ["agent", "-p", "--force"],
+    "cursor": ["agent", "-p"],  # không `--force` (cờ tự duyệt, LOOP-STOP-028 — AUD-DOC-232)
     "copilot": ["copilot", "-p"],
     "grok": ["grok", "-p"],
     "opencode": ["opencode", "run"],
@@ -12138,10 +12142,21 @@ MAX_RETHINK_DEFAULT = 1
 MAX_RETHINK_KEY = "max_rethink"
 
 
+MAX_RETHINK_RE = re.compile(r"\d+")
+
+
 def rethink_cap(keys: Dict[str, str]) -> int:
     """`max_rethink` của xt.yaml → số nguyên ≥ 0; thiếu/lạ → mặc định (không nới: giá trị hỏng không tắt trần)."""
     raw = keys.get(MAX_RETHINK_KEY, "")
-    return int(raw) if re.fullmatch(r"\d+", raw) else MAX_RETHINK_DEFAULT
+    return int(raw) if MAX_RETHINK_RE.fullmatch(raw) else MAX_RETHINK_DEFAULT
+
+
+def max_rethink_error(keys: Dict[str, str]) -> Optional[str]:
+    """`max_rethink` lạ (khác rỗng mà `rethink_cap` không đọc được — AUD-HAR-175) — `doctor` cảnh báo thay vì im lặng."""
+    value = keys.get(MAX_RETHINK_KEY, "")
+    if value == "" or MAX_RETHINK_RE.fullmatch(value):
+        return None
+    return f"xt.yaml: {MAX_RETHINK_KEY} '{value}' không hợp lệ (số nguyên ≥ 0 — ADR-0061)"
 
 
 def pr_rethink_cap(base: Path, pr: Dict[str, Any]) -> int:

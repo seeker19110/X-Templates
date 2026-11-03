@@ -190,3 +190,10 @@
 - Chọn: Mở --agent-args cho người dùng tự truyền cờ; bảng lệnh không thêm cờ bỏ qua quyền; research cờ từng host rồi mới thêm
 - Lý do (tiêu chí chất lượng cuối): (1) an toàn: cờ tự duyệt chưa xác minh có thể là chế độ bỏ qua quyền (LOOP-STOP-028 cấm khung tự bật); cờ do người chạy truyền vào là quyết định của họ. (2) giữ đường lùi: thêm cờ đã research sau. Phần Claude đã sửa (--permission-mode auto). Việc này cần /research từng host nên làm sau PLAN này
 - Đường lùi: Bỏ --agent-args
+
+### D-319 · 2026-11-03T00:23:23+00:00 · Nhánh guard (#420): AUD-SEC-373 (sổ giai đoạn bảo vệ bằng liệt kê lệnh ghi) và AUD-SEC-374 (lời gọi thực thi sau literal lạ coi là trong chuỗi) — sửa tận gốc cần ADR; đóng PLAN thế nào? Kèm hệ quả chặn mới grep -rl … docs | xargs sed -i
+
+- Phương án: (1) Chấp nhận có hạn 2027-01-31: ADR mới chọn bảo vệ theo tiền tố docs/ (như .autopilot/) hoặc vân tay sổ do xt.py stage ghi; tách literal theo họ trình thông dịch hoặc coi lời gọi trong vùng chưa chắc là lời gọi; nhận chặn mới (hướng chặt) · (2) Làm ngay trong PR này · (3) Để mở, chặn phát hành
+- Chọn: Chấp nhận có hạn 2027-01-31: ADR mới chọn bảo vệ theo tiền tố docs/ (như .autopilot/) hoặc vân tay sổ do xt.py stage ghi; tách literal theo họ trình thông dịch hoặc coi lời gọi trong vùng chưa chắc là lời gọi; nhận chặn mới (hướng chặt)
+- Lý do (tiêu chí chất lượng cuối): (1) an toàn: cả hai là giới hạn của cách liệt kê đã biết (ADR-0063) — bản sửa hiện tại đóng mọi dạng đã tái hiện; đổi mô hình bảo vệ là quyết định kiến trúc cần ADR + đo chặn oan trên kho lệnh thật, làm vội trong PR nợ dễ hồi quy (#372, ADR-0061). (2) giữ đường lùi: chấp nhận có hạn, chủ phiên chính. Chặn mới grep|xargs sed -i dưới docs là hướng chặt, đường thay thế: sửa từng file bằng Edit
+- Đường lùi: Mở ADR sớm hơn và làm trước 3.30.0 nếu chủ dự án đòi

@@ -514,6 +514,359 @@ class StageLedgerDirTest(unittest.TestCase):
                 self.assertEqual(decide(cmd)["decision"], "", decide(cmd))
 
 
+class StageLedgerReview405Test(unittest.TestCase):
+    """AUD-SEC-340 (nợ review #405): sổ giai đoạn ghi qua lệnh/API ngoài danh sách cũ — rsync vào thư mục sổ theo tên
+    nguồn, đích từ ống vào xargs, trình giải nén khác tar, `tar --transform`, API chép/giải nén của Python/Node/Perl nhắc
+    thư mục sổ hay tên sổ trong script không chỉ đọc. Luật mới OR với luật cũ: `StageLedgerDirTest` giữ nguyên."""
+
+    DENY = (
+        "rsync -a src/* docs/autopilot/",
+        "rsync -a src/STAGE.json docs/autopilot/",
+        "rsync -a src/STAGE.json docs/autopilot",
+        "rsync -a x/autopilot docs/",
+        "echo docs/autopilot/STAGE.json | xargs -I{} cp x {}",
+        "ls docs/autopilot/* | xargs sed -i s/a/b/",
+        "find . -name STAGE.json | xargs rm",
+        "unzip -o a.zip -d docs",
+        "unzip a.zip -ddocs/autopilot",
+        "cd docs && unzip a.zip",
+        "bsdtar -xf a.tar -C docs",
+        "gtar -xf a.tar -C docs",
+        "bsdtar -xf a.tar -s ,^,docs/,",
+        "7z x a.7z -odocs/autopilot",
+        "7za e a.7z -odocs",
+        "cpio -idm -D docs < a.cpio",
+        "cpio -i --directory=docs/autopilot < a.cpio",
+        "find src | cpio -pdm docs",
+        "tar -xf a.tar --transform 's,^,docs/,'",
+        "tar -xf a.tar --xform=s,^,docs/,",
+        'python3 -c \'import tarfile; t=tarfile.open("a.tar"); [t.extract(m, "docs/autopilot") for m in t]\'',
+        'python3 -c \'import shutil; shutil.move("x", "docs/autopilot")\'',
+        'python3 -c \'import shutil; shutil.copy("x", "docs/autopilot")\'',
+        'python3 -c \'from pathlib import Path; Path("docs/autopilot","STAGE.json").write_text("{}")\'',
+        'python3 -c \'import os; open(os.path.join("docs", "autopilot", "STAGE.json"), "w")\'',
+        'node -e \'require("fs-extra").copySync("x", "docs/autopilot")\'',
+        'node -e \'require("fs").promises.cp("x", "docs/autopilot", {recursive: true})\'',
+        'perl -MFile::Copy::Recursive=dircopy -e \'dircopy("x", "docs/autopilot")\'',
+        # review lượt 2: cờ `d` trong cụm của unzip, CLI zipfile/tarfile, jar, `cp --parents`/`rsync -R`, nguồn ống là
+        # thư mục tổ tiên của sổ hay mẫu khớp tên sổ
+        "unzip -qd docs a.zip",
+        "unzip -od docs/autopilot a.zip",
+        "python3 -m zipfile -e a.zip docs",
+        "python3 -m tarfile -e a.tar docs",
+        "python3 -m zipfile --extract a.zip docs/autopilot",
+        "cd docs && python3 -m zipfile -e ../a.zip .",
+        "cd docs && jar xf a.jar",
+        "cd docs/autopilot && jar -xf a.jar",
+        "cp --parents autopilot/STAGE.json docs/",
+        "rsync -aR autopilot/STAGE.json docs/",
+        "rsync -a --relative autopilot/ docs",
+        "grep -rl approved docs | xargs sed -i s/false/true/",
+        "find . -name 'STAGE*' | xargs rm",
+        "find . -path '*/autopilot/*' | xargs rm",
+        "git grep -l approved -- docs/autopilot | xargs sed -i s/false/true/",
+        'python3 -c \'from pathlib import Path; (Path("docs") / "autopilot" / "STAGE.json").write_text("{}")\'',
+    )
+    ALLOW = (
+        "rsync -a src/notes.md docs/autopilot/",
+        "rsync -a docs/autopilot/ /tmp/bk/",
+        "echo docs/autopilot/PLAN-a.md | xargs -I{} echo {}",
+        "ls docs/autopilot/ | xargs -n1 echo",
+        "unzip -l a.zip",
+        "unzip -o a.zip -d /tmp/x",
+        "unzip a.zip",
+        "bsdtar -tf a.tar -C docs",
+        "7z l a.7z",
+        "7z x a.7z -o/tmp/x",
+        "7z a out.7z docs",
+        "cpio -t < a.cpio",
+        "find docs | cpio -o > a.cpio",
+        "tar -czf a.tgz --transform 's,^,x/,' docs",
+        "python3 -c 'import json; print(json.load(open(\"docs/autopilot/STAGE.json\")))'",
+        'python3 -c \'import shutil; shutil.copytree("docs/autopilot", "/tmp/bk")\'',
+        "python3 -c 'from pathlib import Path; print(Path(\"docs/autopilot\").is_dir())'",
+        'python3 -c \'import shutil; shutil.copy("x", "build")\'',
+        # review lượt 2: chép RA khỏi thư mục sổ, sửa file khác tên sổ, tên `STAGE.json` ngoài thư mục sổ
+        "echo docs/autopilot/PLAN-a.md | xargs -I{} cp {} /tmp/",
+        "ls docs/autopilot/PLAN-*.md | xargs sed -i s/foo/bar/",
+        "find docs/autopilot -name '*.md' | xargs -I{} cp {} /tmp/bk/",
+        "git ls-files docs/autopilot | xargs -I{} cp {} /tmp/bk/",
+        "find docs/autopilot | xargs cp -t /tmp/bk/",
+        "ls * | xargs sed -i s/a/b/",
+        'python3 -c \'import tempfile,os; d=tempfile.mkdtemp(); open(os.path.join(d, "STAGE.json"), "w").write("{}")\'',
+        'python3 -c \'d = {}; e = d.copy(); open("out.txt", "w").write("STAGE.json")\'',
+        "python3 -m zipfile -e a.zip /tmp/x",
+        "python3 -m zipfile -l a.zip",
+        "python3 -m tarfile -l a.tar",
+        "jar tf a.jar",
+        "jar xf a.jar",
+        "jar cf out.jar docs",
+        "cp --parents src/a.md build/",
+        "rsync -aR src/a.md build/",
+    )
+
+    def test_denied(self):
+        for cmd in self.DENY:
+            with self.subTest(cmd=cmd):
+                d = decide(cmd)
+                self.assertEqual((d["decision"], d.get("code")), ("deny", "EVIDENCE_HANDWRITE"), d)
+
+    def test_allowed(self):
+        for cmd in self.ALLOW:
+            with self.subTest(cmd=cmd):
+                self.assertEqual(decide(cmd)["decision"], "", decide(cmd))
+
+
+class ShellSourceReview405Test(unittest.TestCase):
+    """AUD-SEC-341 (nợ review #405): `eval` trước `.`/`source`/shell đọc `<(…)`, shell/`source` đọc `/dev/stdin` mà stdin
+    là `<(…)`, ống vào shell họ khác (hush, yash, posh, oksh, loksh, csh, tcsh, `toybox sh`) — chặn BUDGET như
+    `bash <(cat f)`/`cat f | bash` (AUD-SEC-310/311)."""
+
+    DENY = (
+        "eval . <(cat f)",
+        "eval sh <(cat f)",
+        "eval source <(cat f)",
+        "eval eval . <(cat f)",
+        "bash /dev/stdin < <(cat f)",
+        ". /dev/stdin < <(cat f)",
+        "source /dev/fd/0 < <(cat f)",
+        "cat f.sh | hush",
+        "cat f.sh | yash",
+        "cat f.sh | posh",
+        "cat f.sh | oksh",
+        "cat f.sh | loksh",
+        "cat f.sh | csh",
+        "cat f.sh | tcsh",
+        "cat f.sh | toybox sh",
+        "tcsh <(cat f)",
+        # review lượt 2: `/dev/fd/N` mà chính lệnh chuyển `N< <(…)`, `eval --`, rbash/osh/ysh
+        ". /dev/fd/3 3< <(cat f)",
+        "source /dev/fd/3 3< <(cat f)",
+        "bash /dev/fd/3 3< <(cat f)",
+        "source /proc/self/fd/4 4< <(cat f)",
+        "eval -- . <(cat f)",
+        "eval -- eval -- source <(cat f)",
+        "cat f.sh | rbash",
+        "cat f.sh | osh",
+        "cat f.sh | ysh",
+    )
+    ALLOW = (
+        "diff <(cat a) <(cat b)",
+        "bash script.sh < <(cat f)",
+        "echo 'ls' | yash",
+        "toybox ls -la",
+        "eval echo hi",
+        "eval -- echo hi",
+        "cat /dev/fd/3 3< <(cat f)",
+        "bash script.sh 3< <(cat f)",
+        "while read -r l <&3; do echo $l; done 3< <(git ls-files)",
+    )
+
+    def test_denied(self):
+        for cmd in self.DENY:
+            with self.subTest(cmd=cmd):
+                d = guard.bash_decision(cmd, str(ROOT))
+                self.assertEqual((d["decision"], d.get("code")), ("deny", guard.BUDGET), d)
+
+    def test_allowed(self):
+        for cmd in self.ALLOW:
+            with self.subTest(cmd=cmd):
+                self.assertEqual(decide(cmd)["decision"], "", decide(cmd))
+
+    def test_strict_sh_names_cover_shells(self):
+        for name in guard.SHELLS:
+            with self.subTest(name):
+                self.assertRegex(name, f"^{guard.STRICT_SH_NAME}$")
+
+    def test_new_shells_scanned_like_bash(self):
+        for cmd in ("tcsh -c 'rm -rf ~'", "toybox sh -c 'rm -rf ~'", "echo 'rm -rf ~' | yash"):
+            with self.subTest(cmd=cmd):
+                self.assertEqual(decide(cmd)["decision"], "deny", decide(cmd))
+
+
+class ExecArgvReview405Test(unittest.TestCase):
+    """AUD-SEC-342 (nợ review #405): lời gọi thực thi mà argv không ở đối số đầu (`os.execvp(file, argv)`, Node
+    `spawnSync(cmd, args)`), tuple argv, danh sách với `shell=True`, `asyncio.create_subprocess_*`, và nháy lẻ trong
+    chú thích từng nuốt lời gọi (`STR_ANY_RE`) — chuỗi lệnh được quét như `os.system('…')`."""
+
+    DENY = (
+        'python3 -c \'import os; os.execvp("bash", ["bash", "-c", "rm -rf ~"])\'',
+        'python3 -c \'import os; os.execv("/bin/sh", ("sh", "-c", "rm -rf ~"))\'',
+        'python3 -c \'import os; os.spawnvp(os.P_WAIT, "rm", ["rm", "-rf", "~"])\'',
+        'python3 -c \'import os; os.execlp("rm", "rm", "-rf", "~")\'',
+        'python3 -c \'import os; os.posix_spawn("/bin/sh", ["sh", "-c", "rm -rf ~"], {})\'',
+        "python3 -c 'import asyncio; asyncio.run(asyncio.create_subprocess_shell(\"rm -rf ~\"))'",
+        'python3 -c \'import asyncio; asyncio.run(asyncio.create_subprocess_exec("rm", "-rf", "~"))\'',
+        "python3 -c 'import subprocess; subprocess.run([\"rm -rf ~\"], shell=True)'",
+        'python3 -c \'import subprocess; subprocess.run(("rm", "-rf", "~"))\'',
+        'python3 -c \'import subprocess; subprocess.run(("git", "push", "origin", "main"))\'',
+        'node -e \'require("child_process").spawnSync("bash", ["-c", "rm -rf ~"])\'',
+        'node -e \'require("child_process").execFileSync("bash", ["-c", "rm -rf ~"])\'',
+        'node -e \'require("child_process").spawn("rm", ["-rf", "~"])\'',
+        "python3 -c \"# don't\nimport os; os.system('rm -rf ~')\n# it's\"",
+        "node -e \"// don't\nrequire('child_process').execSync('rm -rf ~') // it's\"",
+        # review lượt 2 🔴: `//` chia nguyên của Python đọc nhầm là chú thích nuốt nháy mở → lời gọi thật bị coi là trong
+        # chuỗi; luật cũ (`STR_ANY_RE`) làm sàn: chỉ bỏ lời gọi nằm trong chuỗi theo CẢ HAI cách tính
+        "python3 -c $'n = 7 // 2; s = \\'a\\\\\\nb\\'; import os; os.system(\"git push origin main\"); print(\\'x\\')'",
+        "python3 -c $'n = 7 // 2; s = \\'a\\\\\\nb\\'; import os; os.system(\"rm -rf ~\"); print(\\'x\\')'",
+        # shell=<giá trị truthy khác True>, argv theo từ khoá `args=`, `executable=` thay argv[0]
+        "python3 -c 'import subprocess; subprocess.run([\"rm -rf ~\"], shell=1)'",
+        'python3 -c \'import subprocess; subprocess.run(["rm -rf ~"], shell="yes")\'',
+        'python3 -c \'import subprocess; subprocess.run(args=["bash", "-c", "rm -rf ~"])\'',
+        'python3 -c \'import subprocess; subprocess.run(args=["git", "push", "origin", "main"])\'',
+        'python3 -c \'import subprocess; subprocess.Popen(executable="/bin/sh", args=["sh", "-c", "rm -rf ~"])\'',
+        'python3 -c \'import subprocess; subprocess.Popen(["x", "-c", "rm -rf ~"], executable="/bin/sh")\'',
+        'python3 -c \'import os; os.execvp(file="bash", args=["bash", "-c", "rm -rf ~"])\'',
+    )
+    ALLOW = (
+        'python3 -c \'import os; os.execvp("ls", ["ls", "-la"])\'',
+        'python3 -c \'import subprocess; subprocess.run(("git", "status"))\'',
+        "python3 -c 'import subprocess; subprocess.run([\"ls -la\"], shell=True)'",
+        'node -e \'require("child_process").spawnSync("ls", ["-la"])\'',
+        "python3 -c \"# don't\nimport os; os.system('ls')\n# it's\"",
+        'python3 -c \'print("os.system(\\"rm -rf ~\\")")\'',
+        "python3 -c $'n = 7 // 2; s = \\'a\\\\\\nb\\'; import os; os.system(\"ls\"); print(\\'x\\')'",
+        "python3 -c 'import subprocess; subprocess.run([\"rm -rf ~\"], shell=False)'",
+        "python3 -c 'import subprocess; subprocess.run([\"ls -la\"], shell=1)'",
+        'python3 -c \'import subprocess; subprocess.run(args=["ls", "-la"])\'',
+        'python3 -c \'import subprocess; subprocess.Popen(["x", "-c", "ls"], executable="/bin/sh")\'',
+    )
+
+    def test_denied(self):
+        for cmd in self.DENY:
+            with self.subTest(cmd=cmd):
+                self.assertEqual(decide(cmd)["decision"], "deny", decide(cmd))
+
+    def test_allowed(self):
+        for cmd in self.ALLOW:
+            with self.subTest(cmd=cmd):
+                self.assertEqual(decide(cmd)["decision"], "", decide(cmd))
+
+
+class GuardReview2HelpersTest(unittest.TestCase):
+    """Bộ phận của bản sửa review lượt 2 (AUD-SEC-340/341/342/352): từng nhánh, cả ca được phép và bị từ chối."""
+
+    def test_names_ledger(self):
+        yes = ("docs", "./docs/", "../docs", "autopilot", "docs/autopilot", "/x/docs", "/x/docs/autopilot")
+        yes += ("STAGE*", "./STAGE.json", "docs/autopilot/*", "*/autopilot/*", "/r/docs/autopilot/STAGE.json")
+        no = ("", "/", ".", "*", "*.md", "src/docs", ".claude/skills/autopilot", "/x/autopilot", "/tmp/d/STAGE.json")
+        no += ("docs/autopilot/PLAN-*.md", "x/STAGE.json", "s/a/b/")
+        for t in yes:
+            with self.subTest(t=t):
+                self.assertTrue(guard._names_ledger(t))
+        for t in no:
+            with self.subTest(t=t):
+                self.assertFalse(guard._names_ledger(t))
+
+    def test_xargs_fed_dest(self):
+        cases = (
+            (["xargs", "rm"], True),
+            (["xargs", "-I{}", "mv", "{}", "/tmp/"], True),  # mv dời nguồn đi = xoá khỏi sổ
+            (["xargs", "cp", "x"], True),  # nối cuối, không `-t`: phần tử cuối là đích
+            (["xargs", "cp", "-t", "/tmp/bk"], False),
+            (["xargs", "-I{}", "cp", "{}", "/tmp/"], False),
+            (["xargs", "-I{}", "cp", "x", "{}"], True),
+            (["xargs", "-I{}", "cp", "-t", "{}", "x"], True),
+            (["xargs", "-I{}", "ln", "-s", "{}", "/tmp/l"], False),
+        )
+        for down, want in cases:
+            with self.subTest(down=down):
+                self.assertEqual(guard._xargs_fed_dest(down, guard.normalize(down)), want)
+
+    def test_ledger_tail(self):
+        self.assertTrue(guard._ledger_tail("STAGE.json", 'Path("docs", "autopilot", "STAGE.json")'))
+        self.assertTrue(guard._ledger_tail("autopilot/STAGE.json", 'join("docs", "autopilot/STAGE.json")'))
+        self.assertFalse(guard._ledger_tail("STAGE.json", 'join(d, "STAGE.json")'))
+        self.assertFalse(guard._ledger_tail("x/STAGE.json", 'Path("docs", "autopilot", "x/STAGE.json")'))
+
+    def test_unpack_dirs(self):
+        cases = (
+            ("unzip", ["-qd", "docs", "a.zip"], ["docs"]),
+            ("unzip", ["-qddocs", "a.zip"], ["docs"]),
+            ("unzip", ["-P", "pl", "a.zip", "-d", "x"], ["x"]),  # mật khẩu không phải cờ `l`
+            ("unzip", ["-Ppl", "a.zip"], ["."]),
+            ("unzip", ["-l", "a.zip", "-d", "x"], []),
+            ("unzip", ["-", "a.zip"], ["."]),
+            ("python3", ["-m", "zipfile", "-e", "a.zip", "out"], ["out"]),
+            ("python3", ["-mtarfile", "--ext", "a.tar"], ["."]),
+            ("python3", ["-I", "-m", "tarfile", "-v", "-e", "a.tar", "-v", "out"], ["out"]),
+            ("python3", ["-m", "zipfile", "-l", "a.zip"], []),
+            ("python3", ["-m", "json.tool", "a.json"], []),
+            ("python3", ["x.py"], []),
+            ("jar", ["xf", "a.jar"], ["."]),
+            ("jar", ["--extract", "--file", "a.jar", "--dir", "out"], ["out"]),
+            ("jar", ["tf", "a.jar"], []),
+            ("jar", [], []),
+        )
+        for name, args, want in cases:
+            with self.subTest(name=name, args=args):
+                self.assertEqual(guard._unpack_dirs(name, args), want)
+
+    def test_copied_name(self):
+        cases = (
+            (["cp", "a/b/STAGE.json", "d/"], "a/b/STAGE.json", "STAGE.json"),
+            (["cp", "--parents", "a/b/", "d/"], "a/b/", "a/b"),
+            (["cp", "--par", "/a/b", "d/"], "/a/b", "a/b"),
+            (["cp", "--", "--parents", "d/"], "--parents", "--parents"),
+            (["rsync", "-aR", "x/./a/b", "d/"], "x/./a/b", "a/b"),
+            (["rsync", "--relative", "a/b", "d/"], "a/b", "a/b"),
+            (["rsync", "-a", "a/b", "d/"], "a/b", "b"),
+            (["mv", "--parents", "a/b", "d/"], "a/b", "b"),
+        )
+        for n, src, want in cases:
+            with self.subTest(n=n):
+                self.assertEqual(guard._copied_name(n, src), want)
+
+    def test_kw_positional_and_exec_items(self):
+        self.assertEqual(guard._kw_positional(["a = 'x'"]), ["a = 'x'"])  # gán JS: không phải từ khoá chỗ
+        self.assertEqual(guard._kw_positional([" args=[1]", "shell=True"]), ["[1]", "shell=True"])
+        self.assertEqual(guard._kw_positional(["m", "args=[1]", "file='f'"]), ["m", "'f'", "[1]"])
+        self.assertEqual(guard._kw_positional(["x == y"]), ["x == y"])
+        items, shell = guard._exec_items("subprocess.run", ['["x"]', "shell=True", 'executable="/bin/sh"'])
+        self.assertEqual((items, shell), (["x"], True))  # shell: phần tử đầu là lệnh, executable không thay
+        items, shell = guard._exec_items("subprocess.run", ['["x", "-c", "ls"]', "executable=exe"])
+        self.assertEqual((items, shell), (["x", "-c", "ls"], False))  # executable không phải chữ nguyên văn
+        self.assertEqual(guard._exec_items("os.system", []), (None, False))
+
+    def test_shell_true_values(self):
+        for v in ("shell=True", "shell = 1", "shell=flag", 'shell="yes"'):
+            with self.subTest(v=v):
+                self.assertRegex(v, guard.SHELL_TRUE_RE)
+        for v in ("shell=False", "shell=None", "shell=0", "shell == x", "shell=", "myshell=True"):
+            with self.subTest(v=v):
+                self.assertNotRegex(v, guard.SHELL_TRUE_RE)
+
+    def test_exec_call_string_floor(self):
+        """Lời gọi bị bỏ chỉ khi cả hai cách tính chuỗi coi là trong chuỗi (review lượt 2 🔴)."""
+        floordiv = "n = 7 // 2; s = 'a\\\nb'; import os; os.system(\"x\"); print('y')"
+        self.assertEqual([n for n, _ in guard._exec_calls(floordiv)], ["os.system"])
+        self.assertEqual(guard._exec_calls("print(\"os.system('rm')\")"), [])
+        comment = "# don't\nos.system('x')\n# it's"
+        self.assertEqual([n for n, _ in guard._exec_calls(comment)], ["os.system"])
+
+    def test_procsub_fd(self):
+        self.assertEqual(guard._procsub_fd([".", "/dev/fd/3", "3", "<"])[0], [".", "/dev/fd/3", "<"])
+        self.assertIn("/proc/self/fd/3", guard._procsub_fd([".", "/dev/fd/3", "3", "<"])[1])
+        self.assertEqual(guard._procsub_fd(["bash", "<"]), (["bash", "<"], guard.STDIN_SCRIPTS))
+        self.assertEqual(guard._procsub_fd(["<"]), (["<"], guard.STDIN_SCRIPTS))
+        self.assertEqual(guard._eval_tail(["eval", "--", ".", "x"]), [".", "x"])
+        self.assertEqual(guard._eval_tail(["eval", "--"]), [])
+
+    def test_hooks_path_env(self):
+        on = (
+            "GIT_CONFIG_PARAMETERS='core.hooksPath'='/dev/null'",
+            "core.hooksPath=/x",
+            "GIT_CONFIG_KEY_0=core.hooksPath",
+        )
+        for a in on:
+            with self.subTest(a=a):
+                self.assertTrue(guard._commit_hooks_path([a, "git", "push"]))
+        off = ("GIT_CONFIG_PARAMETERS='user.name'='x'", "GIT_CONFIG_KEY_0=user.name", "HOOKS=core.hookspath")
+        for a in off:
+            with self.subTest(a=a):
+                self.assertFalse(guard._commit_hooks_path([a, "git", "push"]))
+
+
 class ExecCallStrictTest(unittest.TestCase):
     """AUD-SEC-307 (T-3633): chuỗi trong lời gọi thực thi mà sh/bash đọc NGUYÊN VĂN (`os.system('…')`, `subprocess.run(
     ["bash", "-c", "…"])`) qua tập con chuẩn như lệnh agent gõ; chuỗi guard tự ghép (nối `+`, danh sách argv) giữ lỏng."""
