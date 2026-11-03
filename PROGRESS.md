@@ -3,7 +3,7 @@
 > Giai đoạn hiện tại: G8 Vận hành & tiến hoá (khung 3.29.0, pha `harden` — D-136) · Cập nhật: 2026-11-03 · Nhánh: main
 
 ## Đang làm
-- 2026-11-03 **PLAN-upgrade-2026-11-02** (D-304) gần xong: #413…#423 merge (D-311…D-323). T-3633/3634/3651 xong; **ADR-0065** guard danh sách trắng mở rộng động (#423, D-322/323). Còn: T-3662 (🔴 AUD-SEC-399/400 có từ trước + 🟢 nợ review AUD-SEC-385/386/387/397/402, AUD-PERF-017; nợ #424 AUD-DOC-235…238) → T-3635 (`audit check --strict` xanh) → T-3636 (`loop verify --all`, `release-check` chỉ còn hàng chờ người) → perf trial T-3551/3552/3557 (PLAN-harden-2026-10-27-loops, D-258) → cắt **3.30.0**.
+- 2026-11-03 **PLAN-upgrade-2026-11-02** (D-304) gần xong: #413…#425 merge (D-311…D-324). T-3633/3634/3651/3661 xong; **ADR-0065** guard danh sách trắng mở rộng động (#423, D-322/323). Còn: T-3662 (🔴 AUD-SEC-399/400 có từ trước + 🟢 nợ review AUD-SEC-385/386/387/397/402, AUD-PERF-017) → T-3635 (`audit check --strict` xanh) → T-3636 (`loop verify --all`, `release-check` chỉ còn hàng chờ người) → perf trial T-3551/3552/3557 (PLAN-harden-2026-10-27-loops, D-258) → cắt **3.30.0**.
 - Phép đo `LOOP-ORCH-020` tích luỹ từ PLAN-upgrade; tăng số agent chỉ khi có số (ADR-0061). Phản hồi dự án đích: 10 nhóm `cong-cu` chờ phân loại ([TARGETS](docs/ops/TARGETS.md)).
 - Hoãn tới harden: T-1690/T-1691 (quét lại SEC-091…099). Rà `seeker19110/stored`: chờ chủ repo (HAR-036/041, SEC-026, CI-006/7/9, SEC-043; hạn xét: 2026-12-31).
 
@@ -29,7 +29,20 @@
 - CI không còn kiểm macOS (gỡ `portability.yml` 2026-10-17). Nợ chấp nhận: 4 MUST/module là phán đoán; số điều NĐ 356/2025 chưa đối chiếu bản gốc. Không làm (D-142): tách `xt.py`, song song worktree, merge queue, reviewer LLM mọi PR, thu nhỏ guard.
 
 ## Bàn giao phiên
-- `main` `7d5ad69` (#424). Merge: chạy đúng `do` của `pr next` (REST ghim head) ngay khi `merge`; steward hay merge trước (`405 Merge already in progress` = đã merge). `release-check` chạy trên worktree của `main`. Sửa guard: test đỏ trước, ca `autonomy-bench` cho mỗi 🟠; luật mới OR với luật cũ (bài học #352, #372).
+- `main` `ff0cb88` (#425). Merge: chạy đúng `do` của `pr next` (REST ghim head) ngay khi `merge`; steward hay merge trước (`405 Merge already in progress` = đã merge). `release-check` chạy trên worktree của `main`. Sửa guard: test đỏ trước, ca `autonomy-bench` cho mỗi 🟠; luật mới OR với luật cũ (bài học #352, #372).
 - Chờ người: T-1834 gỡ `merge-gate` ở ruleset hai dự án đích rồi xoá stub (hạn xét: 2026-12-31); `prod_switch` 3.29.0 (hạn xét: 2026-11-30).
-- Autopilot: không chạy (phiên tương tác). `pr stats: chưa đo — đo ở /handover cuối PLAN-upgrade`.
+- Autopilot: không chạy (phiên tương tác). `pr stats --days 7` (2026-11-03):
+
+| PR merge trong 7 ngày (từ 2026-10-27) | Giá trị |
+|---|---|
+| PR đã merge | 123 |
+| Lead time mở → merge (trung vị · P95) | 0.63 giờ · 5.51 giờ |
+| Run CI `pull_request` mỗi PR (trung vị · P95 · tổng) | 2 · 6 · 361 |
+| Run `failure` · `cancelled` (tỉ lệ) | 27 · 32 (16%) |
+| PR làn chuẩn (`xt-standard-lane`) | 106 |
+| PR revert | 0 |
+| Push (head SHA riêng biệt) mỗi PR (trung vị · P95 · tổng) | 2 · 6 · 360 |
+| PR xanh ngay lần push đầu | 96/123 (78%) |
+| Run `cancelled` cùng SHA với run khác | 1 |
+
 - Container mới: `scripts/dev-task.sh setup`; trước khi đẩy `gate-fast`, CI là cổng đầy đủ. Subagent dùng thư mục scratch riêng (bài học audit 2026-11-01).

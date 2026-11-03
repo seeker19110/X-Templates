@@ -225,3 +225,10 @@
 - Chọn: Giữ đã sửa; review 1 lần của PR #423 (ADR-0062, reviewer-alt) là review độc lập lượt 3 — 🔴 mới thì sửa trong PR, không ghi nợ
 - Lý do (tiêu chí chất lượng cuối): (1) đúng/an toàn: review đối kháng của PR vẫn chặn merge nếu còn dạng lọt (🔴 không thành nợ); (3) đơn giản: không tạo thêm vòng ngoài luồng review 1 lần; mọi dạng của review lượt 1-2 có test đỏ trước
 - Đường lùi: Đổi hàng AUD-SEC-388 về mở trong sổ nếu review #423 hoặc audit sau tìm dạng lọt
+
+### D-324 · 2026-11-03T11:38:52+00:00 · AUD-SEC-400 (ghi script rồi chạy cùng lệnh) chặn oan 6,8 % lệnh thật (260 dạng cat > f <<'EOF' … EOF; python3 f): giữ chặn hay quét thân heredoc có nháy như script?
+
+- Phương án: (1) A: giữ chặn mọi ghi-rồi-chạy cùng lệnh; viết lại bằng Write rồi chạy ở lệnh riêng · (2) B: khi cat/tee là nơi duy nhất ghi tệp bằng > từ heredoc CÓ NHÁY và tệp được shell/trình thông dịch chạy cùng lệnh, guard quét thân heredoc như script của trình đó (như bash <<'EOF' / python3 - <<'EOF'); mọi dạng khác giữ chặn
+- Chọn: B: khi cat/tee là nơi duy nhất ghi tệp bằng > từ heredoc CÓ NHÁY và tệp được shell/trình thông dịch chạy cùng lệnh, guard quét thân heredoc như script của trình đó (như bash <<'EOF' / python3 - <<'EOF'); mọi dạng khác giữ chặn
+- Lý do (tiêu chí chất lượng cuối): (1) an toàn hơn A: A chỉ đẩy nội dung sang lệnh riêng mà guard không đọc tệp, B quét thật nội dung (bắt cả cat > x.sh <<'EOF' rm -rf ~ mà base cho qua); (4) gỡ ~260 chặn oan; (3) dùng lại đường quét heredoc sẵn có, không suy cấu trúc mới — đúng tinh thần ADR-0065 (miễn theo giá trị chắc chắn)
+- Đường lùi: Bỏ nhánh miễn B trong _script_run_why, trả fixture d270 về BUDGET

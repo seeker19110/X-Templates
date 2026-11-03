@@ -118,3 +118,7 @@ Revert PR Lát 0; chủ repo thêm lại context `merge-gate` vào ruleset; quay
 - <https://github.blog/changelog/2026-09-17-workflow-execution-protections-in-github-actions-generally-available/> — event policy mặc định
   chặn `pull_request_target` ở repo public từ 2026-11-02.
 - `docs/autopilot/DECISIONS.md` D-119…D-122; `docs/adr/0023`, `0035`; `scripts/xt.py` `pr_next`, `_steward_command` (đọc 2026-10-21).
+
+## Ghi chú 2026-11-03
+
+GitHub dời mốc chặn mặc định `pull_request_target` ở repo public từ 2026-11-02 sang **2026-12-02** (<https://github.blog/changelog/2026-11-02-pull_request_target-blocked-by-default-december-2/>, xác minh 2026-11-03); các mốc 2026-11-02 ở trên đọc là 2026-12-02 — AUD-DOC-242, thân ADR giữ nguyên văn.

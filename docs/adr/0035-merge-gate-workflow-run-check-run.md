@@ -110,4 +110,4 @@ Settings → Actions → Policies (việc của chủ repo). Dự án đích đ�
 
 ## Ghi chú 2026-11-03
 
-Mốc chặn mặc định `pull_request_target` ở repo public dời từ 2026-11-02 sang **2026-12-02** (GitHub dời ngày 2026-10-21; xác minh 2026-11-03: <https://github.blog/changelog/2026-11-02-pull_request_target-blocked-by-default-december-2/>) — AUD-DOC-238; bối cảnh ở trên giữ nguyên văn.
+Mốc chặn mặc định `pull_request_target` ở repo public dời từ 2026-11-02 sang **2026-12-02** (GitHub dời ngày 2026-10-21 — ghi chú biên tập của changelog 2026-09-17, dẫn ở [`research/2026-10-26-autopilot-complete-optimize.md`](../../research/2026-10-26-autopilot-complete-optimize.md); xác minh mốc mới 2026-11-03: <https://github.blog/changelog/2026-11-02-pull_request_target-blocked-by-default-december-2/>) — AUD-DOC-238; bối cảnh ở trên giữ nguyên văn.
