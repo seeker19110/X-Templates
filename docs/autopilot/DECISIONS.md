@@ -121,3 +121,10 @@
 - Chọn: ADR-0066: xét theo TÊN tệp đích ghi được nhắc lại ở chỗ khác của lệnh (trừ lệnh chỉ đọc trong danh sách trắng với tệp không đuôi script), thêm -o/--output và đích ghi của bộ quét script; miễn D-324 chỉ mất khi cd nằm giữa ghi và chạy
 - Lý do (tiêu chí chất lượng cuối): (1) không phụ thuộc danh sách trình chạy — lệnh lạ bị tính (hướng an toàn); sandbox không chặn force-push qua mạng; (4) gỡ chặn oan cd-trước của D-326; (3) dùng dữ liệu đích ghi sẵn có, không suy cấu trúc mới (ADR-0065)
 - Đường lùi: Revert PR triển khai; AUD-SEC-406 về mở
+
+### D-328 · 2026-11-03T14:26:55+00:00 · ADR-0066 chặn mới 340/5237 lệnh (6,5 %): giữ nguyên, thêm lệnh không chạy mã vào danh sách trắng (B), miễn tệp dữ liệu đưa cho script có sẵn (C), hay B+C? Giữ 3 miễn theo giá trị (p.json đối số dữ liệu của -c chỉ đọc; tên gốc bỏ đuôi không tính với đuôi dữ liệu; tệp nội dung gh -F/--body-file/< F)?
+
+- Phương án: (1) A: giữ nguyên · (2) B: thêm mkdir/echo/printf/chmod/sha*sum/md5sum/touch/sed -n chỉ in vào danh sách trắng; giữ 3 miễn theo giá trị · (3) B+C: thêm cả miễn tệp dữ liệu cho script có sẵn
+- Chọn: B: thêm mkdir/echo/printf/chmod/sha*sum/md5sum/touch/sed -n chỉ in vào danh sách trắng; giữ 3 miễn theo giá trị
+- Lý do (tiêu chí chất lượng cuối): (1) B chỉ thêm lệnh không chạy mã — không mở đường thực thi; C đảo phần AUD-SEC-407 vừa siết và tin vào nội dung script có sẵn (có thể exec đối số) → loại; 3 miễn theo giá trị có kiểm _read_only_script/đuôi dữ liệu/đọc nội dung — giữ (giữ 6 ca D-270); (4) bớt chặn oan ~24 ca
+- Đường lùi: Bỏ các lệnh B khỏi danh sách trắng
