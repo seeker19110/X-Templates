@@ -2906,6 +2906,29 @@ class GuardDebt430Test(unittest.TestCase):
         self.assertEqual(guard.edit_decision("/root/.gitconfig", str(ROOT))[0], "deny")
 
 
+class GuardReview431Test(unittest.TestCase):
+    """Review #431 🔴 (AUD-SEC-424 chưa trọn): đích ghi tương đối sau `cd`/`pushd` tới thư mục cấu hình git toàn cục —
+    xét cả đích đã giải theo thư mục đang đứng (`_where`), như vòng `.git/config`. Đỏ ở ad07a66b."""
+
+    def test_r431_cd_then_relative_global_git_config(self):
+        cmds = (
+            "cd /etc && printf '[diff]\\n\\texternal = sh\\n' >> gitconfig",
+            "pushd /etc && printf '[diff]\\n\\texternal = sh\\n' >> gitconfig",
+            "cd /etc; tee -a gitconfig < /tmp/x",
+            "cd /root/.config/git && printf '[core]\\n\\thooksPath = /dev/null\\n' >> config",
+            "cd ~/.config/git && cp /tmp/x config",
+            "cd ~ && printf '[core]\\n\\thooksPath = /dev/null\\n' >> .gitconfig",
+            "GIT_CONFIG_GLOBAL=/tmp/gc git diff; cd /tmp && printf x > gc",
+        )
+        for cmd in cmds:
+            with self.subTest(cmd=cmd):
+                d = decide(cmd)
+                self.assertEqual((d["decision"], d.get("code")), ("deny", "HOOK_BYPASS"), d["reason"][:200])
+        for cmd in ("cd /etc && cat gitconfig", "cd docs && printf x >> config.md", "cd /tmp && printf x > config"):
+            with self.subTest(cmd=cmd):
+                self.assertNotEqual(decide(cmd).get("code"), "HOOK_BYPASS", decide(cmd))
+
+
 class LedgerMatchesGuardTest(unittest.TestCase):
     """Review #428 🔴 (AUD-DOC-243): sổ không được ghi `chấp nhận`/`đã sửa` cho phát hiện mà guard còn cho qua DẠNG
     NGUYÊN VĂN của nó — `audit check --strict` xanh giả. Ca nguyên văn còn lọt thì hàng sổ phải `mở`; khi T-3663 sửa

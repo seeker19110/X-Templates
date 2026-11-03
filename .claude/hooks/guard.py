@@ -352,12 +352,18 @@ def _global_git_config(path: str) -> bool:
     return bool(path) and bool(GLOBAL_GIT_CONFIG_RE.search(_norm_path(path)))
 
 
-def _git_config_env_asks(tokens: List[str], commands: List[Tuple[List[str], Optional[str]]]) -> List[str]:
-    """AUD-SEC-424: lệnh đặt `GIT_CONFIG_GLOBAL=F`/`GIT_CONFIG_SYSTEM=F` và ghi F trong cùng lệnh Bash."""
+def _git_config_env_asks(tokens: List[str], commands: List[Tuple[List[str], Optional[str]]], root: str) -> List[str]:
+    """AUD-SEC-424: lệnh đặt `GIT_CONFIG_GLOBAL=F`/`GIT_CONFIG_SYSTEM=F` và ghi F trong cùng lệnh Bash — đích ghi xét cả
+    dạng đã giải theo thư mục đang đứng (`cd /tmp && printf x > gc`, review #431)."""
     files = {_norm_path(_dequote(m[1])) for t in tokens for m in [GIT_CONFIG_ENV_RE.match(t)] if m}
     if not files:
         return []
-    hits = [w for argv, _ in commands for w in write_targets(normalize(argv), argv) if w and _norm_path(w) in files]
+    hits = [
+        w
+        for argv, here in commands
+        for w in write_targets(normalize(argv), argv)
+        if w and {_norm_path(x) for x in [w, *_where(w, root, here)]} & files
+    ]
     return [GIT_HOOK_WHY.format(w) for w in hits]
 
 
@@ -8100,7 +8106,10 @@ def _write_asks(n: List[str], argv: List[str], root: str, cwd: Optional[str] = N
     asks += [EVIDENCE_WHY.format(t) for t in found if _target_kind(t, root) == "evidence"]
     asks += [FENCE_WHY.format(t) for t in found if _is_fence(t, root)]
     # AUD-SEC-424: ghi THÔ `>> ~/.gitconfig` (`git config -f ~/.gitconfig <khoá>` do luật khoá của git config xét)
-    asks += [GIT_HOOK_WHY.format(t) for t in targets if t != cfg and _global_git_config(t)]
+    # review #431: cả đích đã giải theo thư mục đang đứng (`cd /etc && >> gitconfig`), như vòng `.git/config` dưới đây
+    asks += [
+        GIT_HOOK_WHY.format(x) for t in targets if t != cfg for x in [t, *_where(t, root, cwd)] if _global_git_config(x)
+    ]
     for target in (x for t in targets for x in _where(t, root, cwd)):
         kind = _target_kind(target, root)
         if _is_fence(target, root):
@@ -12402,7 +12411,7 @@ def _bash_decision(
     if nested_deny:
         return _nested_deny_result(res, nested_deny, budget)
     commands = _commands_with_cwd(tokens, cwd)
-    asks += _git_config_env_asks(tokens, commands)
+    asks += _git_config_env_asks(tokens, commands, root)
     deny_reason = next((r for argv, here in commands if (r := _scan_command(argv, root, res, asks, here))), "")
     res.pop("exported_env", None)
     _carry_push_no_verify(res, budget)
