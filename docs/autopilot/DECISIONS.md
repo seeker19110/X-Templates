@@ -232,3 +232,10 @@
 - Chọn: B: khi cat/tee là nơi duy nhất ghi tệp bằng > từ heredoc CÓ NHÁY và tệp được shell/trình thông dịch chạy cùng lệnh, guard quét thân heredoc như script của trình đó (như bash <<'EOF' / python3 - <<'EOF'); mọi dạng khác giữ chặn
 - Lý do (tiêu chí chất lượng cuối): (1) an toàn hơn A: A chỉ đẩy nội dung sang lệnh riêng mà guard không đọc tệp, B quét thật nội dung (bắt cả cat > x.sh <<'EOF' rm -rf ~ mà base cho qua); (4) gỡ ~260 chặn oan; (3) dùng lại đường quét heredoc sẵn có, không suy cấu trúc mới — đúng tinh thần ADR-0065 (miễn theo giá trị chắc chắn)
 - Đường lùi: Bỏ nhánh miễn B trong _script_run_why, trả fixture d270 về BUDGET
+
+### D-325 · 2026-11-03T12:02:49+00:00 · T-3635: 5 nợ review 🟢 còn mở cần sửa mã/thử nghiệm (AUD-SEC-376 cần PR thử trên GitHub, HAR-216 go_no_go fence, HAR-217 argparse --agent-args, HAR-218 research cờ host, SEC-381 danger prompt-assets) — sửa ngay trước 3.30.0 hay chấp nhận có hạn?
+
+- Phương án: (1) Chấp nhận có hạn 2027-01-21 (chủ: phiên chính), lý do từng dòng; sửa ở PLAN sau 3.30.0 · (2) Sửa cả 5 trước khi cắt 3.30.0
+- Chọn: Chấp nhận có hạn 2027-01-21 (chủ: phiên chính), lý do từng dòng; sửa ở PLAN sau 3.30.0
+- Lý do (tiêu chí chất lượng cuối): (2) giữ đường lùi + (5) tốc độ: cả 5 là 🟢, không lùi so với base, không chặn hành động nguy hiểm mới; 376 cần dựng PR thử (ra khỏi máy), 218 cần /research — không làm trong lát khép PLAN; T-3635 cho phép chấp nhận (chủ + hạn)
+- Đường lùi: Đổi các dòng về mở và thêm task vào PLAN kế
