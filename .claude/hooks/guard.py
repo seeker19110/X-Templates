@@ -2078,15 +2078,20 @@ REUSE_READERS = frozenset(
     # vẫn bị bắt ở lệnh chạy
     " mkdir echo touch chmod md5sum sha1sum sha224sum sha256sum sha384sum sha512sum"
     # review #429 (phiên chính): phép thử tệp không mở/chạy tệp — `[ -f s.sh ] && bash s.sh`, `test -f .env && source`
-    " [ [[ test".split()
+    " [ [[ test"
+    # AUD-SEC-419 (nợ review #429): `shellcheck` chỉ đọc/phân tích tệp (cả nguồn `-x`), `which`/`type` in đường dẫn
+    " shellcheck which type".split()
 )
 REUSE_READER_EXEC = ("--compress-program", "--pre")  # `sort`/`rg` chạy chương trình theo giá trị cờ
-REUSE_GIT_READS = (["add"], ["diff"], ["show"], ["apply", "--check"])
+# AUD-SEC-419: `git log` đọc lịch sử; chạy chương trình ngoài chỉ qua cấu hình (`-c`/`GIT_*`/PAGER — mất miễn ở
+# `_reuse_reader`/`_reuse_shadowed`) hay textconv của cấu hình có sẵn — như `git show`/`git diff` đã có
+REUSE_GIT_READS = (["add"], ["diff"], ["show"], ["log"], ["apply", "--check"])
 # Lệnh mà `-o` không phải tệp ra (tên tuỳ chọn, cờ bật/tắt): giá trị sau nó không là đích ghi
 REUSE_O_NOT_FILE = (
     frozenset("set shopt grep egrep fgrep zgrep rg ls ps pgrep pkill ssh scp mount unzip".split()) | SHELLS
 )
-REUSE_ENV_RE = re.compile(r"(?:PATH|GIT_\w*|LESS\w*)\+?=.*", re.S)  # gán biến đổi chương trình lệnh đọc chạy
+# gán biến đổi chương trình lệnh đọc chạy (AUD-SEC-419: cả `PAGER`/`MANPAGER` — `git log`/`git show` mở pager)
+REUSE_ENV_RE = re.compile(r"(?:PATH|GIT_\w*|LESS\w*|\w*PAGER)\+?=.*", re.S)
 REUSE_HOME_RE = re.compile(r"~|\$\{?(?:HOME|PWD)\b")  # tệp dưới home/thư mục hiện tại viết theo biến
 REUSE_DELETERS = frozenset("rm unlink shred rmdir find".split())  # đích của `write_targets` là tệp bị xoá
 REUSE_OUT_OPS = (">", ">>", ">|", "&>", "&>>")  # đích chuyển hướng ghi ở lệnh khác: chỉ ghi, không đọc/chạy
@@ -2303,6 +2308,8 @@ def _reuse_reader(argv: List[str]) -> bool:
         return not any(a.startswith("-v") for a in args)  # `printf -v x`: gán biến
     if head in SED_NAMES:
         return _reuse_sed_print(args)
+    if head == "command":  # AUD-SEC-419: `command -v|-V X` chỉ in cách tìm X; `command X` là CHẠY X — không miễn
+        return args[:1] in (["-v"], ["-V"])
     return not _uniq_output(args) if head == "uniq" else head in REUSE_READERS
 
 
@@ -2522,7 +2529,13 @@ IMPLICIT_LOAD_WHY = (
 # "Build Scripts" (build.rs) + "Configuration" (.cargo/config.toml, .cargo/config); gitattributes(5) (filter/diff
 # driver); pip `install .` (setup.py, pyproject.toml build backend, setup.cfg); tox (tox.ini/tox.toml `commands`),
 # pre-commit (`repo: local` chạy lệnh), just (justfile), rake (Rakefile), Bundler (Gemfile là mã Ruby), Gradle (build
-# script Groovy/Kotlin), Maven (pom.xml — plugin exec). Không thêm tsc/node (không chắc).
+# script Groovy/Kotlin), Maven (pom.xml — plugin exec). Không thêm tsc (không chắc). AUD-SEC-418 (review #429): `node
+# --run` (Node ≥ 22 chạy `scripts` của package.json); Bun (`bun run`/`test`/`install` — package.json scripts, bunfig.toml
+# `preload`); nox (noxfile.py là mã Python); invoke (tasks.py); Composer (composer.json `scripts` chạy khi install/update);
+# CMake (CMakeLists.txt — `execute_process`); Go `test`/`generate`/`run` (biên dịch và chạy mọi `*.go` của gói,
+# `//go:generate`; go.mod không chạy mã — không thêm, `go build` không chạy mã — không tính); `deno task`
+# (deno.json/deno.jsonc `tasks`); go-task `task` (Taskfile.yml…); `script -c CMD` chạy CMD qua shell (`script -qc 'bash
+# -i'` nạp ~/.bashrc).
 IMPLICIT_LOADS: Dict[str, Tuple[str, ...]] = {
     "make": ("GNUmakefile", "makefile", "Makefile"),
     "npm": ("package.json", ".npmrc"),
@@ -2540,8 +2553,26 @@ IMPLICIT_LOADS: Dict[str, Tuple[str, ...]] = {
     "bundle": ("Gemfile",),
     "gradle": ("build.gradle", "build.gradle.kts", "settings.gradle", "settings.gradle.kts"),
     "mvn": ("pom.xml",),
+    "bun": ("package.json", "bunfig.toml"),
+    "nox": ("noxfile.py",),
+    "invoke": ("tasks.py",),
+    "composer": ("composer.json",),
+    "cmake": ("CMakeLists.txt",),
+    "go": ("*.go",),
+    "deno": ("deno.json", "deno.jsonc"),
+    "task": (
+        "Taskfile.yml",
+        "Taskfile.yaml",
+        "taskfile.yml",
+        "taskfile.yaml",
+        "Taskfile.dist.yml",
+        "Taskfile.dist.yaml",
+    ),
 }
+GO_RUN_SUBCMDS = frozenset({"test", "generate", "run"})  # lệnh con của `go` chạy mã của gói
 IMPLICIT_TOOL_HEADS = {
+    **dict.fromkeys(("invoke", "inv"), "invoke"),
+    **{k: k for k in ("bun", "nox", "composer", "cmake", "task")},
     **dict.fromkeys(("make", "gmake"), "make"),
     **dict.fromkeys(("npm", "npx", "yarn", "yarnpkg", "pnpm", "pnpx", "corepack"), "npm"),  # `corepack pnpm test`
     **dict.fromkeys(("pytest", "py.test"), "pytest"),
@@ -2584,6 +2615,23 @@ def _implicit_tools(c: "_ReuseCmd") -> Set[str]:
         out |= {"zsh"} if n[0] == "zsh" else set()
         opts = list(itertools.takewhile(lambda a: a[:1] == "-" and a != "--", n[1:]))
         out |= {"login"} if any(SHELL_LOGIN_RE.fullmatch(a) for a in opts) else set()
+    # AUD-SEC-418: `node --run X` (scripts của package.json), `go test|generate|run`, `deno task`
+    out |= {"npm"} if "node" in heads | {m[1] if m else ""} and any(a.startswith("--run") for a in n[1:]) else set()
+    out |= {"go"} if n[:1] == ["go"] and n[1:2] and n[1] in GO_RUN_SUBCMDS else set()
+    out |= {"deno"} if n[:1] == ["deno"] and "task" in n[1:] else set()
+    for inner in _script_c_commands(n):  # `script -qc 'bash -i' /dev/null`: CMD chạy qua shell
+        out |= {t for d in _reuse_cmds(inner, 1) for t in _implicit_tools(d)}
+    return out
+
+
+def _script_c_commands(n: List[str]) -> List[str]:
+    """Chuỗi lệnh của `script [cờ] -c CMD` / `--command[=]CMD` / cụm `-qc CMD` (util-linux script(1))."""
+    if n[:1] != ["script"]:
+        return []
+    out = _flag_values(n[1:], ("--command",))
+    for k, a in enumerate(n[1:-1], 1):
+        if re.fullmatch(r"-[A-Za-z]*c", a):
+            out.append(n[k + 1])
     return out
 
 

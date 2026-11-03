@@ -20632,6 +20632,212 @@
    "allowed": false
   },
   "note": "review #429: dạng nguyên văn gần của 414/415 (đã chạy bash thật)"
+ },
+ {
+  "id": "d429-418-node-run",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-418"
+  ],
+  "input": {
+   "command": "echo x > package.json; node --run test"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "nợ review #429 (AUD-SEC-418/419): tệp nạp ngầm ngoài bảng; lệnh chỉ đọc của 415"
+ },
+ {
+  "id": "d429-418-bun-test",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-418"
+  ],
+  "input": {
+   "command": "echo x > package.json; bun test"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "nợ review #429 (AUD-SEC-418/419): tệp nạp ngầm ngoài bảng; lệnh chỉ đọc của 415"
+ },
+ {
+  "id": "d429-418-nox",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-418"
+  ],
+  "input": {
+   "command": "echo x > noxfile.py; nox"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "nợ review #429 (AUD-SEC-418/419): tệp nạp ngầm ngoài bảng; lệnh chỉ đọc của 415"
+ },
+ {
+  "id": "d429-418-invoke",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-418"
+  ],
+  "input": {
+   "command": "echo x > tasks.py; invoke build"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "nợ review #429 (AUD-SEC-418/419): tệp nạp ngầm ngoài bảng; lệnh chỉ đọc của 415"
+ },
+ {
+  "id": "d429-418-composer",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-418"
+  ],
+  "input": {
+   "command": "echo x > composer.json; composer install"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "nợ review #429 (AUD-SEC-418/419): tệp nạp ngầm ngoài bảng; lệnh chỉ đọc của 415"
+ },
+ {
+  "id": "d429-418-cmake",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-418"
+  ],
+  "input": {
+   "command": "echo x > CMakeLists.txt; cmake ."
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "nợ review #429 (AUD-SEC-418/419): tệp nạp ngầm ngoài bảng; lệnh chỉ đọc của 415"
+ },
+ {
+  "id": "d429-418-go-test",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-418"
+  ],
+  "input": {
+   "command": "echo x > x_test.go; go test ./..."
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "nợ review #429 (AUD-SEC-418/419): tệp nạp ngầm ngoài bảng; lệnh chỉ đọc của 415"
+ },
+ {
+  "id": "d429-418-deno-task",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-418"
+  ],
+  "input": {
+   "command": "echo x > deno.json; deno task build"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "nợ review #429 (AUD-SEC-418/419): tệp nạp ngầm ngoài bảng; lệnh chỉ đọc của 415"
+ },
+ {
+  "id": "d429-418-task",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-418"
+  ],
+  "input": {
+   "command": "echo x > Taskfile.yml; task build"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "nợ review #429 (AUD-SEC-418/419): tệp nạp ngầm ngoài bảng; lệnh chỉ đọc của 415"
+ },
+ {
+  "id": "d429-418-script-bash-i",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-418"
+  ],
+  "input": {
+   "command": "echo x >> ~/.bashrc; script -qc 'bash -i' /dev/null"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "nợ review #429 (AUD-SEC-418/419): tệp nạp ngầm ngoài bảng; lệnh chỉ đọc của 415"
+ },
+ {
+  "id": "d429-ctl-go-build-log",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-418"
+  ],
+  "input": {
+   "command": "go build ./... > build.log; tail -3 build.log"
+  },
+  "expect": {
+   "allowed": true
+  },
+  "note": "nợ review #429 (AUD-SEC-418/419): tệp nạp ngầm ngoài bảng; lệnh chỉ đọc của 415"
+ },
+ {
+  "id": "d429-ctl-shellcheck-run",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-419"
+  ],
+  "input": {
+   "command": "bash s.sh && shellcheck s.sh"
+  },
+  "expect": {
+   "allowed": true
+  },
+  "note": "nợ review #429 (AUD-SEC-418/419): tệp nạp ngầm ngoài bảng; lệnh chỉ đọc của 415"
+ },
+ {
+  "id": "d429-ctl-git-log-run",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-419"
+  ],
+  "input": {
+   "command": "python3 scripts/xt.py checks; git log -- scripts/xt.py"
+  },
+  "expect": {
+   "allowed": true
+  },
+  "note": "nợ review #429 (AUD-SEC-418/419): tệp nạp ngầm ngoài bảng; lệnh chỉ đọc của 415"
+ },
+ {
+  "id": "d429-ctl-which-ruff",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-419"
+  ],
+  "input": {
+   "command": "python3 -m ruff check scripts && which ruff"
+  },
+  "expect": {
+   "allowed": true
+  },
+  "note": "nợ review #429 (AUD-SEC-418/419): tệp nạp ngầm ngoài bảng; lệnh chỉ đọc của 415"
  }
  ]
 }
