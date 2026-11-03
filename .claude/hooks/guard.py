@@ -2163,8 +2163,9 @@ def _reuse_writes(c: _ReuseCmd) -> List[str]:
     out = [c.argv[k + 1] for k, t in enumerate(c.argv[:-1]) if t in REDIRECTS]
     if (n[:1] or [""])[0] not in REUSE_DELETERS and n[:2] != ["git", "rm"]:  # xoá tệp: không tạo nội dung
         out += write_targets(n, c.argv) + write_targets(_no_redirects(n), [])  # `install … f <<< x`: toán hạng là f
-    if n and n[0] not in REUSE_O_NOT_FILE:
-        out += [v for v in _flag_values(n[1:], ("-o", "--output")) if v[:1] != "-"]
+    if n and n[0] not in REUSE_O_NOT_FILE:  # `-o` chung chỉ khi đứng riêng: cụm cờ `git grep -ohE` không có giá trị
+        out += [n[k + 2] for k, a in enumerate(n[1:-1]) if a == "-o" and n[k + 2][:1] != "-"]
+        out += [v for v in _flag_values(n[1:], ("--output",)) if v[:1] != "-"]
     p = _interp_argv(c.argv)
     if p and INTERP_RE.fullmatch(p[0]):
         inline = _inline_scripts(p)

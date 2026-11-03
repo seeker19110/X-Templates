@@ -2060,6 +2060,18 @@ class GuardWrittenFileReuseTest(unittest.TestCase):
 
     assert_budget = GuardStrictDebtTest.assert_budget
 
+    def test_glued_short_flags_are_not_output(self):
+        """CI #427 (BASE-CFG-001/003 exit 126): `-o` chung chỉ là đích ghi khi đứng riêng — cụm `git grep -ohE` không có
+        giá trị; `-o s.sh` đứng riêng vẫn là đích ghi."""
+        self.assert_budget(
+            ("iconv -f utf8 -t utf8 -o s.sh in; bash s.sh",),
+            (
+                "git grep -ohE 'x' -- scripts; git grep -ohE 'y' -- scripts",
+                'n="$(git grep -ohE \'XT_[A-Z]+\' -- scripts | sort -u)" && test -n "$n"',
+            ),
+            "AUD-SEC-406",
+        )
+
     def test_aud_sec_406_written_file_reused(self):
         """AUD-SEC-406 🔴 (review #426, bash 5.2 + stub `git`): trình chạy/trình ghi ngoài danh sách của AUD-SEC-400 —
         base và head cho qua; luật theo tên không cần biết lệnh kia chạy tệp thế nào."""
