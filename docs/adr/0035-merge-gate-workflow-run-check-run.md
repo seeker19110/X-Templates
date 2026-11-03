@@ -107,3 +107,7 @@ Settings → Actions → Policies (việc của chủ repo). Dự án đích đ�
 - <https://docs.github.com/en/actions/reference/security/securely-using-pull_request_target>
 - <https://github.blog/changelog/2025-11-07-actions-pull_request_target-and-environment-branch-protections-changes/>
 - <https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/collaborating-on-repositories-with-code-quality-features/troubleshooting-required-status-checks>
+
+## Ghi chú 2026-11-03
+
+Mốc chặn mặc định `pull_request_target` ở repo public dời từ 2026-11-02 sang **2026-12-02** (GitHub dời ngày 2026-10-21; xác minh 2026-11-03: <https://github.blog/changelog/2026-11-02-pull_request_target-blocked-by-default-december-2/>) — AUD-DOC-238; bối cảnh ở trên giữ nguyên văn.

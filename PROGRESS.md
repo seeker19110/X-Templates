@@ -3,24 +3,22 @@
 > Giai đoạn hiện tại: G8 Vận hành & tiến hoá (khung 3.29.0, pha `harden` — D-136) · Cập nhật: 2026-11-03 · Nhánh: main
 
 ## Đang làm
-- 2026-11-03 **PLAN-upgrade-2026-11-02** (D-304) gần xong: #413…#423 merge (D-311…D-323). T-3633/3634/3651 xong; **ADR-0065** guard danh sách trắng mở rộng động (#423, D-322/323). Còn: lát `guard-strict` (🔴 AUD-SEC-399/400 có từ trước + 🟢 nợ review 385/386/387/397/402, PERF-017) → T-3635 (`audit check --strict` xanh) → T-3636 (`loop verify --all`, `release-check` chỉ còn hàng chờ người) → cắt **3.30.0**.
-- 2026-11-02 Audit toàn bộ (D-302) + **ADR-0064** harness đa nhà cung cấp (D-303). 2026-11-01 ADR-0062 review 1 lần (D-295); 2026-10-31 PLAN-harden (D-268…D-291), bài học `max_rethink` (ADR-0061).
-- 2026-10-30 **3.29.0** đã phát hành; GO chờ người `prod_switch` (hạn xét: 2026-11-30).
+- 2026-11-03 **PLAN-upgrade-2026-11-02** (D-304) gần xong: #413…#423 merge (D-311…D-323). T-3633/3634/3651 xong; **ADR-0065** guard danh sách trắng mở rộng động (#423, D-322/323). Còn: T-3662 (🔴 AUD-SEC-399/400 có từ trước + 🟢 nợ review AUD-SEC-385/386/387/397/402, AUD-PERF-017; nợ #424 AUD-DOC-235…238) → T-3635 (`audit check --strict` xanh) → T-3636 (`loop verify --all`, `release-check` chỉ còn hàng chờ người) → perf trial T-3551/3552/3557 (PLAN-harden-2026-10-27-loops, D-258) → cắt **3.30.0**.
 - Phép đo `LOOP-ORCH-020` tích luỹ từ PLAN-upgrade; tăng số agent chỉ khi có số (ADR-0061). Phản hồi dự án đích: 10 nhóm `cong-cu` chờ phân loại ([TARGETS](docs/ops/TARGETS.md)).
 - Hoãn tới harden: T-1690/T-1691 (quét lại SEC-091…099). Rà `seeker19110/stored`: chờ chủ repo (HAR-036/041, SEC-026, CI-006/7/9, SEC-043; hạn xét: 2026-12-31).
 
 ## Tiếp theo
 0. PLAN-3.14-app (`v3.14.0`): PR nâng dự án đích chờ chủ dự án: hotel-manager #117, X-Company #65 (hạn xét: 2026-11-30). `unchecked_must` 0/64.
-1. PLAN-3.13: chờ người T-1834 (gỡ `merge-gate` ở ruleset hotel-manager/X-Company rồi xoá stub); **Ruleset sống X-Templates**: không `merge-gate`, `strict: true` (D-144); còn tắt resolve thread + bật "Allow auto-merge" (RUNBOOK-PR-STEWARD §1); `XT_STEWARD_TOKEN` (T-2402 lớp đỡ tạm); App reviewer.
+1. PLAN-3.13: chờ người (hạn xét: 2026-12-31) T-1834 (gỡ `merge-gate` ở ruleset hotel-manager/X-Company rồi xoá stub); **Ruleset sống X-Templates**: không `merge-gate`, `strict: true` (D-144); còn tắt resolve thread + bật "Allow auto-merge" (RUNBOOK-PR-STEWARD §1); `XT_STEWARD_TOKEN` (T-2402 lớp đỡ tạm); App reviewer.
 2. Sau PLAN-3.12: ca đối kháng cho `autonomy-bench`; guard chưa quét nội dung script gọi qua `bash x.sh`/`python3 x.py` (ghi vào LOOP-STOP-027 khi làm); `project-commands.sh` được `source` hai lần mỗi task.
 3. Chờ chủ repo (hạn xét: 2026-12-31): token/app reviewer (T-1508); xoá `/scratch.log` ở gốc container; `x-hotel-manager` dọn/tạo mới; Dependabot security updates (proxy chặn API); Routine tuần `feedback aggregate` + quyền repo đích (T-2410). Event policy `pull_request_target` (repo public, rule mặc định tắt từ 2026-12-02; `pr-review.yml`).
-4. Còn: máy hoá `LOOP-HARNESS-031` (dấu hook theo phiên), `LOOP-STOP-030` (ConfigChange); task `[perf]` trong `loop` (D-041); URL phiên do máy chủ MCP gắn vào thân PR (PATCH lại thân PR sau khi mở); ép báo "đã đo/chưa đo" cho task UI (`LOOP-DESIGN-021`); sàn quyền token; `xt.pyz` (ADR-0010); `pr reviewed` nhận tác giả bot (AUD-XFEAT-039).
-5. Giới hạn guard đã biết: `fd -X rm` (T-2812); tên trần glob (`s?`), glob ngoài thư mục bin, extglob, glob trong container (D-164/D-167); ghép tên hàm lúc chạy, giải mã qua `$(…)` (D-051); env `GIT_CONFIG_*`; CLI container ngoài docker/podman (AUD-SEC-042); chặn oan script Python chỉ đọc nhắc `.claude/hooks`/`.autopilot` (D-105); công cụ tự chạy lệnh sed/awk/perl/tar/m4 (AUD-SEC-251), `PS4`/`BASH_ENV` (AUD-SEC-250), chỉ số mảng số học (AUD-SEC-249).
+4. Còn: máy hoá `LOOP-HARNESS-031` (dấu hook theo phiên), `LOOP-STOP-030` (ConfigChange); task `[perf]` trong `loop` (D-041); URL phiên do máy chủ MCP gắn vào thân PR (PATCH lại thân PR sau khi mở); ép báo "đã đo/chưa đo" cho task UI (`LOOP-DESIGN-021`); sàn quyền token; `xt.pyz` (ADR-0010).
+5. Giới hạn guard đã biết: `fd -X rm` (T-2812); tên trần glob (`s?`), glob ngoài thư mục bin, extglob, glob trong container (D-164/D-167); ghép tên hàm lúc chạy, giải mã qua `$(…)` (D-051); env `GIT_CONFIG_*`; CLI container ngoài docker/podman (AUD-SEC-042); chặn oan script Python chỉ đọc nhắc `.claude/hooks`/`.autopilot` (D-105); giới hạn còn mở khác: sổ audit (AUD-SEC-399/400/402).
 6. Giữ cổng: C901 ≤ 10, `mypy --strict`, coverage dòng + nhánh 100 %, `changelog-check`, trần byte file + tổng thư mục (`tests/test_docs_budget.py`, ADR-0043) — không `noqa`/pragma, không nới trần.
 7. Hàng rào (hook + `settings.json`, cần Claude Code ≥ 2.1.295 — `claude_min_version`): **xét lại hàng rào 2027-01-21** hoặc khi đổi model (LOOP-DESIGN-014).
 
 ## Quyết định
-> Chi tiết ở `docs/adr/` (ADR-0001…0062) và `docs/autopilot/DECISIONS.md` (D-NNN); ở đây chỉ giữ điều chưa có nhà khác.
+> Chi tiết ở `docs/adr/` (ADR-0001…0065) và `docs/autopilot/DECISIONS.md` (D-NNN); ở đây chỉ giữ điều chưa có nhà khác.
 - Khung = thư viện yêu cầu có ID + ghép blueprint + máy kiểm "xong" (ADR-0001); hook fail-open về luồng, fail-closed về hành động nguy hiểm (ADR-0002); blueprint theo quy mô S/M (ADR-0003/0004/0012).
 - Luật VN: Luật 91/2025/QH15 + NĐ 356/2025 (thay NĐ 13/2023 từ 01/01/2026); Luật ANM 116/2025 (01/07/2026). OWASP LLM Top 10 2026; EU AI Act Đ.50 áp dụng 02/08/2026. Mặc định OSI: OpenTofu, Valkey.
 - Repo khung: Python ≥ 3.11; `mypy --strict`; coverage 100 % (cả subprocess); `changelog-check`/`progress-check` trong `lint`; PROGRESS chỉ ghi SHA trên `main` (squash-merge). Tên: X-stored → X-Templates (ADR-0006/0007).
@@ -31,6 +29,7 @@
 - CI không còn kiểm macOS (gỡ `portability.yml` 2026-10-17). Nợ chấp nhận: 4 MUST/module là phán đoán; số điều NĐ 356/2025 chưa đối chiếu bản gốc. Không làm (D-142): tách `xt.py`, song song worktree, merge queue, reviewer LLM mọi PR, thu nhỏ guard.
 
 ## Bàn giao phiên
-- `main` `85662a7` (#423). Merge: chạy đúng `do` của `pr next` (REST ghim head) ngay khi `merge`; steward hay merge trước (`405 Merge already in progress` = đã merge). `release-check` chạy trên worktree của `main`. Sửa guard: test đỏ trước, ca `autonomy-bench` cho mỗi 🟠; luật mới OR với luật cũ (bài học #352, #372).
-- Chờ người: T-1834 gỡ `merge-gate` ở ruleset hai dự án đích rồi xoá stub; `prod_switch` 3.29.0 (hạn xét: 2026-11-30).
+- `main` `7d5ad69` (#424). Merge: chạy đúng `do` của `pr next` (REST ghim head) ngay khi `merge`; steward hay merge trước (`405 Merge already in progress` = đã merge). `release-check` chạy trên worktree của `main`. Sửa guard: test đỏ trước, ca `autonomy-bench` cho mỗi 🟠; luật mới OR với luật cũ (bài học #352, #372).
+- Chờ người: T-1834 gỡ `merge-gate` ở ruleset hai dự án đích rồi xoá stub (hạn xét: 2026-12-31); `prod_switch` 3.29.0 (hạn xét: 2026-11-30).
+- Autopilot: không chạy (phiên tương tác). `pr stats: chưa đo — đo ở /handover cuối PLAN-upgrade`.
 - Container mới: `scripts/dev-task.sh setup`; trước khi đẩy `gate-fast`, CI là cổng đầy đủ. Subagent dùng thư mục scratch riêng (bài học audit 2026-11-01).
