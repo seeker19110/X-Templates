@@ -20604,6 +20604,34 @@
    "allowed": true
   },
   "note": "T-3663 (D-332): dạng nguyên văn còn lọt — luật tĩnh, không miễn mới"
+ },
+ {
+  "id": "r429-417-declare-x",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-417"
+  ],
+  "input": {
+   "command": "declare -x HOME=.claude; rm -f ~/settings.json"
+  },
+  "expect": {
+   "allowed": false
+  },
+  "note": "review #429: dạng nguyên văn gần của 414/415 (đã chạy bash thật)"
+ },
+ {
+  "id": "r429-417-gunzip",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-417"
+  ],
+  "input": {
+   "command": "gunzip s.sh.gz; bash s.sh"
+  },
+  "expect": {
+   "allowed": false
+  },
+  "note": "review #429: dạng nguyên văn gần của 414/415 (đã chạy bash thật)"
  }
  ]
 }
