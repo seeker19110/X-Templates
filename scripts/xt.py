@@ -1518,14 +1518,18 @@ def _link_value(group: str, pos: int) -> str:
 
 PLAN_LINK_LOOSE_RE = re.compile(r"\b(?:sau|files)(?::|\s+T-\d)", re.I)  # `SAU:`, `Files:`, `sau T-1` — gần đúng khoá
 PLAN_TAG_LOOSE_RE = re.compile(r"\b(topo|exec)\s*:\s*[\w-]*", re.I)  # `Topo: Parallel`, `topo : x`, `exec: Deep`…
+PLAN_CODE_SPAN_RE = re.compile(r"`[^`]*`")  # span backtick trong tiêu đề/ghi chú — chữ trích, không phải thẻ
 
 
 def _loose_tag_keys(head: str) -> List[str]:
     """`topo:`/`exec:` viết sai (hoa thường, dấu cách trước `:`, giá trị lạ) — không lặng lẽ thành `self`/`default` (task
-    `review` mất bước reviewer mà không ai biết — AUD-XFEAT-040); thành ghi chú không đọc được như `sau:`/`files:`."""
+    `review` mất bước reviewer mà không ai biết — AUD-XFEAT-040); thành ghi chú không đọc được như `sau:`/`files:`. Chỉ
+    xét nhóm ngoặc (như `_loose_link_keys`), bỏ span backtick — tiêu đề nhắc `topo:` không phải thẻ."""
+    groups, unclosed = _paren_groups(PLAN_CODE_SPAN_RE.sub(" ", head))
     return [
         m[0]
-        for m in PLAN_TAG_LOOSE_RE.finditer(head)
+        for group in groups + ([unclosed] if unclosed else [])
+        for m in PLAN_TAG_LOOSE_RE.finditer(group)
         if not (TOPO_RE if m[1].lower() == "topo" else EXEC_TIER_RE).fullmatch(m[0])
     ]
 
@@ -1576,7 +1580,7 @@ def _bad_links_note(bad: Dict[str, List[str]]) -> List[str]:
     pairs = "; ".join(f"{k} → {', '.join(v)}" for k, v in bad.items())
     return (
         [
-            f"⚠ ghi chú `sau:`/`files:` không đọc được: {pairs} — không ready, `loop record` từ chối; "
+            f"⚠ ghi chú `sau:`/`files:`/`topo:`/`exec:` không đọc được: {pairs} — không ready, `loop record` từ chối; "
             "sửa cú pháp `(sau: T-NNN; files: a, b)`"
         ]
         if bad
@@ -1684,7 +1688,7 @@ def _direct_block(t: Dict[str, Any], cyc: set[str], deferred: Dict[str, Any]) ->
     if t["id"] in cyc:
         return "trên chu trình `sau:`"
     if t.get("bad_links"):
-        return f"ghi chú `sau:`/`files:` không đọc được: {', '.join(t['bad_links'])}"
+        return f"ghi chú `sau:`/`files:`/`topo:`/`exec:` không đọc được: {', '.join(t['bad_links'])}"
     if t["id"] in deferred:
         info = deferred[t["id"]]
         return f"đã defer: {info.get('reason', '') if isinstance(info, dict) else info}"
@@ -2937,7 +2941,10 @@ def loop_record(
         return 2
     bad = plan_bad_links(_plan_tasks(base, st)).get(task)
     if bad:  # fail-closed: không biết dependency/phạm vi thật thì không nhận bằng chứng (review delta PR #173)
-        print(f"✗ {task} có ghi chú `sau:`/`files:` không đọc được: {', '.join(bad)} — sửa PLAN trước", file=sys.stderr)
+        print(
+            f"✗ {task} có ghi chú `sau:`/`files:`/`topo:`/`exec:` không đọc được: {', '.join(bad)} — sửa PLAN trước",
+            file=sys.stderr,
+        )
         return 2
     locked = stage_plan_problem(base, str(st.get("plan"))) if st.get("plan") else ""
     if locked:  # không nhận bằng chứng cho task của giai đoạn khoá (ADR-0058)
@@ -5297,15 +5304,18 @@ def _doctor_harness_settings(base: Path) -> List[Finding]:
 
 def gitignore_blocks(base: Path, rel: str) -> Optional[bool]:
     """`rel` có bị một file `.gitignore` của repo chặn không, theo `git check-ignore` (mọi mẫu git thật: `.claude/`,
-    `.claude/*`, `*.local.*`, BOM, `!` phủ định — AUD-HAR-179). Chỉ tính luật từ `.gitignore` — exclude toàn cục hay
-    `.git/info/exclude` chỉ có ở máy này, người khác clone vẫn commit được. Không có git/không phải repo → None."""
+    `.claude/*`, `*.local.*`, BOM, `!` phủ định — AUD-HAR-179). Chỉ tính luật từ `.gitignore` trong cây (git in đường
+    tương đối) — exclude toàn cục (kể cả `~/.gitignore`, đường tuyệt đối) hay `.git/info/exclude` chỉ có ở máy này,
+    người khác clone vẫn commit được. Không có git/không phải repo → None."""
     if not shutil.which("git"):
         return None
     r = _git(base, "check-ignore", "-v", "-z", "--stdin", "--no-index", stdin=rel + "\0")
     if r.returncode not in (0, 1):
         return None
     src, _, pattern = (r.stdout.split("\0") + ["", "", ""])[:3]
-    return r.returncode == 0 and Path(src).name == ".gitignore" and not pattern.startswith("!")
+    # `.gitignore` trong cây: git in đường tương đối; exclude toàn cục (vd `~/.gitignore`) in đường tuyệt đối
+    in_tree = not os.path.isabs(src) and Path(src).name == ".gitignore"
+    return r.returncode == 0 and in_tree and not pattern.startswith("!")
 
 
 def _doctor_settings_local(base: Path) -> List[Finding]:

@@ -213,7 +213,7 @@ class PlanWavesTest(unittest.TestCase):
         self.assertEqual(self.ids(out), [["T-005"]])
         reasons = {b["id"]: b["reason"] for b in out["blocked"]}
         self.assertEqual(reasons["T-001"], "trên chu trình `sau:`")
-        self.assertTrue(reasons["T-003"].startswith("ghi chú `sau:`/`files:` không đọc được: sau:"))
+        self.assertTrue(reasons["T-003"].startswith("ghi chú `sau:`/`files:`/`topo:`/`exec:` không đọc được: sau:"))
         self.assertEqual(reasons["T-004"], "chờ T-001, T-003 bị chặn")
 
     def test_closed_dep_blocked_does_not_matter(self):
@@ -308,6 +308,24 @@ class PlanWavesTest(unittest.TestCase):
         tasks = xt.parse_plan(self.base / "plan.md")
         self.assertEqual(tasks[0]["bad_links"], ["Topo: Parallel"])
         self.assertTrue(all(t["bad_links"] == [] for t in tasks[len(bad) :]))
+        self.assertIn("ghi chú `sau:`/`files:`/`topo:`/`exec:` không đọc được: Topo: Parallel", blocked["T-100"])
+
+    def test_topo_exec_mentioned_in_title_or_backtick_not_bad(self):
+        """Review T-3635 (AUD-XFEAT-040): chỉ kiểm `topo:`/`exec:` trong nhóm ngoặc, bỏ span backtick — tiêu đề nhắc
+        `topo:`/`Exec: x` hay ghi chú trong ngoặc trích `topo:` trong backtick không làm task bị chặn."""
+        ok = (
+            " Sửa thông báo khi PLAN thiếu `topo:`",
+            " Topo: Parallel là sai chính tả",
+            " (ghi chú `topo:` và `Exec: Deep`)",
+            " (topo: review; ví dụ `topo : x`)",
+        )
+        lines = [task(f"T-1{i:02d}", files=[f"o{i}"], extra=ex) for i, ex in enumerate(ok)]
+        lines.append(task("T-200", files=["z"], extra=" Nhắc `topo:` (Topo: Review)"))
+        out = self.check_invariant(lines)
+        self.assertEqual([b["id"] for b in out["blocked"]], ["T-200"])
+        tasks = xt.parse_plan(self.base / "plan.md")
+        self.assertEqual([t["bad_links"] for t in tasks], [[], [], [], [], ["Topo: Review"]])
+        self.assertEqual(tasks[3]["topology"], "review")
 
     def test_cli_unknown_subcommand_handler(self):
         """cmd_plan với lệnh con lạ → 2 (nhánh phòng thủ như cmd_loop)."""

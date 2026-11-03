@@ -691,6 +691,16 @@ class InstallEdgeTest(unittest.TestCase):
         with redirect_stderr(io.StringIO()):
             install.ensure_gitignore(self.target)
         self.assertTrue(gi.read_text(encoding="utf-8").endswith("cá nhân\n.claude/settings.local.json\n"))
+        # exclude toàn cục mang tên `.gitignore` (vd ~/.gitignore, git in đường tuyệt đối) không phải luật của repo
+        home = self.tmp / "home"
+        home.mkdir()
+        (home / ".gitignore").write_text(".claude/settings.local.json\n.autopilot/\n", encoding="utf-8")
+        cfg = self.tmp / "gitconfig"
+        cfg.write_text(f"[core]\n\texcludesFile = {home / '.gitignore'}\n", encoding="utf-8")
+        gi.write_text("node_modules/\n", encoding="utf-8")
+        with mock.patch.dict(os.environ, {"GIT_CONFIG_GLOBAL": str(cfg)}), redirect_stderr(io.StringIO()):
+            install.ensure_gitignore(self.target)
+        self.assertTrue(gi.read_text(encoding="utf-8").endswith("\n.autopilot/\n.claude/settings.local.json\n"))
         self.assertIsNone(install.gitignore_blocks(self.tmp / "khong-co", "x"))  # git lỗi (không phải repo)
         with mock.patch.object(install.subprocess, "run", side_effect=OSError("không có git")):
             self.assertIsNone(install.gitignore_blocks(self.target, "x"))

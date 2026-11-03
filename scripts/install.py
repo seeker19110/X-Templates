@@ -1240,8 +1240,9 @@ GITIGNORE_PROBE = {".autopilot/": ".autopilot/state.json", ".claude/settings.loc
 
 def gitignore_blocks(target: Path, rel: str) -> bool | None:
     """`rel` có bị một file `.gitignore` chặn không, theo `git check-ignore` (mọi mẫu git thật — `.claude/`, `.claude/*`,
-    `*.local.*`, BOM, `!` phủ định; AUD-HAR-179; cùng luật `gitignore_blocks` của xt.py). Chỉ tính `.gitignore` (exclude
-    toàn cục/`.git/info/exclude` chỉ có ở máy này). Không có git/không phải repo → None."""
+    `*.local.*`, BOM, `!` phủ định; AUD-HAR-179; cùng luật `gitignore_blocks` của xt.py). Chỉ tính `.gitignore` trong cây
+    (đường tương đối; exclude toàn cục kể cả `~/.gitignore`, `.git/info/exclude` chỉ có ở máy này). Không có git/không
+    phải repo → None."""
     cmd = ["git", "-C", str(target), "check-ignore", "-v", "-z", "--stdin", "--no-index"]
     try:
         r = subprocess.run(cmd, input=rel + "\0", capture_output=True, text=True, timeout=10, check=False)
@@ -1250,7 +1251,9 @@ def gitignore_blocks(target: Path, rel: str) -> bool | None:
     if r.returncode not in (0, 1):
         return None
     src, _, pattern = (r.stdout.split("\0") + ["", "", ""])[:3]
-    return r.returncode == 0 and Path(src).name == ".gitignore" and not pattern.startswith("!")
+    # `.gitignore` trong cây: git in đường tương đối; exclude toàn cục (vd `~/.gitignore`) in đường tuyệt đối
+    in_tree = not os.path.isabs(src) and Path(src).name == ".gitignore"
+    return r.returncode == 0 and in_tree and not pattern.startswith("!")
 
 
 def _gitignore_has(target: Path, line: str, have: set[str]) -> bool:

@@ -2314,7 +2314,10 @@ class TaskDagTest(TmpMixin, unittest.TestCase):
         self.assertEqual(json.loads(self.run_main("loop", "status", "--json")[1])["bad_links"], {"T-001": ["sau: T-1"]})
         for cmd in ("next", "status"):
             with self.subTest(cmd=cmd):
-                self.assertIn("ghi chú `sau:`/`files:` không đọc được: T-001 → sau: T-1", self.run_main("loop", cmd)[1])
+                self.assertIn(
+                    "ghi chú `sau:`/`files:`/`topo:`/`exec:` không đọc được: T-001 → sau: T-1",
+                    self.run_main("loop", cmd)[1],
+                )
         write(self.base / "docs" / "autopilot" / "PLAN.md", "- [ ] `T-001` a (sau: T-002)\n- [x] `T-002` b\n")
         self.assertEqual(json.loads(self.run_main("loop", "next", "--json")[1])["bad_links"], {})
         self.assertNotIn("không đọc được", self.run_main("loop", "status")[1])
@@ -2340,7 +2343,7 @@ class TaskDagTest(TmpMixin, unittest.TestCase):
             with self.subTest(task=task):
                 rc, _, err = self.run_main("loop", "record", "--task", task, "--", "true")
                 self.assertEqual(rc, 2)
-                self.assertIn(f"{task} có ghi chú `sau:`/`files:` không đọc được", err)
+                self.assertIn(f"{task} có ghi chú `sau:`/`files:`/`topo:`/`exec:` không đọc được", err)
                 self.assertFalse((self.base / ".autopilot" / "evidence" / f"{task}.json").exists())
         self.assertEqual(self.run_main("loop", "record", "--task", "T-004", "--", "true")[0], 0)
         write(plan, "- [x] `T-001` a — Gate: `true`\n- [ ] `T-002` b (sau: T-001) — Gate: `true`\n")

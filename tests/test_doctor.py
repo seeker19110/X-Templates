@@ -1029,6 +1029,15 @@ class DoctorOrchestrationTest(DoctorCase):
         cfg.write_text(f"[core]\n\texcludesFile = {glob_ignore}\n", encoding="utf-8")
         with unittest.mock.patch.dict(os.environ, {"GIT_CONFIG_GLOBAL": str(cfg)}):
             self.assertIs(xt.gitignore_blocks(self.base, xt.SETTINGS_LOCAL_REL), False)  # chỉ máy này chặn
+        # exclude toàn cục mang tên `.gitignore` (vd ~/.gitignore): git in đường tuyệt đối — vẫn chỉ máy này chặn
+        home = self.base.parent / "home"
+        home.mkdir()
+        (home / ".gitignore").write_text(".claude/settings.local.json\n", encoding="utf-8")
+        cfg.write_text(f"[core]\n\texcludesFile = {home / '.gitignore'}\n", encoding="utf-8")
+        with unittest.mock.patch.dict(os.environ, {"GIT_CONFIG_GLOBAL": str(cfg)}):
+            self.assertIs(xt.gitignore_blocks(self.base, xt.SETTINGS_LOCAL_REL), False)
+            [f] = self.orch()
+        self.assertIn("LOOP-HARNESS-032", f.msg)
         bare = Path(self.enterContext(tempfile.TemporaryDirectory()))
         with unittest.mock.patch.dict(os.environ, {"GIT_CEILING_DIRECTORIES": str(bare.parent)}):
             self.assertIsNone(xt.gitignore_blocks(bare, xt.SETTINGS_LOCAL_REL))
