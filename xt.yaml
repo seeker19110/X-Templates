@@ -18,11 +18,12 @@ build: python3 scripts/xt.py stats
 # Môi trường cloud gọi `scripts/dev-task.sh setup` trong setup script (ADR-0056); CI vẫn cài bằng bước riêng của nó.
 setup: python3 -m pip install --quiet --require-hashes -r requirements-dev.txt
 # Chia test cho CI song song (`dev-task.sh test-shard I N [DIR]` / `test-combine DIR`, fan-out/fan-in — WF-CI-024):
-# test_list = ĐÚNG cách liệt kê lớp của `test` ở trên (test kiểm hai chuỗi trùng nhau), chạy bằng ${XT_PY:-python3} để
+# test_list = ĐÚNG cách liệt kê lớp của `test` ở trên (test kiểm hai chuỗi trùng nhau), chạy bằng XT_PY (python3 |
+# python3.11; chọn bằng `if` để từ lệnh nguyên văn — guard chặn từ lệnh động, ADR-0065 lớp A; giá trị khác → exit 2) để
 # job py311 bắt cả lỗi import trên 3.11; test_unit chạy MỘT lớp ("$1"): có XT_COV_DIR → coverage ghi vào đó, không → không
 # đo; test_combine gộp mọi shard rồi đòi đúng ngưỡng của `test` (100 %, cấu hình .coveragerc). `gate`/`test` không đổi.
-test_list: "${XT_PY:-python3}" -c 'import sys,unittest;S=set();f=lambda s:[f(t) if isinstance(t,unittest.TestSuite) else S.add("tests."+t.__class__.__module__+"."+t.__class__.__name__) for t in s if not isinstance(t,unittest.loader._FailedTest) or print(t._exception,file=sys.stderr) or sys.exit(1)];f(unittest.TestLoader().discover("tests"));print("\n".join(sorted(S)))'
-test_unit: if [ -n "${XT_COV_DIR:-}" ]; then COVERAGE_FILE="$XT_COV_DIR/.coverage" python3 -m coverage run -m unittest "$1"; else "${XT_PY:-python3}" -m unittest "$1"; fi
+test_list: if [ "${XT_PY:-python3}" = python3 ]; then python3 -c 'import sys,unittest;S=set();f=lambda s:[f(t) if isinstance(t,unittest.TestSuite) else S.add("tests."+t.__class__.__module__+"."+t.__class__.__name__) for t in s if not isinstance(t,unittest.loader._FailedTest) or print(t._exception,file=sys.stderr) or sys.exit(1)];f(unittest.TestLoader().discover("tests"));print("\n".join(sorted(S)))'; elif [ "$XT_PY" = python3.11 ]; then python3.11 -c 'import sys,unittest;S=set();f=lambda s:[f(t) if isinstance(t,unittest.TestSuite) else S.add("tests."+t.__class__.__module__+"."+t.__class__.__name__) for t in s if not isinstance(t,unittest.loader._FailedTest) or print(t._exception,file=sys.stderr) or sys.exit(1)];f(unittest.TestLoader().discover("tests"));print("\n".join(sorted(S)))'; else echo "[dev-task] XT_PY=$XT_PY không hỗ trợ (python3 | python3.11)" >&2; exit 2; fi
+test_unit: if [ -n "${XT_COV_DIR:-}" ]; then COVERAGE_FILE="$XT_COV_DIR/.coverage" python3 -m coverage run -m unittest "$1"; elif [ "${XT_PY:-python3}" = python3 ]; then python3 -m unittest "$1"; elif [ "$XT_PY" = python3.11 ]; then python3.11 -m unittest "$1"; else echo "[dev-task] XT_PY=$XT_PY không hỗ trợ (python3 | python3.11)" >&2; exit 2; fi
 # test_weights: file trọng số (giây/lớp, đo có coverage) để `test-shard` chia tham lam LPT thay cho k mod N (D-095:
 # mod N dồn lớp nặng vào một shard). Sinh lại bằng tay: `scripts/dev-task.sh test-weights` rồi commit; lớp mới chưa có
 # trong file lấy trung vị; JSON hỏng → shard đỏ.

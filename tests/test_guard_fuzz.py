@@ -167,11 +167,11 @@ CWD_RELATIVE: Dict[str, str] = {
     "guard-advrev-truncate-dirglob-guard": ".claude/*/guard.py tương đối → /tmp/.claude",
     "guard-rev361b-dd-ap": ".autopilot/state.json tương đối",
     "guard-rev361b-dddd-ap": ".autopilot/state.json tương đối",
-    "guard-rev361b-arith-semi-ap": ".autopilot/state.json tương đối",
+    # guard-rev361b-arith-semi-{ap,stage}: gỡ — `((true) )` (`((` không đóng bằng `))` liền) nay chặn ở mọi thư mục
+    # (ADR-0065 lớp A: bash đọc lại thành subshell lồng, guard không đọc chắc từ lệnh)
     "guard-rev361b-trail-sp-ap": ".autopilot/state.json tương đối",
     "guard-rev361b-dd-stage": "docs/autopilot/STAGE.json tương đối",
     "guard-rev361b-dddd-stage": "docs/autopilot/STAGE.json tương đối",
-    "guard-rev361b-arith-semi-stage": "docs/autopilot/STAGE.json tương đối",
     "guard-rev361b-trail-sp-stage": "docs/autopilot/STAGE.json tương đối",
     "guard-rev361b-oldarith-ap": ".autopilot/state.json tương đối",
     "guard-rev361c-dq-body-ap": ".autopilot/state.json tương đối",
@@ -180,6 +180,9 @@ CWD_RELATIVE: Dict[str, str] = {
     "guard-har154-git-mv-ledger-dir": "docs/autopilot tương đối → /tmp/docs/autopilot",
     "guard-har154-cp-into-ledger-dir": "docs/autopilot/ tương đối → /tmp/docs/autopilot",
     "guard-har154-git-C-rm-ledger-dir": "git -C docs tương đối → /tmp/docs/autopilot",
+    "adr65-398-sed-upper-w": "sed `W docs/autopilot/STAGE.json` tương đối → /tmp/docs/autopilot (AUD-SEC-398)",
+    "adr65r1-398-sed-W-glued": "sed `Wdocs/autopilot/STAGE.json` tương đối → /tmp/docs/autopilot (AUD-SEC-398)",
+    "adr65r1-398-sed-w-newline": "sed `w docs/autopilot/STAGE.json` tương đối → /tmp/docs/autopilot (AUD-SEC-398)",
     **{
         f"og-340-{k}": f"{v} tương đối → /tmp/{v} (AUD-SEC-340)"
         for k, v in (

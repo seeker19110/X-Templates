@@ -1346,7 +1346,7 @@ class HeredocAllowlistTest(unittest.TestCase):
                 'gh pr create --title "fix(guard): y" --body "$(cat <<\'EOF\'\n- handles \\`((…)\\` (round 2\nEOF\n)"',
                 'sql=$(cat <<SQL\nSELECT 1;\nSQL\n)\necho "$sql"',
                 "(cd docs && cat <<EOF\nx\nEOF\n)",
-                "echo $((i+1)); for ((i=0;i<3;i++)); do echo $i; done",
+                'echo $((i+1)); for ((i=0;i<3;i++)); do echo "$i"; done',  # ADR-0065: `$i` không nháy → chặn
                 'echo $((1<<2)); x=$[1+2]; echo $x; echo "$((1<<2))" <<EOF\nx\nEOF',
                 "total=$((a +\n b))\ncat <<EOF\n$total\nEOF",
                 'while read -r l; do echo "$l"; done <<< "$(ls)"',
@@ -1354,6 +1354,54 @@ class HeredocAllowlistTest(unittest.TestCase):
                 "echo a\\ #b <<E\nx\nE",
             ),
         )
+
+    def test_heredoc_unquoted_into_shell(self):
+        """AUD-SEC-392 (ADR-0065 lớp C): heredoc dấu kết KHÔNG nháy có `$`/backtick mà lệnh có shell đọc stdin (ống vào
+        shell, `bash <<E`, `. /dev/stdin`, `xargs sh -c`) → BUDGET: thân mở rộng một lần khi heredoc, lần hai khi shell
+        chạy (`\\$(…)` thành `$(…)`). Heredoc có nháy, hay không có shell đọc stdin, vẫn chạy."""
+        bad = (
+            "cat <<EOF | bash\n\\$(echo git push --force origin main)\nEOF",
+            "cat <<EOF | sh\necho \\$HOME\nEOF",
+            "cat <<EOF | bash -s\n\\`id\\`\nEOF",
+            "cat <<EOF | xargs -0 bash -c\n$x\nEOF",
+            ". /dev/stdin <<EOF\n\\$(id)\nEOF",
+            "source /dev/stdin <<EOF\n$(id)\nEOF",
+            "cat <<EOF | env bash\n${x}\nEOF",
+            # review adr-guard 🔴: heredoc ghi fd tường minh (`0<<`, `0<<-`, chuyển hướng khác trước/sau) — bash 5.2 chạy push
+            "bash 0<<EOF\ngit \\$(echo push) --force origin main\nEOF",
+            "sh 0<<EOF\ngit \\$(echo push) --force origin main\nEOF",
+            "bash 0<<-EOF\n\tgit \\$(echo push) --force origin main\n\tEOF",
+            "bash 0<< EOF\ngit \\$(echo push) --force origin main\nEOF",
+            "bash 0<<EOF 2>/dev/null\ngit \\$(echo push) --force origin main\nEOF",
+            "bash 2>/dev/null <<EOF\ngit \\$(echo push) --force origin main\nEOF",
+            # trình thông dịch chạy chữ stdin qua shell (`system(<STDIN>)`): thân có dấu mở rộng hai lần (`\\$`, backtick,
+            # `$` trong `$(…)`/`${…}`)
+            "cat <<EOF | perl -e 'system(<STDIN>)'\ngit \\$(echo push) --force origin main\nEOF",
+            "python3 -c 'import os,sys; os.system(sys.stdin.read())' <<EOF\ngit \\$(echo push) --force origin main\nEOF",
+            "cat <<EOF | ruby -e 'system(STDIN.read)'\n${x:-$(id)}\nEOF",
+            "cat <<EOF | bash\n'x\nEOF",  # nháy lẻ: không tách được lệnh → coi như có shell
+        )
+        for cmd in bad:
+            with self.subTest(cmd=cmd):
+                self.assertEqual(final(cmd, self.root), "deny")
+        for cmd in bad[:-1]:
+            with self.subTest(layer=cmd):
+                self.assertIn("AUD-SEC-392", guard._here_shell_why(cmd))
+        self.assertIn("AUD-SEC-392", guard._here_shell_why("cat <<EOF | bash\n$x '\nEOF\necho '"))
+        # review adr-guard: câu viết lại không dẫn agent sang đường "ghi script rồi chạy" (guard không quét — AUD-SEC-400)
+        self.assertIn("<<'EOF'", guard.HERE_SHELL_WHY)
+        self.assertNotIn("bash tệp", guard.HERE_SHELL_WHY)
+        for cmd in (
+            "cat <<'EOF' | bash\necho hi\nEOF",
+            "cat <<EOF > notes.md\nhome: $HOME\nEOF",
+            "cat <<EOF | grep x\n$(date)\nEOF",
+            "bash script.sh <<EOF\nyes\nEOF",
+            "python3 - <<EOF\nprint('$HOME')\nEOF",  # trình thông dịch, thân chỉ mở rộng một lần
+            "cat <<'EOF' | perl -e 'system(<STDIN>)'\ngit \\$(echo push)\nEOF",
+        ):
+            with self.subTest(ok=cmd):
+                self.assertEqual(final(cmd, self.root), "")
+                self.assertEqual(guard._here_shell_why(cmd), "")
 
     def test_review_marker_in_quoted_comsub_body_still_denied(self):
         self.assert_all(
@@ -1739,8 +1787,7 @@ class AliasDefinitionTest(unittest.TestCase):
                 "grep 'alias ll=' ~/.bashrc",
                 'echo "alias x=y"',
                 "grep -n alias= README.md",
-                "$PYTHON -m pip install a==1",  # tên lệnh chỉ là biến: giới hạn chung (`$x -rf ~`), không riêng alias
-                '"$(git rev-parse --show-toplevel)"/scripts/x.sh FOO=1',
+                # tên lệnh là biến/thay lệnh (`$PYTHON …`) nay chặn — ADR-0065 lớp A, `test_hooks.GuardMatrixTest.RUNTIME_HEAD_BAD`
                 "aliases x=1",
                 "echo BASH_ALIAS",
             ),
@@ -1974,7 +2021,8 @@ class AliasDefinitionTest(unittest.TestCase):
                 self.assertEqual(final(cmd, self.root), "deny")
         for name, cmd in (
             ("F1_echo_apos_printf", "echo \"it's ok\"\nprintf $'a\\tb\\n'"),
-            ("F2_cmt_apos_ifs", "# don't split on spaces\nIFS=$'\\n'\nfor f in $(ls); do echo \"$f\"; done"),
+            # ADR-0065: `$(ls)` không nháy cùng `IFS=` nay chặn — ca giữ ý comment có nháy lẻ, danh sách là glob
+            ("F2_cmt_apos_ifs", "# don't split on spaces\nIFS=$'\\n'\nfor f in *; do echo \"$f\"; done"),
             (
                 "F3_commit_hd_apos_then_printf",
                 "git commit -m \"$(cat <<'EOF'\nfix: don't break\nEOF\n)\"\nprintf $'done\\n'",
@@ -2644,6 +2692,11 @@ class BashHookSitesTest(unittest.TestCase):
             "compgen -W '$(rm -rf ~)' x",
             "echo 'rm -rf ~' > f; BASH_ENV=f bash -c true",
             "export BASH_ENV=f; bash -c true",
+            # ADR-0065 lớp D (review adr-guard): `${x@P}` luôn chặn — giá trị từ tệp/`\$` trong nháy kép chạy `$(…)`
+            # mà guard không đọc; trước đây giá trị nguyên văn (`x='a'`) được cho qua
+            "x='a'; echo ${x@P}",
+            'y="$(cat f)"; echo "${y@P}"',
+            'mapfile -c1 -C "$cb" a <<< 1',
         ):
             with self.subTest(cmd):
                 self.assertEqual(final(cmd), "deny")
@@ -2651,7 +2704,6 @@ class BashHookSitesTest(unittest.TestCase):
     def test_hook_benign_allowed(self) -> None:
         for cmd in (
             "PS4='+ '; set -x; true",
-            "x='a'; echo ${x@P}",
             "mapfile -t arr < f",
             "compgen -W 'a b' a",
             "complete -F _f x",
