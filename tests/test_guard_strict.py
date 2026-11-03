@@ -1842,7 +1842,7 @@ class GuardStrictDebtTest(unittest.TestCase):
         allow = (
             "cat > x.py <<'EOF'\nprint(1)\nEOF\npython3 x.py",
             "S=/tmp/sp; mkdir -p $S && cat > $S/x.py <<'EOF'\nprint(1)\nEOF\npython3 $S/x.py",  # thư mục có mở rộng
-            "cd d && cat <<'EOF' > x.py && python3 x.py 2>&1 | tail -3\nprint(1)\nEOF",
+            "cat <<'EOF' > x.py && python3 x.py 2>&1 | tail -3\nprint(1)\nEOF",
             "tee x.sh <<\\EOF >/dev/null\necho hi\nEOF\nchmod +x x.sh; bash x.sh",
             'cat > x.sh <<"EOF"\necho hi\nEOF\nbash -e x.sh',
             "cat > /tmp/x.py <<'EOF'\nprint(1)\nEOF\npython3 /tmp/x.py > out.json",
@@ -1866,6 +1866,7 @@ class GuardStrictDebtTest(unittest.TestCase):
             "cat > x.py <<'EOF'\nprint(1)\nEOF\npython3 - <<'PY'\nopen('x.py', 'w').write('x')\nPY\npython3 x.py",
             "cat a.sh > x.sh <<'EOF'\necho hi\nEOF\nbash x.sh",
             "cat > x.sh <<'EOF'\necho hi\nEOF\ncat > y.sh <<'EOF'\necho y\nEOF\nbash x.sh",
+            "cd d && cat <<'EOF' > x.py && python3 x.py 2>&1 | tail -3\nprint(1)\nEOF",  # review #426: có `cd`
             'cat > "$f" <<\'EOF\'\necho hi\nEOF\nbash "$f"',  # tên tệp có mở rộng
             "cat > x.py <<'EOF'\nprint(1)\nEOF\ngit checkout -- x.py; python3 x.py",  # lệnh ngoài danh sách vô hại
             "cat > x.py <<'EOF'\nprint(1)\nEOF\nprintf x > h.py; python3 x.py",  # lệnh khác ghi tệp
@@ -1894,6 +1895,11 @@ class GuardStrictDebtTest(unittest.TestCase):
             "bash 3<<<'git push --force origin main' /dev/fd/3",
             "sh -e /proc/12/fd/5 5<<'E'\ngit status\nE",
             ". /proc/thread-self/fd/3 3<<'E'\ngit status\nE",
+            # review #426 🟢: đường dẫn chưa chuẩn hoá
+            "bash /dev/./fd/3 3<<'E'\ngit push --force origin main\nE",
+            "bash //dev/fd/3 3<<'E'\ngit push --force origin main\nE",
+            "bash /dev/fd//3 3<<'E'\ngit push --force origin main\nE",
+            "bash /proc/self/./fd/3 3<<'E'\ngit push --force origin main\nE",
         )
         allow = (
             "cat /dev/fd/3 3<<E\n$HOME\nE",
@@ -1919,6 +1925,126 @@ class GuardStrictDebtTest(unittest.TestCase):
                 self.assertIn("AUD-PERF-017", d["reason"])
                 self.assertIn("viết lại:", d["reason"])
         self.assertEqual(decide("cat > n.md <<'EOF'\n" + "x" * 60000 + "\nEOF")["decision"], "")
+
+
+P = "git push --force origin main"
+
+
+class GuardReview426Test(unittest.TestCase):
+    """Review #426 (D-326): lỗ mã mới của nhánh guard-strict cho qua (đã tái hiện bash 5.2 với stub) và chặn oan mới."""
+
+    assert_budget = GuardStrictDebtTest.assert_budget
+
+    def assert_same(self, cmd, literal):
+        """`cmd` bị chặn cùng quyết định và mã với dạng nguyên văn `literal`."""
+        d, want = decide(cmd), decide(literal)
+        self.assertEqual(want["decision"], "deny", want)
+        self.assertEqual((d["decision"], d.get("code")), (want["decision"], want.get("code")), d)
+
+    def test_dev_write_targets(self):
+        """AUD-SEC-404 (a): chỉ `/dev/null`, `/dev/std{in,out,err}`, `/dev/tty`, `/dev/fd/*` không phải đích ghi tệp —
+        `/dev/shm/s.sh` là tệp thật."""
+        deny = (
+            f"printf '{P}\\n' > /dev/shm/s.sh; bash /dev/shm/s.sh",
+            f"printf '{P}\\n' > /dev/shm/s.sh; cd /dev/shm; bash s.sh",
+            "cat > /dev/shm/x.sh <<'EOF'\necho hi\nEOF\nprintf x > /dev/./shm/y; bash /dev/shm/x.sh",
+        )
+        allow = ("printf 'x' > /dev/null; bash s.sh", "bash run.sh 2>/dev/stderr; bash x.sh > /dev/fd/1")
+        self.assert_budget(deny, allow, "AUD-SEC-400", guard._script_run_why)
+        self.assertEqual(
+            [guard._dev_sink(p) for p in ("/dev/null", "//dev/./tty", "/dev/fd/9", "/dev/shm/x")], [True] * 3 + [False]
+        )
+
+    def test_heredoc_run_narrowed(self):
+        """AUD-SEC-404 (b): miễn D-324 không áp khi lệnh đổi thư mục (thân quét ở thư mục khác chỗ chạy), trình chạy có
+        stdin/here-string/đối số vị trí (thân đọc lệnh từ đó), hay `uniq IN OUT` ghi tệp (bỏ khỏi danh sách vô hại)."""
+        deny = (
+            "cat > x.sh <<'EOF'\nrm -f settings.json\nEOF\ncd .claude\nbash ../x.sh",
+            "cat > x.sh <<'EOF'\nprintf 'exit 0' > guard.py\nEOF\npushd .claude/hooks\nbash ../../x.sh",
+            f"cat > x.sh <<'EOF'\nsh\nEOF\nbash x.sh <<< '{P}'",
+            "cat > x.sh <<'EOF'\nsh\nEOF\nbash x.sh < cmds.txt",
+            f"cat > x.py <<'EOF'\nimport os,sys\nos.system(sys.argv[1])\nEOF\npython3 x.py '{P}'",
+            "cat > x.sh <<'EOF'\ngit \"$@\"\nEOF\nbash x.sh push --force origin main",
+            f"cat > x.sh <<'EOF'\necho hi\nEOF\nuniq - x.s? <<< '{P}'; bash x.sh",
+            "cat > x.sh <<'EOF'\necho hi\nEOF\nuniq a.txt x.sh; bash x.sh",
+        )
+        allow = (
+            "cat > x.py <<'EOF'\nprint(1)\nEOF\npython3 x.py > out.json 2>&1",
+            "cat > x.sh <<'EOF'\necho hi\nEOF\nbash x.sh | tail -3",
+        )
+        self.assert_budget(deny, allow, "AUD-SEC-400", guard._script_run_why)
+        self.assertIn(
+            "o.txt", guard.write_targets(["uniq", "-f", "1", "i.txt", "o.txt"], ["uniq", "-f", "1", "i.txt", "o.txt"])
+        )
+        self.assertEqual(guard.write_targets(["uniq", "i.txt"], ["uniq", "i.txt"]), [])
+
+    def test_literal_array_rules(self):
+        """AUD-SEC-405: mảng chữ nguyên văn được thay phần tử vào argv rồi áp luật như dạng nguyên văn; dạng không giải
+        được (lát cắt, `${a[*]}` nhiều phần tử, không nháy có khoảng trắng, gán nhiều lần) → BUDGET."""
+        self.assert_same('a=(-rf ~); rm "${a[@]}"', "rm -rf ~")
+        # luật hooksPath là `ask` (chính sách mặc định cho qua); dạng mảng phải đi qua đúng luật đó ở chế độ strict
+        hooks = 'a=(-c core.hooksPath=/dev/null commit -m x); git "${a[@]}"'
+        self.assertEqual(
+            guard._array_lifted(hooks),
+            "a=(-c core.hooksPath=/dev/null commit -m x); git -c core.hooksPath=/dev/null commit -m x",
+        )
+        rank = {"": 0, "ask": 1, "deny": 2}
+        with mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(ROOT), "XT_GUARD_POLICY": "strict"}):
+            for arr, lit in ((hooks, "git -c core.hooksPath=/dev/null commit -m x"),):
+                want = guard.bash_decision(lit, str(ROOT))["decision"]
+                self.assertEqual(want, "ask")
+                self.assertGreaterEqual(
+                    rank[str(guard.bash_decision(arr, str(ROOT))["decision"])], rank[str(want)], arr
+                )
+        self.assert_same('a=(reset --hard HEAD~1); git "${a[@]}"', "git reset --hard HEAD~1")
+        self.assert_same('declare -a a=(push --force origin main); git "${a[@]}"', P)
+        self.assert_same("a=(push --force origin main); git ${a[@]}", P)
+        self.assert_same('a=(push --force); git "${a[0]}" "${a[1]}" origin main', P)
+        deny = (
+            'a=(push --force); git "${a[@]:0}" origin main',
+            "a=('push --force' origin main); git ${a[@]}",
+            'a=(push --force); git "${a[*]}"',
+            'a=(x); a=(push --force origin main); git "${a[@]}"',
+            'a=(push); git "${a[k]}" --force origin main',
+        )
+        allow = (
+            'files=(a.py b.py); python3 -m ruff check "${files[@]}"',
+            "files=(a.txt 'b c.txt'); git add -- \"${files[@]}\"",
+            'args=(-q); pytest "${args[@]}"',
+            'a=(status); git "${a[*]}"',
+        )
+        self.assert_budget(deny, allow, "AUD-SEC-399", guard._array_arg_why)
+
+    def test_positional_params_tainted(self):
+        """AUD-SEC-405: `"$@"`/`$*`/`${@…}`/`$1` làm đối số của lệnh guard xét đối số khi lệnh có `set` đặt tham số vị
+        trí hay định nghĩa hàm — tham số đó là mảng guard không giải."""
+        deny = (
+            f'read -ra a <<< "{P[4:]}"; set -- "${{a[@]}}"; git "$@"',
+            f'set -- {P[4:]}; git "$@"',
+            'f() { git "$@"; }; read -ra a <<< "push --force origin main"; f "${a[@]}"',
+            "function f { git $*; }; f push --force origin main",
+            'f() { rm -rf "$1"; }; f ~',
+        )
+        allow = ('set -e; git "$@"', 'set -o pipefail; echo "$@"', 'f() { echo "$@"; }; f x')
+        self.assert_budget(deny, allow, "AUD-SEC-399", guard._array_arg_why)
+
+    def test_program_not_script(self):
+        """Review #426 🟠 (chặn oan mới): `-c`/`-`/`-m` đã cấp chương trình thì đối số sau là dữ liệu; stdin chỉ là script
+        khi trình chạy không có chương trình khác."""
+        allow = (
+            "curl -sSL -o p.json https://example.com/p.json && python3 -c 'import json,sys; print(json.load(open(sys.argv[1])))' p.json",
+            "echo '{}' > a.json; python3 - a.json <<'EOF'\nimport sys; print(sys.argv)\nEOF",
+            "printf '1 2\\n' > in.txt; python3 sum.py < in.txt",
+            "git diff > p.diff && python3 scripts/check.py < p.diff",
+            "echo data > in.txt && bash run.sh < in.txt",
+            "python3 gen.py > out.json && python3 -m json.tool out.json",
+        )
+        deny = (
+            "printf x > s.py; python3 < s.py",
+            "printf x > s.sh; bash -s < s.sh",
+            "printf x > s.py; python3 -X dev s.py",
+        )
+        self.assert_budget(deny, allow, "AUD-SEC-400", guard._script_run_why)
 
 
 if __name__ == "__main__":

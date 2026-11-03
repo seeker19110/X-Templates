@@ -5049,19 +5049,25 @@ class GuardStored1018Test(unittest.TestCase):
             "npx agent --print --force x",
             "cursor-agent --force",  # tên gốc giữ như cũ: `-f`/`--force` không cần `-p`
             "cursor-agent -f x",
+            # review #426 🟠: binary trần `agent` giữ hành vi base — tài liệu Cursor: `-f` "Force allow commands unless
+            # explicitly denied", không cần `--print`
+            "agent --force 'x'",
+            "agent -f x -- -p",
+            "/usr/local/bin/agent -fp x",
+            "npx agent -p --force x",
         ):
             self.assertEqual(self.bash(cmd), "deny", cmd)
-        # AUD-SEC-385 (review #420): tên chung `agent` chỉ tự duyệt bằng `-f`/`--force` khi chạy không tương tác
-        # (`-p`/`--print`) — binary khác tên `agent` dùng cờ trùng không bị chặn oan
+        # AUD-SEC-385 (review #420/#426): chỉ đường dẫn tường minh (`./bin/agent`) và `npx agent` mới coi `-f`/`--force`
+        # là tự duyệt khi có `-p`/`--print` — công cụ khác tên `agent` dùng cờ trùng không bị chặn oan
         for cmd in (
             "agent -p hi",
             "agent status",
             "echo agent --force",
             "./bin/agent --force",
             "npx agent -f config.yml",
+            "./bin/agent -f x -- -p",
+            "./bin/agent --force --printer x",
         ):
-            self.assertIsNone(self.bash(cmd), cmd)
-        for cmd in ("agent -f x -- -p", "agent --force --printer x"):
             self.assertIsNone(self.bash(cmd), cmd)
 
     def test_review_117_bypasses_closed(self):

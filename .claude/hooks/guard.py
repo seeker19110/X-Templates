@@ -1768,19 +1768,72 @@ ARRAY_LITERAL_RE = re.compile(r"\([^$`*?\\]*\)")  # phần tử nguyên văn: kh
 ARRAY_TARGET_HEADS = frozenset({"read", "mapfile", "readarray", "printf", "getopts", "wait"})
 
 
+# Review #426 🔴 (AUD-SEC-405): mảng chữ nguyên văn không được MIỄN mà được GIẢI — dạng dùng cả từ `"${a[@]}"`,
+# `${a[@]}`/`${a[*]}` (phần tử không khoảng trắng/ký tự đặc biệt), `"${a[*]}"` một phần tử, `${a[N]}` thay bằng phần tử
+# như viết (`~` mở như lúc gán) rồi quét lại (`_lifted_scripts`) — luật áp như dạng nguyên văn; dạng khác → BUDGET. Tham
+# số vị trí (`"$@"`, `$*`, `${@…}`, `$1`) là mảng guard không giải khi lệnh có `set` đặt chúng hay định nghĩa hàm.
+ARRAY_WORD_RE = re.compile(r'(")?\$\{([A-Za-z_]\w*)\[(@|\*|\d+)\]\}(?(1)")')
+ARRAY_PLAIN_RE = re.compile(r"[\w./@%+=:,~^-]+")  # phần tử giữ nguyên khi tách từ không nháy
+POSITIONAL_USE_RE = re.compile(r"\$(?:[@*1-9]|\{[@*1-9])")
+FUNC_DEF_RE = re.compile(r"(?:^|[\s;&|(){}])(?:function[ \t]+[^\s(){};&|]+|[A-Za-z_][\w.:-]*[ \t]*\([ \t]*\))")
+SET_VALUE_OPTS = ("-o", "+o")
+
+
 def _array_arg_why(cmd: str) -> str:
-    """Mảng không chắc là chữ nguyên văn làm đối số của lệnh trong `GLOB_COMMANDS` (cả sau lệnh bọc `sudo`/`env`…)."""
+    """Mảng/tham số vị trí guard không giải được làm đối số của lệnh trong `GLOB_COMMANDS` (cả sau `sudo`/`env`…)."""
     argvs = _ifs_argvs(cmd) or []
-    heads = [_ifs_head(a) for a in argvs]
-    used = {m[1] for head, args in heads if head in GLOB_COMMANDS for w in args for m in ARRAY_USE_RE.finditer(w)}
-    if not used:
-        return ""
-    literal: Dict[str, bool] = {}
+    heads = [_ifs_head(s) for a in argvs for s in _brace_segments(a)]  # `function f { git "$@"; }`: từ sau `{` là lệnh
+    words = [w for head, args in heads if head in GLOB_COMMANDS for w in args]
+    lits = _array_literals(cmd, heads)
+    arrays = any(ARRAY_USE_RE.search(w) and _array_word(w, lits) is None for w in words)
+    positional = any(map(POSITIONAL_USE_RE.search, words)) and (
+        bool(FUNC_DEF_RE.search(strip_heredocs(cmd))) or any(_sets_positional(h, a) for h, a in heads)
+    )
+    return ARRAY_ARG_WHY if arrays or positional else ""
+
+
+def _array_literals(cmd: str, heads: List[Tuple[str, List[str]]]) -> Dict[str, Optional[List[str]]]:
+    """Tên mảng → phần tử như viết (token còn nháy) khi gán DUY NHẤT một lần bằng mảng chữ nguyên văn và không lệnh
+    nào ghi vào nó (read/mapfile/printf -v…), không có mã cùng shell (`source`/`eval`); khác → None."""
+    out: Dict[str, Optional[List[str]]] = {}
     for m in ARRAY_SET_RE.finditer(cmd):
-        literal[m[1]] = literal.get(m[1], True) and not m[2] and bool(ARRAY_LITERAL_RE.fullmatch(m[3] or ""))
+        lit = not m[2] and m[3] is not None and bool(ARRAY_LITERAL_RE.fullmatch(m[3])) and m[1] not in out
+        elems = _raw_tokens(m[3][1:-1]) if lit else None
+        out[m[1]] = elems if elems is not None and not any(_is_punct(e) or e[:1] == "[" for e in elems) else None
     written = {_dequote(w).partition("[")[0] for head, args in heads if head in ARRAY_TARGET_HEADS for w in args}
     same = any(head in IFS_SAME_SHELL for head, _ in heads)
-    return ARRAY_ARG_WHY if same or any(not literal.get(n) or n in written for n in used) else ""
+    return {k: None if same or k in written else v for k, v in out.items()}
+
+
+def _array_word(word: str, lits: Dict[str, Optional[List[str]]]) -> Optional[str]:
+    """Chữ thay cho TỪ `word` dùng mảng chữ nguyên văn (`"${a[@]}"` → `x 'y z'`); None = không giải được."""
+    m = ARRAY_WORD_RE.fullmatch(word)
+    elems = lits.get(m[2]) if m else None
+    if m is None or elems is None:
+        return None
+    if m[3].isdigit():
+        return elems[int(m[3])] if int(m[3]) < len(elems) else '""'
+    if m[1] and m[3] == "@":
+        return " ".join(elems)
+    if m[1]:
+        return elems[0] if len(elems) == 1 else None  # `"${a[*]}"` nhiều phần tử: nối theo IFS — không giải
+    return " ".join(elems) if all(ARRAY_PLAIN_RE.fullmatch(e) for e in elems) else None
+
+
+def _sets_positional(head: str, args: List[str]) -> bool:
+    """`set --`, `set a b` đặt tham số vị trí (cờ `-e`/`-o pipefail` thì không)."""
+    words = [_dequote(w) for w in _no_redirects(args)]
+    after_o = [i > 0 and words[i - 1] in SET_VALUE_OPTS for i in range(len(words))]
+    return head == "set" and any(w == "--" or (w[:1] not in "-+" and not o) for w, o in zip(words, after_o))
+
+
+def _array_lifted(cmd: str) -> str:
+    """Dòng lệnh với mọi từ dùng mảng chữ nguyên văn đã thay bằng phần tử (`_array_word`) — rỗng nếu không có gì thay."""
+    lits = _array_literals(cmd, [_ifs_head(a) for a in _ifs_argvs(cmd) or []])
+    if not any(lits.values()):
+        return ""
+    out = ARRAY_WORD_RE.sub(lambda m: _array_word(m[0], lits) or m[0], cmd)
+    return "" if out == cmd else out
 
 
 # AUD-SEC-400: guard không đọc tệp script lúc chạy (`bash s.sh` đứng riêng cũng vậy) — tệp do chính lệnh ghi rồi chạy thì
@@ -1808,7 +1861,7 @@ def _script_run_why(cmd: str) -> str:
     if _heredoc_run(cmd) is not None:
         return ""
     argvs = _nested_argvs(cmd, 0)
-    writes = _file_index([[w for w in write_targets(normalize(a), a) if not w.startswith("/dev/")] for a in argvs])
+    writes = _file_index([[w for w in write_targets(normalize(a), a) if not _dev_sink(w)] for a in argvs])
     runs = _file_index([_run_files(a) for a in argvs] if writes else [])
     dyn_w, dyn_r = writes.pop(SCRIPT_NAME_DYN, set()), runs.pop(SCRIPT_NAME_DYN, set())
     any_w, any_r = dyn_w.union(*writes.values()), dyn_r.union(*runs.values())
@@ -1834,6 +1887,19 @@ def _file_name(path: str) -> str:
     return posixpath.basename(posixpath.normpath(path))
 
 
+# Review #426 🔴: chỉ các thiết bị không phải tệp mới bỏ khỏi đích ghi — `/dev/shm/s.sh` là tệp thật (tmpfs).
+DEV_SINK_RE = re.compile(r"/dev/(?:null|stdin|stdout|stderr|tty|fd/\d+)")
+
+
+def _norm_path(path: str) -> str:
+    """normpath + gộp `//` đầu (POSIX giữ `//x`, Linux đọc như `/x`)."""
+    return re.sub(r"^/+", "/", posixpath.normpath(path))
+
+
+def _dev_sink(path: str) -> bool:
+    return bool(DEV_SINK_RE.fullmatch(_norm_path(path)))
+
+
 # D-324 (AUD-SEC-400 phương án B): nội dung tệp biết chắc khi `cat > F`/`tee F` chép một heredoc CÓ NHÁY (không mở rộng)
 # — guard quét thân như script của trình chạy (`bash <<'D'`, `python3 - <<'D'`) thay vì chặn. Chỉ miễn theo giá trị khi
 # lệnh có đúng một heredoc, không script lồng, writer là nơi duy nhất ghi (`>`/`>|`, không `>>`/`tee -a`/`<<-`), đúng
@@ -1841,10 +1907,12 @@ def _file_name(path: str) -> str:
 # lệnh còn lại trong `HEREDOC_RUN_SAFE` hay chỉ là gán biến, không lệnh nào khác ghi tệp, tên F không nhắc ở chỗ khác
 # (cả trong thân). So theo TÊN tệp (thư mục có mở rộng — `$S/x.py` — vẫn được): trình chạy mở tệp khác cùng tên (thư mục
 # khác, writer lỗi) là chạy tệp có sẵn — như `bash x.sh` đứng riêng, không phải nội dung guard chưa quét do lệnh này tạo.
-HEREDOC_RUN_SAFE = frozenset(
-    "cd chmod mkdir echo printf true false : ls cat head tail grep wc sort uniq diff pwd cut tr date basename dirname"
-    " realpath".split()
-    + [""]  # chỉ gán biến (`S=/tmp/x;`): không chạy gì
+HEREDOC_RUN_SAFE = (
+    frozenset(  # review #426: không `cd`/`pushd`/`popd` (thân quét ở thư mục khác chỗ chạy), không `uniq`
+        "chmod mkdir echo printf true false : ls cat head tail grep wc sort diff pwd cut tr date basename dirname"
+        " realpath".split()
+        + [""]  # chỉ gán biến (`S=/tmp/x;`): không chạy gì
+    )
 )
 HEREDOC_RUN_SEP_RE = re.compile(r"(?:&&|\|\||[;\n])+")
 
@@ -1889,7 +1957,7 @@ def _sep_commands(raw: List[str]) -> Tuple[List[List[str]], List[str]]:
 def _heredoc_writer(a: List[str], m: "re.Match[str]") -> str:
     """Tệp F mà lệnh đơn `a` (`cat > F <<'D'`, `tee F <<'D'`) ghi từ heredoc có nháy; rỗng nếu khác dạng."""
     ops = [t for t in a if _is_redirect(t)]
-    outs = [a[k + 1] for k, t in enumerate(a[:-1]) if t in (">", ">|") and not a[k + 1].startswith("/dev/")]
+    outs = [a[k + 1] for k, t in enumerate(a[:-1]) if t in (">", ">|") and not _dev_sink(a[k + 1])]
     words = _no_redirects(normalize(a))
     files = outs if words == ["cat"] else words[1:] if words[:1] == ["tee"] and not outs else []
     plain = _heredoc_word(m)[1] and not m.group(0).startswith("<<-") and set(ops) <= {"<<", ">", ">|"}
@@ -1898,15 +1966,19 @@ def _heredoc_writer(a: List[str], m: "re.Match[str]") -> str:
 
 def _heredoc_runner(argvs: List[List[str]], writers: List[int], name: str) -> int:
     """Chỉ số lệnh đơn DUY NHẤT chạy `name` bằng shell/`source`/trình thông dịch, sau writer; -1 nếu không đúng dạng (có
-    lệnh khác ngoài `HEREDOC_RUN_SAFE`, lệnh khác ghi tệp, trình chạy ghi chính F)."""
+    lệnh khác ngoài `HEREDOC_RUN_SAFE`, lệnh khác ghi tệp, trình chạy ghi chính F; review #426: trình chạy có chuyển
+    hướng vào/here-string hay đối số sau F — thân có thể đọc lệnh từ đó)."""
     rest = [k for k in range(len(argvs)) if k != writers[0]]
     runs = [k for k in rest if (_interp_argv(argvs[k])[:1] or [""])[0] not in HEREDOC_RUN_SAFE]
     k = runs[0] if len(runs) == 1 else -1
-    files = _script_file(_interp_argv(argvs[k])) if k > writers[0] else None
-    others = [w for i in rest if i != k for w in write_targets(normalize(argvs[i]), argvs[i]) if w[:5] != "/dev/"]
+    n = _interp_argv(argvs[k])
+    files = _script_file(n) if k > writers[0] else None
+    others = [w for i in rest if i != k for w in write_targets(normalize(argvs[i]), argvs[i]) if not _dev_sink(w)]
     own = [w for w in write_targets(normalize(argvs[k]), argvs[k]) if _file_name(w) == _file_name(name)]
     same = files is not None and [_file_name(f) for f in files] == [_file_name(name)]
-    return k if same and not others and not own else -1
+    last = [a for a in _no_redirects(n) if a != "$"][-1:] == files  # F là đối số cuối: không đối số vị trí sau nó
+    fed = any(t[:1] == "<" for t in argvs[k] if _is_redirect(t))
+    return k if same and last and not fed and not others and not own else -1
 
 
 def _heredoc_script(head: str, body: List[str]) -> str:
@@ -1936,24 +2008,39 @@ def _run_files(argv: List[str]) -> List[str]:
     """Tệp mà lệnh đơn chạy như script: từ lệnh là đường dẫn (`./s.sh`), script của shell/`source`/trình thông dịch,
     tệp đổ vào stdin của chúng (`sh < f`)."""
     words, n = _strip_prefixes(argv), _interp_argv(argv)
-    script = _script_file(n)
-    stdin = _redirect_targets(n, ("<",)) if script is not None else []
+    script, from_stdin = _program(n)
+    stdin = (
+        _redirect_targets(n, ("<",)) if from_stdin else []
+    )  # review #426: stdin là script chỉ khi không có chương trình khác
     return [w for w in words[:1] if "/" in w] + (script or []) + stdin
 
 
 def _script_file(n: List[str]) -> Optional[List[str]]:
-    """Tệp script của lệnh đã chuẩn hoá `n` (rỗng: đọc stdin/`-c`); None = không phải shell/`source`/trình thông dịch."""
+    """Tệp script của lệnh đã chuẩn hoá `n` (rỗng: đọc stdin/`-c`/`-m`); None = không phải shell/`source`/trình thông dịch."""
+    return _program(n)[0]
+
+
+def _program(n: List[str]) -> Tuple[Optional[List[str]], bool]:
+    """(tệp script — `_script_file`, chương trình đọc từ stdin)."""
     rest = [a for a in _no_redirects(n) if a != "$"]
     head = rest[0] if rest else ""
     if head in ("source", "."):
-        return rest[2:3] if rest[1:2] == ["--"] else rest[1:2]
+        return (rest[2:3] if rest[1:2] == ["--"] else rest[1:2]), False
     if head in SHELLS:
         has_c, script = _shell_script_arg(rest)
-        return [] if has_c or script is None else [script]
-    if INTERP_RE.fullmatch(head):  # đối số đầu sau phần cờ (cờ họ không có bảng thì bỏ qua); `deno run FILE`
-        files = [a for a in rest[_interp_opts(rest)[1] :] if a[:1] != "-"]
-        return files[:2] if files[:1] == ["run"] else files[:1]
-    return None
+        return ([] if has_c or script is None else [script]), not has_c and script is None
+    return _interp_program(rest) if INTERP_RE.fullmatch(head) else (None, False)
+
+
+def _interp_program(rest: List[str]) -> Tuple[List[str], bool]:
+    """Trình thông dịch: đối số đầu sau phần cờ là tệp script (`deno run FILE`); `-c`/`-e` đã cấp chương trình, `-m`, `-`
+    (stdin) thì đối số sau là dữ liệu (review #426 🟠: `python3 -c '…' p.json` không chạy `p.json`)."""
+    inline, i, stopped = _interp_opts(rest)
+    if inline or stopped or rest[i : i + 1] == ["-"]:
+        return [], not inline and not stopped
+    files = [a for a in rest[i:] if a[:1] != "-"]
+    files = files[:2] if files[:1] == ["run"] else files[:1]
+    return files, not files
 
 
 def _fd_script_why(cmd: str) -> str:
@@ -1961,7 +2048,7 @@ def _fd_script_why(cmd: str) -> str:
     bash /dev/fd/3`) — stdin (`/dev/stdin`, `/dev/fd/0`) do luật cũ quét như `bash <<E`."""
     raw = _raw_tokens(cmd)
     argvs = [] if raw is None else [[_dequote(t) for t in c] for c in split_commands(raw)]
-    files = [f for a in argvs for f in _script_file(_interp_argv(a)) or []]
+    files = [_norm_path(f) for a in argvs for f in _script_file(_interp_argv(a)) or []]  # `/dev/./fd/3`, `//dev/fd/3`
     return FD_SCRIPT_WHY if any(FD_SCRIPT_RE.fullmatch(f) and f not in STDIN_SCRIPTS for f in files) else ""
 
 
@@ -6512,15 +6599,16 @@ def _py_runner_target(n: List[str]) -> int:
     return -1
 
 
-def _agent_cli(n: List[str]) -> Tuple[str, List[str], str]:
-    """(tên CLI agent, tham số, tên chung đã gọi — `agent`) khi lệnh gọi một CLI agent khác Claude Code (trực tiếp hoặc
-    qua npx/uvx/pipx…)."""
+def _agent_cli(n: List[str], explicit: bool = False) -> Tuple[str, List[str], str]:
+    """(tên CLI agent, tham số, tên chung đã gọi — `agent` — khi gọi qua đường dẫn tường minh (`explicit`: `./bin/agent`)
+    hay trình chạy gói (`npx agent`); binary trần `agent` giữ luật của `cursor-agent` — review #426) khi lệnh gọi một CLI
+    agent khác Claude Code (trực tiếp hoặc qua npx/uvx/pipx…)."""
     name, i = posixpath.basename(n[0]), 1
     t = max(_runner_target(n), _py_runner_target(n))
     if t >= 0:
         name, i = n[t], t + 1
     name = AGENT_CLI_PKGS.get(_pkg_base(name), _pkg_base(name))
-    alias = name if name in AGENT_CLI_ALIASES else ""
+    alias = name if name in AGENT_CLI_ALIASES and (explicit or t >= 0) else ""
     name = AGENT_CLI_ALIASES.get(name, name)
     args = n[i:]
     if t >= 0 and args[:1] == ["--"]:  # `npx <gói> -- <args>`: `--` của trình chạy, không phải của CLI
@@ -6528,8 +6616,9 @@ def _agent_cli(n: List[str]) -> Tuple[str, List[str], str]:
     return (name, args, alias) if name in AGENT_SELF_APPROVE else ("", [], "")
 
 
-# AUD-SEC-385 (review #420): tên chung `agent` — `-f`/`--force` chỉ là cờ tự duyệt của Cursor khi chạy không tương tác
-# (`-p`/`--print`, cả cụm `-fp`); binary khác tên `agent` (`./bin/agent --force`) không bị chặn oan. `cursor-agent` như cũ.
+# AUD-SEC-385 (review #420/#426): tên chung `agent` gọi qua đường dẫn tường minh (`./bin/agent`) hay `npx agent` — `-f`/
+# `--force` chỉ tính là tự duyệt khi có `-p`/`--print` (cả cụm `-fp`); binary trần `agent` và `cursor-agent` như base
+# (tài liệu Cursor: `-f` "Force allow commands unless explicitly denied", không cần `--print`).
 AGENT_ALIAS_PRINT_ONLY = {"agent": frozenset({"-f", "--force"})}
 AGENT_PRINT_RE = re.compile(r"--print|-[A-Za-z]*p[A-Za-z]*")
 
@@ -6560,7 +6649,7 @@ def _self_approve_flag(name: str, a: str, nxt: str) -> str:
 def agent_self_approve(argv: List[str], n: List[str], exported: Tuple[str, ...] = ()) -> str:
     """Lý do chặn khi lệnh mở CLI agent khác với cờ (hoặc biến môi trường — gán trong lệnh hoặc `export` trước đó trong
     cùng chuỗi lệnh) tự duyệt mọi công cụ; rỗng nếu không."""
-    name, args, alias = _agent_cli(n)
+    name, args, alias = _agent_cli(n, "/" in "".join(_strip_prefixes(argv)[:1]))
     if not name:
         return ""
     env = AGENT_SELF_APPROVE_ENV.get(name, "")
@@ -6915,6 +7004,20 @@ def _tar_dest(args: List[str]) -> List[str]:
     return _flag_values(args, ("-C", "--directory")) if extract else []
 
 
+UNIQ_VALUE_OPTS = ("-f", "-s", "-w", "--skip-fields", "--skip-chars", "--check-chars")
+
+
+def _uniq_output(args: List[str]) -> List[str]:
+    """Toán hạng thứ hai của `uniq [cờ] [IN [OUT]]` — `-` là toán hạng (stdin), sau `--` mọi token là toán hạng."""
+    words = _no_redirects(args)
+    k = words.index("--") if "--" in words else len(words)
+    head = words[:k]
+    pos = [
+        a for i, a in enumerate(head) if (a == "-" or a[:1] != "-") and (i == 0 or head[i - 1] not in UNIQ_VALUE_OPTS)
+    ]
+    return (pos + words[k + 1 :])[1:2]
+
+
 FILE_WRITERS: Dict[str, Callable[[List[str]], List[str]]] = {
     "curl": _curl_outputs,
     "wget": _wget_outputs,
@@ -6928,6 +7031,7 @@ FILE_WRITERS: Dict[str, Callable[[List[str]], List[str]]] = {
     "split": lambda a: _positionals(a, ("-l", "-b", "-C", "-n", "-a", "-t", "--additional-suffix"))[1:2],
     "csplit": lambda a: _flag_values(a, ("-f", "--prefix")),
     "dd": lambda a: [x[3:] for x in a if x.startswith("of=")],  # review #186 lần 2: `dd of=.env` là ghi
+    "uniq": _uniq_output,  # review #426: `uniq IN OUT` ghi OUT (`uniq - x.sh <<< '…'`)
 }
 
 
@@ -9276,7 +9380,7 @@ def _lifted_scripts(cmd: str) -> List[str]:
     (`_var_scripts` thay biến): `x=$(echo 'rm -rf ~'); $x`, `read x <<< 'rm -rf ~'; eval "$x"` (KNOWN_GAPS 3.4.0)."""
     base = strip_heredocs(cmd)
     text = READ_HERE_RE.sub(_read_assign, base)
-    variants = [text]
+    variants = [text, *[a for a in [_array_lifted(base)] if a]]  # AUD-SEC-405: mảng chữ nguyên văn đã thay phần tử
     for m in list(SUBST_ASSIGN_RE.finditer(text))[:LIFT_PICKS]:
         vals = _subst_values(m)  # rỗng (shlex lỗi): giữ nguyên gán, không đoán
         variants = [v.replace(m.group(0), f"{m.group(1)}={shlex.quote(val)}", 1) for v in variants for val in vals][
@@ -10058,22 +10162,22 @@ def _interp_opt_scripts(n: List[str]) -> List[str]:
     return _interp_opts(n)[0]
 
 
-def _interp_opts(n: List[str]) -> Tuple[List[str], int]:
-    """(script trong phần cờ — `_interp_opt_scripts`, vị trí sau phần cờ: file script, `-`, `--`; hết argv nếu `-m`)."""
+def _interp_opts(n: List[str]) -> Tuple[List[str], int, bool]:
+    """(script trong phần cờ — `_interp_opt_scripts`, vị trí sau phần cờ: file script, `-`, `--`; hết argv nếu `-m`,
+    gặp cờ kết thúc phần cờ như `-m`)."""
     m = INTERP_RE.fullmatch(n[0]) if n else None
     spec = INTERP_SHORT_OPTS.get(INTERP_FAMILY.get(m[1], m[1])) if m else None
     out: List[str] = []
-    i = 1
-    while spec and i < len(n) and n[i][:1] == "-" and n[i] not in ("-", "--"):
+    i, stop = 1, False
+    while spec and not stop and i < len(n) and n[i][:1] == "-" and n[i] not in ("-", "--"):
         nxt = n[i + 1] if i + 1 < len(n) else None
-        stop = False
         if n[i].startswith("--"):
             script, width = _long_opt(n[i], nxt)
         else:
             script, width, stop = _short_opt(n[i], nxt, spec)
         out += [script] if script is not None else []
         i = len(n) if stop else i + width
-    return out, i
+    return out, i, stop
 
 
 def _inline_scripts(n: List[str]) -> List[str]:

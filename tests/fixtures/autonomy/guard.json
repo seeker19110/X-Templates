@@ -19692,6 +19692,211 @@
    "code": "RULE_DENY"
   },
   "note": "D-324 (AUD-SEC-400 phương án B): heredoc có nháy ghi ra tệp rồi chạy — thân quét như dạng stdin"
+ },
+ {
+  "id": "r426-404-devshm",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-404"
+  ],
+  "input": {
+   "command": "printf 'git push --force origin main\\n' > /dev/shm/s.sh; bash /dev/shm/s.sh"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "review #426: miễn D-324 / đích `/dev/…` của AUD-SEC-400 — mã mới cho qua (bash 5.2 + stub)"
+ },
+ {
+  "id": "r426-404-cd",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-404"
+  ],
+  "input": {
+   "command": "cat > x.sh <<'EOF'\nrm -f settings.json\nEOF\ncd .claude\nbash ../x.sh"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "review #426: miễn D-324 / đích `/dev/…` của AUD-SEC-400 — mã mới cho qua (bash 5.2 + stub)"
+ },
+ {
+  "id": "r426-404-herestring",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-404"
+  ],
+  "input": {
+   "command": "cat > x.sh <<'EOF'\nsh\nEOF\nbash x.sh <<< 'git push --force origin main'"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "review #426: miễn D-324 / đích `/dev/…` của AUD-SEC-400 — mã mới cho qua (bash 5.2 + stub)"
+ },
+ {
+  "id": "r426-404-uniq",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-404"
+  ],
+  "input": {
+   "command": "cat > x.sh <<'EOF'\necho hi\nEOF\nuniq - x.s? <<< 'git push --force origin main'; bash x.sh"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "review #426: miễn D-324 / đích `/dev/…` của AUD-SEC-400 — mã mới cho qua (bash 5.2 + stub)"
+ },
+ {
+  "id": "r426-405-rm",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-405"
+  ],
+  "input": {
+   "command": "a=(-rf ~); rm \"${a[@]}\""
+  },
+  "expect": {
+   "allowed": false,
+   "code": "RULE_DENY"
+  },
+  "note": "review #426: mảng chữ nguyên văn được giải và áp luật; tham số vị trí sau `set --`/hàm là mảng không giải"
+ },
+ {
+  "id": "r426-405-reset",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-405"
+  ],
+  "input": {
+   "command": "a=(reset --hard HEAD~1); git \"${a[@]}\""
+  },
+  "expect": {
+   "allowed": false,
+   "code": "RULE_DENY"
+  },
+  "note": "review #426: mảng chữ nguyên văn được giải và áp luật; tham số vị trí sau `set --`/hàm là mảng không giải"
+ },
+ {
+  "id": "r426-405-set",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-405"
+  ],
+  "input": {
+   "command": "read -ra a <<< \"push --force origin main\"; set -- \"${a[@]}\"; git \"$@\""
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "review #426: mảng chữ nguyên văn được giải và áp luật; tham số vị trí sau `set --`/hàm là mảng không giải"
+ },
+ {
+  "id": "r426-405-func",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-405"
+  ],
+  "input": {
+   "command": "f() { git \"$@\"; }; read -ra a <<< \"push --force origin main\"; f \"${a[@]}\""
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "review #426: mảng chữ nguyên văn được giải và áp luật; tham số vị trí sau `set --`/hàm là mảng không giải"
+ },
+ {
+  "id": "r426-407-c-arg",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-407"
+  ],
+  "input": {
+   "command": "curl -sSL -o p.json https://example.com/p.json && python3 -c 'import json,sys; print(json.load(open(sys.argv[1])))' p.json"
+  },
+  "expect": {
+   "allowed": true
+  },
+  "note": "review #426 🟠: chương trình đã cấp bằng `-c`/`-`/`-m`, stdin chỉ là script khi không có chương trình khác"
+ },
+ {
+  "id": "r426-407-stdin-data",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-407"
+  ],
+  "input": {
+   "command": "printf '1 2\\n' > in.txt; python3 sum.py < in.txt"
+  },
+  "expect": {
+   "allowed": true
+  },
+  "note": "review #426 🟠: chương trình đã cấp bằng `-c`/`-`/`-m`, stdin chỉ là script khi không có chương trình khác"
+ },
+ {
+  "id": "r426-407-dash",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-407"
+  ],
+  "input": {
+   "command": "echo '{}' > a.json; python3 - a.json <<'EOF'\nimport sys; print(sys.argv)\nEOF"
+  },
+  "expect": {
+   "allowed": true
+  },
+  "note": "review #426 🟠: chương trình đã cấp bằng `-c`/`-`/`-m`, stdin chỉ là script khi không có chương trình khác"
+ },
+ {
+  "id": "r426-407-bash-stdin",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-407"
+  ],
+  "input": {
+   "command": "echo data > in.txt && bash run.sh < in.txt"
+  },
+  "expect": {
+   "allowed": true
+  },
+  "note": "review #426 🟠: chương trình đã cấp bằng `-c`/`-`/`-m`, stdin chỉ là script khi không có chương trình khác"
+ },
+ {
+  "id": "r426-408-agent-force",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-408"
+  ],
+  "input": {
+   "command": "agent --force 'x'"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "HOOK_BYPASS"
+  },
+  "note": "review #426 🟠: binary trần `agent` giữ luật base (`-f` tự duyệt không cần `--print`)"
+ },
+ {
+  "id": "r426-408-path-ok",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-408"
+  ],
+  "input": {
+   "command": "./bin/agent --force"
+  },
+  "expect": {
+   "allowed": true
+  },
+  "note": "review #426 🟠: binary trần `agent` giữ luật base (`-f` tự duyệt không cần `--print`)"
  }
  ]
 }
