@@ -266,6 +266,7 @@ python3 -m unittest discover -s tests    # chỉ test (cổng test còn đòi co
 - [ADR-0064](docs/adr/0064-multi-provider-harness.md) (D-303): harness đa nhà cung cấp — một lõi chính sách trung lập, adapter mỏng theo công cụ (Codex, Gemini CLI, Cursor, Copilot CLI, Grok Build, OpenCode), sàn chung bằng git hook, vòng lặp ngoài `loop run --agent`, sandbox kiểm bằng `doctor`; nghiên cứu `research/2026-11-02-multi-provider-harness.md`.
 - [ADR-0065](docs/adr/0065-guard-allowlist-dynamic-expansion.md) (D-322): guard xét mở rộng động theo danh sách trắng — từ lệnh dựng lúc chạy, tách/gán theo tên động (`IFS`), heredoc đọc lại, dữ liệu thành mã (`mapfile -C`, `${x@P}`) → `BUDGET`; không suy cấu trúc lệnh để miễn.
 - [ADR-0066](docs/adr/0066-guard-written-file-reuse.md) (D-327): tệp do chính lệnh ghi mà tên được nhắc lại ở chỗ khác của lệnh (trừ lệnh chỉ đọc trong danh sách trắng) → `BUDGET` — không liệt kê trình chạy (AUD-SEC-406).
+- [ADR-0067](docs/adr/0067-guard-static-limit-layered-defense.md) (D-331): guard là lớp phân tích tĩnh có giới hạn — lớp lách bằng tên/mã dựng lúc chạy (dạng nguyên văn đã chặn) chấp nhận có hạn 2027-01-21; ranh giới cứng ở ruleset GitHub, CI, review; đánh giá sandbox opt-in.
 
 Nghiên cứu nền ngày 2026-10-13 ở [`research/`](research/): phân tích khung cũ, trích xuất catalog `seeker19110/stored`,
 AI agent và giao thức, cơ chế Claude Code. Khung cũ khôi phục được bằng `git archive 1b80fe4`.
