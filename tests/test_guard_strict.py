@@ -2116,7 +2116,7 @@ class GuardWrittenFileReuseTest(unittest.TestCase):
             "bash -c 'printf x > s.txt; python3 -c \"print(1)\" s.txt'",
             "printf x > s.txt; echo `echo $(cat s.txt)`",
             "printf x > s.txt; echo $(echo $(echo $(echo $(echo hi))))",  # sâu hơn SCRIPT_RUN_DEPTH: coi như nhắc
-            "printf x > s.txt; git log --format=x s.txt",
+            "printf x > s.txt; git -C . log --format=x s.txt",  # AUD-SEC-419: `git log` trơn là lệnh đọc; cờ toàn cục thì không
             "printf x > s.txt; uniq s.txt t.txt",
             "echo hi > x.md; gh pr comment 5 -F x.md --repo x.md",  # nhắc ngoài chỗ tệp nội dung
             "echo hi > x.md; gh api -F body=@x.md repos/o/r/issues/1/comments",
@@ -2722,6 +2722,69 @@ class GuardReview429Test(unittest.TestCase):
             "AUD-SEC-414",
             guard._home_dyn_why,
         )
+
+
+class GuardDebt429Test(unittest.TestCase):
+    """Nợ review #429: AUD-SEC-418 (công cụ nạp ngầm ngoài bảng) và AUD-SEC-419 (chặn oan của 415 — lệnh chỉ đọc)."""
+
+    assert_budget = GuardStrictDebtTest.assert_budget
+
+    def test_aud_sec_418_more_implicit_tools(self):
+        """AUD-SEC-418 🟠: đúng các lệnh của hàng sổ — tệp nạp ngầm bị ghi rồi công cụ chạy."""
+        self.assert_budget(
+            (
+                "echo x > package.json; node --run test",
+                "echo x > package.json; bun run test",
+                "echo x > package.json; bun test",
+                "echo x > bunfig.toml; bun install",
+                "echo x > noxfile.py; nox",
+                "echo x > tasks.py; invoke build",
+                "echo x > tasks.py; inv build",
+                "echo x > composer.json; composer install",
+                "echo x > CMakeLists.txt; cmake .",
+                "echo x > x_test.go; go test ./...",
+                "echo x > gen.go; go generate ./...",
+                "echo x > deno.json; deno task build",
+                "echo x > deno.jsonc; deno task build",
+                "echo x > Taskfile.yml; task build",
+                "echo x >> ~/.bashrc; script -qc 'bash -i' /dev/null",
+                "echo x >> ~/.bashrc; script -q -c 'bash -ic true' /dev/null",
+            ),
+            (
+                "go build ./... > build.log; tail -3 build.log",
+                "echo x > notes.md; node --run test",
+                "echo x >> ~/.bashrc; script -qc 'bash -c true' /dev/null",
+            ),
+            "AUD-SEC-416",
+            guard._implicit_load_why,
+        )
+
+    def test_aud_sec_419_readers(self):
+        """AUD-SEC-419 🟢 (a): lệnh chỉ đọc không chạy mã — `shellcheck`, `which`, `type`, `command -v|-V`, `git log` —
+        không làm mất miễn; gán `GIT_*`/`-c` toàn cục vẫn mất miễn (D-329). (b) diff từ tệp giữ chặn (chấp nhận)."""
+        self.assert_budget(
+            (
+                "GIT_EXTERNAL_DIFF=sh git log -p -- s.sh; bash s.sh",
+                "export PAGER='sh -c x'; git log -p -- s.sh; bash s.sh",
+                "git -C . log -p -- s.sh; bash s.sh",
+                "command bash s.sh; sponge s.sh < in.txt",
+                "command -p sponge s.sh < in.txt; bash s.sh",
+                "git apply p.diff && python3 -m unittest",
+                "patch < fix.diff && make",
+            ),
+            (
+                "shellcheck s.sh && bash s.sh",
+                "git log -- scripts/xt.py; python3 scripts/xt.py checks",
+                "which ruff && python3 -m ruff check scripts",
+                "type ruff; python3 -m ruff --version",
+                "command -v ruff && python3 -m ruff --version",
+                "command -V s.sh; bash s.sh",
+            ),
+            "AUD-SEC-41",
+        )
+        cmd = "git -c diff.external=sh log -p -- s.sh; bash s.sh"  # `-c` chạy chương trình: luật cũ chặn trước
+        self.assertEqual(decide(cmd)["decision"], "deny")
+        self.assertTrue(guard._run_named_why(cmd))
 
 
 class LedgerMatchesGuardTest(unittest.TestCase):
