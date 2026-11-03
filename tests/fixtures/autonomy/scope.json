@@ -309,6 +309,12 @@
     "AUD-TEST-056",
     "AUD-XFEAT-047"
    ]
+  },
+  {
+   "reason": "`xt.py loop run --agent-args` (review #418): lệnh agent đã ghép đi qua `guard_block` ngay trong xt.py như lệnh Gate (LOOP-STOP-027) — quyết định chặn nằm ở guard đã có ca trong corpus (cờ tự duyệt), phần mới là đường gọi; đỡ bằng Gate unittest tests.test_xt_loop -k agent_args_go_through_guard",
+   "ids": [
+    "AUD-SEC-375"
+   ]
   }
  ]
 }

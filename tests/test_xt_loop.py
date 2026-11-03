@@ -1572,6 +1572,21 @@ class LoopRunTest(TmpRepoCase):
         self.assertEqual(rc, 2)
         self.assertIn("--agent-args", err)
 
+    def test_agent_args_go_through_guard(self) -> None:
+        """Review #418 (🔴): `--agent-args=--yolo` mở agent lồng tự duyệt mà không qua guard (LOOP-STOP-028) — lệnh agent
+        đã ghép qua cùng kiểm guard như lệnh Gate (LOOP-STOP-027): bị cấm → exit 126, không chạy, kể cả `--dry-run`."""
+        self.assertEqual(run_main("loop", "init")[0], 0)
+        for agent, extra in (
+            ("codex", "--yolo"),
+            ("gemini", "--yolo"),
+            ("codex", "--dangerously-bypass-approvals-and-sandbox"),
+        ):
+            with self.subTest(agent=agent, extra=extra):
+                rc, out, err = run_main("loop", "run", "--agent", agent, f"--agent-args={extra}", "--dry-run")
+                self.assertEqual(rc, 126, out + err)
+                self.assertIn("LOOP-STOP-027", err)
+                self.assertNotIn(extra, out)
+
 
 if __name__ == "__main__":
     unittest.main()

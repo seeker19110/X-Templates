@@ -9177,25 +9177,32 @@ LOOP_RUN_PROMPT = (
 )
 
 
-def _loop_agent_cmd(args: argparse.Namespace) -> Optional[List[str]]:
+def _loop_agent_cmd(args: argparse.Namespace, base: Path) -> Tuple[Optional[List[str]], int]:
     """Lệnh agent của bảng + `--agent-args` (tách theo shell, D-318: cờ quyền của host khác do người chạy truyền, khung
-    không tự thêm cờ tự duyệt); chuỗi tách không được → None (exit 2)."""
+    không tự thêm cờ tự duyệt) → (lệnh, 0). Lệnh ghép qua guard như lệnh Gate (LOOP-STOP-027; review #418: agent gọi
+    `loop run --agent-args=--yolo` từng mở agent lồng tự duyệt mà guard không thấy — LOOP-STOP-028): bị cấm → (None, 126);
+    chuỗi tách không được → (None, 2)."""
     try:
         extra = shlex.split(args.agent_args or "")
     except ValueError as exc:
         print(f"✗ --agent-args: {exc}", file=sys.stderr)
-        return None
-    return [*LOOP_AGENTS[args.agent], *extra]
+        return None, 2
+    cmd = [*LOOP_AGENTS[args.agent], *extra]
+    why = guard_block(shlex.join(cmd), base)
+    if why:
+        print(f"✗ guard chặn, không chạy (LOOP-STOP-027): {why} — lệnh: {shlex.join(cmd)}", file=sys.stderr)
+        return None, 126
+    return cmd, 0
 
 
 def _loop_run(args: argparse.Namespace, base: Path) -> int:
     """`loop run --agent X [--agent-args S] [--max-turns N] [--timeout S] [--dry-run]`: mỗi lượt đọc verdict từ bằng chứng,
     gọi agent headless cho đúng task đó, rồi đọc lại verdict. Exit 0 khi xong (`done`/`done-pending-human`), 3 khi vòng
     không chạy được (chưa `loop init`, blocked, …), 1 khi agent không tiến triển LOOP_RUN_STALL lượt hay hết lượt, 2 khi
-    `--agent-args` sai cú pháp."""
-    agent = _loop_agent_cmd(args)
+    `--agent-args` sai cú pháp, 126 khi guard cấm lệnh agent đã ghép."""
+    agent, rc = _loop_agent_cmd(args, base)
     if agent is None:
-        return 2
+        return rc
     seen: Optional[Tuple[Any, ...]] = None
     stall = 0
     for turn in range(1, args.max_turns + 1):
@@ -15388,7 +15395,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     lru.add_argument("--agent", required=True, choices=list(LOOP_AGENTS))
     lru.add_argument(
-        "--agent-args", help="cờ thêm cho agent (tách theo shell), đặt trước prompt — vd. cờ quyền của host (D-318)"
+        "--agent-args",
+        help="cờ thêm cho agent (tách theo shell, viết `--agent-args=…`), đặt trước prompt; lệnh ghép qua guard — cờ tự duyệt bị cấm (126)",
     )
     lru.add_argument("--max-turns", type=int, default=20, help="số lượt tối đa (mặc định 20)")
     lru.add_argument("--timeout", type=float, default=3600, help="giây tối đa mỗi lượt agent (mặc định 3600)")
