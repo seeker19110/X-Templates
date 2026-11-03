@@ -9920,7 +9920,7 @@ def _pa_visible(line: str) -> List[str]:
         return [_PA_SPACE_RE.sub(" ", line)]
     gone = _pa_strip(line, "", "")
     forms = [gone] if len(gone) == len(line) else [gone, _pa_strip(line, " ", " "), _pa_strip(line, "", " ")]
-    return list(dict.fromkeys(_PA_SPACE_RE.sub(" ", f) for f in forms))
+    return list(dict.fromkeys([gone] + [_PA_SPACE_RE.sub(" ", f) for f in forms]))
 
 
 def _pa_json_literal(m: "re.Match[str]") -> str:
@@ -9931,33 +9931,223 @@ def _pa_json_literal(m: "re.Match[str]") -> str:
         return m[0]
 
 
-# AUD-SEC-365: escape trong chuỗi nháy kép YAML 1.2 (`\xXX`, `\uXXXX`, `\UXXXXXXXX`, ký tự đơn) và TOML (tập con);
-# escape ký tự ESC giữ nguyên văn (không luật nào dựa vào nó; PRF-CLI-004 cấm mã thoát ANSI trong scripts/).
+# AUD-SEC-365: escape trong chuỗi nháy kép YAML 1.2 (`\xXX`, `\uXXXX`, `\UXXXXXXXX`, ký tự đơn); TOML 1.1 dùng bảng
+# riêng — `\v`, `\N`, `\P`, `\a`, `\0`… không phải escape TOML (AUD-SEC-378; spec toml-lang/toml 1.1.0, tra
+# 2026-11-03). Escape ký tự ESC giữ nguyên văn (không luật nào dựa vào nó; PRF-CLI-004 cấm mã thoát ANSI trong scripts/).
 _PA_ESC_RE = re.compile(r"\\(?:x([0-9a-fA-F]{2})|u([0-9a-fA-F]{4})|U([0-9a-fA-F]{8})|(.))")
-_PA_ESC_CHARS = {
+_PA_YAML_ESC = {
     "0": "\0", "a": "\a", "b": "\b", "f": "\f", "n": "\n", "r": "\r", "t": "\t", "v": "\v",
-    " ": " ", "/": "/", '"': '"', "\\": "\\", "N": "\x85", "_": "\xa0", "L": "\u2028", "P": "\u2029",
+    " ": " ", "/": "/", '"': '"', "\\": "\\", "N": "\x85", "_": "\xa0", "L": " ", "P": " ",
 }  # fmt: skip
+_PA_TOML_ESC = {"b": "\b", "f": "\f", "n": "\n", "r": "\r", "t": "\t", '"': '"', "\\": "\\"}
 
 
-def _pa_esc_char(m: "re.Match[str]") -> str:
-    """Một escape YAML/TOML đã giải mã; escape lạ hoặc mã ngoài Unicode → nguyên văn."""
+def _pa_esc_char(table: Dict[str, str], m: "re.Match[str]") -> str:
+    """Một escape đã giải mã theo bảng `table`; escape lạ hoặc mã ngoài Unicode → nguyên văn."""
     code = m[1] or m[2] or m[3]
     if code:
         return chr(int(code, 16)) if int(code, 16) <= 0x10FFFF else m[0]
-    return _PA_ESC_CHARS.get(m[4], m[0])
+    return table.get(m[4], m[0])
 
 
-def _pa_esc_literal(m: "re.Match[str]") -> str:
-    """Chuỗi nháy kép YAML/TOML với các escape đã giải mã (`_pa_esc_char`)."""
-    return _PA_ESC_RE.sub(_pa_esc_char, m[0])
+def _pa_at(rx: "re.Pattern[str]", line: str, pos: int) -> "re.Match[str]":
+    """Khớp của `rx` ngay tại `pos` — chỉ cho regex khớp được chuỗi rỗng (lần thử đầu của `finditer` là ở `pos`)."""
+    return next(rx.finditer(line, pos))
 
 
-_PA_DECODERS: Dict[str, Callable[["re.Match[str]"], str]] = {
-    ".json": _pa_json_literal,
-    ".yaml": _pa_esc_literal,
-    ".yml": _pa_esc_literal,
-    ".toml": _pa_esc_literal,
+@dataclass
+class _PaScanState:
+    """Trạng thái quét YAML/TOML mang sang dòng sau: nháy còn mở, độ sâu `[`/`{` (YAML), ngưỡng thụt lề của khối
+    `|`/`>` (YAML — dòng thụt sâu hơn hoặc trống thuộc khối), ngưỡng thụt lề của plain scalar chạy tới hết dòng (YAML —
+    dòng không phải comment thụt sâu hơn là dòng tiếp của scalar; -1 trong ngoặc)."""
+
+    quote: str = ""
+    flow: int = 0
+    block: Optional[int] = None
+    plain: Optional[int] = None
+
+
+# AUD-SEC-378: YAML — chuỗi nháy kép chỉ mở ở chỗ đặt nút: đầu dòng, sau tiền tố `- `/`? `/`---`, thuộc tính
+# `!tag`/`&anchor`, `[`/`{`, sau `key:` và (trong ngoặc) `,`. `"` trong plain scalar, comment, khối `|`/`>`, chuỗi nháy
+# đơn (kể cả nhiều dòng) không mở chuỗi. Plain scalar dừng ở `: `, ` #`, hết dòng; trong ngoặc dừng cả ở `,[]{}`; chạy
+# tới hết dòng thì dòng không phải comment thụt sâu hơn cột cha (trong ngoặc: mọi dòng) là dòng tiếp của nó. Mọi
+# lặp possessive, mỗi token đọc một lần (tuyến tính). Không đặt nhóm bắt trong lặp possessive (`re` của Python 3.11
+# ném SystemError "span of capturing group is wrong") — cột `-` cuối của tiền tố tìm lại bằng `_PA_YAML_DASH_RE`.
+_PA_YAML_DASH = r"(?:---|-|\?)(?=[ \t]|$)"
+_PA_YAML_NODE_RE = re.compile(
+    r"(?P<pre>(?:[ \t]*+(?:" + _PA_YAML_DASH + r"|[!&][^\s,\[\]{}]*+|[\[{]))*+)[ \t]*+"
+    r"(?:(?P<dq>\")|(?P<sq>')|(?P<close>[\]}])|(?P<block>[|>][-+1-9]*+[ \t]*+(?:#.*)?$)|(?P<end>#|$))?"
+)
+_PA_YAML_DASH_RE = re.compile(r"(?<![^ \t\[{])" + _PA_YAML_DASH)
+_PA_YAML_PLAIN_RE = (
+    re.compile(r"(?:[^\s:]++|:(?=\S)|\s++(?=[^\s#]))*+"),
+    re.compile(r"(?:[^\s:,\[\]{}]++|:(?=[^\s,\[\]{}])|\s++(?=[^\s#,\[\]{}]))*+"),
+)  # (ngữ cảnh khối, trong ngoặc)
+_PA_YAML_AFTER_RE = re.compile(r"[ \t]*+(?:(?P<colon>:)|(?P<comma>,)|(?P<close>[\]}]))?")
+_PA_YAML_BODY = {'"': re.compile(r'(?:[^"\\]++|\\.)*+\\?(")?'), "'": re.compile(r"(?:[^']++|'')*+(')?")}
+
+
+def _pa_yaml_quoted(st: _PaScanState, line: str, pos: int, quote: str, spans: List[Tuple[int, int]]) -> int:
+    """Đọc thân chuỗi nháy `quote` từ `pos` (sau nháy mở, hoặc đầu dòng khi chuỗi còn mở từ dòng trước): nháy kép thì
+    ghi khoảng cần giải mã. Trả vị trí sau nháy đóng; chưa đóng → nhớ `quote` sang dòng sau."""
+    m = _pa_at(_PA_YAML_BODY[quote], line, pos)
+    if quote == '"':
+        spans.append((pos, m.end()))
+    st.quote = "" if m[1] else quote
+    return m.end()
+
+
+def _pa_yaml_plain(st: _PaScanState, line: str, pos: int, parent: int) -> int:
+    """Đọc plain scalar từ `pos` → vị trí sau nó; chạy tới hết dòng (không comment) → -1 và nhớ ngưỡng thụt lề của dòng
+    tiếp (`parent` trong ngữ cảnh khối, -1 trong ngoặc): `'`/`"` đầu dòng tiếp chỉ là chữ của scalar (review blk-pa)."""
+    end = _pa_at(_PA_YAML_PLAIN_RE[st.flow > 0], line, pos).end()
+    if line[end:].strip():
+        return end
+    st.plain = -1 if st.flow else parent
+    return -1
+
+
+def _pa_yaml_node(
+    st: _PaScanState, line: str, pos: int, parent: int, spans: List[Tuple[int, int]]
+) -> Tuple[int, int, int]:
+    """Một nút YAML từ `pos` → (vị trí sau nút — -1 khi hết việc trên dòng, cột đầu nút, ngưỡng thụt lề cho khối
+    `|`/`>`: cột `-` gần nhất trên dòng, không có thì `parent` — cột khoá)."""
+    m = _pa_at(_PA_YAML_NODE_RE, line, pos)
+    st.flow += m["pre"].count("[") + m["pre"].count("{")
+    parent = max([parent] + [d.start() for d in _PA_YAML_DASH_RE.finditer(line, pos, m.end("pre"))])
+    at = m.end()
+    if m["dq"] or m["sq"]:
+        return _pa_yaml_quoted(st, line, at, m["dq"] or m["sq"], spans), at - 1, parent
+    if m["close"]:
+        st.flow = max(st.flow - 1, 0)
+        return at, at - 1, parent
+    if m["block"]:
+        st.block = parent
+    if m["block"] or m["end"] is not None:
+        return -1, at, parent
+    return _pa_yaml_plain(st, line, at, parent), at, parent
+
+
+def _pa_yaml_after(
+    st: _PaScanState, line: str, pos: int, start: int, parent: int, spans: List[Tuple[int, int]]
+) -> Tuple[int, int, int]:
+    """Sau một nút (bắt đầu ở cột `start`): `:` → nút là khoá, đọc giá trị (khối của nó thụt sâu hơn cột khoá);
+    trong ngoặc `,` → đọc nút kế, `]`/`}` → đóng ngoặc; khác (comment, hết dòng, chữ thừa) → -1."""
+    m = _pa_at(_PA_YAML_AFTER_RE, line, pos)
+    if m.lastgroup is None or (not st.flow and m.lastgroup != "colon"):
+        return -1, start, parent
+    if m.lastgroup == "close":
+        st.flow -= 1
+        return m.end(), start, parent
+    return _pa_yaml_node(st, line, m.end(), start if m.lastgroup == "colon" else parent, spans)
+
+
+def _pa_yaml_spans(st: _PaScanState, line: str) -> List[Tuple[int, int]]:
+    """Khoảng thân chuỗi nháy kép YAML trên một dòng (cập nhật `st`): dòng trong khối `|`/`>` không có chuỗi; dòng
+    tiếp của chuỗi còn mở bắt đầu trong chuỗi; dòng tiếp của plain scalar nhiều dòng (dòng trống giữa giữ scalar mở)
+    đọc tiếp scalar; còn lại đọc nút → sau nút → … tới hết việc."""
+    spans: List[Tuple[int, int]] = []
+    indent = len(line) - len(line.lstrip(" "))
+    text = line.strip()
+    if (st.block is not None and indent > st.block) or ((st.block, st.plain) != (None, None) and not text):
+        return spans
+    st.block, plain, st.plain = None, st.plain, None
+    if st.quote:
+        pos, start, parent = _pa_yaml_quoted(st, line, 0, st.quote, spans), 0, indent - 1
+    elif plain is not None and indent > plain and text[0] != "#":
+        pos, start, parent = _pa_yaml_plain(st, line, 0, plain), indent, plain
+    else:
+        pos, start, parent = _pa_yaml_node(st, line, 0, indent - 1, spans)
+    while pos >= 0 and not st.quote:
+        pos, start, parent = _pa_yaml_after(st, line, pos, start, parent, spans)
+    return spans
+
+
+# AUD-SEC-378: TOML — chuỗi cơ bản `"…"`/`"""…"""` (nhiều dòng) được giải mã; literal `'…'`/`'''…'''` và comment
+# `#` thì không, `"` bên trong chúng không mở chuỗi. Nháy đóng của chuỗi nhiều dòng kèm tối đa hai nháy thuộc nội dung.
+_PA_TOML_TOK_RE = re.compile(r"\"\"\"|'''|[\"'#]|[^\"'#]*+")
+_PA_TOML_BODY = {
+    '"""': re.compile(r'(?:[^"\\]++|\\.|"(?!""))*+\\?("{3,5}+)?'),
+    "'''": re.compile(r"(?:[^']++|'(?!''))*+('{3,5}+)?"),
+    '"': re.compile(r'(?:[^"\\]++|\\.)*+\\?(")?'),
+    "'": re.compile(r"[^']*+(')?"),
+}
+
+
+def _pa_toml_string(st: _PaScanState, line: str, pos: int, quote: str, spans: List[Tuple[int, int]]) -> int:
+    """Đọc thân chuỗi TOML mở bằng `quote` từ `pos`: chuỗi cơ bản thì ghi khoảng cần giải mã. Trả vị trí sau nháy
+    đóng; chuỗi nhiều dòng chưa đóng → nhớ `quote` sang dòng sau (chuỗi một dòng không đóng là hỏng, không mang)."""
+    m = _pa_at(_PA_TOML_BODY[quote], line, pos)
+    if quote[0] == '"':
+        spans.append((pos, m.end()))
+    st.quote = quote if len(quote) == 3 and m[1] is None else ""
+    return m.end()
+
+
+def _pa_toml_spans(st: _PaScanState, line: str) -> List[Tuple[int, int]]:
+    """Khoảng thân chuỗi cơ bản TOML trên một dòng (cập nhật `st`); dừng ở comment."""
+    spans: List[Tuple[int, int]] = []
+    pos = _pa_toml_string(st, line, 0, st.quote, spans) if st.quote else 0
+    while not st.quote and pos < len(line):
+        tok = _pa_at(_PA_TOML_TOK_RE, line, pos)[0]
+        if tok == "#":
+            break
+        pos += len(tok)
+        if tok[0] in "\"'":
+            pos = _pa_toml_string(st, line, pos, tok, spans)
+    return spans
+
+
+def _pa_splice(line: str, spans: List[Tuple[int, int]], table: Dict[str, str]) -> List[str]:
+    """`[line với từng khoảng trong spans đã giải mã escape theo table]`; dòng không có `\\` → `[]`."""
+    if "\\" not in line:
+        return []
+    out, last = [], 0
+    for a, b in spans:
+        out += [line[last:a], _PA_ESC_RE.sub(lambda m: _pa_esc_char(table, m), line[a:b])]
+        last = b
+    return ["".join(out) + line[last:]]
+
+
+def _pa_json_views() -> Callable[[str], List[str]]:
+    """Bộ giải mã theo dòng của `.json`: mỗi chuỗi nháy kép trên dòng giải mã bằng `json.loads`; dòng bắt đầu bên
+    trong chuỗi chưa đóng ở dòng trước thêm bản giải mã như thể có `"` mở ở đầu dòng (nợ review PR-PA)."""
+    inside = False
+
+    def views(line: str) -> List[str]:
+        nonlocal inside
+        cont = '"' + line if inside else line
+        inside = any(m[1] is None for m in _PA_JSON_STR_RE.finditer(cont))
+        if "\\" not in line:
+            return []
+        return [_PA_JSON_STR_RE.sub(_pa_json_literal, line), _PA_JSON_STR_RE.sub(_pa_json_literal, cont)]
+
+    return views
+
+
+def _pa_yaml_views() -> Callable[[str], List[str]]:
+    """Bộ giải mã theo dòng của `.yaml`/`.yml`: chỉ chuỗi nháy kép thật (`_pa_yaml_spans`), bảng escape YAML; BOM đầu
+    dòng (đầu luồng/tài liệu YAML) không thuộc nút (review blk-pa)."""
+    st = _PaScanState()
+
+    def views(line: str) -> List[str]:
+        bom = int(line[:1] == "﻿")
+        return _pa_splice(line, [(a + bom, b + bom) for a, b in _pa_yaml_spans(st, line[bom:])], _PA_YAML_ESC)
+
+    return views
+
+
+def _pa_toml_views() -> Callable[[str], List[str]]:
+    """Bộ giải mã theo dòng của `.toml`: chỉ chuỗi cơ bản (`_pa_toml_spans`), bảng escape TOML."""
+    st = _PaScanState()
+    return lambda line: _pa_splice(line, _pa_toml_spans(st, line), _PA_TOML_ESC)
+
+
+_PA_DECODERS: Dict[str, Callable[[], Callable[[str], List[str]]]] = {
+    ".json": _pa_json_views,
+    ".yaml": _pa_yaml_views,
+    ".yml": _pa_yaml_views,
+    ".toml": _pa_toml_views,
 }
 
 
@@ -9965,22 +10155,27 @@ _PA_DECODERS: Dict[str, Callable[["re.Match[str]"], str]] = {
 _PA_NEWLINE_RE = re.compile(r"\r?\n")
 
 
-def _pa_views(text: str, decode: Optional[Callable[["re.Match[str]"], str]]) -> Iterator[List[str]]:
+def _pa_views(text: str, decoder: Optional[Callable[[], Callable[[str], List[str]]]]) -> Iterator[List[str]]:
     """Các dạng của từng dòng để chạy luật: dòng gốc, và với file có bộ giải mã (`_PA_DECODERS`: `.json`, `.yaml`/`.yml`/
-    `.toml`) mà dòng có escape thì thêm bản đã giải mã từng chuỗi nháy kép trên dòng (`\\uXXXX`, `\\"` — review
-    T-3634, AUD-SEC-365: escape không lách được luật, số dòng giữ nguyên). Dòng bắt đầu bên trong chuỗi nháy kép chưa
-    đóng ở dòng trước (TOML `\"\"\"`, YAML gãy dòng) thêm bản giải mã như thể có `"` mở ở đầu dòng (nợ review PR-PA)."""
-    inside = False
+    `.toml`) mà dòng có escape thì thêm bản đã giải mã từng chuỗi trên dòng (`\\uXXXX`, `\\"` — review T-3634,
+    AUD-SEC-365: escape không lách được luật, số dòng giữ nguyên); bộ giải mã mang trạng thái chuỗi nhiều dòng (TOML
+    `\"\"\"`, YAML gãy dòng) và chỉ giải mã chuỗi thật của định dạng (AUD-SEC-378)."""
+    decode = decoder() if decoder else None
     for line in _PA_NEWLINE_RE.split(text):
-        if decode is None:
-            yield [line]
-            continue
-        cont = '"' + line if inside else line
-        inside = any(m[1] is None for m in _PA_JSON_STR_RE.finditer(cont))
-        if "\\" not in line:
-            yield [line]
-            continue
-        yield list(dict.fromkeys((line, _PA_JSON_STR_RE.sub(decode, line), _PA_JSON_STR_RE.sub(decode, cont))))
+        yield list(dict.fromkeys([line] + (decode(line) if decode else [])))
+
+
+# AUD-SEC-380: dòng chỉ gồm FF/VT và khoảng trắng (ngắt trang `^L` của văn bản giấy phép) không giấu được chữ nào.
+_PA_PAGE_BREAK_RE = re.compile(r"[\f\v \t]*+")
+
+
+def _pa_hidden(views: List[str]) -> bool:
+    """Dòng có ký tự ẩn: `PA_HIDDEN_RE` trên mọi dạng, hoặc `\\r` lẻ trên dòng gốc (chỉ `\\n` tách dòng — `\\r` lẻ đưa
+    con trỏ về đầu dòng khi hiển thị, che phần trước nó; AUD-SEC-379); dòng gốc chỉ là ngắt trang thì không
+    (AUD-SEC-380)."""
+    if _PA_PAGE_BREAK_RE.fullmatch(views[0]):
+        return False
+    return "\r" in views[0] or any(PA_HIDDEN_RE.search(v) for v in views)
 
 
 def _pa_line_findings(
@@ -9997,7 +10192,7 @@ def _pa_line_findings(
     decode = next((d for ext, d in _PA_DECODERS.items() if rel.lower().endswith(ext)), None)
     out: List[Dict[str, object]] = []
     for n, views in enumerate(_pa_views(text, decode), 1):
-        hidden_hit = hidden and any(PA_HIDDEN_RE.search(v) for v in views)
+        hidden_hit = hidden and _pa_hidden(views)
         hits = [("hidden", "ký tự ẩn (zero-width/bidi/tag)")] if hidden_hit else []
         seen = list(dict.fromkeys(views + [s for v in views for s in _pa_visible(v)]))
         hits += [(r, m) for r, m, pats in rules if any(re.search(p, v) for p in pats for v in seen)]

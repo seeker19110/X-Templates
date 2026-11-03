@@ -701,6 +701,209 @@ class GuardMatrixTest(unittest.TestCase):
         res = self.g.bash_decision("X=1; git commit -m x", self.root)
         self.assertEqual((res["decision"], res["commit"]), ("", True))
 
+    def test_guard_ifs_word_split(self):
+        """AUD-SEC-388 (review #420): bash tách mở rộng không nháy theo `IFS` hiện hành, guard tách theo khoảng trắng —
+        `IFS=/; c="git/push/--force/origin/main"; $c` chạy `git push --force origin main`. `IFS` có thể bị gán (mọi dạng,
+        cả tên che bằng nháy/brace/`$'…'`, tên đích động, nameref) cùng mở rộng không nháy → BUDGET; `IFS=… read` (gán chỉ
+        cho `read`, không lưu lại) và mở rộng có nháy vẫn chạy."""
+        push = "c=git/push/--force/origin/main"
+        bad = [
+            'IFS=/; c="git/push/--force/origin/main"; $c',
+            f"IFS=/ ; {push}; ${{c}}",
+            "export IFS=/; c=push/--force/origin/main; git $c",
+            f"f(){{ local IFS=/; {push}; $c; }}; f",
+            f"declare IFS=/; {push}; $c",
+            f"declare -x IFS=/; {push}; $(echo $c)",
+            f"read -rd '' IFS <<< /; {push}; $c",
+            f"IFS+=/; {push}; $c",
+            f"printf -v IFS /; {push}; $c",
+            f"for IFS in /; do {push}; $c; done",
+            f"IFS=$'\\x2f'; {push}; $c",
+            f'export I"FS"=/; {push}; $c',
+            f"export I\\FS=/; {push}; $c",
+            f"export {{I,J}}FS=/; {push}; $c",
+            f"export $'\\x49'FS=/; {push}; $c",
+            f'n=I; export "${{n}}FS"=/; {push}; $c',
+            f"declare -n r=$(printf '\\x49FS'); r=/; {push}; $c",  # `\\x49` giải ở dạng chỉ-chữ-số
+            # tên đích động thật (đọc từ file — không có chữ IFS ở đâu cả)
+            f"declare -n r=$(cat n.txt); r=/; {push}; $c",
+            f"declare -n r; r=x; {push}; $c",
+            f'read -r "$(cat n.txt)" <<< /; {push}; $c',
+            f'printf -v "$(cat n.txt)" /; {push}; $c',
+            f'n=$(cat n.txt); export "$n"=/; {push}; $c',
+            "(( $(cat n.txt)=47 )); c=git4push4--force4origin4main; $c",
+            "IFS=/; set -- git/push/--force/origin/main; ${@}",
+            "IFS=/; a=(git/push/--force/origin/main); ${a[@]}",
+            f"read(){{ $c; }}; {push}; IFS=/ read",
+            f'export "IFS=/ read"; {push}; $c',
+            # danh sách `for … in` là dữ liệu, nhưng thay lệnh trong danh sách và thân vòng là mã chạy thật
+            "IFS=/; c=push/--force/origin/main; for f in $(git $c); do :; done",
+            f"IFS=/; {push}; for f in a; do $c; done",
+            f"IFS=/; {push}; for f in $c; do $f; done",
+        ]
+        for cmd in bad:
+            with self.subTest(cmd=cmd):
+                res = self.g.bash_decision(cmd, self.root)
+                self.assertEqual((res["decision"], res.get("code")), ("deny", self.g.BUDGET), res)
+        # shell lồng: lớp tập con chạy trên script lồng, lý do chặn đi lên lệnh gốc
+        self.check("deny", [f"bash -c 'IFS=/; {push}; $c'", 'sh -c "IFS=/; c=git/status; \\$c"'])
+        self.check(
+            "",
+            [
+                'while IFS= read -r line; do echo "$line"; done < list.txt',
+                "while IFS= read -r f; do wc -l $f; done < list.txt",
+                "IFS=$'\\n' read -r a b <<< \"$s\"; echo $a",
+                'IFS=, read -ra parts <<< "a,b"; echo "${parts[0]}"',
+                'IFS=/; echo "$HOME"',
+                "IFS=/; echo $? $# $$",
+                "grep -rn IFS scripts/",
+                'c="git status"; $c',
+                'export PATH="$HOME/bin:$PATH"; ls $HOME',
+                'local_x=1; read -r a b <<< "$s"; echo $a',
+                "IFS=$'\\n'; for f in $(ls); do echo \"$f\"; done",
+                'IFS=,; select x in ${opts[@]}; do echo "$x"; break; done',
+            ],
+        )
+
+    # AUD-SEC-388 lượt 2 (review blk-guard): bash thật (stub `git`) chạy `git push --force origin main` ở mọi ca dưới.
+    IFS_R2_BAD = (
+        # `for`/`select` chỉ là đối số; danh sách không dừng ở `&&`/`|`/`||`
+        "IFS=/; c=git/push/--force/origin/main; echo for x in && $c",
+        "IFS=/; c=git/push/--force/origin/main; : for x in | $c",
+        "IFS=/; c=git/push/--force/origin/main; false for x in || $c",
+        "IFS=/; c=git/push/--force/origin/main; echo select x in && $c",
+        "IFS=/; c=git/push/--force/origin/main; echo a >& for x in && $c",
+        # từ khoá/`!` ở vị trí đối số: `IFS=/` là đối số của export/declare… (gán thật), không phải `IFS=… read`
+        "export if IFS=/ read; c=git/push/--force/origin/main; $c",
+        "declare then IFS=/ read; c=git/push/--force/origin/main; $c",
+        "typeset else IFS=/ read; c=git/push/--force/origin/main; $c",
+        "readonly while IFS=/ read; c=git/push/--force/origin/main; $c",
+        "export ! IFS=/ read; c=git/push/--force/origin/main; $c",
+        "IFS=/ eval '$c'; c=git/push/--force/origin/main; $c",
+        # tên đích động / ngữ cảnh số học (bash đánh giá đệ quy giá trị biến — `n=IFS=4; (( i < n ))` gán IFS)
+        "n=IF; n+=S; declare -i x=$n=4; c=git4push4--force4origin4main; $c",
+        "n=IF; n+=S; declare -i x; x=$n=4; c=git4push4--force4origin4main; $c",
+        "n=IF; n+=S; [[ $n=4 -eq 4 ]]; c=git4push4--force4origin4main; $c",
+        "n=IF; n+=S; a[$n=4]=1; c=git4push4--force4origin4main; $c",
+        "n=IF; n+=S; (( (0), $n=4 )); c=git4push4--force4origin4main; $c",
+        "n=IF; n+=S; : $(( (0), $n=4 )); c=git4push4--force4origin4main; $c",
+        'n=IF; n+=S; : "${x:$n=4:1}"; c=git4push4--force4origin4main; $c',
+        "n=IF; n+=S; for x in $(( (0), $n=4 )); do :; done; c=git4push4--force4origin4main; $c",
+        'n=IF; n+=S; unset "$n"; : ${!n:=/}; c=git/push/--force/origin/main; $c',
+        "n=IF; n+=S; f=n; declare -$f r=$n; r=/; c=git/push/--force/origin/main; $c",
+        'n=$(echo SFI | rev); unset "$n"; : ${!n:=/}; c=git/push/--force/origin/main; $c',
+        "n=$(echo SFI | rev)=4; (( i < n )); c=git4push4--force4origin4main; $c",
+        "n=$(echo SFI | rev)=4; for ((j=0; j<n; j++)); do :; done; c=git4push4--force4origin4main; $c",
+        'read -r n < f; [[ "$n" -eq 4 ]]; c=git4push4--force4origin4main; $c',
+        'n=$(cat f); x=abc; : "${x:n:1}"; c=git4push4--force4origin4main; $c',
+        'n=Ifs=4; : "${a[n]}"; c=git4push4--force4origin4main; $c',
+        "declare -u n=ifs=4; a=([n]=1); c=git4push4--force4origin4main; $c",
+        "for n in $(cat f); do let n; done; c=git4push4--force4origin4main; $c",
+        "for n in *; do (( n )); done; c=git4push4--force4origin4main; $c",
+        "printf -v n %s IFS=4; (( n )); c=git4push4--force4origin4main; $c",
+        ": ${n:=IFS=4}; (( n )); c=git4push4--force4origin4main; $c",
+        'n=I; n+=FS=4; a["$n"]=1; c=git4push4--force4origin4main; $c',
+        "f() { (( $1 )); }; f IFS=4; c=git4push4--force4origin4main; $c",
+        "bash -c '(( $1 )); c=git4push4--force4origin4main; $c' _ IFS=4",
+        "(( $(cat f) )); c=git4push4--force4origin4main; $c",
+        "(( IFS=4 )); c=git4push4--force4origin4main; $c",
+        "a=(1 2); read -r n < f; unset 'a[n]'; c=git4push4--force4origin4main; $c",
+        # đích gán khác: phần tử mảng IFS, read -a, wait -p, getopts, coproc, mapfile -C, trap, source
+        "read -ra IFS <<< /; c=git/push/--force/origin/main; $c",
+        "read -p x IFS <<< /; c=git/push/--force/origin/main; $c",
+        "printf -vIFS /; c=git/push/--force/origin/main; $c",
+        "sleep 0 & wait -n -p IFS; c=git/push/--force/origin/main; $c",
+        "getopts : IFS; c=git/push/--force/origin/main; $c",
+        "coproc IFS { :; }; c=git/push/--force/origin/main; $c",
+        "mapfile -C f -c 1 a < x; c=git/push/--force/origin/main; $c",
+        "trap 'IFS=/' DEBUG; c=git/push/--force/origin/main; $c",
+        "IFS=/; c=git/push/--force/origin/main; trap '$c' EXIT",
+        "x=IFS; eval 'declare -n r=$x'; r=/; c=git/push/--force/origin/main; $c",
+        ". ./x.sh; c=git/push/--force/origin/main; $c",
+        "export " + "{a,b}" * 17 + "=1; c=git/push/--force/origin/main; $c",  # bung brace quá trần: không đọc chắc tên
+        "IFS=/; c=git/push/--force/origin/main; . /dev/stdin <<'EOF'\n$c\nEOF",
+    )
+    # Không gán IFS (hoặc chỉ gán cho `read`): chặn oan ở lượt 1, nay chạy.
+    IFS_R2_OK = (
+        'G=.claude/hooks/guard.py && grep -n "^STRICT_IFS_RE\\|^def _letter_forms" $G | head',
+        "for f in .claude/hooks/*.py scripts/*.sh; do grep -c IFS $f; done",
+        "git log -S IFS --oneline -- $(git ls-files '*.sh')",
+        'git commit -m "fix(guard): chặn tách từ theo IFS (AUD-SEC-388)" && git log -1 --stat $(git rev-parse HEAD)',
+        "git commit -m \"$(cat <<'EOF'\nfix: bash tách từ theo IFS khi c=$x\nEOF\n)\" && git log -1 $(git rev-parse HEAD)",
+        "git commit -F - <<'EOF' && git log -1 $(git rev-parse HEAD)\nfix: bash (source) tách theo IFS=/; $c\nEOF",
+        "cat > /tmp/pr-body.md <<'EOF'\n`IFS=/; c=...; $c` — bash tách\nEOF\nls $HOME",
+        "cat > /tmp/x.yml <<'EOF'\n    shell: bash\n    run: IFS=$'\\n'; echo ${{ github.sha }}\nEOF\nls $HOME",
+        "cat > /tmp/Makefile <<'EOF'\nSHELL := bash\nall:\n\t@IFS=$$'\\n'; echo $$x\nEOF\nls $HOME",
+        'grep -rIF "SELECT" src/ | head -$N',
+        "export $(grep -v '^#' .env | xargs) && npm run dev",
+        "set -a; . ./.env; set +a; npm run dev",
+        'read -r -p "Nhánh [$def]: " b; git checkout $b',
+        "read -t $T -n 1 key; echo $key",
+        "files=(); while IFS= read -r -d '' f; do files+=(\"$f\"); done < <(git ls-files -z '*.py'); echo ${#files[@]}",
+        "git ls-files '*.md' | while IFS= read -r f; do python3 -c \"print(open('x').read())\" $f; done",
+        "while IFS=\\| read -r a b; do echo $a; done < table.txt",
+        'IFS="$sep" read -ra parts <<< "$s"; echo ${parts[0]}',
+        "echo $((1 + 2)) $((a+b)); ls -la",
+        'for i in 1 2 3; do echo $i; done; declare -A m; echo "${m[0]}" $HOME',
+        "sleep 0 & wait $!; echo $HOME",
+        "if true; then echo for x in; fi; ls $HOME",
+        # số học nhắc tên nhưng lệnh không đưa vào biến giá trị có thể chứa IFS (biến môi trường: của người dùng)
+        "declare -A c; for w in a b a; do (( c[$w] += 1 )); done; echo ${c[a]}",
+        "echo $((a+b)); ls $HOME",
+        "for ((i=0;i<3;i++)); do echo $i; done",
+        "x=$(( (a+b) * 2 )); echo $x",
+        "let 'x = 1 << 2'; echo $x",
+        'echo "$(( $(wc -l < notes.txt) + 1 ))"',  # thay lệnh trong số học: không tách; chặn khi có mở rộng khác
+        'n=$(grep -n x f | cut -d: -f1); sed -n "$((n-5)),$((n+5))p" f',
+        "A=1 B=$(date) make; ls $HOME",
+    )
+
+    def test_guard_ifs_word_split_review_r2(self):
+        """AUD-SEC-388 lượt 2 (review blk-guard): ngoại lệ `for … in`/`IFS=… read` chỉ khi từ khoá ở VỊ TRÍ LỆNH (từ
+        token, không regex trên chữ); tên đích động/ngữ cảnh số học/mã cùng shell đều tính là có thể gán `IFS`; dò `IFS`
+        trên cấu trúc lệnh (gán ở vị trí mã), không trên chữ thô — grep/commit/heredoc dữ liệu nhắc IFS vẫn chạy."""
+        for cmd in self.IFS_R2_BAD:
+            with self.subTest(cmd=cmd):
+                res = self.g.bash_decision(cmd, self.root)
+                self.assertEqual((res["decision"], res.get("code")), ("deny", self.g.BUDGET), res)
+                self.assertIn("AUD-SEC-388", str(res["reason"]))
+        # shell lồng: thân `-c` xét như mã ở lệnh gốc (cả script nháy kép `\$c`) và ở lớp tập con của script lồng
+        self.check(
+            "deny",
+            [
+                "bash -c 'IFS=/; c=git/push/--force/origin/main; echo for x in && $c'",
+                'sh -c "IFS=/; c=git/status; \\$c"',
+                "bash -o pipefail -c 'eval \"IFS=/\"; c=git/status; $c'",
+            ],
+        )
+        for cmd in self.IFS_R2_OK:
+            with self.subTest(cmd=cmd):
+                self.assertNotEqual(self.dec(cmd), "deny", self.g.bash_decision(cmd, self.root))
+
+    def test_guard_ifs_scan_linear(self):
+        """AUD-SEC-388 lượt 2 (review blk-guard 🟠 ReDoS): dò ngữ cảnh số học/danh sách `for` tuyến tính. Lượt 1
+        `STRICT_ARITH_DYN_RE` O(n³) trên chữ thô: ca của review (4 KB `((`/`$` trong nháy đơn) 54 s, ~9 KB vượt timeout
+        600 s của hook. Nay ca đó dưới 5 s; ~60 KB mã/nháy kép dồn `((`, `a[`, `[[ -eq`, danh sách `for` qua lớp
+        AUD-SEC-388 dưới 5 s (`a[` dồn còn chậm ở luật cũ `STRICT_RAW` AUD-SEC-249 — có từ trước, ngoài phạm vi)."""
+        review = "git push --force origin main; echo $x; : '" + "((" * 1000 + "$" * 2000 + "'"
+        start = time.monotonic()
+        self.assertEqual(self.g.bash_decision(review, self.root)["decision"], "deny")
+        self.assertLess(time.monotonic() - start, 5.0)
+        for cmd in (
+            'echo $x; : "' + "((" * 30000 + "$a" * 1000 + '"',
+            "echo $x; : " + "a[" * 30000,
+            "echo $x; : " + "a[$" * 20000,
+            "echo $x; for x in " + "$a " * 20000 + "; do :; done",
+            "echo $x; " + "for x in a; " * 5000 + "do :; done",
+            'echo $x; : "' + "[[ -eq " * 10000 + '"',
+            'echo $x; : "' + "${x:1}" * 10000 + '"',
+        ):
+            with self.subTest(cmd=cmd[:30]):
+                live, bare = self.g._code_views(self.g._CodeView(cmd))
+                start = time.monotonic()
+                self.g._ifs_split_why(cmd, live, bare)
+                self.assertLess(time.monotonic() - start, 5.0)
+
     def test_guard_commit_dir_follows_cd_and_git_C(self):
         # Commit rơi vào repo ở `cd …`/`git -C …`, không phải gốc phiên — hook chạy cổng của repo đó.
         def cdir(cmd: str, cwd: str | None = "/w/a") -> object:
