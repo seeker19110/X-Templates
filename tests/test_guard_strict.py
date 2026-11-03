@@ -1843,7 +1843,6 @@ class GuardStrictDebtTest(unittest.TestCase):
                 self.assertIn("push --force", d["reason"])
         allow = (
             "cat > x.py <<'EOF'\nprint(1)\nEOF\npython3 x.py",
-            "S=/tmp/sp; mkdir -p $S && cat > $S/x.py <<'EOF'\nprint(1)\nEOF\npython3 $S/x.py",  # thư mục có mở rộng
             "cat <<'EOF' > x.py && python3 x.py 2>&1 | tail -3\nprint(1)\nEOF",
             "tee x.sh <<\\EOF >/dev/null\necho hi\nEOF\nchmod +x x.sh; bash x.sh",
             'cat > x.sh <<"EOF"\necho hi\nEOF\nbash -e x.sh',
@@ -1869,6 +1868,8 @@ class GuardStrictDebtTest(unittest.TestCase):
             "cat a.sh > x.sh <<'EOF'\necho hi\nEOF\nbash x.sh",
             "cat > x.sh <<'EOF'\necho hi\nEOF\ncat > y.sh <<'EOF'\necho y\nEOF\nbash x.sh",
             'cat > "$f" <<\'EOF\'\necho hi\nEOF\nbash "$f"',  # tên tệp có mở rộng
+            "cd d && cat <<'EOF' > x.py && python3 x.py 2>&1 | tail -3\nprint(1)\nEOF",  # review #426: có `cd`
+            "S=/tmp/sp; mkdir -p $S && cat > $S/x.py <<'EOF'\nprint(1)\nEOF\npython3 $S/x.py",  # D-329: gán trước
             "cat > x.py <<'EOF'\nprint(1)\nEOF\ngit checkout -- x.py; python3 x.py",  # lệnh ngoài danh sách vô hại
             "cat > x.py <<'EOF'\nprint(1)\nEOF\nprintf x > h.py; python3 x.py",  # lệnh khác ghi tệp
         )
@@ -2055,8 +2056,7 @@ class GuardReview426Test(unittest.TestCase):
 
 
 class GuardWrittenFileReuseTest(unittest.TestCase):
-    """ADR-0066 (D-327): tệp là đích ghi của lệnh mà tên nhắc lại ở lệnh đơn khác → BUDGET (AUD-SEC-406); miễn D-324 chỉ
-    mất khi `cd` nằm giữa ghi và chạy; chữ `find -exec` trong đối số có nháy không phải lệnh find (AUD-SEC-410)."""
+    """ADR-0066 (D-327…D-329): tệp là đích ghi của lệnh mà tên nhắc lại ở lệnh đơn khác → BUDGET (AUD-SEC-406)."""
 
     assert_budget = GuardStrictDebtTest.assert_budget
 
@@ -2197,59 +2197,134 @@ class GuardWrittenFileReuseTest(unittest.TestCase):
         self.assertFalse(guard._reuse_reader([]))
         self.assertEqual(guard._reuse_writes(guard._ReuseCmd(["$_"], [], [], False, True)), [])
 
-    def test_aud_sec_406_d324_cd_before(self):
-        """ADR-0066 (thay D-326): `cd`/`pushd`/`popd` đứng TRƯỚC cả lệnh ghi và lệnh chạy không làm mất miễn D-324 — thân
-        quét sau đúng các lệnh đổi thư mục đó; nằm GIỮA ghi và chạy thì vẫn chặn (AUD-SEC-404)."""
-        allow = (
-            "cd /tmp/w && cat > f.py <<'EOF'\nprint(1)\nEOF\npython3 f.py",
-            "cd d && cat <<'EOF' > x.py && python3 x.py 2>&1 | tail -3\nprint(1)\nEOF",
-            "cat > f.py <<'EOF'\nprint(1)\nEOF\npython3 f.py; cd /tmp",
-        )
+    def test_aud_sec_406_d324_cd_denied(self):
+        """D-329 (về #426): có `cd`/`pushd`/`popd` (trước, giữa hay sau) thì miễn D-324 không áp — luật ghi-rồi-chạy chặn;
+        thân không còn được quét ở thư mục đoán."""
         deny = (
             "cat > x.sh <<'EOF'\nrm -f settings.json\nEOF\ncd .claude\nbash ../x.sh",
             "cat > x.sh <<'EOF'\nprintf 'exit 0' > guard.py\nEOF\npushd .claude/hooks\nbash ../../x.sh",
+            "(cd docs) && cat > x.sh <<'EOF'\necho hi\nEOF\nbash x.sh",
+            "cd .claude && cat > x.sh <<'EOF'\necho ok\nEOF\nbash x.sh",
         )
-        self.assert_budget(deny, allow, "AUD-SEC-40", lambda c: guard._script_run_why(c) or guard._reuse_why(c))
-        self.assertEqual(
-            guard._heredoc_run("cd /tmp/w && cat > f.py <<'EOF'\nprint(1)\nEOF\npython3 f.py"),
-            "python3 - <<'XTEOF'\nprint(1)\nXTEOF\ncd /tmp/w\npython3 - <<'XTEOF'\nprint(1)\nXTEOF",
-        )
-        self.assertIsNone(guard._heredoc_run("cd a && cd b && cat > f.py <<'EOF'\nprint(1)\nEOF\npython3 f.py"))
-        for cmd in (  # `cd` không có hiệu lực (subshell, nền, sau `||`): thân vẫn quét ở thư mục đầu
-            f"(cd docs) && cat > x.sh <<'EOF'\nrm -f .claude/{'settings.json'}\nEOF\nbash x.sh",
-            f"cd docs & cat > x.sh <<'EOF'\nrm -f .claude/{'settings.json'}\nEOF\nbash x.sh",
-            f"true || cd docs; cat > x.sh <<'EOF'\nrm -f .claude/{'settings.json'}\nEOF\nbash x.sh",
-        ):
-            with self.subTest(cmd=cmd):
-                self.assertEqual(decide(cmd)["decision"], "deny", decide(cmd))
+        self.assert_budget(deny, (), "AUD-SEC-400", guard._script_run_why)
         self.assertIsNone(guard._heredoc_run("cat > x.sh <<'EOF'\necho hi\nEOF\nbash x.sh; echo x.sh"))
-        body = "rm -f settings.json"
-        moved = decide(f"cd .claude && cat > x.sh <<'EOF'\n{body}\nEOF\nbash x.sh")
-        direct = decide(f"cd .claude && bash <<'EOF'\n{body}\nEOF")
-        self.assertEqual(direct["decision"], "deny", direct)
-        self.assertEqual((moved["decision"], moved.get("code")), (direct["decision"], direct.get("code")), moved)
 
-    def test_aud_sec_410_find_in_quoted_arg(self):
-        """AUD-SEC-410 🟢: chữ `find -exec` trong đối số có nháy của lệnh khác không phải lệnh find (D-153 từng chặn
-        `xt.py loop decide --question "… find -exec …"`); find thật — kể cả tên có nháy, lồng, sau wrapper — vẫn chặn."""
+    def test_aud_sec_410_find_quoted_text_still_scanned(self):
+        """AUD-SEC-410 mở lại (D-329): chữ `find … -exec/-delete` trong đối số có nháy vẫn bị luật find gốc dự án chặn —
+        trả sớm theo token từng mở `git rebase --exec 'find . -delete'`."""
         for cmd in (
-            'python3 scripts/xt.py loop decide --question "a find -exec b" --option x',
-            "echo 'find . -delete'",
-            "git commit -m 'docs: find -exec từ gốc'",
-        ):
-            with self.subTest(cmd=cmd):
-                self.assertEqual(decide(cmd)["decision"], "", decide(cmd))
-        for cmd in (
+            'python3 scripts/xt.py loop decide --question "a find . -exec b" --option x',
             "find . -exec chmod 644 {} +",
             'fi""nd . -exec chmod 644 {} +',
-            "\\find . -delete",
             "xargs find . -delete",
             'echo "$(find . -exec chmod 644 {} +)"',
-            "bash -c 'find . -exec chmod 644 {} +'",
             "bash <<'EOF'\nfind . -exec chmod 644 {} +\nEOF",
         ):
             with self.subTest(cmd=cmd):
                 self.assertEqual(decide(cmd)["decision"], "deny", decide(cmd))
+
+
+class GuardReview427Test(unittest.TestCase):
+    """Review #427 (D-329, pr rethink): 7 🔴 do miễn mới của ADR-0066 mở ra — thu về luật chặn (lệnh của review)."""
+
+    assert_budget = GuardStrictDebtTest.assert_budget
+
+    def assert_deny(self, cmds):
+        for cmd in cmds:
+            with self.subTest(cmd=cmd):
+                self.assertEqual(decide(cmd)["decision"], "deny", decide(cmd))
+
+    def test_r427_find_quoted_arg_back_to_base(self):
+        """🔴 1: trả sớm của `find_root_scan` (AUD-SEC-410) bỏ quét chuỗi gốc — lệnh chạy chữ trong đối số có nháy xoá cả
+        repo (đã chạy thật: `git rebase --exec`, `make --eval`). Về hành vi base."""
+        self.assert_deny(
+            (
+                "git rebase --exec 'find . -delete' HEAD~1",
+                "git rebase -x 'find . -delete' HEAD~1",
+                "git rebase -i --exec 'find . -delete' HEAD~1",
+                "make --eval='x:; find . -delete' x",
+                "git bisect run sh -c 'find . -delete'",
+                "git submodule foreach 'find . -delete'",
+                "git filter-branch -f --tree-filter 'find . -delete' HEAD",
+                "npx -c 'find . -delete'",
+                "tmux new -d 'find . -delete'",
+            )
+        )
+
+    def test_r427_d324_cd_or_assign_before_writer(self):
+        """🔴 2: miễn D-324 với `cd` đứng trước — `CDPATH=`/`HOME=` đổi đích `cd` mà lượt quét thân không biết (ghi đè
+        `guard.py`, xoá `settings.json` thật). Về #426: có `cd`/`pushd`/`popd` hay lệnh gán biến trước writer → không
+        miễn."""
+        deny = (
+            "CDPATH=.claude; cd hooks && cat > x.sh <<'EOF'\nprintf 'exit 0' > guard.py\nEOF\nbash x.sh",
+            "HOME=.claude; cd ~ && cat > x.sh <<'EOF'\nrm -f settings.json\nEOF\nbash x.sh",
+            "cd /tmp/w && cat > f.py <<'EOF'\nprint(1)\nEOF\npython3 f.py",
+            "cat > f.py <<'EOF'\nprint(1)\nEOF\npython3 f.py; cd /tmp",
+            "S=/tmp/sp; cat > $S/x.py <<'EOF'\nprint(1)\nEOF\npython3 $S/x.py",
+        )
+        self.assert_budget(deny, (), "AUD-SEC-40", lambda c: guard._script_run_why(c) or guard._reuse_why(c))
+        for cmd in deny:
+            with self.subTest(cmd=cmd):
+                self.assertIsNone(guard._heredoc_run(cmd))
+
+    def test_r427_o_short_cluster(self):
+        """🔴 3: `-o` dính/cuối cụm (getopt) là đích ghi; chỉ `git grep` được miễn (`git archive -o` là ghi)."""
+        deny = (
+            f"printf '{P}\\n' | iconv -f utf8 -t utf8 -os.sh; bash s.sh",
+            f"printf '{P}\\n' | iconv -f utf8 -t utf8 -cso s.sh; bash s.sh",
+            f"printf '{P}\\n' | iconv -f utf8 -t utf8 -cos.sh; bash s.sh",
+            f"printf '{P}\\n' | sort -mos.sh; bash s.sh",
+        )
+        allow = ("git grep -o TODO -- a; git grep -c TODO -- b",)
+        self.assert_budget(deny, allow, "AUD-SEC-40", lambda c: guard._script_run_why(c) or guard._reuse_why(c))
+        archive = guard._ReuseCmd(["git", "archive", "-o", "x.zip", "HEAD"], [], [], False, True)
+        self.assertIn("x.zip", guard._reuse_writes(archive))
+        args = ["-I/opt", "-o", "a", "-xo", "b", "-cos.sh", "-o", "-v", "--", "-o", "c"]
+        self.assertEqual(guard._reuse_o_values(args), ["a", "b", "s.sh"])
+        self.assertEqual(guard._reuse_o_values(["-o"]), [])
+
+    def test_r427_data_arg_python_only(self):
+        """🔴 4: `_read_only_script` không đọc chắc perl/ruby — `do $ARGV[0]` chạy tệp dữ liệu. Miễn chỉ họ python."""
+        self.assert_budget(
+            (
+                f"printf 'system(\"{P}\");' > p.txt; perl -e 'do $ARGV[0]' ./p.txt",
+                f"printf 'system(\"{P}\")' > p.txt; ruby -e 'load ARGV[0]' ./p.txt",
+            ),
+            (),
+            "AUD-SEC-406",
+            guard._reuse_why,
+        )
+
+    def test_r427_target_project_cost(self):
+        """ADR-0066 Hệ quả (D-329): chặn oan có chủ đích ở dự án đích — build `-o` rồi chạy; lệnh Kiểm UX-DS-021 viết lại
+        qua ống (không ghi tệp rồi đọc lại) thì cho qua."""
+        old = "npx --yes @google/design.md@0.4.0 lint DESIGN.md > lint.json; node -e 'const s=require(\"./lint.json\").summary;process.exit(s.errors+s.warnings?1:0)'"
+        self.assert_budget(
+            ("go build -o bin/app ./cmd/app && ./bin/app --help", "gcc -O2 -o hello hello.c && ./hello", old),
+            (
+                'npx --yes @google/design.md@0.4.0 lint DESIGN.md | node -e \'const s=JSON.parse(require("fs")'
+                '.readFileSync(0,"utf8")).summary;process.exit(s.errors+s.warnings?1:0)\'',
+            ),
+            "AUD-SEC-406",
+            guard._reuse_why,
+        )
+
+    def test_r427_reader_shadow_and_env(self):
+        """🔴 5: lệnh chỉ đọc bị thay bằng tệp vừa ghi cùng tên trong PATH, hay biến `PATH`/`GIT_*`/`LESS*` làm nó chạy
+        chương trình ngoài — không miễn; bỏ `less`."""
+        self.assert_budget(
+            (
+                f"printf '#!/bin/sh\\n{P}\\n' > ~/.local/bin/ls; chmod +x ~/.local/bin/ls; ls",
+                f"printf '#!/bin/sh\\n{P}\\n' > ls; chmod +x ls; PATH=$PWD:$PATH; ls",
+                f"export LESSOPEN='|sh %s'; printf '{P}\\n' > x.txt; less x.txt",
+                "export GIT_EXTERNAL_DIFF=sh; printf 'touch PWNED\\n' > s.txt; git add -N s.txt; git diff s.txt",
+                f"printf '#!/bin/sh\\n{P}\\n' > ~/.local/bin/cat; chmod +x ~/.local/bin/cat; cat /dev/null",
+                "printf x > $HOME/notes.txt; cat $HOME/notes.txt",
+            ),
+            ("pytest > out.txt; cat out.txt; ls; PATHX=1; echo out.txt",),
+            "AUD-SEC-406",
+            guard._reuse_why,
+        )
 
 
 if __name__ == "__main__":

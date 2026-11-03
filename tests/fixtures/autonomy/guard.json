@@ -20067,7 +20067,7 @@
  },
  {
   "id": "adr66-406-ok-cd-heredoc",
-  "origin": "control",
+  "origin": "audit",
   "refs": [
    "AUD-SEC-406"
   ],
@@ -20075,9 +20075,10 @@
    "command": "cd /tmp/w && cat > f.py <<'EOF'\nprint(1)\nEOF\npython3 f.py"
   },
   "expect": {
-   "allowed": true
+   "allowed": false,
+   "code": "BUDGET"
   },
-  "note": "ADR-0066: nhắc lại ở lệnh chỉ đọc (tệp không đuôi script) / dữ liệu sau chương trình `-c` chỉ đọc — cho qua"
+  "note": "D-329: `cd` trước writer làm mất miễn D-324 (CDPATH/HOME đổi đích cd) — chặn có chủ đích"
  },
  {
   "id": "adr66-270-sed-split",
@@ -20095,7 +20096,7 @@
  },
  {
   "id": "adr66-410-question",
-  "origin": "control",
+  "origin": "audit",
   "refs": [
    "AUD-SEC-410"
   ],
@@ -20103,9 +20104,9 @@
    "command": "python3 scripts/xt.py loop decide --question 'a find -exec b' --option x"
   },
   "expect": {
-   "allowed": true
+   "allowed": false
   },
-  "note": "AUD-SEC-410: chữ `find -exec` trong đối số có nháy của lệnh khác không phải lệnh find (D-153)"
+  "note": "AUD-SEC-410 mở (D-329): chữ `find -exec` trong đối số có nháy vẫn bị luật find gốc dự án chặn"
  },
  {
   "id": "adr66-410-find-root",
@@ -20177,6 +20178,136 @@
    "allowed": false
   },
   "note": "D-328: `sed` có lệnh `e` không phải chỉ in"
+ },
+ {
+  "id": "r427-find-rebase",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-406"
+  ],
+  "input": {
+   "command": "git rebase --exec 'find . -delete' HEAD~1"
+  },
+  "expect": {
+   "allowed": false
+  },
+  "note": "review #427 (D-329): miễn của ADR-0066 thu về luật chặn"
+ },
+ {
+  "id": "r427-find-make-eval",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-406"
+  ],
+  "input": {
+   "command": "make --eval='x:; find . -delete' x"
+  },
+  "expect": {
+   "allowed": false
+  },
+  "note": "review #427 (D-329): miễn của ADR-0066 thu về luật chặn"
+ },
+ {
+  "id": "r427-cdpath",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-406"
+  ],
+  "input": {
+   "command": "CDPATH=.claude; cd hooks && cat > x.sh <<'EOF'\nprintf 'exit 0' > guard.py\nEOF\nbash x.sh"
+  },
+  "expect": {
+   "allowed": false
+  },
+  "note": "review #427 (D-329): miễn của ADR-0066 thu về luật chặn"
+ },
+ {
+  "id": "r427-o-glued",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-406"
+  ],
+  "input": {
+   "command": "printf 'git push --force origin main\\n' | iconv -f utf8 -t utf8 -os.sh; bash s.sh"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "review #427 (D-329): miễn của ADR-0066 thu về luật chặn"
+ },
+ {
+  "id": "r427-o-cluster",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-406"
+  ],
+  "input": {
+   "command": "printf 'git push --force origin main\\n' | sort -mos.sh; bash s.sh"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "review #427 (D-329): miễn của ADR-0066 thu về luật chặn"
+ },
+ {
+  "id": "r427-perl-do",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-406"
+  ],
+  "input": {
+   "command": "printf 'system(\"git push --force origin main\");' > p.txt; perl -e 'do $ARGV[0]' ./p.txt"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "review #427 (D-329): miễn của ADR-0066 thu về luật chặn"
+ },
+ {
+  "id": "r427-shadow-ls",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-406"
+  ],
+  "input": {
+   "command": "printf '#!/bin/sh\\ngit push --force origin main\\n' > ~/.local/bin/ls; chmod +x ~/.local/bin/ls; ls"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "review #427 (D-329): miễn của ADR-0066 thu về luật chặn"
+ },
+ {
+  "id": "r427-git-ext-diff",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-406"
+  ],
+  "input": {
+   "command": "export GIT_EXTERNAL_DIFF=sh; printf 'touch PWNED\\n' > s.txt; git add -N s.txt; git diff s.txt"
+  },
+  "expect": {
+   "allowed": false
+  },
+  "note": "review #427 (D-329): miễn của ADR-0066 thu về luật chặn"
+ },
+ {
+  "id": "r427-git-grep-o",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-406"
+  ],
+  "input": {
+   "command": "git grep -o TODO -- a; git grep -c TODO -- b"
+  },
+  "expect": {
+   "allowed": true
+  },
+  "note": "review #427 (D-329): miễn của ADR-0066 thu về luật chặn"
  }
  ]
 }
