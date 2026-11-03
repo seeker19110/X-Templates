@@ -20838,6 +20838,242 @@
    "allowed": true
   },
   "note": "nợ review #429 (AUD-SEC-418/419): tệp nạp ngầm ngoài bảng; lệnh chỉ đọc của 415"
+ },
+ {
+  "id": "d430-421-script-noc",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-421"
+  ],
+  "input": {
+   "command": "echo x >> ~/.bashrc; script -q /dev/null"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "nợ review #430 (AUD-SEC-420…424, T-3664)"
+ },
+ {
+  "id": "d430-421-script-c-bash",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-421"
+  ],
+  "input": {
+   "command": "echo x >> ~/.bashrc; script -qc bash /dev/null"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "nợ review #430 (AUD-SEC-420…424, T-3664)"
+ },
+ {
+  "id": "d430-421-script-attached",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-421"
+  ],
+  "input": {
+   "command": "echo x >> ~/.bashrc; script -qc'bash -i' /dev/null"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "nợ review #430 (AUD-SEC-420…424, T-3664)"
+ },
+ {
+  "id": "d430-421-script-abbrev",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-421"
+  ],
+  "input": {
+   "command": "echo x >> ~/.bashrc; script --comm 'bash -i' /dev/null"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "nợ review #430 (AUD-SEC-420…424, T-3664)"
+ },
+ {
+  "id": "d430-422-taskfile-dist",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-422"
+  ],
+  "input": {
+   "command": "echo x > taskfile.dist.yml; task build"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "nợ review #430 (AUD-SEC-420…424, T-3664)"
+ },
+ {
+  "id": "d430-422-go-C-test",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-422"
+  ],
+  "input": {
+   "command": "echo x > x_test.go; go -C . test ./..."
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "nợ review #430 (AUD-SEC-420…424, T-3664)"
+ },
+ {
+  "id": "d430-424-gitconfig-hooks",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-424"
+  ],
+  "input": {
+   "command": "printf '[core]\\n\\thooksPath = /dev/null\\n' >> ~/.gitconfig"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "HOOK_BYPASS"
+  },
+  "note": "nợ review #430 (AUD-SEC-420…424, T-3664)"
+ },
+ {
+  "id": "d430-424-etc-gitconfig",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-424"
+  ],
+  "input": {
+   "command": "printf '[diff]\\n\\texternal = sh\\n' >> /etc/gitconfig"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "HOOK_BYPASS"
+  },
+  "note": "nợ review #430 (AUD-SEC-420…424, T-3664)"
+ },
+ {
+  "id": "d430-424-fakehome",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-424"
+  ],
+  "input": {
+   "command": "printf '[diff]\\n\\texternal = sh\\n' > /tmp/h/.gitconfig; HOME=/tmp/h git diff"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "HOOK_BYPASS"
+  },
+  "note": "nợ review #430 (AUD-SEC-420…424, T-3664)"
+ },
+ {
+  "id": "d430-424-xdg",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-424"
+  ],
+  "input": {
+   "command": "printf '[diff]\\n\\texternal = sh\\n' >> ~/.config/git/config"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "HOOK_BYPASS"
+  },
+  "note": "nợ review #430 (AUD-SEC-420…424, T-3664)"
+ },
+ {
+  "id": "d430-ctl-420-pager-gh",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-420"
+  ],
+  "input": {
+   "command": "PAGER=cat gh pr view 5 > pr.txt; grep -n x pr.txt"
+  },
+  "expect": {
+   "allowed": true
+  },
+  "note": "nợ review #430 (AUD-SEC-420…424, T-3664)"
+ },
+ {
+  "id": "d430-ctl-420-grep-word",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-420"
+  ],
+  "input": {
+   "command": "git log -1 --format=%s > s.txt; cat s.txt; grep -rn 'PAGER=' docs"
+  },
+  "expect": {
+   "allowed": true
+  },
+  "note": "nợ review #430 (AUD-SEC-420…424, T-3664)"
+ },
+ {
+  "id": "d430-ctl-421-script-ls",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-421"
+  ],
+  "input": {
+   "command": "script -qc 'ls' /dev/null > out.txt; cat out.txt"
+  },
+  "expect": {
+   "allowed": true
+  },
+  "note": "nợ review #430 (AUD-SEC-420…424, T-3664)"
+ },
+ {
+  "id": "d430-ctl-424-config-get",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-424"
+  ],
+  "input": {
+   "command": "git config --get user.name > n.txt; cat n.txt"
+  },
+  "expect": {
+   "allowed": true
+  },
+  "note": "nợ review #430 (AUD-SEC-420…424, T-3664)"
+ },
+ {
+  "id": "r431-425-cd-etc",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-425"
+  ],
+  "input": {
+   "command": "cd /etc && printf '[diff]\\n\\texternal = sh\\n' >> gitconfig"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "HOOK_BYPASS"
+  },
+  "note": "review #431: gitconfig hệ thống sau cd/pushd"
+ },
+ {
+  "id": "r431-425-pushd-etc",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-425"
+  ],
+  "input": {
+   "command": "pushd /etc && printf '[diff]\\n\\texternal = sh\\n' >> gitconfig"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "HOOK_BYPASS"
+  },
+  "note": "review #431: gitconfig hệ thống sau cd/pushd"
  }
  ]
 }

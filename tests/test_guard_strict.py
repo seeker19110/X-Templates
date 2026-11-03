@@ -2765,7 +2765,6 @@ class GuardDebt429Test(unittest.TestCase):
         self.assert_budget(
             (
                 "GIT_EXTERNAL_DIFF=sh git log -p -- s.sh; bash s.sh",
-                "export PAGER='sh -c x'; git log -p -- s.sh; bash s.sh",
                 "git -C . log -p -- s.sh; bash s.sh",
                 "command bash s.sh; sponge s.sh < in.txt",
                 "command -p sponge s.sh < in.txt; bash s.sh",
@@ -2785,6 +2784,149 @@ class GuardDebt429Test(unittest.TestCase):
         cmd = "git -c diff.external=sh log -p -- s.sh; bash s.sh"  # `-c` chạy chương trình: luật cũ chặn trước
         self.assertEqual(decide(cmd)["decision"], "deny")
         self.assertTrue(guard._run_named_why(cmd))
+
+
+class GuardDebt430Test(unittest.TestCase):
+    """Nợ review #430: AUD-SEC-420 (bỏ luật mất miễn `*PAGER`), AUD-SEC-421 (`script` đọc như getopt, không `-c` là shell
+    tương tác), AUD-SEC-422 (tên Taskfile, `go -C`), AUD-SEC-423 (phần đã xác minh), AUD-SEC-424 (cấu hình git toàn cục).
+    Mọi ca đỏ ở 0ed8e2ec."""
+
+    assert_budget = GuardStrictDebtTest.assert_budget
+    assert_deny = GuardReview429Test.assert_deny
+    assert_pass = GuardReview429Test.assert_pass
+
+    def test_aud_sec_420_pager_not_shadowing(self):
+        """AUD-SEC-420 🟠: git/gh chỉ mở pager khi có TTY — gán `*PAGER` không làm mất miễn lệnh đọc (như base 4d9a0e4c);
+        `GIT_PAGER` vẫn mất miễn (thuộc `GIT_*`)."""
+        self.assert_pass(
+            (
+                "PAGER=cat gh pr view 5 > pr.txt; grep -n x pr.txt",
+                'AWS_PAGER="" aws sts get-caller-identity > id.json; jq .Account id.json',
+                "git log -1 --format=%s > s.txt; cat s.txt; grep -rn 'PAGER=' docs | head -3",
+                "export PAGER=cat; git log --oneline -3 > l.txt; wc -l l.txt",
+                "GH_PAGER= gh issue list > i.txt; head i.txt",
+                "SYSTEMD_PAGER=cat systemctl status x > s.txt; grep y s.txt",
+            )
+        )
+        self.assert_budget(("GIT_PAGER=cat git log -- s.sh; bash s.sh",), (), "AUD-SEC-415")
+        # #430 từng chặn (luật `*PAGER`, gỡ ở AUD-SEC-420): không TTY thì git không mở pager
+        self.assert_pass(("export PAGER='sh -c x'; git log -p -- s.sh; bash s.sh",))
+
+    def test_aud_sec_421_script_getopt(self):
+        """AUD-SEC-421 🟠: đúng 4 lệnh hàng sổ (util-linux 2.39.3 nạp `.bashrc` thật) + biến thể getopt."""
+        self.assert_budget(
+            (
+                "echo x >> ~/.bashrc; script -q /dev/null",
+                "echo x >> ~/.bashrc; script -qc bash /dev/null",
+                "echo x >> ~/.bashrc; script -qc'bash -i' /dev/null",
+                "echo x >> ~/.bashrc; script --comm 'bash -i' /dev/null",
+                "echo x >> ~/.bashrc; script --command='bash -i' /dev/null",
+                "echo x >> ~/.bashrc; script /dev/null -qc 'bash -i'",
+                "echo x >> ~/.bashrc; script -E never -qc bash /dev/null",
+            ),
+            (
+                "script -qc 'ls' /dev/null > out.txt; cat out.txt",
+                "echo x >> ~/.bashrc; script -qc 'bash -c true' /dev/null",
+                "echo x >> ~/.bashrc; script -O log.txt -c 'bash -c true'",
+            ),
+            "AUD-SEC-416",
+            guard._implicit_load_why,
+        )
+        self.assertEqual(guard._script_c_commands(["script", "-q", "--c=ls", "f"]), (["ls"], True))
+        self.assertEqual(guard._script_c_commands(["script", "--log-out", "x", "--", "-c"]), ([], False))
+        self.assertEqual(guard._script_c_commands(["script", "--flush", "-c"]), ([""], True))
+
+    def test_aud_sec_422_taskfile_go_C(self):
+        """AUD-SEC-422 🟠: tên `taskfile.dist.y(a)ml` (đủ 8 tên go-task), `go-task`; `go -C DIR test|generate`."""
+        self.assert_budget(
+            (
+                "echo x > taskfile.dist.yml; task build",
+                "echo x > taskfile.dist.yaml; task build",
+                "echo x > Taskfile.yml; go-task build",
+                "echo x > x_test.go; go -C . test ./...",
+                "echo x > gen.go; go -C . generate ./...",
+                "echo x > gen.go; go -C=. run .",
+            ),
+            (
+                "go test ./... > test.log 2>&1; tail -20 test.log",
+                "go generate ./... && go test ./...",
+                "echo x > a.go; go vet ./...",
+                "go build ./... > build.log; tail -3 build.log",
+            ),
+            "AUD-SEC-416",
+            guard._implicit_load_why,
+        )
+        self.assertEqual(guard._go_subcmd(["go", "-C"]), "")
+
+    def test_aud_sec_423_verified_part(self):
+        """AUD-SEC-423 🟢 phần đã xác minh: `php composer.phar`/`./composer.phar`, `nodejs --run`, `python3 -m nox|invoke`,
+        tệp test tự dò của pytest/unittest, `cargo run|test|build` với `*.rs`."""
+        self.assert_budget(
+            (
+                "echo x > composer.json; php composer.phar install",
+                "echo x > composer.json; ./composer.phar install",
+                "echo x > package.json; nodejs --run test",
+                "echo x > noxfile.py; python3 -m nox",
+                "echo x > tasks.py; python3 -m invoke build",
+                "echo x > test_a.py; pytest",
+                "echo x > test_a.py; python3 -m unittest",
+                "echo x > test_a.py; python3 -m unittest discover -s .",
+                "echo x > src/main.rs; cargo run",
+                "echo x > tests/t.rs; cargo test",
+            ),
+            (
+                "echo x > notes.md; python3 -m unittest -q tests.test_a",
+                "echo x > a.rs; cargo fmt --check",
+            ),
+            "AUD-SEC-416",
+            guard._implicit_load_why,
+        )
+
+    def test_aud_sec_424_global_git_config(self):
+        """AUD-SEC-424 🔴: ghi thô cấu hình git toàn cục/hệ thống (và tệp của `GIT_CONFIG_GLOBAL|SYSTEM=`, HOME giả có
+        `.gitconfig`) → HOOK_BYPASS như ghi `.git/config`."""
+        cmds = (
+            "printf '[core]\\n\\thooksPath = /dev/null\\n' >> ~/.gitconfig",
+            "printf '[diff]\\n\\texternal = sh\\n' >> ~/.gitconfig",
+            "printf '[alias]\\n\\tst = !sh x\\n' >> $HOME/.gitconfig",
+            "mkdir -p ~/.config/git && printf '[core]\\n\\tfsmonitor = sh x\\n' >> ~/.config/git/config",
+            "printf '[diff]\\n\\texternal = sh\\n' >> ${XDG_CONFIG_HOME:-~/.config}/git/config",
+            "printf '[diff]\\n\\texternal = sh\\n' >> /etc/gitconfig",
+            "mkdir -p /tmp/h; printf '[core]\\n\\thooksPath = /dev/null\\n' > /tmp/h/.gitconfig",
+            "printf '[diff]\\n\\texternal = sh\\n' > /tmp/h/.gitconfig; HOME=/tmp/h git diff",
+            "cp /tmp/x ~/.gitconfig",
+            "export GIT_CONFIG_GLOBAL=/tmp/g.cfg; printf '[diff]\\n\\texternal = sh\\n' > /tmp/g.cfg; git diff",
+            "GIT_CONFIG_SYSTEM=/tmp/s.cfg git diff; tee /tmp/s.cfg < x",
+        )
+        for cmd in cmds:
+            with self.subTest(cmd=cmd):
+                d = decide(cmd)
+                self.assertEqual((d["decision"], d.get("code")), ("deny", "HOOK_BYPASS"), d["reason"][:200])
+        self.assert_pass(("git config --get user.name > n.txt; cat n.txt", "cat ~/.gitconfig"))
+        self.assertEqual(guard.edit_decision("/root/.gitconfig", str(ROOT))[0], "deny")
+
+
+class GuardReview431Test(unittest.TestCase):
+    """Review #431 🔴 (AUD-SEC-424 chưa trọn): đích ghi tương đối sau `cd`/`pushd` tới thư mục cấu hình git toàn cục —
+    xét cả đích đã giải theo thư mục đang đứng (`_where`), như vòng `.git/config`. Đỏ ở ad07a66b."""
+
+    def test_r431_cd_then_relative_global_git_config(self):
+        cmds = (
+            "cd /etc && printf '[diff]\\n\\texternal = sh\\n' >> gitconfig",
+            "pushd /etc && printf '[diff]\\n\\texternal = sh\\n' >> gitconfig",
+            "cd /etc; tee -a gitconfig < /tmp/x",
+            "cd /root/.config/git && printf '[core]\\n\\thooksPath = /dev/null\\n' >> config",
+            "cd ~/.config/git && cp /tmp/x config",
+            "cd ~ && printf '[core]\\n\\thooksPath = /dev/null\\n' >> .gitconfig",
+            "GIT_CONFIG_GLOBAL=/tmp/gc git diff; cd /tmp && printf x > gc",
+        )
+        for cmd in cmds:
+            with self.subTest(cmd=cmd):
+                d = decide(cmd)
+                self.assertEqual((d["decision"], d.get("code")), ("deny", "HOOK_BYPASS"), d["reason"][:200])
+        for cmd in ("cd /etc && cat gitconfig", "cd docs && printf x >> config.md", "cd /tmp && printf x > config"):
+            with self.subTest(cmd=cmd):
+                self.assertNotEqual(decide(cmd).get("code"), "HOOK_BYPASS", decide(cmd))
 
 
 class LedgerMatchesGuardTest(unittest.TestCase):
