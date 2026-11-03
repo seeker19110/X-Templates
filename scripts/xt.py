@@ -9974,12 +9974,13 @@ class _PaScanState:
 # lặp possessive, mỗi token đọc một lần (tuyến tính). Không đặt nhóm bắt trong lặp possessive (`re` của Python 3.11
 # ném SystemError "span of capturing group is wrong") — cột `-` cuối của tiền tố tìm lại bằng `_PA_YAML_DASH_RE`.
 # Tag nguyên văn `!<URI>` được chứa `,[]` (ký tự URI của YAML 1.2, không có `<`: lần thử hỏng dừng ở `<` kế — tuyến
-# tính) — nhánh riêng trước `!tag` thường (AUD-SEC-395).
+# tính) — nhánh riêng trước `!tag` thường (AUD-SEC-395); `[`/`]` trong nó không phải ngoặc flow: độ sâu ngoặc đếm trên
+# tiền tố đã bỏ tag nguyên văn (`_PA_YAML_VERBATIM_RE`, review adr-pa).
 _PA_YAML_DASH = r"(?:---|-|\?)(?=[ \t]|$)"
+_PA_YAML_VERBATIM = r"!<[\w\-#;/?:@&=+$,.!~*'()\[\]%]*+>"
+_PA_YAML_VERBATIM_RE = re.compile(_PA_YAML_VERBATIM)
 _PA_YAML_NODE_RE = re.compile(
-    r"(?P<pre>(?:[ \t]*+(?:"
-    + _PA_YAML_DASH
-    + r"|!<[\w\-#;/?:@&=+$,.!~*'()\[\]%]*+>|[!&][^\s,\[\]{}]*+|[\[{]))*+)[ \t]*+"
+    r"(?P<pre>(?:[ \t]*+(?:" + _PA_YAML_DASH + "|" + _PA_YAML_VERBATIM + r"|[!&][^\s,\[\]{}]*+|[\[{]))*+)[ \t]*+"
     r"(?:(?P<dq>\")|(?P<sq>')|(?P<close>[\]}])|(?P<block>[|>][-+1-9]*+[ \t]*+(?:#.*)?$)|(?P<end>#|$))?"
 )
 _PA_YAML_DASH_RE = re.compile(r"(?<![^ \t\[{])" + _PA_YAML_DASH)
@@ -10020,7 +10021,8 @@ def _pa_yaml_node(
     """Một nút YAML từ `pos` → (vị trí sau nút — -1 khi hết việc trên dòng, cột đầu nút, ngưỡng thụt lề cho khối
     `|`/`>`: cột `-` gần nhất trên dòng, không có thì `parent` — cột khoá)."""
     m = _pa_at(_PA_YAML_NODE_RE, line, pos)
-    st.flow += m["pre"].count("[") + m["pre"].count("{")
+    pre = _PA_YAML_VERBATIM_RE.sub("", m["pre"])
+    st.flow += pre.count("[") + pre.count("{")
     parent = max([parent] + [d.start() for d in _PA_YAML_DASH_RE.finditer(line, pos, m.end("pre"))])
     at = m.end()
     if m["dq"] or m["sq"]:
