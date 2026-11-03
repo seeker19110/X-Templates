@@ -3213,7 +3213,7 @@ class GuardReview433Test(unittest.TestCase):
                 "HOME=. sh -c 'git status'",
                 "GIT_CONFIG_GLOBAL=cfg sh -c 'git log -1'",
                 "env -i HOME=. sh -c 'git status'",
-                "HOME=. bash -c 'git push'",
+                "HOME=. bash -c 'git push origin feat'",
                 "HOME=. eval 'git status'",
             ),
             (
