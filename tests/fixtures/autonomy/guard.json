@@ -21236,6 +21236,34 @@
    "allowed": true
   },
   "note": "nợ review #431 (AUD-SEC-426…430, T-3665)"
+ },
+ {
+  "id": "r432-431-home-pwd",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-431"
+  ],
+  "input": {
+   "command": "cd sub && printf '[diff]\\n\\texternal = touch /tmp/pwn\\n' > .gitconfig && HOME=$PWD git diff"
+  },
+  "expect": {
+   "allowed": false
+  },
+  "note": "review #432: miễn mới mở lỗ cấu hình git (đã chạy git 2.43)"
+ },
+ {
+  "id": "r432-431-devfd",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-431"
+  ],
+  "input": {
+   "command": "exec 3<>/tmp/gcf; printf '[diff]\\n\\texternal = touch /tmp/pwn\\n' >/dev/fd/3; GIT_CONFIG_GLOBAL=/dev/fd/3 git diff"
+  },
+  "expect": {
+   "allowed": false
+  },
+  "note": "review #432: miễn mới mở lỗ cấu hình git (đã chạy git 2.43)"
  }
  ]
 }
