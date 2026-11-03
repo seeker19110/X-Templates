@@ -2327,6 +2327,403 @@ class GuardReview427Test(unittest.TestCase):
         )
 
 
+class GuardLiteralFormsT3663Test(unittest.TestCase):
+    """T-3663 (D-332, ADR-0067 §Quyết định): dạng NGUYÊN VĂN guard còn cho qua — luật tĩnh OR với luật cũ, không miễn
+    mới. Mỗi ca deny đỏ trên head 1af24ca3 (cho qua)."""
+
+    assert_budget = GuardStrictDebtTest.assert_budget
+
+    def assert_deny(self, cmds, code=None):
+        for cmd in cmds:
+            with self.subTest(cmd=cmd):
+                d = decide(cmd)
+                self.assertEqual(d["decision"], "deny", d)
+                if code:
+                    self.assertEqual(d.get("code"), code, d["reason"][:300])
+
+    def assert_allow(self, cmds):
+        for cmd in cmds:
+            with self.subTest(cmd=cmd):
+                self.assertEqual(decide(cmd)["decision"], "", decide(cmd))
+
+    def test_aud_sec_414_tilde_after_literal_home(self):
+        """AUD-SEC-414: `~`/`$HOME` sau gán `HOME=<chữ>` (đứng riêng, `export`, đầu lệnh, trước `bash -c`) — thay giá trị
+        rồi áp luật hàng rào sẵn có (HOOK_BYPASS)."""
+        self.assert_deny(
+            (
+                "HOME=.claude; rm -f ~/settings.json",
+                "HOME=.claude; echo '{}' > ~/settings.json",
+                "HOME=.claude; : > ~/settings.json",
+                "HOME=.claude/hooks; cd ~ && rm -f guard.py",
+                "export HOME=.claude; cd ~; rm -f settings.json",
+                "HOME=.claude/hooks bash -c 'rm -f ~/guard.py'",
+                "HOME=.claude/hooks bash -c 'rm -f $HOME/guard.py'",
+                "HOME=.claude; cd ~ && bash <<'EOF'\nrm -f settings.json\nEOF",
+                "HOME=.claude/hooks; cd ~/ && : > guard.py",
+            ),
+            "HOOK_BYPASS",
+        )
+        self.assert_allow(
+            (
+                "HOME=/tmp/h; ls ~",
+                "HOME=/tmp/h git config --global user.name x",
+                "cd ~ && ls",
+                "git log --oneline HEAD~3..HEAD",
+                "HOME=.claude; ls ~/hooks",
+            )
+        )
+        self.assertEqual(guard._sub_tilde("rm ~/a ~ x~y '~' a=~/b", {"HOME": "H"}), "rm H/a H x~y 'H' a=H/b")
+        self.assert_deny(
+            (
+                "HOME=.claude bash <<'EOF'\nrm -f ~/settings.json\nEOF",
+                "export HOME=.claude; bash <<'EOF'\nrm -f $HOME/settings.json\nEOF",
+                "HOME=.claude; python3 -c 'import os; os.remove(os.path.expanduser(\"~/settings.json\"))'",
+                "cat <<'EOF' | patch -p0\n--- .claude/settings.json\n+++ .claude/settings.json\n@@ -1 +1 @@\n-a\n+b\nEOF",
+                "printf -- '--- /dev/null\\n+++ .claude/settings.json\\n' | patch -p0",
+                "tar -xf a.tar --wildcards '*.sh'; bash s.sh",
+            )
+        )
+        self.assertEqual(guard._sub_tilde("rm ~/a", {}), "rm ~/a")
+
+    def test_aud_sec_414_dynamic_home(self):
+        """AUD-SEC-414: HOME gán bằng giá trị KHÔNG chữ (mở rộng, `read`, `unset`) mà lệnh dùng `~`/`$HOME` → BUDGET."""
+        self.assert_budget(
+            (
+                "HOME=$X; rm -f ~/settings.json",
+                'HOME="$(mktemp -d)"; rm -f ~/notes.txt',
+                "read -r HOME < h.txt; rm -f ~/settings.json",
+                "HOME+=/.claude; rm -f ~/settings.json",
+                "[[ -v HOME ]] && printf -v HOME %s .claude; rm -f ~/settings.json",
+            ),
+            (
+                'HOME="$(mktemp -d)" git config --global user.name x',
+                "echo $HOME; ls ~",
+                'HOME=/tmp/h; echo "${HOME}"',
+                "[[ -v HOME ]] && echo $HOME",
+                'rm -rf "${HOME:?HOME unset}/.cache/x"',
+            ),
+            "AUD-SEC-414",
+            guard._home_dyn_why,
+        )
+        for cmd in (
+            'HOME="$(mktemp -d)"; cd ~ && rm -f settings.json',
+            'export HOME="$PWD/.claude"; rm -f $HOME/s.json',
+        ):
+            with self.subTest(cmd=cmd):  # luật cũ chặn trước (cd không biết — D-106); lớp mới vẫn bắt (OR)
+                self.assertEqual(decide(cmd)["decision"], "deny")
+                self.assertIn("AUD-SEC-414", guard._home_dyn_why(cmd))
+
+    def test_aud_sec_414_patch_heredoc_targets(self):
+        """AUD-SEC-414: `patch`/`git apply` có đích trong thân heredoc — đích lấy từ dòng `+++ `/`--- ` (mọi mức -pN): đích
+        rào bị luật hàng rào chặn; đích được lệnh khác nhắc lại → BUDGET (ADR-0066)."""
+        diff = "--- .claude/settings.json\n+++ .claude/settings.json\n@@ -1 +1 @@\n-{\n+x\n"
+        self.assert_deny(
+            (
+                f"patch -p0 <<'EOF'\n{diff}EOF",
+                f"git apply <<'EOF'\n{diff.replace('--- ', '--- a/').replace('+++ ', '+++ b/')}EOF",
+                "cd .claude && patch -p1 <<'EOF'\n--- a/hooks/guard.py\n+++ b/hooks/guard.py\n@@ -1 +1 @@\n-a\n+b\nEOF",
+                "patch -p0 <<< $'--- /dev/null\\n+++ .claude/settings.json\\n@@ -0,0 +1 @@\\n+x\\n'",
+            ),
+            "HOOK_BYPASS",
+        )
+        new = f"--- /dev/null\n+++ s.sh\n@@ -0,0 +1 @@\n+{P}\n"
+        self.assert_budget(
+            (
+                f"patch -p0 <<'EOF'\n{new}EOF\nbash s.sh",
+                f"git apply <<'EOF'\n{new.replace('+++ ', '+++ b/')}EOF\nbash s.sh",
+                f"git apply <<'EOF'\ndiff --git a/x b/s.sh\n{new.replace('+++ ', '+++ b/')}EOF\nsh ./s.sh",
+            ),
+            (f"patch -p0 <<'EOF'\n{new.replace('s.sh', 'notes.md')}EOF",),
+            "AUD-SEC-406",
+            guard._reuse_why,
+        )
+        self.assertEqual(
+            guard._patch_header_paths('--- a/x/y.py\t2020\n+++ "b/s p.sh"\nrename to z.sh\n+++ /dev/null\n'),
+            ["a/x/y.py", "b/s p.sh", "z.sh"],
+        )
+        self.assertEqual(guard._patch_candidates("a/b/c.sh"), ["a/b/c.sh", "b/c.sh", "c.sh"])
+
+    def test_aud_sec_414_patch_from_file(self):
+        """AUD-SEC-414: diff đọc từ tệp (`patch < p.diff`, `git apply p.diff`, `patch -i`) — guard không đọc được đích;
+        cùng lệnh có lệnh chạy tệp → BUDGET."""
+        self.assert_budget(
+            (
+                "patch -p0 < p.diff; bash s.sh",
+                "git apply p.diff; bash s.sh",
+                "patch -p1 -i fix.diff && python3 x.py",
+                "git apply fix.patch && python3 -m x",
+                "git apply fix.patch && make",
+            ),
+            ("git apply --check p.diff && git diff --stat", "patch -p1 < fix.diff && git diff"),
+            "AUD-SEC-414",
+            guard._patch_file_why,
+        )
+
+    def test_aud_sec_415_unlisted_writer_named_file(self):
+        """AUD-SEC-415 (ADR-0066 "lệnh lạ bị tính"): lệnh ngoài danh sách trắng chỉ đọc có đối số trùng tên tệp/mô-đun
+        mà lệnh đơn khác CHẠY → BUDGET."""
+        self.assert_budget(
+            (
+                "sponge s.sh < in.txt; bash s.sh",
+                "sponge x.py < in.txt; python3 -m x",
+                "unzip -o a.zip s.sh; bash s.sh",
+                "unzip -o a.zip x.py && python3 x.py",
+                "tar -xf a.tar s.sh; bash s.sh",
+                "openssl enc -d -base64 -in in.txt -out s.sh; bash s.sh",
+                "openssl enc -d -base64 -in in.txt -out=s.sh; bash s.sh",
+                "xxd -r -p in.hex s.sh; bash s.sh",
+                "unzip -o a.zip d/s.sh; cd d; ./s.sh",
+                "unzip -o a.zip pkg/x.py; python3 -m pkg.x",
+                "unzip -o a.zip x.py; python3 -c 'import x'",
+                "unzip -o a.zip x.js; node -e 'require(\"./x\")'",
+                "sponge x.py < in.txt; python3 - <<'EOF'\nimport x\nEOF",
+                "sponge p.awk < in.txt; awk -f p.awk f",
+                "tar -xf a.tar Makefile; make",
+                "bash -c 'sponge s.sh < in.txt'; bash s.sh",
+                "unzip -o a.zip s.sh; chmod +x s.sh; PATH=.:$PATH s.sh",
+                "7z x a.7z s.py; python3 -c \"exec(open('s.py').read())\"",
+            ),
+            (
+                "chmod +x s.sh && ./s.sh",
+                "cat s.sh; bash s.sh",
+                "git add s.sh && bash s.sh",
+                "bash s.sh; bash s.sh",
+                "tar -xf a.tar -C out && bash run.sh",
+                "python3 -m pytest -q tests/test_x.py",
+                "python3 a/xt.py check; python3 b/xt.py check",
+                "python3 scripts/xt.py checks && python3 -m ruff check scripts tests && shellcheck scripts/*.sh",
+                'python3 -m coverage run -m unittest "$1"; python3 -m unittest "$1"',
+                "python3 -m pdb -m x; python3 -m coverage report -m 2>&1 | tail -2; python3 -m x",
+                "case {} in *.py) python3 -m ruff format {} ;; esac",
+                "cat > x.sh <<'EOF'\necho hi\nEOF\nbash x.sh",
+                "tee x.sh <<'EOF'\necho hi\nEOF\nbash x.sh",
+            ),
+            "AUD-SEC-415",
+            guard._run_named_why,
+        )
+        mods = {
+            ("-m", "x"): ["x"],
+            ("-mx",): ["x"],
+            ("-Im", "x"): ["x"],
+            ("-X", "dev", "-m", "x"): ["x"],
+            ("-Xdev", "-m", "x"): ["x"],
+            ("--check-hash-based-pycs", "never", "-m", "x"): ["x"],
+            ("--version",): [],
+            ("-c", "import x"): [],
+            ("-m",): [],
+            ("x.py", "-m", "y"): [],
+            ("-u",): [],
+            ("--", "x"): [],
+        }
+        for args, want in mods.items():
+            with self.subTest(args=args):
+                self.assertEqual(guard._py_modules(["python3", *args]), want)
+
+    def test_aud_sec_416_implicit_load(self):
+        """AUD-SEC-416: tệp NẠP NGẦM của công cụ X (danh sách `IMPLICIT_LOADS`) bị ghi rồi X chạy trong cùng lệnh → BUDGET."""
+        self.assert_budget(
+            (
+                f"cat >> ~/.bashrc <<'EOF'\n{P}\nEOF\nbash -ic true",
+                f'cat > package.json <<\'EOF\'\n{{"scripts":{{"test":"{P}"}}}}\nEOF\nnpm test',
+                f"printf 'all:\\n\\t{P}\\n' > GNUmakefile && make",
+                "> Makefile; make",
+                "> conftest.py; pytest -q",
+                "> conftest.py; python3 -m pytest -q",
+                "printf x > pkg.tmp; cp pkg.tmp package.json; yarn install",
+                "printf x > sitecustomize.py; python3 -c 1",
+                "printf x > x.pth; python3 run.py",
+                "printf x > setup.py; pip install .",
+                "printf x > build.rs; cargo test",
+                "printf x > .cargo/config.toml; cargo run",
+                "printf x > ~/.profile; bash --login -c true",
+                "printf x > ~/.zshenv; zsh -c true",
+                "printf '* filter=x' > .gitattributes; git add .",
+                "sed -i 's/a/b/' Makefile && make",
+                "bash -c 'printf x > Makefile'; make",
+                "printf x > tox.ini; tox -q",
+                "printf x > Gemfile; bundle exec rake",
+                "printf x > build.gradle; ./gradlew test",
+                "printf x > setup.py; uv run python -c 1",
+            ),
+            (
+                "make > build.log 2>&1; tail -5 build.log",
+                "printf x > notes.md; make",
+                "printf x > ~/.bashrc; bash -c true",
+                "cat Makefile; make",
+                "pytest -q > out.txt; tail -3 out.txt",
+            ),
+            "AUD-SEC-416",
+            guard._implicit_load_why,
+        )
+
+
+class GuardReview429Test(unittest.TestCase):
+    """Review #429 (lượt sửa duy nhất, ADR-0062): 🔴1–5 + bổ sung (`git am`/`gpatch`, giải nén suy tên) — mỗi lệnh đỏ ở
+    32a94951. `<proj>`: dự án nằm dưới HOME (HOME giả = thư mục cha của ROOT), như cấu hình đo của reviewer."""
+
+    assert_budget = GuardStrictDebtTest.assert_budget
+    P = ROOT.name
+
+    def assert_deny(self, cmds, home=None):
+        env = {"HOME": home} if home else {}
+        for cmd in cmds:
+            with self.subTest(cmd=cmd, home=home), mock.patch.dict(os.environ, env):
+                self.assertEqual(decide(cmd)["decision"], "deny", decide(cmd))
+
+    def assert_pass(self, cmds):
+        for cmd in cmds:
+            with self.subTest(cmd=cmd):
+                self.assertEqual(decide(cmd)["decision"], "", decide(cmd))
+
+    def test_r429_1_prefix_home_keeps_real_tilde(self):
+        """🔴1: bash mở `~` TRƯỚC khi áp gán tiền tố; `HOME=x cmd`, `env HOME=x`, gán trong `( … )` không đổi `~` của
+        shell này — base chặn thì head chặn (cả HOME giả chứa dự án lẫn HOME=/root). `cd ~/<proj> && rm -rf scripts`
+        chỉ bị base chặn trong bản sao rv429 của reviewer (ở worktree này base cũng cho qua) — đo bằng cmp.py."""
+        p = self.P
+        cmds = (
+            "HOME=/tmp/x cd ~ && rm -rf .ssh",
+            f"HOME=/tmp/x pushd ~ && rm -rf {p}",
+            f"HOME=/tmp/x cd ~/{p}/.autopilot && echo x > state.json",
+            f"HOME=/tmp/x cd ~/{p}/.autopilot && cp /dev/null state.json",
+            f"HOME=/tmp/x cd ~/{p}/.autopilot && rm -f *.json",
+            f"HOME=/tmp/x true; cd ~/{p}/.autopilot/evidence && cp /dev/null x.json",
+            f"(HOME=/tmp/x); cd ~/{p}/.autopilot && cp /dev/null state.json",
+            f"HOME=/tmp/x git status; cd ~/{p}/.autopilot && rm -f *.json",
+            f"HOME=/tmp/x true; cd ~ && rm -rf {p}",
+            f"env HOME=/tmp/x true; cd ~ && rm -rf {p}",
+        )
+        self.assert_deny(cmds, str(ROOT.parent))
+        self.assert_deny(cmds[:1])  # HOME=/root thật: `~/.ssh`
+        self.assertTrue(guard._sets_home(["HOME=/tmp/x"]))
+        self.assertTrue(guard._sets_home(["declare", "-x", "HOME=/tmp/x"]))
+        self.assertTrue(guard._sets_home(["printf", "-v", "HOME", "%s", "x"]))
+        self.assertTrue(guard._sets_home(["for", "HOME", "in", "a"]))
+        self.assertFalse(guard._sets_home(["HOME=/tmp/x", "true"]))
+        self.assertFalse(guard._sets_home(["env", "HOME=/tmp/x", "true"]))
+        self.assertFalse(guard._sets_home(["printf", "%s", "HOME"]))
+        self.assertFalse(guard._sets_home(["echo", "hi"]))
+
+    def test_r429_2_tilde_captured_before_home_change(self):
+        """🔴2: `~` đã lấy vào biến trước khi đổi HOME mở theo home THẬT (bash mở lúc gán)."""
+        p = self.P
+        self.assert_deny(
+            (
+                "x=~; HOME=/tmp/y; rm -rf $x",
+                'x=~; export HOME=/tmp/y; rm -rf "$x"',
+                "h=~; HOME=/tmp/y; rm -rf $h/.ssh",
+                f"x=~/{p}; HOME=/tmp/y; rm -rf $x",
+                f"a=~; HOME=/tmp/y; rm -rf $a/{p}",
+                f"x=~; HOME=/tmp/y; cd $x && rm -rf {p}",
+                f'x=~/{p}; HOME=/tmp/y bash -c "rm -rf $x"',
+                f"x=~/{p}/.claude; HOME=/tmp/y; rm -rf $x",
+            ),
+            str(ROOT.parent),
+        )
+
+    def test_r429_3_declare_flags(self):
+        """🔴3: `declare -x|-g`/`typeset -x HOME=<chữ>` được ghi nhận như gán (cờ không làm mất ghi nhận)."""
+        self.assert_deny(
+            (
+                "declare -x HOME=.claude; rm -f ~/settings.json",
+                "typeset -x HOME=.claude; rm -f ~/settings.json",
+                "declare -g HOME=.claude; rm -f ~/settings.json",
+                "declare -x HOME=.autopilot; echo x > ~/state.json",
+            )
+        )
+
+    def test_r429_4_git_C_apply(self):
+        """🔴4: `git -C <dir> apply` (lặp được) nối thư mục vào đích như `-d`."""
+        body = "--- a/settings.json\n+++ b/settings.json\n@@ -1 +1 @@\n-x\n+y\n"
+        self.assert_deny(
+            (
+                f"git -C .claude apply <<'D'\n{body}D",
+                "git -C .claude apply -p1 <<< $'--- a/settings.json\\n+++ b/settings.json\\n@@ -1 +1 @@\\n-x\\n+y\\n'",
+                f"git -C . -C .claude apply <<'D'\n{body}D",
+            )
+        )
+
+    def test_r429_5_implicit_through_runners(self):
+        """🔴5: công cụ chạy qua `coverage run -m X`/`python3 -m coverage run -m X`/`corepack <pm>` vẫn nạp ngầm."""
+        self.assert_budget(
+            (
+                "echo x > conftest.py; python3 -m coverage run -m pytest",
+                "echo x > conftest.py; coverage run -m pytest",
+                "echo x > package.json; corepack pnpm test",
+                "echo x > package.json; corepack yarn test",
+            ),
+            ("coverage run -m pytest -q", "python3 -m coverage report -m 2>&1 | tail -2"),
+            "AUD-SEC-416",
+            guard._implicit_load_why,
+        )
+        self.assertEqual(guard._run_modules(["coverage", "run", "-m", "pytest"], []), ["pytest"])
+        self.assertEqual(guard._run_modules(["coverage", "report", "-m"], []), [])
+        self.assertEqual(guard._run_modules(["ls"], ["ls"]), [])
+
+    def test_r429_extra_git_am_gpatch_decompress(self):
+        """Bổ sung (có từ trước): `git am`/`gpatch` dùng chung bộ đọc đích; bộ giải nén suy ra tên đích (`F.gz` → F)."""
+        mbox = (
+            "From 0 Mon Sep 17 00:00:00 2001\nFrom: a <a@b.c>\nSubject: x\n\n---\n"
+            "diff --git a/.claude/settings.json b/.claude/settings.json\n--- a/.claude/settings.json\n"
+            "+++ b/.claude/settings.json\n@@ -1 +1 @@\n-x\n+y\n"
+        )
+        self.assert_deny(
+            (
+                f"git am <<'D'\n{mbox}D",
+                "gpatch -p0 <<'D'\n--- .claude/settings.json\n+++ .claude/settings.json\n@@ -1 +1 @@\n-x\n+y\nD",
+            ),
+        )
+        self.assert_budget(
+            (
+                f"git am <<'D'\n{mbox.replace('.claude/settings.json', 's.sh')}D\nbash s.sh",
+                "gunzip s.sh.gz; bash s.sh",
+                "xz -d s.sh.xz && bash s.sh",
+                "gzip -d s.sh.gz; bash s.sh",
+                "unxz s.sh.xz; bash s.sh",
+                "bunzip2 s.sh.bz2; bash s.sh",
+                "bzip2 -d s.sh.bz2; bash s.sh",
+                "zstd -d s.sh.zst; bash s.sh",
+                "unzstd s.sh.zst; bash s.sh",
+                "gunzip a.tgz && tar -xf a.tar && bash a.tar",
+            ),
+            ("gunzip log.txt.gz && grep x log.txt", "zcat s.sh.gz | head -3", "gzip s.sh; ls"),
+            "AUD-SEC-40",
+            lambda c: guard._reuse_why(c) or guard._script_run_why(c),
+        )
+
+    def test_r429_readers_and_home_data(self):
+        """🟠6: phép thử tệp (`[`, `[[`, `test`) là lệnh chỉ đọc; 🟢8: chữ HOME trong dữ liệu không là ghi HOME — mà
+        414 không mở lại."""
+        self.assert_pass(
+            (
+                "[ -f Makefile ] && make",
+                "test -f .env && source .env",
+                "[ -f s.sh ] && bash s.sh",
+                "[[ -x s.sh ]] && ./s.sh",
+                "[ -f ~/.bashrc ] && . ~/.bashrc",
+                'echo "HOME=$HOME"',
+                "printenv HOME && ls ~",
+                "env | grep HOME; ls ~",
+            )
+        )
+        self.assert_budget(
+            (
+                "HOME=$X; rm -f ~/settings.json",
+                "read -r HOME < h.txt; rm -f ~/settings.json",
+                "unset HOME; rm -f ~/settings.json",
+                "local HOME; cd ~ && rm -f x",
+                "declare -n r=HOME; r=$X; rm -f ~/x",
+                "eval HOME=$X; rm -f ~/x",
+                "(( HOME = 1 )); ls ~",
+                "for HOME in a b; do ls ~; done",
+                "wait -p HOME; ls ~",
+                "env HOME=$X bash -c 'rm -f ~/x'",
+            ),
+            (),
+            "AUD-SEC-414",
+            guard._home_dyn_why,
+        )
+
+
 class LedgerMatchesGuardTest(unittest.TestCase):
     """Review #428 🔴 (AUD-DOC-243): sổ không được ghi `chấp nhận`/`đã sửa` cho phát hiện mà guard còn cho qua DẠNG
     NGUYÊN VĂN của nó — `audit check --strict` xanh giả. Ca nguyên văn còn lọt thì hàng sổ phải `mở`; khi T-3663 sửa

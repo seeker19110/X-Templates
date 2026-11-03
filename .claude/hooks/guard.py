@@ -1433,7 +1433,8 @@ def _allowlist_why(cmd: str) -> str:
     """ADR-0065: lý do chặn của lớp danh sách trắng (rỗng = qua); nợ cùng họ: mảng nhiễm làm đối số, ghi rồi chạy
     script, script từ đường dẫn fd (AUD-SEC-399/400/402)."""
     why = _dyn_head_why(cmd) or _reread_why(cmd) or _split_why(cmd) or _here_shell_why(cmd)
-    return why or _array_arg_why(cmd) or _script_run_why(cmd) or _reuse_why(cmd) or _fd_script_why(cmd)
+    why = why or _array_arg_why(cmd) or _script_run_why(cmd) or _reuse_why(cmd) or _fd_script_why(cmd)
+    return why or _home_dyn_why(cmd) or _run_named_why(cmd) or _implicit_load_why(cmd) or _patch_file_why(cmd)
 
 
 def _reread_why(cmd: str) -> str:
@@ -2075,7 +2076,9 @@ REUSE_READERS = frozenset(
     "cat head tail grep rg wc diff cmp sort cut ls stat file jq"  # không `less` (LESSOPEN chạy lệnh — D-329)
     # D-328: lệnh không chạy mã theo tên tệp (in tên, tạo thư mục/tệp rỗng, đổi quyền, băm) — `chmod +x F` rồi chạy F
     # vẫn bị bắt ở lệnh chạy
-    " mkdir echo touch chmod md5sum sha1sum sha224sum sha256sum sha384sum sha512sum".split()
+    " mkdir echo touch chmod md5sum sha1sum sha224sum sha256sum sha384sum sha512sum"
+    # review #429 (phiên chính): phép thử tệp không mở/chạy tệp — `[ -f s.sh ] && bash s.sh`, `test -f .env && source`
+    " [ [[ test".split()
 )
 REUSE_READER_EXEC = ("--compress-program", "--pre")  # `sort`/`rg` chạy chương trình theo giá trị cờ
 REUSE_GIT_READS = (["add"], ["diff"], ["show"], ["apply", "--check"])
@@ -2108,6 +2111,7 @@ def _reuse_why(cmd: str) -> str:
         return ""
     cmds = _reuse_cmds(cmd, 0)
     writes = [(i, w) for i, c in enumerate(cmds) for w in _reuse_writes(c)]
+    writes += [(i, w) for i in range(len(cmds)) for w in _patch_targets_at(cmds, i)]  # diff qua ống (AUD-SEC-414)
     for i, f in dict.fromkeys(writes):
         pat = _reuse_pattern(f)
         if pat is not None and any(_reuse_counts(cmds, j, f, pat) for j in range(len(cmds)) if j != i):
@@ -2160,6 +2164,8 @@ def _reuse_writes(c: _ReuseCmd) -> List[str]:
     out = [c.argv[k + 1] for k, t in enumerate(c.argv[:-1]) if t in REDIRECTS]
     if (n[:1] or [""])[0] not in REUSE_DELETERS and n[:2] != ["git", "rm"]:  # xoá tệp: không tạo nội dung
         out += write_targets(n, c.argv) + write_targets(_no_redirects(n), [])  # `install … f <<< x`: toán hạng là f
+        out += _patch_heredoc_targets(c)  # AUD-SEC-414: `patch`/`git apply` có đích trong thân heredoc
+        out += _decompress_targets(n)  # review #429: `gunzip s.sh.gz` ghi `s.sh`
     if n and n[0] not in REUSE_O_NOT_FILE and n[:2] != ["git", "grep"]:  # `git grep -o`: in phần khớp (D-329)
         out += _reuse_o_values(n[1:]) + [v for v in _flag_values(n[1:], ("--output",)) if v[:1] != "-"]
     p = _interp_argv(c.argv)
@@ -2170,6 +2176,27 @@ def _reuse_writes(c: _ReuseCmd) -> List[str]:
             probe = _WriteProbe(s)
             out += [PERL_OPEN_MODE_RE.sub("", x) for x in _script_literals(s) if probe(x)]
     return [w for w in out if w not in ("", "-") and not _dev_sink(w)]
+
+
+DECOMPRESS_SUFFIX_RE = re.compile(r"\.(?:gz|z|xz|lzma|bz2|zst|lz4|lz|(t)(?:gz|bz2?|xz|zst))$", re.I)
+UNPACK_HEADS = frozenset("gunzip unxz bunzip2 unzstd unlzma uncompress unlz4".split())
+
+
+def _decompress_targets(n: List[str]) -> List[str]:
+    """Tệp mà bộ giải nén suy ra từ tên nguồn (review #429): `gunzip F.gz`, `gzip -d`, `xz -d`/`unxz`, `bzip2 -d`/
+    `bunzip2`, `zstd -d`/`unzstd` → F (bỏ đuôi; `.tgz` → `.tar`). Bản `*cat` ghi ra stdout — không có đích."""
+    if not n:
+        return []
+    args = n[1:]
+    short = "".join(a[1:] for a in args if a[:1] == "-" and a[1:2] != "-")
+    long_dec = any(a in ("--decompress", "--uncompress") for a in args)
+    if n[0] not in UNPACK_HEADS and not (n[0] in DECOMPRESS_FLAGS | {"lzip"} and ("d" in short or long_dec)):
+        return []
+    out = []
+    for a in _positionals(args, ("-S", "--suffix")):
+        m = DECOMPRESS_SUFFIX_RE.search(a)
+        out += [a[: m.start()] + (".tar" if m[1] else "")] if m else []
+    return out
 
 
 def _reuse_o_values(args: List[str]) -> List[str]:
@@ -2319,6 +2346,380 @@ def _reuse_data_arg(c: _ReuseCmd, f: str, pat: "re.Pattern[str]") -> bool:
         if _norm_path(a) == _norm_path(f) and a in left:
             left.remove(a)
     return not any(_reuse_hit(pat, f, t) for t in left) and _read_only_script(program, frozenset({"python"}))
+
+
+# T-3663 (D-332, ADR-0067 §Quyết định): dạng NGUYÊN VĂN guard còn cho qua — luật tĩnh OR với luật cũ, KHÔNG miễn trừ mới
+# (bài học #426/#427). AUD-SEC-414: `HOME` không chữ + `~`/`$HOME`; `patch`/`git apply` (đích trong thân heredoc → đích
+# ghi; diff từ tệp + lệnh chạy tệp → BUDGET). AUD-SEC-415: lệnh lạ có đối số trùng tên tệp/mô-đun lệnh khác CHẠY.
+# AUD-SEC-416: tệp NẠP NGẦM của công cụ bị ghi rồi công cụ chạy.
+HOME_DYN_WHY = (
+    "`HOME` gán bằng giá trị không phải chữ (mở rộng, `read`, `unset`, `+=`) mà lệnh dùng `~`/`$HOME` — guard không biết"
+    " thư mục đích (AUD-SEC-414, ADR-0067); viết lại: đường dẫn nguyên văn thay cho `~`/`$HOME`, hay `HOME=<chữ>`"
+)
+HOME_USE_RE = re.compile(r"(?<![^\s=:;&|(`'\"])~(?=/|$|[\s;&|)`:'\"])|\$\{?HOME(?!\w)", re.M)
+HOME_NAME_RE = re.compile(r"(?<![\w$.{/-])HOME(?![\w}])")  # tên trần: gán, `read HOME`, `unset HOME`, `for HOME in`
+# Đọc, không gán — phần còn lại của lệnh vẫn xét (`printf -v` gán): phép thử biến đã đặt (`[[ -v HOME ]]`, `test -v
+# HOME`); mở rộng `${HOME…}` (thông điệp `${HOME:?HOME unset}`, mặc định — `:=` chỉ gán khi HOME chưa đặt, mà bỏ đặt
+# HOME là tên trần `unset HOME` vẫn bị bắt)
+HOME_TEST_RE = re.compile(r"(?:\[\[?|\btest)[ \t][^;&|\n\]]*?-v[ \t]+['\"]?HOME\b|\$\{HOME\b[^{}]*\}")
+
+
+def _home_dyn_why(cmd: str) -> str:
+    """Lệnh dùng `~`/`$HOME` và GHI `HOME` bằng giá trị không phải chữ nguyên văn (`HOME=$X`, `read HOME`); hay ghi
+    `HOME` (cả chữ) mà `~`/`$HOME` nằm trong thân heredoc — bản thay biến (`_var_scripts`) không mang thân. Chữ HOME
+    trong dữ liệu (`echo "HOME=$HOME"`, `printenv HOME`, `[[ -v HOME ]]`) không phải ghi (review #429 🟢)."""
+    if "HOME" not in cmd or not HOME_USE_RE.search(cmd):
+        return ""
+    # ghi HOME xét trên mã của lệnh, không trong thân heredoc (dữ liệu; thân chạy bằng shell được quét như script riêng)
+    code = HOME_TEST_RE.sub("", strip_heredocs(cmd) if "<<" in cmd else cmd)
+    writes = _home_writes(code) if HOME_NAME_RE.search(code) else []
+    bodies = ["\n".join(b) for _, _, b in _heredocs(join_continuations(cmd))] if writes and "<<" in cmd else []
+    if any(HOME_USE_RE.search(b) for b in bodies):
+        return HOME_DYN_WHY
+    return HOME_DYN_WHY if HOME_USE_RE.search(code) and not all(writes) else ""
+
+
+HOME_DYN_VALUE_RE = re.compile(r"[$`]")
+HOME_VAR_HEADS = frozenset("read mapfile readarray unset getopts coproc".split())  # nhận TÊN biến làm đối số
+
+
+def _home_writes(code: str) -> List[bool]:
+    """Mỗi lần mã ghi `HOME` (gán đầu lệnh/`env`/`export`/`declare -x`…, `read`/`unset`/`printf -v`/`for HOME in`/
+    `eval`/số học): True khi giá trị là chữ nguyên văn (`HOME=.claude`), False khi không biết. Dữ liệu (`echo HOME`)
+    không tính."""
+    out: List[bool] = []
+    if re.search(r"\(\([^)]*\bHOME\b", code):  # `(( HOME = … ))`, `$(( HOME=… ))`
+        out.append(False)
+    for c in split_commands(tokenize(code)):
+        words = [t for t in c if t not in SHELL_KEYWORDS and not _is_redirect(t)]
+        if words[:1] in (["for"], ["select"]):
+            out += [False] if words[1:2] == ["HOME"] else []
+            continue
+        i = 0
+        while i < len(words) and (ENV_ASSIGN_RE.fullmatch(words[i]) or words[i] == "env"):
+            i += 1  # gán đầu lệnh, `env A=x …`
+        head, args = (posixpath.basename(words[i]), words[i + 1 :]) if i < len(words) else ("", [])
+        assigns = words[:i] + (args if head in DECLARE_CMDS or head == "let" else [])
+        out += [
+            not t.startswith("HOME+=") and not HOME_DYN_VALUE_RE.search(t)
+            for t in assigns
+            if t.startswith("HOME") and t.split("=", 1)[0].rstrip("+") == "HOME" and "=" in t
+        ]
+        flag = HOME_VAR_FLAG_HEADS.get(head)
+        named = any(p == flag and w == "HOME" for p, w in zip(args, args[1:])) if flag else False
+        named = named or head in HOME_VAR_HEADS and "HOME" in args
+        named = (
+            named
+            or head in ("declare", "typeset", "local", "readonly")
+            and ("HOME" in args or any(a.endswith("=HOME") for a in args))
+        )  # `local HOME` (rỗng), `declare -n r=HOME`
+        named = named or head == "eval" and any("HOME" in a for a in args)
+        out += [False] if named else []
+    return out
+
+
+PATCH_FILE_WHY = (
+    "`patch`/`git apply` đọc diff từ tệp (guard không đọc được đích) cùng lệnh có lệnh chạy tệp/công cụ nạp tệp ngầm"
+    " (AUD-SEC-414, ADR-0066); viết lại: áp diff ở một lệnh Bash, chạy ở lệnh riêng"
+)
+# Dòng đầu tệp của diff: unified (`--- `/`+++ `), context (`*** `), `Index: ` (GNU patch đọc làm tên dự phòng), git
+# (`rename to`/`copy to`, `diff --git a/x b/y`). Chiều chặt: dòng thân bắt đầu bằng `--- ` cũng thành tên (thừa, vô hại).
+PATCH_HEADER_RE = re.compile(
+    r"^(?:(?:\+\+\+|---|\*\*\*|Index:) |(?:rename|copy) to )(?:\"((?:[^\"\\\n]|\\.)*)\"|([^\t\n]*?))[ \t]*(?:\t.*)?$"
+    r"|^diff --git (\S+) (\S+)",
+    re.M,
+)
+
+
+PATCH_WORD_RE = re.compile(r"\b(?:g?patch|apply|am)\b")  # lọc nhanh: lệnh có thể là patch/gpatch/git apply/git am
+
+
+def _patch_cmd(argv: List[str]) -> bool:
+    """`patch`/`gpatch`, `git apply`, `git am` (review #429: mbox cũng mang `diff --git`/`+++` như diff)."""
+    n = normalize(argv)
+    return n[:1] in (["patch"], ["gpatch"]) or n[:2] in (["git", "apply"], ["git", "am"])
+
+
+def _patch_header_paths(text: str) -> List[str]:
+    out = [g for m in PATCH_HEADER_RE.finditer(text) for g in m.groups() if g]
+    return [p for p in dict.fromkeys(out) if _norm_path(p) != "/dev/null"]
+
+
+def _patch_candidates(path: str) -> List[str]:
+    """Đích có thể của một tên trong diff: mọi mức bỏ thành phần đầu (`-pN` — GNU patch không `-p` lấy tên gốc; git
+    apply mặc định `-p1`)."""
+    parts = [x for x in path.split("/") if x]
+    return list(dict.fromkeys([path] + ["/".join(parts[k:]) for k in range(1, len(parts))]))
+
+
+def _patch_heredoc_targets(c: "_ReuseCmd") -> List[str]:
+    """Đích ghi của `patch`/`git apply` lấy từ thân heredoc/here-string gắn lệnh (kèm `-d`/`--directory`)."""
+    return _patch_targets_at([c], 0)
+
+
+def _patch_targets_at(cmds: List["_ReuseCmd"], j: int) -> List[str]:
+    """Như `_patch_heredoc_targets`, cả chữ của các lệnh đổ vào stdin của patch qua ống (`cat <<'D' | patch`,
+    `printf '--- …\\n+++ …' | git apply` — `\\n` đọc như xuống dòng)."""
+    c = cmds[j]
+    if not _patch_cmd(c.argv):
+        return []
+    texts = c.bodies + [c.argv[k + 1] for k, a in enumerate(c.argv[:-1]) if a == "<<<"]
+    k = j - 1
+    while k >= 0 and cmds[k].pipe:
+        texts += cmds[k].texts
+        k -= 1
+    cands = [x for t in texts for p in _patch_header_paths(t.replace("\\n", "\n")) for x in _patch_candidates(p)]
+    gdir = ""
+    for d in _git_C_dirs(c.argv):  # review #429: `git -C .claude apply` (lặp được, nối như `cd`)
+        gdir = posixpath.join(gdir, d)
+    dirs = _flag_values(normalize(c.argv)[1:], ("-d", "--directory"))
+    bases = [posixpath.join(gdir, d) for d in dirs] or ([gdir] if gdir else [])
+    return list(dict.fromkeys(cands + [posixpath.join(d, x) for d in bases for x in cands]))
+
+
+def _patch_fence_scripts(
+    cmd: str, placed: List[Tuple[List[str], Optional[str]]], start: Optional[str]
+) -> List[Tuple[str, Optional[str]]]:
+    """Bản viết lại `: > 'đích'` của mọi đích `patch`/`git apply` trong thân heredoc/chữ đổ vào qua ống, đặt ở thư mục
+    lệnh patch chạy — quét lại để luật hàng rào/bằng chứng sẵn có áp lên đích (AUD-SEC-414)."""
+    if not PATCH_WORD_RE.search(cmd):
+        return []
+    cmds = _reuse_cmds(cmd, 0)
+    targets = [t for j, c in enumerate(cmds) if c.top for t in _patch_targets_at(cmds, j)]
+    if not targets:
+        return []
+    script = "; ".join(": > " + shlex.quote(t) for t in dict.fromkeys(targets))
+    heres = [here for c, here in placed if _patch_cmd(c)] or [start]
+    return [(script, here) for here in dict.fromkeys(heres)]
+
+
+def _patch_file_why(cmd: str) -> str:
+    """`patch`/`git apply` không có diff trong thân heredoc/here-string (đọc từ tệp/stdin không thấy) và lệnh đơn khác
+    chạy tệp hay công cụ nạp tệp ngầm (trừ `.gitattributes` của git)."""
+    if not PATCH_WORD_RE.search(cmd):
+        return ""
+    cmds = _reuse_cmds(cmd, 0)
+    blind = [j for j, c in enumerate(cmds) if _patch_cmd(c.argv) and not _patch_targets_at(cmds, j)]
+    runs = [j for j, c in enumerate(cmds) if _run_refs(c, ("git",))]
+    return PATCH_FILE_WHY if any(j != k for j in blind for k in runs) else ""
+
+
+RUN_NAMED_WHY = (
+    "đối số của lệnh ngoài danh sách trắng chỉ đọc trùng tên tệp/mô-đun mà lệnh đơn khác CHẠY (`sponge s.sh`, `tar -xf"
+    " a.tar s.sh`, `unzip … x.py` rồi `bash s.sh`/`python3 -m x`) — lệnh lạ có thể ghi tệp đó (AUD-SEC-415, ADR-0066);"
+    " viết lại: tạo/giải nén tệp ở một lệnh Bash, chạy ở lệnh riêng"
+)
+IMPLICIT_LOAD_WHY = (
+    "tệp mà công cụ NẠP NGẦM (Makefile, package.json, conftest.py, ~/.bashrc…) bị ghi rồi công cụ đó chạy trong cùng"
+    " lệnh — guard không đọc tệp lúc chạy (AUD-SEC-416, ADR-0067); viết lại: ghi tệp bằng công cụ Write rồi chạy ở lệnh"
+    " Bash riêng"
+)
+# Tệp công cụ nạp NGẦM (không nhắc trên dòng lệnh) — danh sách đếm được; nguồn (đọc 2026-11-03): GNU make manual §3.2
+# "What Name to Give Your Makefile"; npm docs `package.json` (scripts) + `npmrc` (per-project config); pytest docs
+# "Configuration" (rootdir/inifile: pytest.ini, pyproject.toml, tox.ini, setup.cfg) + "conftest.py"; Python `site`
+# module (sitecustomize, usercustomize, `.pth`); bash(1) INVOCATION (login: ~/.bash_profile, ~/.bash_login,
+# ~/.profile, ~/.bash_logout; tương tác: ~/.bashrc); zsh(1) STARTUP/SHUTDOWN FILES (`.zshenv` mọi lần chạy); Cargo Book
+# "Build Scripts" (build.rs) + "Configuration" (.cargo/config.toml, .cargo/config); gitattributes(5) (filter/diff
+# driver); pip `install .` (setup.py, pyproject.toml build backend, setup.cfg); tox (tox.ini/tox.toml `commands`),
+# pre-commit (`repo: local` chạy lệnh), just (justfile), rake (Rakefile), Bundler (Gemfile là mã Ruby), Gradle (build
+# script Groovy/Kotlin), Maven (pom.xml — plugin exec). Không thêm tsc/node (không chắc).
+IMPLICIT_LOADS: Dict[str, Tuple[str, ...]] = {
+    "make": ("GNUmakefile", "makefile", "Makefile"),
+    "npm": ("package.json", ".npmrc"),
+    "pytest": ("conftest.py", "pytest.ini", "pyproject.toml", "setup.cfg", "tox.ini"),
+    "python": ("sitecustomize.py", "usercustomize.py", "*.pth"),
+    "pip": ("setup.py", "pyproject.toml", "setup.cfg"),
+    "login": (".bashrc", ".bash_profile", ".bash_login", ".profile", ".bash_logout", ".zshrc", ".zprofile", ".zlogin"),
+    "zsh": (".zshenv",),
+    "cargo": ("build.rs", ".cargo/config.toml", ".cargo/config"),
+    "git": (".gitattributes",),
+    "tox": ("tox.ini", "tox.toml", "pyproject.toml", "setup.cfg"),
+    "pre-commit": (".pre-commit-config.yaml",),
+    "just": ("justfile", "Justfile", ".justfile"),
+    "rake": ("Rakefile", "rakefile", "Rakefile.rb"),
+    "bundle": ("Gemfile",),
+    "gradle": ("build.gradle", "build.gradle.kts", "settings.gradle", "settings.gradle.kts"),
+    "mvn": ("pom.xml",),
+}
+IMPLICIT_TOOL_HEADS = {
+    **dict.fromkeys(("make", "gmake"), "make"),
+    **dict.fromkeys(("npm", "npx", "yarn", "yarnpkg", "pnpm", "pnpx", "corepack"), "npm"),  # `corepack pnpm test`
+    **dict.fromkeys(("pytest", "py.test"), "pytest"),
+    **dict.fromkeys(("gradle", "gradlew"), "gradle"),
+    **dict.fromkeys(("mvn", "mvnw"), "mvn"),
+    **{k: k for k in ("cargo", "git", "tox", "pre-commit", "just", "rake", "bundle")},
+    **dict.fromkeys(("uv", "poetry"), "pip"),  # dựng gói dự án qua build backend (setup.py/pyproject.toml)
+}
+PIP_HEAD_RE = re.compile(r"pip[0-9.]*")
+SHELL_LOGIN_RE = re.compile(r"-[A-Za-z]*[il][A-Za-z]*|--login")  # `bash -ic`, `bash -l`, `bash --login`
+PY_MODULE_RUNNERS = frozenset({"coverage", "cProfile", "profile", "pdb", "trace"})  # chạy mô-đun `-m X` thứ hai
+PY_MODULE_RE = re.compile(r"[A-Za-z_][\w.]*")  # `coverage report -m` (cờ "missing") không ăn `2` của `2>&1`
+RUN_F_FLAG_HEADS = frozenset("awk gawk mawk nawk sed gsed make gmake".split())  # `-f FILE`: chương trình/makefile
+PY_IMPORT_RE = re.compile(
+    r"(?:^|[\s;(])(?:import|from)[ \t]+([A-Za-z_][\w.]*)|(?:__import__|import_module)\(\s*['\"]([\w.]+)"
+)
+JS_REQUIRE_RE = re.compile(r"(?:require|import)\s*\(\s*['\"]([^'\"]+)['\"]|\bfrom\s+['\"]([^'\"]+)['\"]")
+CODE_STR_RE = re.compile(r"['\"]([^'\"\s]+)['\"]")  # chữ trong code `-c`/`-e`: tên tệp script (`exec(open('s.py'))`)
+
+
+class _RunRef(NamedTuple):
+    path: str
+    stem: bool  # nạp theo tên mô-đun: so cả tên gốc bỏ đuôi (`-m x` ↔ `x.py`, `require("./x")` ↔ `x.js`)
+    implicit: bool = False  # tệp nạp ngầm (`IMPLICIT_LOADS`): chỉ so tên nguyên văn, không so mẫu glob của đối số
+
+
+def _implicit_tools(c: "_ReuseCmd") -> Set[str]:
+    """Công cụ (khoá của `IMPLICIT_LOADS`) mà lệnh đơn chạy; tầng lồng không đọc (`$_` đầu lệnh) = mọi công cụ."""
+    n, p = normalize(c.argv), _interp_argv(c.argv)
+    heads = {posixpath.basename(h) for h in (n[:1] + p[:1])}
+    if "$_" in heads:
+        return set(IMPLICIT_LOADS)
+    out = {IMPLICIT_TOOL_HEADS[h] for h in heads if h in IMPLICIT_TOOL_HEADS}
+    out |= {"pip" for h in heads if PIP_HEAD_RE.fullmatch(h)}
+    m = INTERP_RE.fullmatch(p[0]) if p else None
+    mods = _run_modules(n, p)  # review #429: cả `coverage run -m pytest`, `python3 -m coverage run -m pytest`
+    out |= {"python"} if m and INTERP_FAMILY.get(m[1], m[1]) == "python" or n[:1] == ["coverage"] else set()
+    out |= ({"pytest"} if "pytest" in mods else set()) | ({"pip"} if "pip" in mods else set())
+    if n and n[0] in SHELLS:
+        out |= {"zsh"} if n[0] == "zsh" else set()
+        opts = list(itertools.takewhile(lambda a: a[:1] == "-" and a != "--", n[1:]))
+        out |= {"login"} if any(SHELL_LOGIN_RE.fullmatch(a) for a in opts) else set()
+    return out
+
+
+def _run_modules(n: List[str], p: List[str]) -> List[str]:
+    """Mô-đun Python lệnh đơn chạy: `python -m X`; trình chạy mô-đun (`PY_MODULE_RUNNERS`) chạy thêm `-m Y` sau nó —
+    `python3 -m coverage run -m Y`, `python3 -m pdb -m Y`, lệnh `coverage run -m Y` (chỉ Y)."""
+    m = INTERP_RE.fullmatch(p[0]) if p else None
+    if m and INTERP_FAMILY.get(m[1], m[1]) == "python":
+        seq, mods = p, _py_modules(p)
+        k = p.index("-m", 1) + 2 if "-m" in p[1:] else len(p)
+    elif n[:1] == ["coverage"]:
+        seq, mods, k = n, ["coverage"], 1
+    else:
+        return []
+    if mods[:1] and mods[0] in PY_MODULE_RUNNERS:
+        if mods[0] == "coverage":
+            k = k + 1 if seq[k : k + 1] == ["run"] else len(seq)
+        mods = mods + [b for a, b in zip(seq[k:], seq[k + 1 :]) if a == "-m" and PY_MODULE_RE.fullmatch(b)][:1]
+    return mods if seq is p else mods[1:]
+
+
+def _py_modules(n: List[str]) -> List[str]:
+    """Mô-đun của `python -m MOD` (cả `-mMOD`, cụm `-Im MOD`); dừng ở `-c`, tệp script, `-`/`--`."""
+    i = 1
+    while i < len(n):
+        a = n[i]
+        if a in ("-", "--") or a[:1] != "-":
+            return []
+        if a.startswith("--"):  # tuỳ chọn dài duy nhất ăn giá trị: `--check-hash-based-pycs MODE`
+            i += 2 if a == "--check-hash-based-pycs" else 1
+            continue
+        for k, ch in enumerate(a[1:], 2):
+            rest = a[k:]
+            if ch == "m":
+                return [x for x in [rest or (n[i + 1] if i + 1 < len(n) else "")] if x]
+            if ch == "c":
+                return []
+            if ch in "WXQ":
+                i += 0 if rest else 1
+                break
+        i += 1
+    return []
+
+
+def _run_refs(c: "_ReuseCmd", skip: Tuple[str, ...] = ()) -> List[_RunRef]:
+    """Tệp/mô-đun lệnh đơn CHẠY theo tên nguyên văn: script của shell/`source`/trình thông dịch, `./f`, `-m MOD`,
+    `import`/`require` và tên tệp script trong code `-c`/`-e`/stdin, `-f` của awk/sed/make, `--rcfile`, tệp nạp ngầm
+    (`IMPLICIT_LOADS`, trừ công cụ trong `skip`)."""
+    out = [_RunRef(f, False) for f in _run_files(c.argv) if f not in ("", "-", "$_")]
+    n, p = normalize(c.argv), _interp_argv(c.argv)
+    m = INTERP_RE.fullmatch(p[0]) if p else None
+    fam = INTERP_FAMILY.get(m[1], m[1]) if m else ""
+    if m:
+        here = [c.argv[k + 1] for k, a in enumerate(c.argv[:-1]) if a == "<<<"]
+        codes = _inline_scripts(p) or c.bodies + here
+        out += [_RunRef(x, False) for s in codes for x in CODE_STR_RE.findall(s) if REUSE_SCRIPT_RE.fullmatch(x)]
+        if fam == "python":
+            out += [_RunRef(g.replace(".", "/"), True) for s in codes for t in PY_IMPORT_RE.findall(s) for g in t if g]
+        else:
+            out += [_RunRef(g, True) for s in codes for t in JS_REQUIRE_RE.findall(s) for g in t if g]
+    out += [_RunRef(x.replace(".", "/"), True) for x in _run_modules(n, p)]
+    if n and n[0] in RUN_F_FLAG_HEADS:
+        out += [_RunRef(f, False) for f in _flag_values(n[1:], ("-f", "--file", "--makefile"))]
+    if n and n[0] in SHELLS:
+        out += [_RunRef(f, False) for f in _flag_values(n[1:], ("--rcfile", "--init-file"))]
+    tools = _implicit_tools(c) - set(skip)
+    return out + [_RunRef(f, False, True) for t in sorted(tools) for f in IMPLICIT_LOADS[t]]
+
+
+def _run_ref_hit(ref: _RunRef, arg: str) -> bool:
+    """Đối số `arg` trùng tệp `ref`: đường dẫn, tên gốc (mẫu `*.pth` theo glob); nạp theo mô-đun thì cả tên gốc bỏ đuôi
+    (đuôi không phải dữ liệu) hay thư mục trùng thành phần mô-đun. Không so thư mục chứa tệp chạy (`ruff check scripts
+    && python3 scripts/xt.py` — lệnh Kiểm của chính repo)."""
+    a, r = _norm_path(arg or "."), _norm_path(ref.path)
+    ab, rb = posixpath.basename(a), posixpath.basename(r)
+    if re.search(r"[*?\[]", arg) and "$" not in arg and "*" not in rb:  # mẫu glob nguyên văn (`--wildcards '*.sh'`)
+        return not (ref.stem or ref.implicit) and (fnmatch.fnmatchcase(rb, ab) or fnmatch.fnmatchcase(r, a))
+    if not arg or SCRIPT_NAME_DYN_RE.search(arg) and "*" not in ref.path:
+        return False
+    if a == r or ab == rb or ("*" in rb and fnmatch.fnmatchcase(ab, rb)):
+        return True
+    if not ref.stem:
+        return False
+    stem = ab.rsplit(".", 1)[0] if "." in ab[1:] and not REUSE_DATA_EXT_RE.search(ab) else ab
+    parts = [x for x in r.split("/") if x not in ("", ".", "..")]
+    last = parts[-1].rsplit(".", 1)[0] if parts else ""
+    return stem == last or ("." not in ab and ab in parts)
+
+
+def _cmd_args(c: "_ReuseCmd") -> List[str]:
+    """Đối số của lệnh đơn để so tên: từ sau từ lệnh (cả đích chuyển hướng), giá trị sau `=` (`-out=F`, `X=F`)."""
+    words = [w for w in c.argv[1:] if not _is_punct(w)] + [w for w in c.argv[:1] if ENV_ASSIGN_RE.fullmatch(w)]
+    return words + [w.split("=", 1)[1] for w in words if "=" in w]
+
+
+def _run_named_why(cmd: str) -> str:
+    """AUD-SEC-415: lệnh đơn ngoài danh sách trắng chỉ đọc (`_reuse_reader`, mất miễn khi `_reuse_shadowed`) có đối số
+    trùng tệp mà lệnh đơn KHÁC chạy (`_run_refs`). Miễn D-324 giữ (`_heredoc_run`: thân quét như script)."""
+    if _heredoc_run(cmd) is not None:
+        return ""
+    cmds = _reuse_cmds(cmd, 0)
+    per = [_run_refs(c) for c in cmds]
+    if any(w.startswith(("PATH=", "PATH+=")) or w == "PATH" for c in cmds for w in c.argv):  # `PATH=.:$PATH s.sh`
+        per = [rs + [_RunRef(h, False) for h in _strip_prefixes(c.argv)[:1]] for c, rs in zip(cmds, per)]
+    refs = [(i, r) for i, rs in enumerate(per) for r in rs]
+    for j, c in enumerate(cmds):
+        own = {_norm_path(x.path) for x in per[j] if not x.stem}  # tệp chương trình của chính lệnh: không là đối số
+        args = [a for a in _cmd_args(c) if _norm_path(a or ".") not in own]
+        for i, r in refs:
+            if i == j or r in per[j] or not any(_run_ref_hit(r, a) for a in args):
+                continue
+            # lệnh đọc không ghi gì: chỉ xét nó bị thay tên/biến môi trường; tệp chạy dưới `~` (`[ -f ~/.bashrc ] && .
+            # ~/.bashrc`) không làm mất miễn — điều đó chỉ đúng với tệp VỪA GHI (D-329)
+            if not _reuse_reader(c.argv) or _reuse_shadowed(cmds, c, posixpath.basename(r.path)):
+                return RUN_NAMED_WHY
+    return ""
+
+
+def _implicit_hit(name: str, path: str) -> bool:
+    p = _norm_path(path)
+    b = posixpath.basename(p)
+    if "/" in name:
+        return p == name or p.endswith("/" + name)
+    return fnmatch.fnmatchcase(b, name) if "*" in name else b == name
+
+
+def _implicit_load_why(cmd: str) -> str:
+    """AUD-SEC-416: đích ghi (mọi cách `_reuse_writes` nhận ra) là tệp nạp ngầm của công cụ mà lệnh đơn KHÁC chạy."""
+    cmds = _reuse_cmds(cmd, 0)
+    tools = [_implicit_tools(c) for c in cmds]
+    for i, c in enumerate(cmds):
+        for w in _reuse_writes(c):
+            need = {t for t, names in IMPLICIT_LOADS.items() if any(_implicit_hit(x, w) for x in names)}
+            if need and any(need & ts for j, ts in enumerate(tools) if j != i):
+                return IMPLICIT_LOAD_WHY
+    return ""
 
 
 # ADR-0063 T-3637 — shell lồng theo argv đã chuẩn hoá (AUD-SEC-309…311): chữ và argv là hai cách đọc cùng lệnh; guard
@@ -3490,13 +3891,16 @@ def _cd_operands(args: List[str]) -> Tuple[List[str], bool]:
     return plain[j:], False
 
 
-def _cd_target(n: List[str], cwd: Optional[str], cdpath: bool = False) -> Optional[str]:
+def _cd_target(n: List[str], cwd: Optional[str], cdpath: bool = False, home: bool = False) -> Optional[str]:
     """Thư mục sau `cd <dir>`; `cd`, `cd -`, `pushd +N`, `cd` kèm cờ lạ hay biến → None (không biết — D-106: đích ghi
     tương đối sau đó thử ở mọi thư mục canh). Chuyển hướng và cờ `-P`/`-L`/`-e`/`--` không đổi đích (AUD-SEC-088).
-    Có `CDPATH` (`cdpath`) hay thư mục trước đó không biết: chỉ đích tuyệt đối/`~` giải được."""
+    Có `CDPATH` (`cdpath`) hay thư mục trước đó không biết: chỉ đích tuyệt đối/`~` giải được. Lệnh đã gán/đọc `HOME`
+    (`home`): `~`/`~/…` là không biết như `cd $HOME` (AUD-SEC-414)."""
     args, dashdash = _cd_operands(n[1:])
     if len(args) != 1 or "$" in args[0] or re.search(r"[*?\[]", args[0]) or TILDE_DIR_RE.match(args[0]):
         return None  # biến, glob (`cd .cl*`), `~+`/`~-` (= `$PWD`/`$OLDPWD` — AUD-SEC-097): không biết (D-106)
+    if home and HOME_TILDE_RE.match(args[0]):
+        return None
     if (args[0].startswith("-") and not dashdash) or (n[0] == "pushd" and re.fullmatch(r"[+-]\d+", args[0])):
         return None
     target = posixpath.expanduser(args[0])
@@ -3530,6 +3934,34 @@ def _sets_cdpath(argv: List[str]) -> bool:
     return any(t == "CDPATH" or t.startswith("CDPATH=") for t in argv)
 
 
+HOME_TILDE_RE = re.compile(r"~(?=/|$)")  # `~`, `~/…` mở ra `$HOME` (không phải `~user`, `~+`, `~-`)
+
+
+HOME_PERSIST_HEADS = frozenset(
+    "export declare typeset readonly local read mapfile readarray unset getopts let eval coproc".split()
+)
+HOME_VAR_FLAG_HEADS = {"printf": "-v", "wait": "-p"}  # chỉ ghi biến qua cờ này (`printf -v HOME`, `wait -p HOME`)
+
+
+def _sets_home(argv: List[str]) -> bool:
+    """Lệnh đổi `HOME` BỀN ở shell hiện tại (AUD-SEC-414, review #429): gán đứng riêng (`HOME=…`, chỉ có gán), lệnh
+    dựng sẵn ghi biến (`export`/`declare -x`/`read`/`unset`/`printf -v`/`eval`… nhắc HOME), `for HOME in`. Gán tiền tố
+    (`HOME=x cmd`, `env HOME=x cmd`) không đổi `~` của shell này — bash mở `~` trước khi áp gán tiền tố."""
+    words = [t for t in argv if t not in SHELL_KEYWORDS and not _is_redirect(t)]
+    if words[:1] in (["for"], ["select"]):
+        return words[1:2] == ["HOME"]
+    homes = [t for t in words if t == "HOME" or t.startswith(("HOME=", "HOME+=")) or "HOME" in t and "eval" in words]
+    if not homes:
+        return False
+    if all(ENV_ASSIGN_RE.fullmatch(t) for t in words):
+        return True
+    head = posixpath.basename(next((t for t in words if not ENV_ASSIGN_RE.fullmatch(t)), ""))
+    flag = HOME_VAR_FLAG_HEADS.get(head)
+    if flag:
+        return any(p == flag and w == "HOME" for p, w in zip(words, words[1:]))
+    return head in HOME_PERSIST_HEADS
+
+
 def _commands_with_cwd(tokens: List[str], start: Optional[str]) -> List[Tuple[List[str], Optional[str]]]:
     """Mỗi lệnh đơn kèm thư mục nó chạy: `cd`/`pushd` dời thư mục; `(`…`)` và `$(`…`)` là subshell — ra khỏi đó
     thì về thư mục cũ (`(cd ../b && git pull); git commit` vẫn commit ở chỗ cũ). `popd`/đích không rõ → None.
@@ -3539,25 +3971,30 @@ def _commands_with_cwd(tokens: List[str], start: Optional[str]) -> List[Tuple[Li
     here: Optional[str] = start
     cur: List[str] = []
     cdpath = bool(os.environ.get("CDPATH"))
+    home = False
 
     def flush() -> None:
-        nonlocal here, cdpath
+        nonlocal here, cdpath, home
         if cur:
             n = normalize(cur)
             cdpath = cdpath or _sets_cdpath(cur)
+            home = home or _sets_home(cur)
             if n[:1] in (["cd"], ["pushd"]):
-                here = _cd_target(n, here, cdpath)
+                here = _cd_target(n, here, cdpath, home)
             elif n[:1] == ["popd"]:
                 here = None
             out.append((list(cur), _run_dir(cur, here)))
             cur.clear()
 
+    hstack: List[bool] = []  # `HOME` đổi trong `( … )` chỉ có hiệu lực trong subshell đó
     for t in tokens:
         if _is_punct(t) and not _is_redirect(t):
             flush()
             stack.extend([here] * t.count("("))
+            hstack.extend([home] * t.count("("))
             for _ in range(t.count(")")):
                 here = stack.pop() if stack else None
+                home = hstack.pop() if hstack else home
         else:
             cur.append(t)
     flush()
@@ -9542,20 +9979,23 @@ FOR_NUM_SAMPLE = 8
 FOR_NUM_RE = re.compile(r"-?[0-9]+")
 
 
-def _record_assigns(c: List[str], env: Dict[str, str], pick: int = 0) -> None:
-    """`x='…'`, `export x=…`: gán đứng riêng (không kèm lệnh) có hiệu lực cho các lệnh sau; `for x in a b`: x lấy từ thứ
-    `pick` của danh sách. `x+=…` nối vào giá trị đã ghi (`c=r; c+=m; $c` → `rm`); giá trị cũ không biết → bỏ ghi nhận
-    (biến thành không biết, AUD-SEC-125)."""
+def _record_assigns(c: List[str], env: Dict[str, str], pick: int = 0, home0: Optional[str] = None) -> None:
+    """`x='…'`, `export x=…`, `declare -x x=…`: gán đứng riêng (không kèm lệnh) có hiệu lực cho các lệnh sau; `for x in
+    a b`: x lấy từ thứ `pick` của danh sách. `x+=…` nối vào giá trị đã ghi (`c=r; c+=m; $c` → `rm`); giá trị cũ không
+    biết → bỏ ghi nhận (biến thành không biết, AUD-SEC-125). `home0` (lệnh nhắc HOME — AUD-SEC-414): `~` trong giá trị
+    mở NGAY lúc gán, theo HOME đã ghi nhận hay home thật `home0` (`x=~; HOME=/tmp/y; rm -rf $x` xoá home thật — review
+    #429)."""
     c = [t for t in c if t not in SHELL_KEYWORDS] if c[0] in SHELL_KEYWORDS else c  # `then x=…`, `do x=…`, `{ x=…`
     words = _for_values(c)
     if words:
         env[c[1]] = _sub_vars(words[min(pick, len(words) - 1)], env)[:VAR_VALUE_MAX]
         return
-    words = c[1:] if c[:1] and c[0] in DECLARE_CMDS else c
+    # review #429: cờ của declare/typeset (`-x`, `-g`, `+x`) không làm mất ghi nhận gán
+    words = [t for t in c[1:] if t[:1] not in "-+"] if c[:1] and c[0] in DECLARE_CMDS else c
     if words and all(ASSIGN_ANY_RE.fullmatch(t) for t in words):
         for t in words:
             k, _, v = t.partition("=")
-            val = _sub_vars(v, env)
+            val = _sub_vars(v if home0 is None else _sub_tilde(v, {"HOME": env.get("HOME", home0)}), env)
             if k.endswith("+"):  # nối vào giá trị đã ghi; dài quá trần thì bỏ luôn (không giữ giá trị cũ đã sai)
                 k = k[:-1]
                 old = env.pop(k, None)
@@ -9585,23 +10025,42 @@ def _for_words(c: List[str]) -> int:
     return len(_for_values(c))
 
 
-def _expand_tokens(tokens: List[str], pick: int, split: bool) -> List[str]:
+def _expand_tokens(tokens: List[str], pick: int, split: bool, tilde: bool = False) -> List[str]:
     """Dòng token với biến đã gán thay bằng giá trị theo thứ tự xuất hiện; dấu `;`/`&&`/`|`/chuyển hướng giữ nguyên nên
-    `cd $D`, `echo "$x" | sh` còn đủ ngữ cảnh. `split`: token chỉ là `$x` được tách từ như shell không nháy."""
+    `cd $D`, `echo "$x" | sh` còn đủ ngữ cảnh. `split`: token chỉ là `$x` được tách từ như shell không nháy. `tilde`
+    (AUD-SEC-414, bản THÊM — bản không thay `~` vẫn quét): `~` CHỮ có sẵn trong token (trước khi thay biến) mở theo
+    HOME đã gán bằng chữ, cả gán tiền tố cho lệnh đó (`HOME=x bash -c '… ~/f'`)."""
     env: Dict[str, str] = {}
     out: List[str] = []
     cur: List[str] = []
+    local: Dict[str, str] = {}
+    home0 = posixpath.expanduser("~") if any("HOME" in t for t in tokens) else None
     for t in tokens:
         if _is_punct(t) and not _is_redirect(t):
             if cur:
-                _record_assigns(cur, env, pick)
-            cur = []
+                _record_assigns(cur, env, pick, home0)
+            cur, local = [], {}
             out.append(t)
             continue
         cur.append(t)
-        sub = _sub_vars(t, env) if env or "${" in t else t
+        if tilde and t.startswith("HOME="):  # chiều chặt: cả gán đứng sau từ lệnh (`env HOME=x …`, đối số `export`)
+            local["HOME"] = _sub_vars(t[5:], env)
+        scope = {**env, **local} if local else env
+        lit = _sub_tilde(t, scope) if tilde else t
+        sub = _sub_vars(lit, scope) if scope or "${" in lit else lit
         out += _split_words(sub) if split and VAR_REF_RE.fullmatch(t) and sub != t else [sub]
     return out
+
+
+# AUD-SEC-414: `~` đầu từ (cả sau `=`/`:` của gán, trong chữ `-c`) mở ra `$HOME` — sau gán `HOME=<chữ>` guard thay giá trị
+# rồi quét lại như `$HOME` (`HOME=.claude; rm -f ~/settings.json`). Chiều chặt: cả `~` sau nháy (`expanduser("~/x")`
+# trong `python3 -c`; bản quét lại chỉ thêm chặn).
+TILDE_RE = re.compile(r"(?<![^\s=:;&|(`'\"])~(?=/|$|[\s;&|)`:'\"])", re.M)
+
+
+def _sub_tilde(text: str, env: Dict[str, str]) -> str:
+    home = env.get("HOME")
+    return TILDE_RE.sub(lambda _: home, text) if home is not None and "~" in text else text
 
 
 def _var_scripts(tokens: List[str]) -> List[str]:
@@ -9611,8 +10070,10 @@ def _var_scripts(tokens: List[str]) -> List[str]:
     picks = min(VAR_FOR_PICKS, max([1, *(_for_words(c) for c in split_commands(tokens))]))
     seen = {base}
     out: List[str] = []
-    for pick, split in itertools.product(range(picks), (False, True)):
-        script = _join_tokens(_expand_tokens(tokens, pick, split))
+    # AUD-SEC-414: bản thay `~`/HOME gán tiền tố (`HOME=x bash -c '…$HOME…'`) là bản THÊM
+    tildes = (False, True) if "HOME" in base and ("~" in base or "HOME=" in base) else (False,)
+    for pick, split, tilde in itertools.product(range(picks), (False, True), tildes):
+        script = _join_tokens(_expand_tokens(tokens, pick, split, tilde))
         if script not in seen:
             seen.add(script)
             out.append(script)
@@ -9980,6 +10441,7 @@ def _nested_sources(
     placed = _commands_with_cwd(tokens, start)
     alias_rw, alias_ns, alias_asks = _git_alias_sources(placed, root, budget)
     built: Placed = [(s, start) for s in _var_scripts(tokens)] + alias_rw + [(s, start) for s in _lifted_scripts(cmd)]
+    built += _patch_fence_scripts(cmd, placed, start)  # AUD-SEC-414: đích `patch`/`git apply` trong thân heredoc
     runner = [(s, here) for c, here in placed for s in _runner_scripts(c)]
     decoded, opaque = _decoded_pipes(tokens, [here for _, here in placed])
     nested = _nested_pairs(cmd, tokens, placed, start, budget)

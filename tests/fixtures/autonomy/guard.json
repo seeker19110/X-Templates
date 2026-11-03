@@ -20308,6 +20308,330 @@
    "allowed": true
   },
   "note": "review #427 (D-329): miễn của ADR-0066 thu về luật chặn"
+ },
+ {
+  "id": "t3663-414-tilde-rm",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-414"
+  ],
+  "input": {
+   "command": "HOME=.claude; rm -f ~/settings.json"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "HOOK_BYPASS"
+  },
+  "note": "T-3663 (D-332): dạng nguyên văn còn lọt — luật tĩnh, không miễn mới"
+ },
+ {
+  "id": "t3663-414-cd-tilde-heredoc",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-414"
+  ],
+  "input": {
+   "command": "HOME=.claude; cd ~ && bash <<'EOF'\nrm -f settings.json\nEOF"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "HOOK_BYPASS"
+  },
+  "note": "T-3663 (D-332): dạng nguyên văn còn lọt — luật tĩnh, không miễn mới"
+ },
+ {
+  "id": "t3663-414-prefix-bash-c",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-414"
+  ],
+  "input": {
+   "command": "HOME=.claude/hooks bash -c 'rm -f ~/guard.py'"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "HOOK_BYPASS"
+  },
+  "note": "T-3663 (D-332): dạng nguyên văn còn lọt — luật tĩnh, không miễn mới"
+ },
+ {
+  "id": "t3663-414-home-dynamic",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-414"
+  ],
+  "input": {
+   "command": "HOME=$X; rm -f ~/settings.json"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "T-3663 (D-332): dạng nguyên văn còn lọt — luật tĩnh, không miễn mới"
+ },
+ {
+  "id": "t3663-414-patch-fence",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-414"
+  ],
+  "input": {
+   "command": "patch -p0 <<'EOF'\n--- .claude/settings.json\n+++ .claude/settings.json\n@@ -1 +1 @@\n-{\n+x\nEOF"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "HOOK_BYPASS"
+  },
+  "note": "T-3663 (D-332): dạng nguyên văn còn lọt — luật tĩnh, không miễn mới"
+ },
+ {
+  "id": "t3663-414-patch-run",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-414"
+  ],
+  "input": {
+   "command": "patch -p0 <<'EOF'\n--- /dev/null\n+++ s.sh\n@@ -0,0 +1 @@\n+git push --force origin main\nEOF\nbash s.sh"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "T-3663 (D-332): dạng nguyên văn còn lọt — luật tĩnh, không miễn mới"
+ },
+ {
+  "id": "t3663-414-apply-file-run",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-414"
+  ],
+  "input": {
+   "command": "git apply p.diff; bash s.sh"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "T-3663 (D-332): dạng nguyên văn còn lọt — luật tĩnh, không miễn mới"
+ },
+ {
+  "id": "t3663-415-sponge",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-415"
+  ],
+  "input": {
+   "command": "sponge s.sh < in.txt; bash s.sh"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "T-3663 (D-332): dạng nguyên văn còn lọt — luật tĩnh, không miễn mới"
+ },
+ {
+  "id": "t3663-415-sponge-m",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-415"
+  ],
+  "input": {
+   "command": "sponge x.py < in.txt; python3 -m x"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "T-3663 (D-332): dạng nguyên văn còn lọt — luật tĩnh, không miễn mới"
+ },
+ {
+  "id": "t3663-415-tar",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-415"
+  ],
+  "input": {
+   "command": "tar -xf a.tar s.sh; bash s.sh"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "T-3663 (D-332): dạng nguyên văn còn lọt — luật tĩnh, không miễn mới"
+ },
+ {
+  "id": "t3663-415-openssl",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-415"
+  ],
+  "input": {
+   "command": "openssl enc -d -base64 -in in.txt -out s.sh; bash s.sh"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "T-3663 (D-332): dạng nguyên văn còn lọt — luật tĩnh, không miễn mới"
+ },
+ {
+  "id": "t3663-415-xxd",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-415"
+  ],
+  "input": {
+   "command": "xxd -r -p in.hex s.sh; bash s.sh"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "T-3663 (D-332): dạng nguyên văn còn lọt — luật tĩnh, không miễn mới"
+ },
+ {
+  "id": "t3663-416-bashrc",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-416"
+  ],
+  "input": {
+   "command": "cat >> ~/.bashrc <<'EOF'\ngit push --force origin main\nEOF\nbash -ic true"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "T-3663 (D-332): dạng nguyên văn còn lọt — luật tĩnh, không miễn mới"
+ },
+ {
+  "id": "t3663-416-package-json",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-416"
+  ],
+  "input": {
+   "command": "cat > package.json <<'EOF'\n{\"scripts\":{\"test\":\"git push --force origin main\"}}\nEOF\nnpm test"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "T-3663 (D-332): dạng nguyên văn còn lọt — luật tĩnh, không miễn mới"
+ },
+ {
+  "id": "t3663-416-gnumakefile",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-416"
+  ],
+  "input": {
+   "command": "printf 'all:\\n\\tgit push --force origin main\\n' > GNUmakefile && make"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "T-3663 (D-332): dạng nguyên văn còn lọt — luật tĩnh, không miễn mới"
+ },
+ {
+  "id": "t3663-416-conftest",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-416"
+  ],
+  "input": {
+   "command": "> conftest.py; pytest -q"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "T-3663 (D-332): dạng nguyên văn còn lọt — luật tĩnh, không miễn mới"
+ },
+ {
+  "id": "t3663-ctl-home-literal",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-414"
+  ],
+  "input": {
+   "command": "HOME=/tmp/h git config --global user.name x"
+  },
+  "expect": {
+   "allowed": true
+  },
+  "note": "T-3663 (D-332): dạng nguyên văn còn lọt — luật tĩnh, không miễn mới"
+ },
+ {
+  "id": "t3663-ctl-run-then-add",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-415"
+  ],
+  "input": {
+   "command": "bash s.sh && git add s.sh"
+  },
+  "expect": {
+   "allowed": true
+  },
+  "note": "T-3663 (D-332): dạng nguyên văn còn lọt — luật tĩnh, không miễn mới"
+ },
+ {
+  "id": "t3663-ctl-make-log",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-416"
+  ],
+  "input": {
+   "command": "make > build.log 2>&1; tail -5 build.log"
+  },
+  "expect": {
+   "allowed": true
+  },
+  "note": "T-3663 (D-332): dạng nguyên văn còn lọt — luật tĩnh, không miễn mới"
+ },
+ {
+  "id": "t3663-ctl-apply-check",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-414"
+  ],
+  "input": {
+   "command": "git diff > p.diff && git apply --check p.diff"
+  },
+  "expect": {
+   "allowed": true
+  },
+  "note": "T-3663 (D-332): dạng nguyên văn còn lọt — luật tĩnh, không miễn mới"
+ },
+ {
+  "id": "r429-417-declare-x",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-417"
+  ],
+  "input": {
+   "command": "declare -x HOME=.claude; rm -f ~/settings.json"
+  },
+  "expect": {
+   "allowed": false
+  },
+  "note": "review #429: dạng nguyên văn gần của 414/415 (đã chạy bash thật)"
+ },
+ {
+  "id": "r429-417-gunzip",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-417"
+  ],
+  "input": {
+   "command": "gunzip s.sh.gz; bash s.sh"
+  },
+  "expect": {
+   "allowed": false
+  },
+  "note": "review #429: dạng nguyên văn gần của 414/415 (đã chạy bash thật)"
  }
  ]
 }
