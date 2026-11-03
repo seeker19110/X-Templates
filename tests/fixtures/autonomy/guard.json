@@ -17588,6 +17588,277 @@
    "allowed": true
   },
   "note": "review #420: -m cuối làm guard ném IndexError"
- }
+ },
+{
+ "id": "og-388-ifs-assign-split",
+ "origin": "adversarial-reviewer",
+ "refs": [
+  "AUD-SEC-388"
+ ],
+ "input": {
+  "command": "IFS=/; c=\"git/push/--force/origin/main\"; $c"
+ },
+ "expect": {
+  "allowed": false,
+  "code": "BUDGET"
+ },
+ "note": "review #420: bash tách mở rộng không nháy theo IFS đã gán, guard tách theo khoảng trắng"
+},
+{
+ "id": "og-388-ifs-export-arg",
+ "origin": "adversarial-reviewer",
+ "refs": [
+  "AUD-SEC-388"
+ ],
+ "input": {
+  "command": "export IFS=/; c=push/--force/origin/main; git $c"
+ },
+ "expect": {
+  "allowed": false
+ },
+ "note": "review #420: bash tách mở rộng không nháy theo IFS đã gán, guard tách theo khoảng trắng"
+},
+{
+ "id": "og-388-ifs-brace-name",
+ "origin": "adversarial-reviewer",
+ "refs": [
+  "AUD-SEC-388"
+ ],
+ "input": {
+  "command": "export {I,J}FS=/; c=git/push/--force/origin/main; $c"
+ },
+ "expect": {
+  "allowed": false
+ },
+ "note": "review #420: bash tách mở rộng không nháy theo IFS đã gán, guard tách theo khoảng trắng"
+},
+{
+ "id": "og-388-ifs-printf-dyn",
+ "origin": "adversarial-reviewer",
+ "refs": [
+  "AUD-SEC-388"
+ ],
+ "input": {
+  "command": "printf -v \"$(printf '\\x49FS')\" /; c=git/push/--force/origin/main; $c"
+ },
+ "expect": {
+  "allowed": false
+ },
+ "note": "review #420: bash tách mở rộng không nháy theo IFS đã gán, guard tách theo khoảng trắng"
+},
+{
+ "id": "og-388-control-read-loop",
+ "origin": "control",
+ "refs": [
+  "AUD-SEC-388"
+ ],
+ "input": {
+  "command": "while IFS= read -r f; do wc -l $f; done < list.txt"
+ },
+ "expect": {
+  "allowed": true
+ },
+ "note": "review #420: bash tách mở rộng không nháy theo IFS đã gán, guard tách theo khoảng trắng"
+},
+{
+ "id": "og-388-control-quoted",
+ "origin": "control",
+ "refs": [
+  "AUD-SEC-388"
+ ],
+ "input": {
+  "command": "IFS=/; echo \"$HOME\""
+ },
+ "expect": {
+  "allowed": true
+ },
+ "note": "review #420: bash tách mở rộng không nháy theo IFS đã gán, guard tách theo khoảng trắng"
+},
+{
+ "id": "og-389-config-env-commit",
+ "origin": "adversarial-reviewer",
+ "refs": [
+  "AUD-SEC-389"
+ ],
+ "input": {
+  "command": "git --config-env=core.hooksPath=HOME commit -m x",
+  "policy": "strict"
+ },
+ "expect": {
+  "allowed": false
+ },
+ "note": "review #420: --config-env=core.hooksPath=VAR dạng = dính liền bỏ git hook như --no-verify"
+},
+{
+ "id": "og-389-control-config-env-user",
+ "origin": "control",
+ "refs": [
+  "AUD-SEC-389"
+ ],
+ "input": {
+  "command": "git --config-env=user.name=USER commit -m x",
+  "policy": "strict"
+ },
+ "expect": {
+  "allowed": true
+ },
+ "note": "review #420: --config-env=core.hooksPath=VAR dạng = dính liền bỏ git hook như --no-verify"
+},
+{
+ "id": "og-384-find-json",
+ "origin": "adversarial-reviewer",
+ "refs": [
+  "AUD-SEC-384"
+ ],
+ "input": {
+  "command": "find docs -name '*.json' | xargs sed -i s/a/b/"
+ },
+ "expect": {
+  "allowed": false
+ },
+ "note": "review #420: nguồn find có token docs nhưng bộ lọc tên không thể khớp sổ giai đoạn"
+},
+{
+ "id": "og-384-find-not",
+ "origin": "adversarial-reviewer",
+ "refs": [
+  "AUD-SEC-384"
+ ],
+ "input": {
+  "command": "find docs ! -name '*.md' | xargs sed -i s/a/b/"
+ },
+ "expect": {
+  "allowed": false
+ },
+ "note": "review #420: nguồn find có token docs nhưng bộ lọc tên không thể khớp sổ giai đoạn"
+},
+{
+ "id": "og-384-find-print-before-filter",
+ "origin": "adversarial-reviewer",
+ "refs": [
+  "AUD-SEC-384"
+ ],
+ "input": {
+  "command": "find . -path ./src -prune -o -print -path docs | xargs sed -i s/a/b/"
+ },
+ "expect": {
+  "allowed": false
+ },
+ "note": "review #420: nguồn find có token docs nhưng bộ lọc tên không thể khớp sổ giai đoạn"
+},
+{
+ "id": "og-384-git-ls-files-docs",
+ "origin": "adversarial-reviewer",
+ "refs": [
+  "AUD-SEC-384"
+ ],
+ "input": {
+  "command": "git ls-files docs | xargs sed -i s/a/b/"
+ },
+ "expect": {
+  "allowed": false
+ },
+ "note": "review #420: nguồn find có token docs nhưng bộ lọc tên không thể khớp sổ giai đoạn"
+},
+{
+ "id": "og-384-control-find-md",
+ "origin": "control",
+ "refs": [
+  "AUD-SEC-384"
+ ],
+ "input": {
+  "command": "find docs -name '*.md' | xargs sed -i s/a/b/"
+ },
+ "expect": {
+  "allowed": true
+ },
+ "note": "review #420: nguồn find có token docs nhưng bộ lọc tên không thể khớp sổ giai đoạn"
+},
+{
+ "id": "og-384-control-find-prune",
+ "origin": "control",
+ "refs": [
+  "AUD-SEC-384"
+ ],
+ "input": {
+  "command": "find . -path ./docs -prune -o -name '*.py' -print | xargs sed -i s/a/b/"
+ },
+ "expect": {
+  "allowed": true
+ },
+ "note": "review #420: nguồn find có token docs nhưng bộ lọc tên không thể khớp sổ giai đoạn"
+},
+{
+ "id": "og-384-control-git-pathspec",
+ "origin": "control",
+ "refs": [
+  "AUD-SEC-384"
+ ],
+ "input": {
+  "command": "git ls-files 'docs/*.md' | xargs sed -i s/a/b/"
+ },
+ "expect": {
+  "allowed": true
+ },
+ "note": "review #420: nguồn find có token docs nhưng bộ lọc tên không thể khớp sổ giai đoạn"
+},
+{
+ "id": "t329-wipe-mount-code",
+ "origin": "repro",
+ "refs": [
+  "AUD-SEC-329"
+ ],
+ "input": {
+  "command": "docker run -v \"$PWD\":/app img rm -rf /app"
+ },
+ "expect": {
+  "allowed": false,
+  "code": "WIPE_OUTSIDE"
+ },
+ "note": "nợ review #407: khoá theo dấu lý do của mã nhiều dấu"
+},
+{
+ "id": "t329-wipe-xargs-code",
+ "origin": "repro",
+ "refs": [
+  "AUD-SEC-329"
+ ],
+ "input": {
+  "command": "ls | xargs rm -rf"
+ },
+ "expect": {
+  "allowed": false,
+  "code": "WIPE_OUTSIDE"
+ },
+ "note": "nợ review #407: khoá theo dấu lý do của mã nhiều dấu"
+},
+{
+ "id": "og-388-control-for-list",
+ "origin": "control",
+ "refs": [
+  "AUD-SEC-388"
+ ],
+ "input": {
+  "command": "IFS=$'\\n'; for f in $(ls); do echo \"$f\"; done"
+ },
+ "expect": {
+  "allowed": true
+ },
+ "note": "review #420: bash tách mở rộng không nháy theo IFS đã gán, guard tách theo khoảng trắng"
+},
+{
+ "id": "og-388-for-list-subst",
+ "origin": "adversarial-reviewer",
+ "refs": [
+  "AUD-SEC-388"
+ ],
+ "input": {
+  "command": "IFS=/; c=push/--force/origin/main; for f in $(git $c); do :; done"
+ },
+ "expect": {
+  "allowed": false
+ },
+ "note": "review #420: bash tách mở rộng không nháy theo IFS đã gán, guard tách theo khoảng trắng"
+}
  ]
 }

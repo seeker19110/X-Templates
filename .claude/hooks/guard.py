@@ -947,7 +947,83 @@ def _strict_why(cmd: str, cwd: Optional[str] = None) -> str:
     why = next((why for rules, text in checks for rx, why in rules if rx.search(text)), "")
     if not why and STRICT_IFS_RE.search(v.s) and STRICT_SHELL_RE.search(v.s):
         why = "`$IFS` trong script của shell lồng (AUD-SEC-239)"
-    return why or _dyn_text_why(v, live, bare) or _gh_strict_why(v.s, live, cwd)
+    return why or _ifs_split_why(cmd, v.s, bare) or _dyn_text_why(v, live, bare) or _gh_strict_why(v.s, live, cwd)
+
+
+# AUD-SEC-388: bash tách mở rộng không nháy theo `IFS` hiện hành, guard tách theo khoảng trắng (`IFS=/; c=git/push/…;
+# $c`). OR với luật `$IFS` ở trên (bài học #372), không thay. `IFS` có thể bị gán khi tên xuất hiện ở bất kỳ dạng chỉ-chữ-số
+# nào (cả sau bung brace: `export {I,J}FS=/`) hoặc lệnh gán có tên đích động (`printf -v "$n"`, `declare -n`, `(( $n=1 ))`)
+# → mọi mở rộng không nháy là chỗ guard không đọc chắc. `IFS=… read` (gán chỉ cho `read`, không lưu lại) không tính trừ khi
+# lệnh có thể định nghĩa lại `read` (hàm, `enable`, `alias`).
+STRICT_SPLIT_RE = re.compile(r"\$[A-Za-z_{(@*0-9]")  # `$?`/`$#`/`$$`/`$!`/`$-` ra số/cờ: không tính
+STRICT_IFS_READ_RE = re.compile(
+    r"(?P<pre>^|[;&|({\n]|\b(?:while|until|do|then|else|if)[ \t]|!)[ \t]*IFS="
+    r"(?:'[^'\\]*'|\"[^\"$`\\]*\"|\$'(?:[^'\\]|\\.)*'|[^\s;&|$`\\'\"(){}<>]*)[ \t]+read(?=[ \t;&|)\n]|$)"
+)
+STRICT_REDEF_RE = re.compile(r"\(\s*\)|\b(?:function|enable|alias)\b")
+STRICT_ARITH_DYN_RE = re.compile(r"\(\([^)]*\$[^)]*[^=!<>]=(?!=)")  # `(( $n = 47 ))`: gán số học tên đích động
+STRICT_ASSIGNERS = frozenset("declare typeset local export readonly read mapfile readarray getopts let printf".split())
+STRICT_NAMEREF_RE = re.compile(r"[-+][A-Za-z]*n[A-Za-z]*")
+STRICT_FOR_LIST_RE = re.compile(r"\b(?:for|select)[ \t]+\w+[ \t]+in\b([^;\n]*)")
+
+
+def _ifs_split_why(cmd: str, text: str, bare: str) -> str:
+    """AUD-SEC-388: lý do chặn khi `IFS` có thể bị gán và có mở rộng không nháy (rỗng = qua). `text`: chữ đã gấp heredoc
+    (thân là dữ liệu). Lệnh gọi shell/`eval`: xét chữ thô, mở rộng ở đâu cũng tính (`sh -c "IFS=/; …; \\$c"`, thân
+    heredoc vào `| bash` — chữ nháy/thân là script bash đọc lại, như AUD-SEC-239)."""
+    shell = STRICT_SHELL_RE.search(cmd)
+    text = cmd if shell else text
+    if not STRICT_SPLIT_RE.search(_for_list_free(text if shell else bare)):
+        return ""
+    kept = text if STRICT_REDEF_RE.search(text) else STRICT_IFS_READ_RE.sub(r"\g<pre>read", text)
+    texts = [kept, *(brace_variants(kept) or [])]
+    if any("IFS" in f for t in texts for f in _letter_forms(t)) or _dyn_assign_target(cmd):
+        return "mở rộng không nháy khi `IFS` có thể bị gán — bash tách từ khác guard (AUD-SEC-388)"
+    return ""
+
+
+def _for_list_free(text: str) -> str:
+    """Danh sách từ của `for/select NAME in …` là dữ liệu gán cho biến vòng (`IFS=$'\\n'; for f in $(ls)` — dùng lại không
+    nháy thì bị xét ở chỗ dùng): bỏ `$` ở tầng ngoài của danh sách; `$` bên trong `$(…)` là mã chạy thật — giữ."""
+
+    def blank(m: "re.Match[str]") -> str:
+        out: List[str] = []
+        depth = 0
+        for ch in m[1]:
+            depth += (ch == "(") - (ch == ")")
+            out.append(" " if ch == "$" and depth == 0 else ch)
+        return m[0][: m.start(1) - m.start()] + "".join(out)
+
+    return STRICT_FOR_LIST_RE.sub(blank, text)
+
+
+def _dyn_assign_target(cmd: str) -> bool:
+    """Lệnh gán biến mà tên đích không phải chữ nguyên văn (có thể là `IFS`): `declare/export/local/read/… "$n"=…`,
+    `printf -v "$n"`, nameref `declare -n`, gán số học `(( $n=… ))`. Token không tách được → coi như có."""
+    raw = _raw_tokens(cmd)
+    if raw is None or STRICT_ARITH_DYN_RE.search(cmd):
+        return True
+    return any(_dyn_target_argv(argv) for argv in split_commands(raw))
+
+
+def _dyn_target_argv(argv: List[str]) -> bool:
+    plain = [_dequote(t) for t in argv]
+    n = normalize(plain)
+    if not n or n[0] not in STRICT_ASSIGNERS:
+        return False
+    words = _assign_names(argv[len(argv) - len(_strip_prefixes(plain)) + 1 :], n[0])
+    if n[0] in ("declare", "typeset", "local") and any(STRICT_NAMEREF_RE.fullmatch(w) for w in words):
+        return True  # nameref: tên đích có thể gán sau (`declare -n r; r=$x`)
+    return any(re.search(r"[$`]", w.split("=", 1)[0]) for w in words if not w.startswith(("-", "+")))
+
+
+def _assign_names(words: List[str], head: str) -> List[str]:
+    """Từ có thể là tên đích của lệnh gán `head` — bỏ chuyển hướng và đích của nó (`read a <<< "$s"`); `printf`: chỉ
+    toán hạng của `-v`."""
+    kept = [w for i, w in enumerate(words) if not _is_redirect(w) and not (i and _is_redirect(words[i - 1]))]
+    if head != "printf":
+        return kept
+    return [w[2:] or " ".join(kept[i + 1 : i + 2]) for i, w in enumerate(kept) if w.startswith("-v")]
 
 
 def _dyn_text_why(v: _CodeView, live: str, bare: str) -> str:
@@ -6397,8 +6473,9 @@ def _existing_test(target: str, root: str) -> bool:
 
 def _commit_hooks_path(argv: List[str]) -> bool:
     """Lệnh commit/push đặt `core.hooksPath` qua `-c`, biến `GIT_CONFIG_KEY_<n>` (git ≥ 2.31) hay `GIT_CONFIG_PARAMETERS`
-    (git đọc như `-c`: `'core.hooksPath'='/dev/null'` — review lượt 2 AUD-SEC-352)."""
-    low = [a.lower() for a in argv]
+    (git đọc như `-c`: `'core.hooksPath'='/dev/null'` — review lượt 2 AUD-SEC-352). `--config-env=core.hooksPath=VAR`
+    (`=` dính liền) bóc tiền tố trước khi so (AUD-SEC-383/389)."""
+    low = [a.lower().removeprefix("--config-env=") for a in argv]
     return any(
         a.startswith("core.hookspath=")
         or re.fullmatch(r"git_config_key_\d+\+?=core\.hookspath", a)
@@ -7795,9 +7872,73 @@ def _xargs_evidence(tokens: List[str]) -> List[str]:
                 or posixpath.basename(inner[0]) not in XARGS_WRITERS
             ):
                 continue
-            if any(map(_names_evidence, up)) or (any(map(_names_ledger, up)) and _xargs_fed_dest(down, inner)):
+            ledger = any(map(_names_ledger, up)) and _xargs_fed_dest(down, inner) and not _find_skips_ledger(up)
+            if any(map(_names_evidence, up)) or ledger:
                 asks.append(EVIDENCE_WHY.format(f"đích từ ống `{' '.join(up)[:60]}` vào xargs {inner[0]}"))
     return asks
+
+
+# AUD-SEC-384: nguồn ống `find` mà mọi nhánh in ra đều qua bộ lọc tên/đường dẫn không thể khớp sổ giai đoạn
+# (`find docs -name '*.md'`, `find . -path ./docs -prune -o -name '*.py' -print`) không liệt kê sổ. Chỉ đọc biểu thức trong
+# tập con: thử nghiệm đã biết, `-o`, in bằng `-print`/`-print0`; khác (ngoặc, phủ định, `-printf`/`-exec`/`-fprint` in chữ
+# tuỳ ý, cờ lạ, đối số thiếu) → không chứng minh được, giữ chặn.
+FIND_TESTS_1 = frozenset(
+    "-name -iname -path -ipath -wholename -iwholename -type -xtype -maxdepth -mindepth -mtime -mmin -newer -size".split()
+)
+FIND_TESTS_0 = frozenset("-a -and -empty -readable -writable -executable -true -false -depth -xdev -prune".split())
+FIND_PRINTS = ("-print", "-print0")
+LEDGER_FIND_NAME = ("-name", "-iname")  # tên khác `FIND_NAME_TESTS` (luật `.autopilot` cũ) — không ghi đè
+LEDGER_FIND_PATH = ("-path", "-ipath", "-wholename", "-iwholename")
+
+
+def _find_skips_ledger(up: List[str]) -> bool:
+    """Lệnh nguồn là `find` chắc chắn không in đường dẫn sổ giai đoạn (AUD-SEC-384)."""
+    n = normalize(up)
+    if n[:1] != ["find"]:
+        return False
+    expr = list(itertools.dropwhile(lambda t: t[:1] not in "-!()," or t in ("-H", "-L", "-P"), n[1:]))
+    branches = _find_branches(expr)
+    explicit = any(t in FIND_PRINTS for t in expr)
+    return branches is not None and all(_find_branch_skips(b, explicit) for b in branches)
+
+
+def _find_branches(expr: List[str]) -> Optional[List[List[Tuple[str, str]]]]:
+    """Biểu thức `find` thành các nhánh `-o`, mỗi nhánh là dãy (thử nghiệm, đối số); None = ngoài tập con đọc chắc."""
+    branches: List[List[Tuple[str, str]]] = [[]]
+    i = 0
+    while i < len(expr):
+        t = expr[i]
+        if t in ("-o", "-or"):
+            branches.append([])
+        elif t in FIND_TESTS_1 and i + 1 < len(expr):
+            branches[-1].append((t, expr[i + 1]))
+            i += 1
+        elif t in FIND_TESTS_0 or t in FIND_PRINTS:
+            branches[-1].append((t, ""))
+        else:
+            return None
+        i += 1
+    return branches
+
+
+def _find_branch_skips(branch: List[Tuple[str, str]], explicit: bool) -> bool:
+    """Nhánh không in sổ: gặp bộ lọc loại sổ TRƯỚC lệnh in, hoặc nhánh không in khi biểu thức có `-print` ở nhánh khác."""
+    for t, arg in branch:
+        if t in FIND_PRINTS:
+            return False
+        if t in LEDGER_FIND_NAME + LEDGER_FIND_PATH and not _find_pat_may_match(t, arg):
+            return True
+    return explicit
+
+
+def _find_pat_may_match(test: str, pat: str) -> bool:
+    """Mẫu `-name`/`-path` có thể khớp sổ: `-name` so tên sổ; `-path` (`*` khớp cả `/`) so phần chữ sau `*` cuối với đuôi
+    đường dẫn sổ. `[`/`?`/`\\` (fnmatch của find khác Python: `[^…]`, `\\.`) → coi như khớp."""
+    name, pat = (LEDGER_NAME.lower(), pat.lower()) if test.startswith("-i") else (LEDGER_NAME, pat)
+    if test in LEDGER_FIND_NAME:
+        return bool(re.search(r"[\[\\]", pat)) or fnmatch.fnmatchcase(name, pat)
+    tail = pat.rsplit("*", 1)[-1]
+    return bool(re.search(r"[?\[\\]", tail)) or name.endswith(tail) or tail.endswith(name)
 
 
 # `git push` mà guard không biết đích (T-1523): push là hành động không đảo ngược ở nhánh chính, nên đích không giải được

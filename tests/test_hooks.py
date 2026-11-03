@@ -701,6 +701,70 @@ class GuardMatrixTest(unittest.TestCase):
         res = self.g.bash_decision("X=1; git commit -m x", self.root)
         self.assertEqual((res["decision"], res["commit"]), ("", True))
 
+    def test_guard_ifs_word_split(self):
+        """AUD-SEC-388 (review #420): bash tách mở rộng không nháy theo `IFS` hiện hành, guard tách theo khoảng trắng —
+        `IFS=/; c="git/push/--force/origin/main"; $c` chạy `git push --force origin main`. `IFS` có thể bị gán (mọi dạng,
+        cả tên che bằng nháy/brace/`$'…'`, tên đích động, nameref) cùng mở rộng không nháy → BUDGET; `IFS=… read` (gán chỉ
+        cho `read`, không lưu lại) và mở rộng có nháy vẫn chạy."""
+        push = "c=git/push/--force/origin/main"
+        bad = [
+            'IFS=/; c="git/push/--force/origin/main"; $c',
+            f"IFS=/ ; {push}; ${{c}}",
+            "export IFS=/; c=push/--force/origin/main; git $c",
+            f"f(){{ local IFS=/; {push}; $c; }}; f",
+            f"declare IFS=/; {push}; $c",
+            f"declare -x IFS=/; {push}; $(echo $c)",
+            f"read -rd '' IFS <<< /; {push}; $c",
+            f"IFS+=/; {push}; $c",
+            f"printf -v IFS /; {push}; $c",
+            f"for IFS in /; do {push}; $c; done",
+            f"IFS=$'\\x2f'; {push}; $c",
+            f'export I"FS"=/; {push}; $c',
+            f"export I\\FS=/; {push}; $c",
+            f"export {{I,J}}FS=/; {push}; $c",
+            f"export $'\\x49'FS=/; {push}; $c",
+            f'n=I; export "${{n}}FS"=/; {push}; $c',
+            f"declare -n r=$(printf '\\x49FS'); r=/; {push}; $c",  # `\\x49` giải ở dạng chỉ-chữ-số
+            # tên đích động thật (đọc từ file — không có chữ IFS ở đâu cả)
+            f"declare -n r=$(cat n.txt); r=/; {push}; $c",
+            f"declare -n r; r=x; {push}; $c",
+            f'read -r "$(cat n.txt)" <<< /; {push}; $c',
+            f'printf -v "$(cat n.txt)" /; {push}; $c',
+            f'n=$(cat n.txt); export "$n"=/; {push}; $c',
+            "(( $(cat n.txt)=47 )); c=git4push4--force4origin4main; $c",
+            "IFS=/; set -- git/push/--force/origin/main; ${@}",
+            "IFS=/; a=(git/push/--force/origin/main); ${a[@]}",
+            f"read(){{ $c; }}; {push}; IFS=/ read",
+            f'export "IFS=/ read"; {push}; $c',
+            # danh sách `for … in` là dữ liệu, nhưng thay lệnh trong danh sách và thân vòng là mã chạy thật
+            "IFS=/; c=push/--force/origin/main; for f in $(git $c); do :; done",
+            f"IFS=/; {push}; for f in a; do $c; done",
+            f"IFS=/; {push}; for f in $c; do $f; done",
+        ]
+        for cmd in bad:
+            with self.subTest(cmd=cmd):
+                res = self.g.bash_decision(cmd, self.root)
+                self.assertEqual((res["decision"], res.get("code")), ("deny", self.g.BUDGET), res)
+        # shell lồng: lớp tập con chạy trên script lồng, lý do chặn đi lên lệnh gốc
+        self.check("deny", [f"bash -c 'IFS=/; {push}; $c'", 'sh -c "IFS=/; c=git/status; \\$c"'])
+        self.check(
+            "",
+            [
+                'while IFS= read -r line; do echo "$line"; done < list.txt',
+                "while IFS= read -r f; do wc -l $f; done < list.txt",
+                "IFS=$'\\n' read -r a b <<< \"$s\"; echo $a",
+                'IFS=, read -ra parts <<< "a,b"; echo "${parts[0]}"',
+                'IFS=/; echo "$HOME"',
+                "IFS=/; echo $? $# $$",
+                "grep -rn IFS scripts/",
+                'c="git status"; $c',
+                'export PATH="$HOME/bin:$PATH"; ls $HOME',
+                'local_x=1; read -r a b <<< "$s"; echo $a',
+                "IFS=$'\\n'; for f in $(ls); do echo \"$f\"; done",
+                'IFS=,; select x in ${opts[@]}; do echo "$x"; break; done',
+            ],
+        )
+
     def test_guard_commit_dir_follows_cd_and_git_C(self):
         # Commit rơi vào repo ở `cd …`/`git -C …`, không phải gốc phiên — hook chạy cổng của repo đó.
         def cdir(cmd: str, cwd: str | None = "/w/a") -> object:

@@ -617,6 +617,58 @@ class StageLedgerReview405Test(unittest.TestCase):
                 self.assertEqual(decide(cmd)["decision"], "", decide(cmd))
 
 
+class StageLedgerFindFilterTest(unittest.TestCase):
+    """AUD-SEC-384 (review #420): nguồn ống `find` có token `docs` nhưng bộ lọc tên/đường dẫn không thể khớp sổ giai đoạn
+    (`-name '*.md'`, `-prune` nhánh docs rồi `-print` nhánh lọc) → không chạm sổ, cho chạy. Giữ chặn khi mẫu có thể khớp
+    sổ, không lọc, có `-o` nhánh không lọc, phủ định/ngoặc, hành động in chữ tuỳ ý (`-printf`, `-exec`), mẫu có `\\`.
+    `git ls-files docs`/`git grep -l … -- docs` thật sự có thể liệt kê sổ → giữ chặn; lọc pathspec theo đuôi thì chạy."""
+
+    DENY = (
+        "find docs | xargs sed -i s/a/b/",
+        "find docs -name '*.json' | xargs sed -i s/a/b/",
+        "find docs -iname 'stage.JSON' | xargs sed -i s/a/b/",
+        "find docs -name '*.md' -o -name '*.json' | xargs sed -i s/a/b/",
+        "find docs -name '*.md' -o -type f | xargs sed -i s/a/b/",
+        "find docs ! -name '*.md' | xargs sed -i s/a/b/",
+        "find docs -not -name '*.md' | xargs sed -i s/a/b/",
+        "find docs -name '*.md' -printf 'docs/autopilot/STAGE.json\\n' | xargs sed -i s/a/b/",
+        "find docs -name '*.md' -fprint /dev/stdout | xargs sed -i s/a/b/",
+        "find docs -name 'STAGE\\.json' | xargs sed -i s/a/b/",
+        "find docs -path '*E.json' | xargs sed -i s/a/b/",
+        "find docs -path 'docs/a*n' | xargs sed -i s/a/b/",
+        "find docs -path 'docs/autopilot/STAGE.jso?' | xargs sed -i s/a/b/",
+        "find docs -regex '.*md' | xargs sed -i s/a/b/",
+        "find . -path ./src -prune -o -print -path docs | xargs sed -i s/a/b/",
+        "find -L docs | xargs sed -i s/a/b/",
+        "find docs -name '*.md' -name | xargs sed -i s/a/b/",
+        "git ls-files docs | xargs sed -i s/a/b/",
+        "git grep -l foo -- docs framework | xargs perl -pi -e s/a/b/",
+    )
+    ALLOW = (
+        "find docs -name '*.md' | xargs sed -i s/a/b/",
+        "find docs -type f -name '*.md' -print0 | xargs -0 sed -i s/a/b/",
+        "find docs -iname '*.MD' | xargs sed -i s/a/b/",
+        "find docs -name '*.md' -o -name '*.yaml' | xargs sed -i s/a/b/",
+        "find . -path ./docs -prune -o -name '*.py' -print | xargs sed -i s/a/b/",
+        "find . -path ./docs -prune -o -name '*.py' | xargs sed -i s/a/b/",
+        "find -L docs -maxdepth 2 -path '*/adr/*.md' | xargs sed -i s/a/b/",
+        "find docs -wholename 'docs/adr/0001.md' | xargs sed -i s/a/b/",
+        "git ls-files 'docs/*.md' | xargs sed -i s/a/b/",
+        "git grep -l foo -- 'docs/*.md' 'framework/*.md' | xargs perl -pi -e s/a/b/",
+    )
+
+    def test_denied(self):
+        for cmd in self.DENY:
+            with self.subTest(cmd=cmd):
+                d = decide(cmd)
+                self.assertEqual((d["decision"], d.get("code")), ("deny", "EVIDENCE_HANDWRITE"), d)
+
+    def test_allowed(self):
+        for cmd in self.ALLOW:
+            with self.subTest(cmd=cmd):
+                self.assertEqual(decide(cmd)["decision"], "", decide(cmd))
+
+
 class ShellSourceReview405Test(unittest.TestCase):
     """AUD-SEC-341 (nợ review #405): `eval` trước `.`/`source`/shell đọc `<(…)`, shell/`source` đọc `/dev/stdin` mà stdin
     là `<(…)`, ống vào shell họ khác (hush, yash, posh, oksh, loksh, csh, tcsh, `toybox sh`) — chặn BUDGET như
@@ -947,6 +999,38 @@ class ReasonCodeLockTest(unittest.TestCase):
         markers = {m for m, _ in guard.REASON_CODES}
         for code, const in self.MERGE_ONLY.items():
             self.assertIn(getattr(guard, const), markers, code)
+
+    # Mã có nhiều dấu (review #407 R1: ≥ 3 dấu WIPE_OUTSIDE chưa khoá): mỗi DẤU một lệnh thật sinh đúng dấu đó.
+    MARKER_EXAMPLES = (
+        ("WIPE_OUTSIDE", "rm -r ."),  # xoá đệ quy gốc dự án
+        ("WIPE_OUTSIDE", "find . -delete"),  # bắt đầu từ gốc dự án bị chặn
+        ("WIPE_OUTSIDE", "ls | xargs rm -rf"),  # rm -rf không có đích
+        ("WIPE_OUTSIDE", "find ~/x -delete"),  # find xoá file ngoài thư mục dự án
+        ("WIPE_OUTSIDE", 'docker run -v "$PWD":/app img rm -rf /app'),  # xoá thư mục gắn từ máy
+        ("HOOK_BYPASS", "git config core.hooksPath /dev/null"),  # bỏ qua hook của dự án
+        ("UNRESOLVED_TARGET", "git update-ref --stdin < refs.txt"),
+        ("UNRESOLVED_TARGET", "git -c alias.p=$X p"),
+        ("UNRESOLVED_TARGET", "git --config-e=x push origin feat"),
+        ("UNRESOLVED_TARGET", "parallel --arg-s ,, echo ,, a b"),
+        ("UNRESOLVED_TARGET", "ls | xargs chmod 000"),
+        ("BUDGET", "echo " + "a" * guard.CMD_MAX_CHARS),  # vượt ngân sách quét (mẫu ở EXAMPLES là lớp tập con)
+    )
+
+    def test_every_marker_blocks_a_real_command(self):
+        """AUD-SEC-329 (nợ review #407): khoá theo DẤU, không chỉ theo mã — đổi câu chữ một dấu của mã nhiều dấu (vd
+        "xoá thư mục gắn từ máy") mà ca khác cùng mã vẫn xanh thì đỏ ở đây. `BASH_ENV` (dấu OPAQUE_EXEC) bị lớp tập con
+        ADR-0063 chặn BUDGET trước ở mọi lệnh Bash → khoá ở nơi sinh dấu."""
+        covered: set[str] = set()
+        for code, cmd in (*self.EXAMPLES.items(), *self.MARKER_EXAMPLES):
+            with self.subTest(code=code, cmd=cmd):
+                d = decide(cmd)
+                self.assertEqual((d["decision"], d.get("code")), ("deny", code), d)
+                covered |= {m for m, c in guard.REASON_CODES if c == code and m in str(d["reason"])}
+        merge_only = {getattr(guard, const) for const in self.MERGE_ONLY.values()}
+        missing = {m for m, _ in guard.REASON_CODES} - covered - merge_only - {guard.BASH_ENV_MARK}
+        self.assertEqual(missing, set())
+        why = guard._bash_env_asks(guard.tokenize("BASH_ENV=f make"))[0]
+        self.assertEqual(guard.decide({"decision": "ask", "reason": why}).code, "OPAQUE_EXEC")
 
     def core(self, payload: object, env: dict | None = None) -> tuple[int, dict]:
         out = io.StringIO()
