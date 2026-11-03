@@ -2929,6 +2929,172 @@ class GuardReview431Test(unittest.TestCase):
                 self.assertNotEqual(decide(cmd).get("code"), "HOOK_BYPASS", decide(cmd))
 
 
+class GuardDebt431Test(unittest.TestCase):
+    """Nợ review #431 + lỗ có từ trước (T-3665): AUD-SEC-426…430. Mọi ca đỏ ở dc116939."""
+
+    assert_budget = GuardStrictDebtTest.assert_budget
+    assert_pass = GuardReview429Test.assert_pass
+    G = "printf '[core]\\n\\thooksPath = /dev/null\\n'"
+
+    def assert_hook_bypass(self, cmds):
+        for cmd in cmds:
+            with self.subTest(cmd=cmd):
+                d = decide(cmd)
+                self.assertEqual((d["decision"], d.get("code")), ("deny", "HOOK_BYPASS"), d["reason"][:200])
+
+    def test_aud_sec_426_dev_null_config(self):
+        """AUD-SEC-426 🟠: `/dev/null` (thiết bị) không vào tập tệp cấu hình git; `> /dev/null` không là ghi — như base."""
+        self.assert_pass(
+            (
+                "GIT_CONFIG_GLOBAL=/dev/null git status > /dev/null 2>&1",
+                "GIT_CONFIG_SYSTEM=/dev/null git status",
+                "env GIT_CONFIG_GLOBAL=/dev/null git status >/dev/null",
+                "GIT_CONFIG_GLOBAL=/dev/null git -C . log -1 --format=%H 2>/dev/null",
+            )
+        )
+        self.assert_hook_bypass(("GIT_CONFIG_GLOBAL=/tmp/gc git diff; printf x > /tmp/gc",))
+
+    def test_aud_sec_427_go_double_dash_C(self):
+        """AUD-SEC-427 🟠: go nhận `--C DIR`/`--C=DIR`/`-C=DIR` trước lệnh con."""
+        self.assert_budget(
+            (
+                "echo x > a_test.go; go --C . test ./...",
+                "echo x > a_test.go; go --C=. test",
+                "echo x > a_test.go; go -C=. test",
+            ),
+            (),
+            "AUD-SEC-416",
+            guard._implicit_load_why,
+        )
+
+    def test_aud_sec_428_project_gitconfig_unittest_flags_prefix(self):
+        """AUD-SEC-428 🟢: (b) giá trị cờ của `unittest` không phải tên test; (c) `cargo bench`, `$(prefix)/etc/gitconfig`
+        (git-config(1) FILES). (a) bị review #432 thu hồi: tệp `.gitconfig`/`git/config` TRONG cây dự án vẫn chặn như base
+        (`HOME=$PWD`, `~+`, symlink tới HOME biến chúng thành cấu hình toàn cục) — kỳ vọng đổi từ cho qua về chặn."""
+        self.assert_hook_bypass(
+            (
+                "printf x > dotfiles/.gitconfig",
+                "cp x.cfg tests/fixtures/git/config",
+                f"{self.G} > fh/.gitconfig; HOME=fh git diff",
+                f"mkdir -p fh; {self.G} > fh/.gitconfig; export HOME=fh; git diff",
+                f"{self.G} > xdg/git/config; XDG_CONFIG_HOME=xdg git diff",
+                f"mkdir -p x/git; {self.G} > x/git/config; export XDG_CONFIG_HOME=$PWD/x; git log -p -1",
+                f"{self.G} > d/.gitconfig; HOME=$D git diff",
+                f"{self.G} >> /usr/local/etc/gitconfig",
+                f"{self.G} >> /opt/homebrew/etc/gitconfig",
+                f"{self.G} >> ~/.gitconfig",
+            )
+        )
+        self.assert_budget(
+            (
+                "echo x > test_a.py; python3 -m unittest -k foo",
+                "echo x > test_a.py; python3 -m unittest --durations 3",
+                "echo x > test_a.py; python3 -m unittest discover -p 'test_*.py'",
+                "echo x > benches/b.rs; cargo bench",
+            ),
+            ("echo x > notes.md; python3 -m unittest -k foo tests.test_a",),
+            "AUD-SEC-416",
+            guard._implicit_load_why,
+        )
+        self.assertTrue(guard._global_git_config(str(ROOT / "dotfiles/.gitconfig")))
+        self.assertTrue(guard._global_git_config("/root/.gitconfig"))
+
+    def test_aud_sec_429_worktree_config_and_interp(self):
+        """AUD-SEC-429 🔴 (có từ trước): `config.worktree` là cấu hình git của repo; trình thông dịch ghi gitconfig toàn
+        cục bằng chữ cứng → như `.git/config`."""
+        self.assert_hook_bypass(
+            (
+                f"git config extensions.worktreeConfig true; {self.G} >> .git/config.worktree",
+                f"{self.G} >> .git/config.worktree",
+                f"{self.G} >> .git/worktrees/w/config.worktree",
+                "python3 -c \"open('/root/.gitconfig','a').write('[core]\\n\\thooksPath = /dev/null\\n')\"",
+                "node -e \"require('fs').appendFileSync('/root/.gitconfig', 'x')\"",
+                "python3 -c \"open('/etc/gitconfig','a').write('x')\"",
+            )
+        )
+        self.assertEqual(guard.edit_decision(str(ROOT / ".git/config.worktree"), str(ROOT))[0], "deny")
+
+    def test_aud_sec_430_exec_login_and_export_git_config(self):
+        """AUD-SEC-430 🟠 (có từ trước): `exec -l`/`exec -a -NAME` là login shell; `export GIT_CONFIG_KEY_0=core.hooksPath`
+        rồi `git commit` cùng luật với gán đầu lệnh (câu hỏi bỏ hook)."""
+        self.assert_budget(
+            (
+                "echo x >> ~/.bash_profile; exec -l bash -c true",
+                "echo x >> ~/.profile; exec -a -bash bash -c true",
+                "echo x >> ~/.profile; exec -cl bash -c true",
+            ),
+            ("echo x >> ~/.profile; exec -a mybash bash -c true",),
+            "AUD-SEC-416",
+            guard._implicit_load_why,
+        )
+        self.assertFalse(guard._exec_login(["exec", "-c", "bash"]))
+        self.assertFalse(guard._exec_login(["exec", "--", "bash"]))
+        self.assertFalse(guard._exec_login(["bash", "-l"]))
+        self.assertTrue(guard._exec_login(["X=1", "exec", "-c", "-a", "-sh", "sh"]))
+        prefix = (
+            "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0=/dev/null git commit -m 'docs: x'"
+        )
+        export = "export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0=/dev/null; git commit -m 'docs: x'"
+        for cmd in (prefix, export):
+            with self.subTest(cmd=cmd), mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(ROOT)}):
+                d = guard.bash_decision(cmd, str(ROOT))
+                self.assertEqual(d["decision"], "ask", d)
+                self.assertIn("core.hooksPath", d["reason"])
+
+
+class GuardReview432Test(unittest.TestCase):
+    """Review #432 (lượt sửa duy nhất): 🔴1/🔴2 — miễn 428(a) (tệp cấu hình git TRONG cây dự án) mở lại đường tắt hook
+    (`cd sub && > .gitconfig && HOME=$PWD git diff`, `~+`, symlink tới HOME) → thu hồi, về hành vi base 928af2ce; 🔴3 —
+    miễn 426 chỉ đúng `/dev/null` (`/dev/fd/3` là tệp thật). Mọi ca đỏ ở 191f161c."""
+
+    E = "printf '[diff]\\n\\texternal = touch /tmp/pwn\\n'"
+    assert_hook_bypass = GuardDebt431Test.assert_hook_bypass
+
+    def test_r432_1_in_tree_gitconfig_bash(self):
+        """🔴1: base chặn thì head còn chặn — ghi `.gitconfig`/`git/config` trong cây dự án (Bash)."""
+        e = self.E
+        self.assert_hook_bypass(
+            (
+                f"cd sub && {e} > .gitconfig && HOME=$PWD git diff",
+                f"cd sub && {e} > .gitconfig && HOME=~+ git diff",
+                f'cd sub && {e} > .gitconfig && HOME="$(pwd)" git diff',
+                f"cd sub && {e} > .gitconfig; export HOME=$PWD; git diff",
+                f"pushd sub && {e} > .gitconfig && HOME=$PWD git diff",
+                f"cd sub && mkdir -p git && {e} > git/config && XDG_CONFIG_HOME=$PWD git diff",
+                "cd sub && printf '[diff \"t\"]\\n\\ttextconv = touch /tmp/pwn;\\n' > .gitconfig && HOME=$PWD git log -p -1",
+                "cd sub && printf '[core]\\n\\tfsmonitor = touch /tmp/pwn\\n' > .gitconfig && HOME=$PWD git status",
+                f"{e} > .gitconfig && env -C sub HOME=.. git diff",
+                "printf '[core]\\n\\thooksPath = /tmp/h\\n' > .gitconfig",
+                f"{e} > dotfiles/.gitconfig && git diff",
+                "printf '[core]\\n\\thooksPath = /dev/null\\n' >> hm/.gitconfig",
+                "printf '[core]\\n\\thooksPath = /dev/null\\n' >> hm/.config/git/config",
+                "python3 -c \"open('dotfiles/.gitconfig','a').write('x')\"",
+            )
+        )
+        self.assertEqual(
+            decide(f"{e} > .gitconfig && HOME=`pwd` git diff")["decision"], "deny"
+        )  # backtick: BUDGET trước
+        with mock.patch.dict(os.environ, {"HOME": str(ROOT)}):  # gốc dự án = HOME
+            self.assert_hook_bypass(("printf '[core]\\n\\thooksPath = /dev/null\\n' >> .gitconfig",))
+
+    def test_r432_2_in_tree_gitconfig_edit(self):
+        """🔴2: Edit/Write `<root>/.gitconfig`, `git/config`, `.config/git/config`, `hm/.gitconfig` → deny như base."""
+        for rel in (".gitconfig", "git/config", ".config/git/config", "hm/.gitconfig", "dotfiles/.gitconfig"):
+            with self.subTest(rel=rel):
+                self.assertEqual(guard.edit_decision(str(ROOT / rel), str(ROOT))[0], "deny")
+
+    def test_r432_3_dev_null_only(self):
+        """🔴3: chỉ đúng `/dev/null` được miễn — `/dev/fd/3` mang nội dung thật."""
+        self.assert_hook_bypass((f"exec 3<>/tmp/gcf; {self.E} >/dev/fd/3; GIT_CONFIG_GLOBAL=/dev/fd/3 git diff",))
+        for cmd in (
+            "GIT_CONFIG_GLOBAL=/dev/null git status > /dev/null 2>&1",
+            "GIT_CONFIG_SYSTEM=/dev/null git status",
+            "env GIT_CONFIG_GLOBAL=/dev/null git status >/dev/null",
+        ):
+            with self.subTest(cmd=cmd):
+                self.assertEqual(decide(cmd)["decision"], "", decide(cmd))
+
+
 class LedgerMatchesGuardTest(unittest.TestCase):
     """Review #428 🔴 (AUD-DOC-243): sổ không được ghi `chấp nhận`/`đã sửa` cho phát hiện mà guard còn cho qua DẠNG
     NGUYÊN VĂN của nó — `audit check --strict` xanh giả. Ca nguyên văn còn lọt thì hàng sổ phải `mở`; khi T-3663 sửa
