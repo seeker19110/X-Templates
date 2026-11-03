@@ -2135,6 +2135,36 @@ class GuardWrittenFileReuseTest(unittest.TestCase):
         )
         self.assert_budget(deny, allow, "AUD-SEC-406", guard._reuse_why)
 
+    def test_aud_sec_406_d328_harmless_readers(self):
+        """D-328: danh sách trắng thêm lệnh không chạy mã theo tên tệp (`mkdir echo printf touch chmod md5sum sha*sum`)
+        và `sed -n` chỉ in; tệp không đuôi script. `chmod +x F` rồi chạy F vẫn bị bắt ở lệnh chạy."""
+        allow = (
+            "pytest > out.txt; mkdir -p out.txt.d",
+            "pytest > out.txt; echo out.txt",
+            "pytest > out.txt; printf '%s\\n' out.txt",
+            "pytest > out.txt; touch out.txt",
+            "pytest > out.txt; chmod 644 out.txt",
+            "pytest > out.txt; md5sum out.txt; sha1sum out.txt; sha256sum out.txt; sha512sum out.txt",
+            "sed -i 's/a/b/' f.md && sed -n '4,6p' f.md",
+            "pytest > out.txt; sed -n -e '/FAIL/p' out.txt; sed --quiet '$p' out.txt; gsed -n 1p out.txt",
+        )
+        deny = (
+            "printf x > s; chmod +x s; ./s",
+            "printf x > s.sh; chmod +x s.sh",  # đuôi script: lệnh chỉ đọc cũng tính
+            "pytest > out.txt; printf -v v out.txt",
+            "pytest > out.txt; sed -n e out.txt",
+            "pytest > out.txt; sed -n 's/x/y/e' out.txt",
+            "pytest > out.txt; sed -n 'w o2' out.txt",
+            "pytest > out.txt; sed -n '1r o2' out.txt",
+            "pytest > out.txt; sed -n -f prog.sed out.txt",
+            "pytest > out.txt; sed -ni 4p out.txt",
+            "pytest > out.txt; sed --in-place -n 4p out.txt",
+            "pytest > out.txt; sed 4p out.txt",  # không `-n`
+            "pytest > out.txt; echo out.txt | bash",
+        )
+        self.assert_budget(deny, allow, "AUD-SEC-406", guard._reuse_why)
+        self.assertFalse(guard._reuse_sed_print(["-n"]))  # không có chương trình
+
     def test_aud_sec_406_helpers(self):
         """Biên của bộ tách lệnh/đích ghi của ADR-0066 (độ phủ nhánh)."""
         self.assertEqual(guard._reuse_cmds("echo 'x", 0), [])

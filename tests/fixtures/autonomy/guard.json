@@ -14014,17 +14014,14 @@
   "id": "guard-sec270-sed-benign",
   "origin": "audit",
   "refs": [
-   "AUD-SEC-270",
-   "AUD-SEC-406"
+   "AUD-SEC-270"
   ],
   "input": {
    "command": "sed -i 's/(e.g.)/vi du/' f && sed -n '/error/p' f"
   },
   "expect": {
-   "allowed": false,
-   "code": "BUDGET"
-  },
-  "note": "ADR-0066 Hệ quả: lệnh lạ (script có sẵn, `sed`) đọc tệp vừa ghi — chặn có chủ đích (D-327)"
+   "allowed": true
+  }
  },
  {
   "id": "guard-sec271-ps4-append",
@@ -19844,7 +19841,7 @@
    "allowed": false,
    "code": "BUDGET"
   },
-  "note": "ADR-0066 Hệ quả: lệnh lạ (script có sẵn, `sed`) đọc tệp vừa ghi — chặn có chủ đích (D-327)"
+  "note": "ADR-0066 Hệ quả: lệnh lạ (script có sẵn) đọc tệp vừa ghi — chặn có chủ đích (D-327)"
  },
  {
   "id": "r426-407-dash",
@@ -19874,7 +19871,7 @@
    "allowed": false,
    "code": "BUDGET"
   },
-  "note": "ADR-0066 Hệ quả: lệnh lạ (script có sẵn, `sed`) đọc tệp vừa ghi — chặn có chủ đích (D-327)"
+  "note": "ADR-0066 Hệ quả: lệnh lạ (script có sẵn) đọc tệp vừa ghi — chặn có chủ đích (D-327)"
  },
  {
   "id": "r426-408-agent-force",
@@ -20123,6 +20120,63 @@
    "allowed": false
   },
   "note": "AUD-SEC-410: chữ `find -exec` trong đối số có nháy của lệnh khác không phải lệnh find (D-153)"
+ },
+ {
+  "id": "adr66-d328-ok-harmless",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-406"
+  ],
+  "input": {
+   "command": "pytest > out.txt; mkdir -p out.d; echo out.txt; printf '%s\\n' out.txt; touch out.txt; chmod 644 out.txt; sha256sum out.txt; md5sum out.txt"
+  },
+  "expect": {
+   "allowed": true
+  },
+  "note": "D-328 (ADR-0066): lệnh không chạy mã theo tên tệp / `sed -n` chỉ in nhắc tệp vừa ghi — cho qua"
+ },
+ {
+  "id": "adr66-d328-ok-sed-n",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-406"
+  ],
+  "input": {
+   "command": "sed -i 's/a/b/' f.md && sed -n '4,6p' f.md"
+  },
+  "expect": {
+   "allowed": true
+  },
+  "note": "D-328 (ADR-0066): lệnh không chạy mã theo tên tệp / `sed -n` chỉ in nhắc tệp vừa ghi — cho qua"
+ },
+ {
+  "id": "adr66-d328-chmod-run",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-406"
+  ],
+  "input": {
+   "command": "printf 'git push --force origin main\\n' > s; chmod +x s; ./s"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "D-328 (ADR-0066): `chmod +x` không là chạy, nhưng lệnh chạy tệp sau đó vẫn bị bắt"
+ },
+ {
+  "id": "adr66-d328-sed-e",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-406"
+  ],
+  "input": {
+   "command": "printf 'git push --force origin main\\n' > c.txt; sed -n e c.txt"
+  },
+  "expect": {
+   "allowed": false
+  },
+  "note": "D-328: `sed` có lệnh `e` không phải chỉ in"
  }
  ]
 }

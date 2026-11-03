@@ -61,9 +61,12 @@ thư mục chung, thân quét đúng thư mục). Tên tệp có mở rộng (`$
   (không exec/import động/ghi) và không nhắc tên tệp (`python3 -c '…json.load(open(sys.argv[1]))' p.json`); (c) tệp
   nội dung của `gh pr|issue … -F`/`--body-file`/`< F` (gh gửi chữ, không chạy; nội dung do luật đăng bài D-270 xét).
   Lệnh chỉ đọc mà stdout đổ vào lệnh lạ (`cat f | python3 x`) hay nằm trong `$(…)` vẫn tính.
+- D-328 (sau đo lần đầu: 340 qua→chặn): danh sách trắng thêm lệnh không chạy mã theo tên tệp — `mkdir echo touch
+  chmod md5sum sha*sum`, `printf` không `-v`, `sed -n` chỉ in (không `-i`/`-f`, chương trình không `w`/`W`/`e`/`r`/`R`);
+  `chmod +x F` rồi chạy F vẫn bị bắt ở lệnh chạy. Không miễn tệp dữ liệu vào script có sẵn/`-m` (phương án C bị loại).
 - Chặn oan có chủ đích (đổi kỳ vọng test/bench): tệp vừa ghi đi vào script có sẵn hay `-m` (`python3 sum.py < in.txt`,
-  `bash run.sh < in.txt`, `python3 -m json.tool out.json` — gỡ một phần AUD-SEC-407), `sed -n` đọc tệp vừa `sed -i`.
-  Đo 5 237 lệnh Bash thật (2026-11-03): so head b18ca759 — 340 qua→chặn (210 tệp dữ liệu vào lệnh lạ, 130 tệp script
-  sửa bằng `python3 - <<EOF` rồi đọc/chạy lại), 22 chặn→qua (20 dạng `cd` trước D-324, 2 AUD-SEC-410); so base
-  85662a7f — 638 qua→chặn (gồm 273 của AUD-SEC-400), 2 chặn→qua.
+  `bash run.sh < in.txt`, `python3 -m json.tool out.json` — gỡ một phần AUD-SEC-407).
+  Đo 5 237 lệnh Bash thật (2026-11-03, sau D-328): so head b18ca759 — 318 qua→chặn (188 tệp dữ liệu vào lệnh lạ, 130
+  tệp script sửa bằng `python3 - <<EOF` rồi đọc/chạy lại), 22 chặn→qua (20 dạng `cd` trước D-324, 2 AUD-SEC-410); so
+  base 85662a7f — 616 qua→chặn (gồm 273 của AUD-SEC-400), 2 chặn→qua.
 - Đường lùi: revert PR triển khai; AUD-SEC-406 về `mở`.

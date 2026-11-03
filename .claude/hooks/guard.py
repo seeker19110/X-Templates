@@ -2076,7 +2076,12 @@ REUSE_WHY = (
 )
 REUSE_SCRIPT_RE = re.compile(r".*\.(?:sh|bash|zsh|py|js|mjs|cjs|ts|rb|pl|php|lua|awk|sed|mk)|(?:GNU)?[Mm]akefile", re.I)
 # Lệnh chỉ đọc không chạy mã: nhắc tên tệp KHÔNG đuôi script ở đây không tính (trừ cờ chạy chương trình ngoài).
-REUSE_READERS = frozenset("cat head tail grep rg wc diff cmp sort cut ls stat file jq less".split())
+REUSE_READERS = frozenset(
+    "cat head tail grep rg wc diff cmp sort cut ls stat file jq less"
+    # D-328: lệnh không chạy mã theo tên tệp (in tên, tạo thư mục/tệp rỗng, đổi quyền, băm) — `chmod +x F` rồi chạy F
+    # vẫn bị bắt ở lệnh chạy
+    " mkdir echo touch chmod md5sum sha1sum sha224sum sha256sum sha384sum sha512sum".split()
+)
 REUSE_READER_EXEC = ("--compress-program", "--pre")  # `sort`/`rg` chạy chương trình theo giá trị cờ
 REUSE_GIT_READS = (["add"], ["diff"], ["show"], ["apply", "--check"])
 # Lệnh mà `-o` không phải tệp ra (tên tuỳ chọn, cờ bật/tắt): giá trị sau nó không là đích ghi
@@ -2247,7 +2252,27 @@ def _reuse_reader(argv: List[str]) -> bool:
     head, args = posixpath.basename(argv[0]), argv[1:]
     if head == "git":
         return any(args[: len(s)] == s for s in REUSE_GIT_READS)
+    if head == "printf":
+        return not any(a.startswith("-v") for a in args)  # `printf -v x`: gán biến
+    if head in SED_NAMES:
+        return _reuse_sed_print(args)
     return not _uniq_output(args) if head == "uniq" else head in REUSE_READERS
+
+
+def _reuse_sed_print(args: List[str]) -> bool:
+    """D-328: `sed -n` chỉ in — không `-i`/`-f`, chương trình không có lệnh `w`/`W`/`e`/`r`/`R` (bộ đọc `_sed_has_write`)
+    và không chạy pattern space (`_sed_runs_input`, đọc chặt mọi dạng cờ)."""
+    opts = [a for a in args if a[:1] == "-" and not a.startswith("--")]
+    quiet = any("n" in a[1:] for a in opts) or any(a in ("--quiet", "--silent") for a in args)
+    edits = any("i" in a[1:] or "f" in a[1:] for a in opts) or any(a.startswith(("--in", "--fi")) for a in args)
+    scripts = _sed_scripts(args)
+    return (
+        quiet
+        and not edits
+        and bool(scripts)
+        and not _sed_runs_input(args)
+        and not any(_sed_has_write(s, "wWerR") for s in scripts)
+    )
 
 
 def _reuse_data_arg(c: _ReuseCmd, f: str, pat: "re.Pattern[str]") -> bool:
@@ -7142,12 +7167,13 @@ SED_LABEL_CMDS = frozenset("btT:v")  # đối số tới `;`/xuống dòng (GNU 
 SED_FLAG_CHARS = frozenset("gpiImM0123456789 \t")  # cờ của `s` không ghi/chạy gì
 
 
-def _sed_has_write(script: str) -> bool:
-    """Chương trình có lệnh ghi tệp (`w`/`W`, cờ `w` của `s`) hay chạy shell (`e`, cờ `e`); đọc không chắc → True."""
+def _sed_has_write(script: str, bad: str = "wWe") -> bool:
+    """Chương trình có lệnh ghi tệp (`w`/`W`, cờ `w` của `s`) hay chạy shell (`e`, cờ `e`); đọc không chắc → True.
+    `bad`: chữ lệnh coi là có hại (ADR-0066 thêm `r`/`R` — đọc tệp khác)."""
     i = 0
     while i < len(script):
         i = _sed_skip_address(script, i)
-        if i < 0 or (i < len(script) and script[i] in "wWe"):
+        if i < 0 or (i < len(script) and script[i] in bad):
             return True
         i = _sed_command_end(script, i) if i < len(script) else i
         if i < 0:
