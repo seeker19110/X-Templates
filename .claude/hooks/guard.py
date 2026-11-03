@@ -340,6 +340,25 @@ def _bypass_edit(path: str, tool_input: Optional[Dict[str, object]]) -> str:
 # Git hook và cấu hình git của repo: không nằm trong commit (không có dấu vết PR) — sửa = tắt/bỏ qua hook của dự án.
 GIT_HOOK_PATTERNS = (".git/hooks", ".git/hooks/*", ".git/config")
 GIT_HOOK_WHY = "ghi {} — git hook/cấu hình git không vào commit, sửa là bỏ qua hook của dự án; người làm tay"
+# AUD-SEC-424: cấu hình git toàn cục/hệ thống mang cùng khoá chạy lệnh/hooksPath như `.git/config` (`diff.external`,
+# `core.hooksPath`, `alias.x = !…`, `core.fsmonitor`) — git đọc `$HOME/.gitconfig`, `$XDG_CONFIG_HOME/git/config`
+# (mặc định `~/.config/git/config`), `/etc/gitconfig` (git-config(1) FILES). Ghi thô (chuyển hướng/trình ghi) vào MỌI tệp
+# tên `.gitconfig` hay đuôi `git/config` (cả HOME giả `HOME=/tmp/h` có `/tmp/h/.gitconfig`) → như ghi `.git/config`.
+GLOBAL_GIT_CONFIG_RE = re.compile(r"(?:^|/)(?:\.gitconfig|git/config)$|^/etc/gitconfig$")
+GIT_CONFIG_ENV_RE = re.compile(r"(?<![\w$])GIT_CONFIG_(?:GLOBAL|SYSTEM)=(\S+)")  # tệp cấu hình chỉ định bằng biến
+
+
+def _global_git_config(path: str) -> bool:
+    return bool(path) and bool(GLOBAL_GIT_CONFIG_RE.search(_norm_path(path)))
+
+
+def _git_config_env_asks(tokens: List[str], commands: List[Tuple[List[str], Optional[str]]]) -> List[str]:
+    """AUD-SEC-424: lệnh đặt `GIT_CONFIG_GLOBAL=F`/`GIT_CONFIG_SYSTEM=F` và ghi F trong cùng lệnh Bash."""
+    files = {_norm_path(_dequote(m[1])) for t in tokens for m in [GIT_CONFIG_ENV_RE.match(t)] if m}
+    if not files:
+        return []
+    hits = [w for argv, _ in commands for w in write_targets(normalize(argv), argv) if w and _norm_path(w) in files]
+    return [GIT_HOOK_WHY.format(w) for w in hits]
 
 
 def edit_decision(path: str, root: str, tool_input: Optional[Dict[str, object]] = None) -> Tuple[str, str]:
@@ -348,7 +367,7 @@ def edit_decision(path: str, root: str, tool_input: Optional[Dict[str, object]] 
     bypass = _bypass_edit(path, tool_input)
     if bypass:
         return "deny", f"Không ghi công tắc tắt hook (`{bypass}`) vào {rel} — hàng rào của khung (ADR-0018)."
-    if _match_any(rel, GIT_HOOK_PATTERNS):
+    if _match_any(rel, GIT_HOOK_PATTERNS) or _global_git_config(path):
         return "deny", GIT_HOOK_WHY.format(rel) + "."
     if kind == "capability":
         return "ask", "Sửa cấu hình " + CAPABILITY_WHY.format(rel) + "."
@@ -2090,8 +2109,9 @@ REUSE_GIT_READS = (["add"], ["diff"], ["show"], ["log"], ["apply", "--check"])
 REUSE_O_NOT_FILE = (
     frozenset("set shopt grep egrep fgrep zgrep rg ls ps pgrep pkill ssh scp mount unzip".split()) | SHELLS
 )
-# gán biến đổi chương trình lệnh đọc chạy (AUD-SEC-419: cả `PAGER`/`MANPAGER` — `git log`/`git show` mở pager)
-REUSE_ENV_RE = re.compile(r"(?:PATH|GIT_\w*|LESS\w*|\w*PAGER)\+?=.*", re.S)
+# gán biến đổi chương trình lệnh đọc chạy. AUD-SEC-420: bỏ `*PAGER` (#430) — git/gh chỉ mở pager khi stdout là TTY,
+# lệnh Bash của agent không có TTY; `GIT_PAGER` vẫn thuộc `GIT_*`
+REUSE_ENV_RE = re.compile(r"(?:PATH|GIT_\w*|LESS\w*)\+?=.*", re.S)
 REUSE_HOME_RE = re.compile(r"~|\$\{?(?:HOME|PWD)\b")  # tệp dưới home/thư mục hiện tại viết theo biến
 REUSE_DELETERS = frozenset("rm unlink shred rmdir find".split())  # đích của `write_targets` là tệp bị xoá
 REUSE_OUT_OPS = (">", ">>", ">|", "&>", "&>>")  # đích chuyển hướng ghi ở lệnh khác: chỉ ghi, không đọc/chạy
@@ -2560,19 +2580,30 @@ IMPLICIT_LOADS: Dict[str, Tuple[str, ...]] = {
     "cmake": ("CMakeLists.txt",),
     "go": ("*.go",),
     "deno": ("deno.json", "deno.jsonc"),
+    # AUD-SEC-422: đủ 8 tên mặc định của go-task (taskfile.go `DefaultTaskfiles`, đọc 2026-11-03 qua review #430)
     "task": (
         "Taskfile.yml",
-        "Taskfile.yaml",
         "taskfile.yml",
+        "Taskfile.yaml",
         "taskfile.yaml",
         "Taskfile.dist.yml",
+        "taskfile.dist.yml",
         "Taskfile.dist.yaml",
+        "taskfile.dist.yaml",
     ),
+    # AUD-SEC-423 (phần chắc): tệp test tự dò — pytest `python_files` mặc định `test_*.py`/`*_test.py`; unittest
+    # discover mặc định `test*.py` (docs.python.org unittest "Test Discovery"); Cargo biên dịch và chạy gói từ `src/`,
+    # `tests/`… (`cargo run|test`)
+    "unittest": ("test*.py",),
+    "cargo-src": ("*.rs",),
 }
+IMPLICIT_LOADS["pytest"] += ("test_*.py", "*_test.py")
 GO_RUN_SUBCMDS = frozenset({"test", "generate", "run"})  # lệnh con của `go` chạy mã của gói
+PY_TOOL_MODULES = {"pytest": "pytest", "pip": "pip", "nox": "nox", "invoke": "invoke", "tox": "tox"}  # `python3 -m X`
 IMPLICIT_TOOL_HEADS = {
     **dict.fromkeys(("invoke", "inv"), "invoke"),
     **{k: k for k in ("bun", "nox", "composer", "cmake", "task")},
+    **{"go-task": "task", "bunx": "bun", "composer.phar": "composer"},  # AUD-SEC-422/423
     **dict.fromkeys(("make", "gmake"), "make"),
     **dict.fromkeys(("npm", "npx", "yarn", "yarnpkg", "pnpm", "pnpx", "corepack"), "npm"),  # `corepack pnpm test`
     **dict.fromkeys(("pytest", "py.test"), "pytest"),
@@ -2610,29 +2641,88 @@ def _implicit_tools(c: "_ReuseCmd") -> Set[str]:
     m = INTERP_RE.fullmatch(p[0]) if p else None
     mods = _run_modules(n, p)  # review #429: cả `coverage run -m pytest`, `python3 -m coverage run -m pytest`
     out |= {"python"} if m and INTERP_FAMILY.get(m[1], m[1]) == "python" or n[:1] == ["coverage"] else set()
-    out |= ({"pytest"} if "pytest" in mods else set()) | ({"pip"} if "pip" in mods else set())
+    out |= {PY_TOOL_MODULES[x] for x in mods if x in PY_TOOL_MODULES}  # #430: cả `python3 -m nox|invoke`
+    if "unittest" in mods and _unittest_discovers(p):
+        out.add("unittest")
     if n and n[0] in SHELLS:
         out |= {"zsh"} if n[0] == "zsh" else set()
         opts = list(itertools.takewhile(lambda a: a[:1] == "-" and a != "--", n[1:]))
         out |= {"login"} if any(SHELL_LOGIN_RE.fullmatch(a) for a in opts) else set()
-    # AUD-SEC-418: `node --run X` (scripts của package.json), `go test|generate|run`, `deno task`
-    out |= {"npm"} if "node" in heads | {m[1] if m else ""} and any(a.startswith("--run") for a in n[1:]) else set()
-    out |= {"go"} if n[:1] == ["go"] and n[1:2] and n[1] in GO_RUN_SUBCMDS else set()
+    # AUD-SEC-418: `node --run X` (scripts của package.json), `go test|generate|run`, `deno task`; #430: `nodejs`,
+    # `go -C DIR test`, `php composer.phar`, `cargo run|test|build` biên dịch/chạy `*.rs`
+    node = m is not None and INTERP_FAMILY.get(m[1], m[1]) == "node"
+    out |= {"npm"} if node and any(a.startswith("--run") for a in n[1:]) else set()
+    out |= {"go"} if n[:1] == ["go"] and _go_subcmd(n) in GO_RUN_SUBCMDS else set()
     out |= {"deno"} if n[:1] == ["deno"] and "task" in n[1:] else set()
-    for inner in _script_c_commands(n):  # `script -qc 'bash -i' /dev/null`: CMD chạy qua shell
-        out |= {t for d in _reuse_cmds(inner, 1) for t in _implicit_tools(d)}
+    out |= {"composer"} if any(posixpath.basename(a) == "composer.phar" for a in p[:2]) else set()
+    out |= {"cargo-src"} if n[:1] == ["cargo"] and set(n[1:]) & {"run", "test", "build", "r", "t", "b"} else set()
+    if n[:1] == ["script"]:  # AUD-SEC-418/421: `script` chạy CMD qua shell; không `-c` = `$SHELL -i` (nạp rc)
+        cmds, has_c = _script_c_commands(n)
+        out |= set() if has_c else {"login", "zsh"}
+        for d in (d for inner in cmds for d in _reuse_cmds(inner, 1)):
+            out |= _implicit_tools(d)
+            dn = normalize(d.argv)
+            if dn and dn[0] in SHELLS and _shell_script_arg(dn) == (False, None):  # shell trần dưới tty: tương tác
+                out |= {"login", "zsh"}
     return out
 
 
-def _script_c_commands(n: List[str]) -> List[str]:
-    """Chuỗi lệnh của `script [cờ] -c CMD` / `--command[=]CMD` / cụm `-qc CMD` (util-linux script(1))."""
-    if n[:1] != ["script"]:
-        return []
-    out = _flag_values(n[1:], ("--command",))
-    for k, a in enumerate(n[1:-1], 1):
-        if re.fullmatch(r"-[A-Za-z]*c", a):
-            out.append(n[k + 1])
-    return out
+def _go_subcmd(n: List[str]) -> str:
+    """Lệnh con của `go` sau cờ toàn cục `-C DIR`/`-C=DIR` (go1.20+, AUD-SEC-422)."""
+    i = 1
+    while i < len(n) and n[i].startswith("-C"):
+        i += 2 if n[i] == "-C" else 1
+    return n[i] if i < len(n) else ""
+
+
+def _unittest_discovers(p: List[str]) -> bool:
+    """`python -m unittest` không tên test (hay `discover`) thì tự dò `test*.py` (AUD-SEC-423)."""
+    k = p.index("unittest") + 1 if "unittest" in p else len(p)
+    rest = [a for a in p[k:] if a[:1] != "-"]
+    return not rest or rest[0] == "discover"
+
+
+SCRIPT_VALUE_SHORT = "cEIOBTmo"  # util-linux script(1) 2.39: cờ ngắn ăn giá trị (`-c CMD`, `-E auto`, `-O f`…)
+SCRIPT_VALUE_LONG = (
+    "--echo",
+    "--log-in",
+    "--log-out",
+    "--log-io",
+    "--log-timing",
+    "--logging-format",
+    "--output-limit",
+)
+
+
+def _script_c_commands(n: List[str]) -> Tuple[List[str], bool]:
+    """(chuỗi lệnh, có `-c`) của `script` đọc như getopt (AUD-SEC-421): cụm `-qc CMD`, dính `-qcCMD`, `--command[=]CMD`
+    và mọi tiền tố duy nhất `--c…` của nó; tham số vị trí đứng trước cờ (getopt hoán vị)."""
+    out: List[str] = []
+    has_c, i = False, 1
+    while i < len(n):
+        a, nxt = n[i], (n[i + 1] if i + 1 < len(n) else "")
+        if a == "--":
+            break
+        if a.startswith("--"):
+            key, eq, val = a.partition("=")
+            if len(key) > 2 and "--command".startswith(key):
+                has_c = True
+                out.append(val if eq else nxt)
+                i += 1 if eq else 2
+                continue
+            takes = len(key) > 3 and any(o.startswith(key) for o in SCRIPT_VALUE_LONG)
+            i += 2 if takes and not eq else 1
+            continue
+        if a[:1] == "-" and len(a) > 1:
+            for k, ch in enumerate(a[1:], 2):
+                if ch in SCRIPT_VALUE_SHORT:
+                    if ch == "c":
+                        has_c = True
+                        out.append(a[k:] or nxt)
+                    i += 0 if a[k:] else 1
+                    break
+        i += 1
+    return out, has_c
 
 
 def _run_modules(n: List[str], p: List[str]) -> List[str]:
@@ -8009,6 +8099,8 @@ def _write_asks(n: List[str], argv: List[str], root: str, cwd: Optional[str] = N
     found = [x for t in find_evidence for x in _where(t, root, cwd) if t not in targets]
     asks += [EVIDENCE_WHY.format(t) for t in found if _target_kind(t, root) == "evidence"]
     asks += [FENCE_WHY.format(t) for t in found if _is_fence(t, root)]
+    # AUD-SEC-424: ghi THÔ `>> ~/.gitconfig` (`git config -f ~/.gitconfig <khoá>` do luật khoá của git config xét)
+    asks += [GIT_HOOK_WHY.format(t) for t in targets if t != cfg and _global_git_config(t)]
     for target in (x for t in targets for x in _where(t, root, cwd)):
         kind = _target_kind(target, root)
         if _is_fence(target, root):
@@ -12310,6 +12402,7 @@ def _bash_decision(
     if nested_deny:
         return _nested_deny_result(res, nested_deny, budget)
     commands = _commands_with_cwd(tokens, cwd)
+    asks += _git_config_env_asks(tokens, commands)
     deny_reason = next((r for argv, here in commands if (r := _scan_command(argv, root, res, asks, here))), "")
     res.pop("exported_env", None)
     _carry_push_no_verify(res, budget)
