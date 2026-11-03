@@ -2,7 +2,7 @@
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "Bash|Write|Edit|MultiEdit|write_file|.*__.*",
+        "matcher": "Bash|Write|Edit|MultiEdit|write_file|run_terminal_command|search_replace|.*__.*",
         "hooks": [
           {
             "type": "command",

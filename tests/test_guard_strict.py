@@ -201,7 +201,27 @@ class DynamicCodeDenyTest(unittest.TestCase):
         'bash -c "for f in *.txt; do wc -l \\$f; done"',
         "PS4='+ '; set -x; true",
         "sed -i -e 's/a/b/g' -e 's|x|y|' f",
+        "sh -c \"$(cat <<'E'\necho hi\nE\n)\"",  # AUD-TEST-048: heredoc `cat` nháy đơn trong `$(…)` là chữ tĩnh
     )
+
+    def test_documented_rewrites_pass(self):
+        """AUD-SEC-322: ba dạng lát B chặn theo thiết kế và cách viết thay ghi ở harness-files.md (giới hạn đã biết) —
+        dạng gốc vẫn chặn, dạng viết thay cho chạy."""
+        sock = '"$HOME/.ssh/agent.sock"'
+        pairs = (
+            ('eval "$(ssh-agent -s)"', f"ssh-agent -a {sock} >/dev/null; export SSH_AUTH_SOCK={sock}"),
+            ('TMP=$(mktemp -d); bash -c "cd $TMP"', 'TMP=$(mktemp -d); bash -c \'cd "$1"\' _ "$TMP"'),
+            ('retry(){ "$@"; }; retry ls', "for i in 1 2 3; do ls && break; sleep 1; done"),
+        )
+        for bad, good in pairs:
+            with self.subTest(bad=bad):
+                self.assertEqual(decide(bad)["decision"], "deny")
+                self.assertEqual(decide(good)["decision"], "")
+
+    def test_tool_programs_double_dash(self):
+        """AUD-TEST-048: sau `--` mọi đối số còn lại là chương trình/tệp kể cả bắt đầu bằng `-` (AUD-SEC-296)."""
+        self.assertEqual(guard._tool_programs(["--", "-1 {print}", "f"], guard.AWK_PROG_LONG, "e"), ["-1 {print}", "f"])
+        self.assertEqual(guard._tool_programs(["-n", "--", "-e"], guard.SED_PROG_LONG, "e"), ["-e"])
 
     def test_review_lot_b(self):
         """Review lát B 🔴 (trước PR): địa chỉ GNU của sed, cờ sed/awk lạ, `IMe`, awk `system("" $0)`/`| "sh"`, `--fi`,

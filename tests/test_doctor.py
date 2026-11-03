@@ -339,6 +339,42 @@ class DoctorHooksTest(DoctorCase):
                     with unittest.mock.patch.dict(os.environ, {"CURSOR_SANDBOX": value}):
                         self.assertTrue(self.real_in_container())
 
+    def test_sandbox_sources_read_config_strictly(self):
+        """AUD-CODE-042: Codex `sandbox_mode` chỉ tính ở gốc file (trong `[profiles.x]` không kích hoạt thì không), nhận
+        nháy đơn TOML; Gemini `tools.sandbox` chuỗi `"false"`/`"0"`/rỗng là tắt. AUD-CODE-041: `.codex/config.toml` không đọc
+        được (EACCES) → bỏ qua, doctor không sập."""
+        codex = {
+            '[profiles.x]\nsandbox_mode = "workspace-write"\n': [],
+            "sandbox_mode = 'workspace-write'\n": [".codex/config.toml sandbox_mode=workspace-write"],
+            'sandbox_mode = "read-only"\n[profiles.x]\nsandbox_mode = "danger-full-access"\n': [
+                ".codex/config.toml sandbox_mode=read-only"
+            ],
+            "sandbox_mode = \"workspace-write'\n": [],  # nháy lệch: không phải chuỗi TOML
+        }
+        for text, want in codex.items():
+            with self.subTest(text=text):
+                p = self.write(".codex/config.toml", text)
+                self.assertEqual(xt._sandbox_sources(self.base), want)
+                p.unlink()
+        on = [".gemini/settings.json tools.sandbox"]
+        gemini: list[tuple[object, list[str]]] = [("false", []), ("0", []), (" ", []), ("FALSE", []), ("docker", on)]
+        for value, want in [*gemini, (True, on), (False, []), (1, []), ({"a": 1}, [])]:
+            with self.subTest(value=value):
+                p = self.write(".gemini/settings.json", json.dumps({"tools": {"sandbox": value}}))
+                self.assertEqual(xt._sandbox_sources(self.base), want)
+                p.unlink()
+        self.write(".codex/config.toml", 'sandbox_mode = "workspace-write"\n')
+        real = Path.read_text
+
+        def denied(path: Path, *a: Any, **k: Any) -> str:
+            if path.name == "config.toml":
+                raise PermissionError(13, "denied")
+            return real(path, *a, **k)
+
+        with unittest.mock.patch.object(Path, "read_text", denied):
+            self.assertEqual(xt._sandbox_sources(self.base), [])
+            self.assertIsInstance(self.codes("warn", deep=False), list)  # doctor chạy hết, không sập
+
     def test_sandbox_cursor_file_is_config_not_proof(self):
         """AUD-HAR-202 (phần Cursor, review #PR-orange-harness): `.cursor/sandbox.json` chỉ cấu hình phạm vi của sandbox
         Cursor (mạng, đường dẫn — cursor.com/docs/reference/sandbox, đọc 2026-11-02), không có khoá bật; sandbox bật theo
@@ -426,6 +462,15 @@ class DoctorHooksTest(DoctorCase):
         found = xt._doctor_matchers({"PreToolUse": [{"matcher": "Bash|(NotebookEdit"}]})
         self.assertEqual([f.level for f in found], ["warn"])
         self.assertIn("NotebookEdit", found[0].msg)
+        self.assertEqual(len(xt._doctor_matchers({"PreToolUse": [{"matcher": ["Bash"]}, "lạ"]})), 1)  # không phải chuỗi
+
+    def test_pretool_catch_all_matcher_covers_every_tool(self):
+        """AUD-CODE-039: Claude Code coi matcher `*`, `""` hay vắng là mọi tool — một mục guard bắt-tất-cả không bị cảnh
+        báo "không phủ"."""
+        for entry in ({"matcher": "*", "hooks": []}, {"matcher": "", "hooks": []}, {"hooks": []}):
+            with self.subTest(entry=entry):
+                self.assertEqual(xt._doctor_matchers({"PreToolUse": [{"matcher": "Bash"}, entry]}), [])
+        self.assertEqual(len(xt._doctor_matchers({"PreToolUse": [{"matcher": "Bash"}]})), 1)
 
     def test_shell_syntax_and_other_suffixes(self):
         self.write(".claude/hooks/stop-guard.sh", "if then\n")
@@ -961,6 +1006,41 @@ class DoctorOrchestrationTest(DoctorCase):
         # AUD-HAR-178: thiếu git trên PATH → không sập, chỉ bỏ kiểm track (fail-open như `_doctor_git`)
         with unittest.mock.patch.object(xt.shutil, "which", return_value=None):
             self.assertEqual(self.orch(), [])
+
+    def test_settings_local_gitignore_by_git_check_ignore(self):
+        """AUD-HAR-179: có git thì hỏi `git check-ignore` — mọi mẫu git thật chặn (`.claude/`, `.claude/*`, `.claude/**`,
+        `*.local.*`, BOM đầu file) không bị cảnh báo oan; `!` phủ định hay chỉ exclude toàn cục (máy này) → cảnh báo;
+        không phải repo → None (đường lùi so dòng)."""
+        git = ["git", "-C", str(self.base), "-c", "user.email=t@t", "-c", "user.name=t", "-c", "commit.gpgsign=false"]
+        subprocess.run([*git, "status", "--porcelain"], check=True, capture_output=True)  # base là repo git
+        self.write(".claude/settings.local.json", "{}")
+        gi = self.base / ".gitignore"
+        for text in (".claude/\n", ".claude/*\n", ".claude/**\n", "*.local.*\n", "﻿.claude/settings.local.json\n"):
+            with self.subTest(text=text):
+                gi.write_text(text, encoding="utf-8")
+                self.assertEqual(self.orch(), [])
+        gi.write_text(".claude/*\n!.claude/settings.local.json\n", encoding="utf-8")
+        [f] = self.orch()
+        self.assertIn(".claude/settings.local.json có mà `.gitignore` không chặn", f.msg)
+        gi.write_text("node_modules/\n", encoding="utf-8")
+        glob_ignore = self.base.parent / "global-ignore"
+        glob_ignore.write_text(".claude/\n", encoding="utf-8")
+        cfg = self.base.parent / "gitconfig"
+        cfg.write_text(f"[core]\n\texcludesFile = {glob_ignore}\n", encoding="utf-8")
+        with unittest.mock.patch.dict(os.environ, {"GIT_CONFIG_GLOBAL": str(cfg)}):
+            self.assertIs(xt.gitignore_blocks(self.base, xt.SETTINGS_LOCAL_REL), False)  # chỉ máy này chặn
+        # exclude toàn cục mang tên `.gitignore` (vd ~/.gitignore): git in đường tuyệt đối — vẫn chỉ máy này chặn
+        home = self.base.parent / "home"
+        home.mkdir()
+        (home / ".gitignore").write_text(".claude/settings.local.json\n", encoding="utf-8")
+        cfg.write_text(f"[core]\n\texcludesFile = {home / '.gitignore'}\n", encoding="utf-8")
+        with unittest.mock.patch.dict(os.environ, {"GIT_CONFIG_GLOBAL": str(cfg)}):
+            self.assertIs(xt.gitignore_blocks(self.base, xt.SETTINGS_LOCAL_REL), False)
+            [f] = self.orch()
+        self.assertIn("LOOP-HARNESS-032", f.msg)
+        bare = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        with unittest.mock.patch.dict(os.environ, {"GIT_CEILING_DIRECTORIES": str(bare.parent)}):
+            self.assertIsNone(xt.gitignore_blocks(bare, xt.SETTINGS_LOCAL_REL))
 
     def test_malformed_settings_env_fail_open(self):
         self.settings_env(".claude/settings.json", ["không phải object"])

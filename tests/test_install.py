@@ -161,16 +161,18 @@ class InstallTest(unittest.TestCase):
         src = Path(self.enterContext(tempfile.TemporaryDirectory()))
         (src / "framework" / "m").mkdir(parents=True)
         (src / "research" / "sub").mkdir(parents=True)
-        for name in ("a.md", "b.md", "c.md", "d.md", "e.md", "khong-tro.md"):
+        for name in ("a.md", "b.md", "c.md", "d.md", "e.md", "f g.md", "h.md", "khong-tro.md"):
             (src / "research" / name).write_text("x\n", encoding="utf-8")
         (src / "research" / "b.md").write_text("Xem `research/d.md`.\n", encoding="utf-8")
         (src / "framework" / "m" / "x.md").write_text(
             "Nguồn `research/a.md`, `../../research/b.md`, [c](../../research/c.md), `research/e.md#muc`,"
-            " `.claude/skills/research/SKILL.md`, `research/sub`, `research/vang.md`, `../research/khong-tro.md`.\n",
+            " `.claude/skills/research/SKILL.md`, `research/sub`, `research/vang.md`, `../research/khong-tro.md`.\n"
+            # AUD-CODE-044: đích `<…>` có khoảng trắng/`#` như `LINK_RE` của check-links
+            "[f](<../../research/f g.md>) [h](<../../research/h.md#muc>) [r](<#chi-muc>)\n",
             encoding="utf-8",
         )
         got = [p.as_posix() for p in install.linked_research(src)]
-        self.assertEqual(got, ["a.md", "b.md", "c.md", "d.md", "e.md"])
+        self.assertEqual(got, ["a.md", "b.md", "c.md", "d.md", "e.md", "f g.md", "h.md"])
 
     def test_installed_check_links_uses_project_root(self):
         self.run_install()
@@ -667,6 +669,66 @@ class InstallEdgeTest(unittest.TestCase):
         with redirect_stderr(err):
             code = install.main([str(self.target), "--label", "t", *extra])
         return code, err.getvalue()
+
+    def test_gitignore_check_ignore_and_non_utf8(self):
+        """AUD-HAR-180: `.gitignore` không phải UTF-8 không làm install sập (đọc `errors="replace"`, nối bằng append nên
+        byte cũ giữ nguyên). AUD-HAR-179: đích là repo git → hỏi `git check-ignore` — mẫu git thật đã chặn (`.claude/`,
+        `.autopilot/*`, `*.local.*`, BOM đầu file) không nối dòng thừa; `!` phủ định → nối dòng còn thiếu."""
+        gi = self.target / ".gitignore"
+        gi.write_bytes(b"caf\xe9\n")
+        with redirect_stderr(io.StringIO()):
+            install.ensure_gitignore(self.target)  # chưa phải repo: đường lùi so dòng
+        self.assertTrue(gi.read_bytes().startswith(b"caf\xe9\n"))
+        self.assertTrue(gi.read_bytes().endswith(b"\n.autopilot/\n.claude/settings.local.json\n"))
+        subprocess.run(["git", "init", "-q", str(self.target)], check=True)
+        for same in (".claude/\n.autopilot/*\n", "﻿.autopilot/\n*.local.*\n", ".claude/**\n.autopilot\n"):
+            with self.subTest(same=same):
+                gi.write_text(same, encoding="utf-8")
+                with redirect_stderr(io.StringIO()):
+                    install.ensure_gitignore(self.target)
+                self.assertEqual(gi.read_text(encoding="utf-8"), same)
+        gi.write_text(".autopilot/\n.claude/*\n!.claude/settings.local.json\n", encoding="utf-8")
+        with redirect_stderr(io.StringIO()):
+            install.ensure_gitignore(self.target)
+        self.assertTrue(gi.read_text(encoding="utf-8").endswith("cá nhân\n.claude/settings.local.json\n"))
+        # exclude toàn cục mang tên `.gitignore` (vd ~/.gitignore, git in đường tuyệt đối) không phải luật của repo
+        home = self.tmp / "home"
+        home.mkdir()
+        (home / ".gitignore").write_text(".claude/settings.local.json\n.autopilot/\n", encoding="utf-8")
+        cfg = self.tmp / "gitconfig"
+        cfg.write_text(f"[core]\n\texcludesFile = {home / '.gitignore'}\n", encoding="utf-8")
+        gi.write_text("node_modules/\n", encoding="utf-8")
+        with mock.patch.dict(os.environ, {"GIT_CONFIG_GLOBAL": str(cfg)}), redirect_stderr(io.StringIO()):
+            install.ensure_gitignore(self.target)
+        self.assertTrue(gi.read_text(encoding="utf-8").endswith("\n.autopilot/\n.claude/settings.local.json\n"))
+        self.assertIsNone(install.gitignore_blocks(self.tmp / "khong-co", "x"))  # git lỗi (không phải repo)
+        with mock.patch.object(install.subprocess, "run", side_effect=OSError("không có git")):
+            self.assertIsNone(install.gitignore_blocks(self.target, "x"))
+
+    def test_gemini_settings_symlink_and_odd_before_tool(self):
+        """AUD-HAR-207: `.gemini/settings.json` là symlink → không ghi xuyên ra ngoài dự án (`skipped-symlink`, như
+        AUD-HAR-010); `hooks.BeforeTool` không phải danh sách → giữ nguyên file (`kept`), không thay bằng bản khung im lặng."""
+        src = install.adapter_src("gemini")
+        outside = self.tmp / "outside.json"
+        outside.write_text("{}", encoding="utf-8")
+        gem = self.target / ".gemini" / "settings.json"
+        gem.parent.mkdir()
+        gem.symlink_to(outside)
+        self.assertEqual(install.merge_gemini_settings(gem, src), "skipped-symlink")
+        self.assertEqual(install.adapter_action(self.target, "gemini"), "skipped-symlink")
+        code, err = self.install_quiet("--harness", "gemini")
+        self.assertEqual(code, 0, err)
+        self.assertEqual(outside.read_text(encoding="utf-8"), "{}")  # file ngoài dự án không bị ghi
+        self.assertIn("skipped-symlink", err)
+        gem.unlink()
+        odd = {"hooks": {"BeforeTool": {"a": 1}}}
+        gem.write_text(json.dumps(odd), encoding="utf-8")
+        self.assertIsNone(install.gemini_merged(gem, src))
+        self.assertEqual(install.merge_gemini_settings(gem, src), "kept")
+        self.assertEqual(json.loads(gem.read_text(encoding="utf-8")), odd)
+        gem.write_text(json.dumps({"hooks": {"BeforeTool": None}}), encoding="utf-8")  # null = chưa có mục nào
+        self.assertEqual(install.merge_gemini_settings(gem, src), "merged")
+        self.assertIn(install.GEMINI_HOOK_NAME, gem.read_text(encoding="utf-8"))
 
     def test_strip_frontmatter_unclosed_keeps_text(self):
         self.assertEqual(install.strip_frontmatter("---\ntitle: x\nkhông đóng\n"), "---\ntitle: x\nkhông đóng\n")
@@ -2276,6 +2338,28 @@ class GitHooksTest(unittest.TestCase):
         # Claude Code có hook Bash của khung đã chạy cổng → pre-commit bỏ qua (D-309)
         xt_yaml.write_text(self.GATES.format(lint="false"), encoding="utf-8")
         self.assertEqual(self.commit("fix: hai", env={**self.env, "CLAUDECODE": "1"}).returncode, 0)
+
+    def test_pre_commit_xt_error_falls_back_to_full_gate(self):
+        """AUD-HAR-206: `xt.py commit-gate` lỗi hoặc in giá trị lạ → cổng ĐẦY ĐỦ (`gate`), như `commit_gate_mode`
+        (vắng/lạ = full); chỉ đúng `fast` mới chạy `gate-fast`."""
+        self.init_repo()
+        xt = self.target / ".xtemplates" / "scripts"
+        xt.mkdir(parents=True)
+        ran = self.target / "ran.txt"
+        (xt / "dev-task.sh").write_text(f'#!/bin/sh\nprintf %s "$1" > "{ran}"\n', encoding="utf-8")
+        (xt / "dev-task.sh").chmod(0o755)
+        hook = ROOT / "framework" / "templates" / "git-hooks" / "pre-commit"
+        for body, want in (
+            ("raise SystemExit(1)", "gate"),
+            ("print('fast')", "gate-fast"),
+            ("print('full')", "gate"),
+            ("print('lạ')", "gate"),
+        ):
+            with self.subTest(body=body):
+                (xt / "xt.py").write_text(body + "\n", encoding="utf-8")
+                r = subprocess.run(["bash", str(hook)], cwd=self.target, env=self.env, capture_output=True, text=True)
+                self.assertEqual(r.returncode, 0, r.stderr)
+                self.assertEqual(ran.read_text(encoding="utf-8"), want)
 
     def test_pre_push_blocks_main_force_and_delete(self):
         self.init_repo()

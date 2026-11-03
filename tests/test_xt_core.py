@@ -1718,6 +1718,54 @@ class LoopRecordBranchesTest(TmpMixin, RealAutopilotUntouchedMixin, unittest.Tes
             with redirect_stderr(err):
                 xt.main(["loop", "record", "--task", "T-002", "--executor", "opus", "--", "true"])
 
+    def test_deep_parallel_task_red_twice_not_escalated(self):
+        """AUD-TEST-041: task `(topo: parallel; exec: deep)` đã ở tầng sâu — đỏ 2 lần (lần chạy không phải của
+        `executor-deep`) KHÔNG báo "chuyển cấp" giả; `default_failures` vẫn đếm (khoá vế `not deep_already`)."""
+        write(
+            self.base / "docs" / "autopilot" / "PLAN.md",
+            """
+            ### Lát 1 — nền
+            - [ ] `T-001` việc (topo: parallel; exec: deep) — Gate: `true`
+            """,
+        )
+        st = xt.read_state(self.base)
+        st["started"] = "2026-10-19T00:00:00+00:00"
+        xt.write_state(st, self.base)
+        with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+            xt.loop_record("T-001", ["sh -c 'echo ea; exit 1'"], self.base, None)
+            xt.loop_record("T-001", ["sh -c 'echo eb; exit 1'"], self.base, None)  # chữ ký khác → chưa blocked
+        v = xt.loop_verdict(self.base)
+        self.assertEqual((v["executor"], v["escalated"], v["default_failures"]), ("executor-deep", False, 2))
+        self.assertIn("tầng sâu theo PLAN", v["reason"])
+        self.assertNotIn("chuyển cấp", v["reason"])
+
+    def test_record_warns_executor_mismatch(self):
+        """AUD-HAR-174: `loop record --executor` khác lựa chọn harness (task `self` → không agent nào; task `parallel` →
+        `executor`) → cảnh báo stderr nhưng vẫn ghi như khai (LOOP-ORCH-020); khai đúng, không khai, task ngoài PLAN → im."""
+        write(
+            self.base / "docs" / "autopilot" / "PLAN.md",
+            """
+            ### Lát 1 — nền
+            - [ ] `T-001` tự làm (files: a) — Gate: `true`
+            - [ ] `T-002` song song (topo: parallel; files: b) — Gate: `true`
+            """,
+        )
+
+        def record(task: str, executor: str | None) -> str:
+            err = io.StringIO()
+            with redirect_stdout(io.StringIO()), redirect_stderr(err):
+                xt.loop_record(task, ["false"], self.base, executor)
+            return err.getvalue()
+
+        warn = record("T-001", "executor")
+        self.assertIn("⚠ --executor executor khác lựa chọn harness (phiên chính tự làm)", warn)
+        self.assertIn("LOOP-ORCH-020", warn)
+        self.assertEqual(xt.read_evidence("T-001", self.base)["executor"], "executor")  # vẫn ghi như khai
+        self.assertIn("⚠ --executor executor-deep khác lựa chọn harness (executor)", record("T-002", "executor-deep"))
+        for task, executor in (("T-002", "executor"), ("T-001", None), ("T-999", "executor")):
+            with self.subTest(task=task, executor=executor):
+                self.assertNotIn("⚠ --executor", record(task, executor))
+
     def test_topology_default_self_executor_null(self):
         """ADR-0061 / LOOP-ORCH-024: thiếu `topo:` = `self`, `executor: null` (kể cả khi có `exec: deep` mà không
         `parallel`); `review`/`audit` cũng `null`; task `self` đỏ 2 lần vẫn chuyển cấp lên `executor-deep` (ADR-0029);
@@ -2287,7 +2335,10 @@ class TaskDagTest(TmpMixin, unittest.TestCase):
         self.assertEqual(json.loads(self.run_main("loop", "status", "--json")[1])["bad_links"], {"T-001": ["sau: T-1"]})
         for cmd in ("next", "status"):
             with self.subTest(cmd=cmd):
-                self.assertIn("ghi chú `sau:`/`files:` không đọc được: T-001 → sau: T-1", self.run_main("loop", cmd)[1])
+                self.assertIn(
+                    "ghi chú `sau:`/`files:`/`topo:`/`exec:` không đọc được: T-001 → sau: T-1",
+                    self.run_main("loop", cmd)[1],
+                )
         write(self.base / "docs" / "autopilot" / "PLAN.md", "- [ ] `T-001` a (sau: T-002)\n- [x] `T-002` b\n")
         self.assertEqual(json.loads(self.run_main("loop", "next", "--json")[1])["bad_links"], {})
         self.assertNotIn("không đọc được", self.run_main("loop", "status")[1])
@@ -2313,7 +2364,7 @@ class TaskDagTest(TmpMixin, unittest.TestCase):
             with self.subTest(task=task):
                 rc, _, err = self.run_main("loop", "record", "--task", task, "--", "true")
                 self.assertEqual(rc, 2)
-                self.assertIn(f"{task} có ghi chú `sau:`/`files:` không đọc được", err)
+                self.assertIn(f"{task} có ghi chú `sau:`/`files:`/`topo:`/`exec:` không đọc được", err)
                 self.assertFalse((self.base / ".autopilot" / "evidence" / f"{task}.json").exists())
         self.assertEqual(self.run_main("loop", "record", "--task", "T-004", "--", "true")[0], 0)
         write(plan, "- [x] `T-001` a — Gate: `true`\n- [ ] `T-002` b (sau: T-001) — Gate: `true`\n")

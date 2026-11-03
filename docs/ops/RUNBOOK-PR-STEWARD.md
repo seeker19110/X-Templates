@@ -14,7 +14,11 @@ với mỗi PR chạy cùng luật với `pr next`, rồi tự làm đúng các 
 | `merge` | `PUT pulls/<N>/merge` squash, ghim `sha=<head>`, `commit_title` = tiêu đề PR + ` (#N)` (D-254; repo nên đặt `squash_merge_commit_title: PR_TITLE` cho mọi đường merge khác) — chỉ khi `merge-check` = `merge` ở đúng head đó (kể cả PR người đã bật auto-merge: merge ghim head ngay). Thiếu `XT_STEWARD_TOKEN`: merge xong thì `POST actions/workflows/ci.yml/dispatches` trên nhánh đích (`→ dispatch CI ✓`; tên khác: biến `XT_CI_WORKFLOW`) |
 | `disable-auto-merge` | `gh pr merge --disable-auto` — auto-merge do người bật trên PR chưa đủ điều kiện (dọn dẹp, không để GitHub merge head chưa đánh giá) |
 | `update` | `PUT pulls/<N>/update-branch` ghim `expected_head_sha` — **chỉ khi có secret `XT_STEWARD_TOKEN`** |
-| `review`, `fix`, `debt`, `retarget`, `defer-human`, `wait` | chỉ ghi vào bản tóm tắt (Step Summary), không làm gì |
+| `review`, `fix`, `debt`, `rethink`, `split-or-close`, `retarget`, `defer-human`, `wait` | chỉ ghi vào bản tóm tắt (Step Summary), không làm gì |
+
+`rethinks[]` (lần `pr rethink` đã dùng, D-211) chỉ nằm ở `.autopilot/reviews.json` cục bộ, không đăng lên PR — steward ở
+CI/clone khác có thể báo `rethink` ở chỗ worktree tác giả báo `split-or-close` (trần `max_rethink`). Vô hại cho merge: cả
+hai chỉ ghi Step Summary, không thuộc hành động máy làm (AUD-XFEAT-042).
 
 PR từ fork hoặc tác giả không có quyền ghi repo luôn thành `defer-human` (người merge). PR làn chuẩn được gắn nhãn
 `xt-standard-lane`; không gắn được nhãn thì lượt đó không merge (exit 1, `warn`). Máy **không bao giờ bật auto-merge** của

@@ -622,6 +622,16 @@ class DecideWorktreesTest(TmpRepoCase):
         with unittest.mock.patch.dict(os.environ, {"GIT_CONFIG_GLOBAL": str(cfg)}):
             self.assertIn("D-008", self.decide(self.main))
 
+    def test_decide_remote_numbers_ignore_pathspec_env(self):
+        """AUD-HAR-215: `GIT_LITERAL_PATHSPECS=1` (hay GLOB/NOGLOB/ICASE) của môi trường làm magic `:(literal)`/`:(glob)`
+        của `_remote_decisions` không khớp gì → cấp trùng D-NNN đã có ở nhánh remote; `_perf_env` gỡ các biến này."""
+        self.remote_log_d007()
+        for var in ("GIT_LITERAL_PATHSPECS", "GIT_NOGLOB_PATHSPECS"):
+            with self.subTest(var=var), unittest.mock.patch.dict(os.environ, {var: "1"}):
+                self.assertIn("### D-007", xt._remote_decisions(self.main, Path("docs/autopilot/DECISIONS.md")))
+        with unittest.mock.patch.dict(os.environ, {"GIT_LITERAL_PATHSPECS": "1"}):
+            self.assertIn("D-008", self.decide(self.main))
+
     def test_decide_numbers_span_month_files(self) -> None:
         """T-3651: DECISIONS.md tách theo tháng (`DECISIONS-YYYY-MM.md`) — số kế tiếp tính trên MỌI file (cây này, worktree
         khác, nhánh remote), không cấp trùng; mục mới vẫn ghi vào DECISIONS.md, không vào bản tháng."""

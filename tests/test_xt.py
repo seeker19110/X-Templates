@@ -318,10 +318,18 @@ class ValidateTest(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertRegex(out.getvalue(), r"⚠ 08-backend/api\.md:\d+: xác minh 2026-01-02 — 304 ngày")
         self.assertIn("ngày xác minh quá 180 ngày", out.getvalue())
-        with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
-            self.assertEqual(
-                xt.main(["--framework", str(self.fw), "validate", "--today", "hôm qua", "--stale", "1"]), 2
-            )
+        # AUD-CODE-043: `--today` sai định dạng hay không kèm `--stale` → exit 2 TRƯỚC khi validate, không in "✓"
+        for args, why in (
+            (["--today", "hôm qua", "--stale", "1"], "✗ --today phải là YYYY-MM-DD: hôm qua"),
+            (["--stale", "10", "--today", "2026-13-99"], "✗ --today phải là YYYY-MM-DD: 2026-13-99"),
+            (["--today", "2026-11-02"], "✗ --today chỉ dùng với --stale"),
+        ):
+            with self.subTest(args=args):
+                out, err = io.StringIO(), io.StringIO()
+                with redirect_stdout(out), redirect_stderr(err):
+                    self.assertEqual(xt.main(["--framework", str(self.fw), "validate", *args]), 2)
+                self.assertEqual(out.getvalue(), "")
+                self.assertIn(why, err.getvalue())
 
     def test_duplicate_id(self):
         p = self.fw / "08-backend" / "api.md"

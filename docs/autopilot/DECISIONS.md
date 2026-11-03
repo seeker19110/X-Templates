@@ -197,3 +197,10 @@
 - Chọn: Chấp nhận có hạn 2027-01-31: ADR mới chọn bảo vệ theo tiền tố docs/ (như .autopilot/) hoặc vân tay sổ do xt.py stage ghi; tách literal theo họ trình thông dịch hoặc coi lời gọi trong vùng chưa chắc là lời gọi; nhận chặn mới (hướng chặt)
 - Lý do (tiêu chí chất lượng cuối): (1) an toàn: cả hai là giới hạn của cách liệt kê đã biết (ADR-0063) — bản sửa hiện tại đóng mọi dạng đã tái hiện; đổi mô hình bảo vệ là quyết định kiến trúc cần ADR + đo chặn oan trên kho lệnh thật, làm vội trong PR nợ dễ hồi quy (#372, ADR-0061). (2) giữ đường lùi: chấp nhận có hạn, chủ phiên chính. Chặn mới grep|xargs sed -i dưới docs là hướng chặt, đường thay thế: sửa từng file bằng Edit
 - Đường lùi: Mở ADR sớm hơn và làm trước 3.30.0 nếu chủ dự án đòi
+
+### D-320 · 2026-11-03T03:46:58+00:00 · T-3635: đóng 39 dòng nợ review còn mở sau hai lô sửa rẻ thế nào (24 chấp nhận, 2 bác bỏ, 2 đã sửa từ trước theo phân loại có bằng chứng; 11 sửa-ngay mà lô bỏ qua vì chạm file ngoài phạm vi lô)?
+
+- Phương án: (1) Ghi theo phân loại; 11 dòng bỏ qua → chấp nhận hạn 2026-12-15 (đợt kế), chủ phiên chính · (2) Sửa nốt 11 dòng trong PR này · (3) Để mở
+- Chọn: Ghi theo phân loại; 11 dòng bỏ qua → chấp nhận hạn 2026-12-15 (đợt kế), chủ phiên chính
+- Lý do (tiêu chí chất lượng cuối): (1) đúng: mỗi dòng có lý do/bằng chứng phân loại đã chạy (reviewer agent, chỉ đọc); 11 dòng chưa sửa không được ghi đã sửa (P1). (2) giữ đường lùi: hạn ngắn, chủ rõ; PR này đã lớn (hai lô ~1.100 dòng), thêm sửa làm review kém (bài học #372). (3) audit check --strict nhận chấp nhận có chủ + hạn
+- Đường lùi: Mở lại từng dòng (đổi chấp nhận → mở) khi có lô sửa

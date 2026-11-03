@@ -2236,6 +2236,29 @@ class PrNextCliTest(unittest.TestCase):
         self.assertIn("D-005 không có trong docs/autopilot/DECISIONS.md", err)
         self.assertEqual(run_main("pr", "rethink", "--pr-json", "-", "--decision", "D-005", stdin="[]")[0], 2)
 
+    def test_rethink_cap_rechecked_inside_lock(self):
+        """AUD-CODE-040: hai `pr rethink` đồng thời — tiến trình kia ghi lần rethink cuối SAU khi lệnh này kiểm trần (ngoài
+        khoá) → kiểm lại trong khoá của `update_reviews` từ chối, sổ chỉ có một lần (trần 1); PR cắt bản không trần."""
+        run_main("pr", "reviewed", "--pr", "7", "--head", "d" * 40, "--blocking")
+        run_main("pr", "reviewed", "--pr", "7", "--head", self.head, "--blocking")
+        self.decisions(self.base, f"### D-005 · {self.soon(2)} · PR #7 quá trần review: tách PR?")
+        other = {"decision": "D-004", "at": self.soon(1)}
+        real = xt._rethink_problem
+
+        def racing(*args: object) -> object:  # tiến trình khác ghi xen giữa lúc kiểm trần và lúc ghi
+            xt.update_reviews(self.base, "7", lambda r: {**r, "rethinks": [*xt._rec_rethinks(r), other]})
+            return real(*args)
+
+        with unittest.mock.patch.object(xt, "_rethink_problem", side_effect=racing):
+            rc, out, err = self.rethink("D-005")
+        self.assertEqual((rc, out), (2, ""))
+        self.assertIn("✗ PR #7 đã dùng 1/1 lần `pr rethink` (xt.yaml max_rethink, ADR-0061)", err)
+        self.assertEqual(xt.read_reviews(self.base)["7"]["rethinks"], [other])
+        full: list[int] = []
+        fn = xt._rethink_append({"decision": "D-006"}, 0, full)  # cap 0 (không trần/PR cắt bản): luôn ghi
+        self.assertEqual(len(fn({"rethinks": [other, other]})["rethinks"]), 3)
+        self.assertEqual(full, [])
+
     def test_rethink_decision_must_follow_every_unclean_review(self):
         """Review #298 lượt 2: quyết định ghi GIỮA hai review chưa sạch (cũ hơn review cuối) không mở được trần; một D-NNN
         không mở trần hai lần cho cùng PR (kể cả khi mốc của nó sau các review mới, trong độ lệch giờ cho phép)."""
@@ -2432,7 +2455,7 @@ class PrNextCliTest(unittest.TestCase):
         self.published.return_value = 3  # đăng lỗi: sổ cục bộ đã ghi, `pr next` đòi đăng lại bằng `pr debt`
         rc, out, _ = debt("AUD-SEC-001")
         self.assertEqual((rc, out), (3, f"✓ PR #7: ghi nợ review ở {head[:7]} (AUD-SEC-001) — nợ sửa cuối pha\n"))
-        self.published.assert_called_once_with("7", "7", head, True, debt=["AUD-SEC-001"])
+        self.published.assert_called_once_with("7", "7", head, True, debt=["AUD-SEC-001"], fixed=[])
         self.assertEqual(xt.read_reviews(self.base)["7"]["reviews"][-1]["debt"], ["AUD-SEC-001"])
         r = json.loads(self.nxt(p, "--json")[1])
         self.assertEqual((r["action"], r["do"]), ("republish-review", "xt.py pr debt --pr 7 --findings AUD-SEC-001"))
@@ -2505,8 +2528,8 @@ class PrNextCliTest(unittest.TestCase):
         self.assertEqual(out, f"✓ PR #7: ghi nợ review ở {head[:7]} (—; 🔴 đã sửa: AUD-SEC-002) — nợ sửa cuối pha\n")
         last = xt.read_reviews(self.base)["7"]["reviews"][-1]
         self.assertEqual((last["head"], last["clean"], last["debt"], last["fixed"]), (head, True, [], ["AUD-SEC-002"]))
-        self.published.assert_called_once_with("7", "7", head, True, debt=["AUD-SEC-002"])
-        self.assertIn(f"head={head} verdict=debt", xt.review_comment_body(head, True, debt=["AUD-SEC-002"]))
+        self.published.assert_called_once_with("7", "7", head, True, debt=[], fixed=["AUD-SEC-002"])
+        self.assertIn(f"head={head} verdict=debt", xt.review_comment_body(head, True, fixed=["AUD-SEC-002"]))
         rc, out, _ = debt("--fixed", "AUD-SEC-002")  # chạy lại: không ghi thêm, đã đăng thì không đăng lại
         self.assertEqual(rc, 0)
         self.assertIn("(đã ghi trước đó — không ghi thêm)", out)
@@ -2523,7 +2546,7 @@ class PrNextCliTest(unittest.TestCase):
         self.assertEqual((last["debt"], last["fixed"]), (["AUD-SEC-001"], ["AUD-SEC-002"]))
         self.published.assert_not_called()
         self.assertEqual(debt("--findings", "AUD-SEC-001", "--fixed", "AUD-SEC-002")[0], 0)  # đăng bù
-        self.published.assert_called_once_with("7", "7", head, True, debt=["AUD-SEC-001", "AUD-SEC-002"])
+        self.published.assert_called_once_with("7", "7", head, True, debt=["AUD-SEC-001"], fixed=["AUD-SEC-002"])
         # khác danh sách `--fixed` ở cùng head không phải "chạy lại" (`again` so cả `fixed`): kiểm lại từ đầu — head đã có
         # dấu `debt` (review hợp lệ) nên `pr next` không còn là `debt`, từ chối
         mark = {"head": head, "clean": True, "debt": True, "at": "2026-11-01T03:00:00Z"}
@@ -2548,6 +2571,18 @@ class PrNextCliTest(unittest.TestCase):
         self.assertEqual(rc, 2)
         self.assertIn("đổi ít nhất một file test", err)
         self.assertIn("src/a.py", err)
+        # AUD-HAR-191: xoá file test hay chỉ sửa fixture không phải test hồi quy — `--fixed` bị từ chối
+        git = ["git", "-C", str(self.base), "-c", "user.email=t@t", "-c", "user.name=t", "-c", "commit.gpgsign=false"]
+        subprocess.run([*git, "rm", "-q", "tests/test_a.py"], check=True, capture_output=True)
+        dropped = self.commit({"src/a.py": "x = 4\n"})
+        fixture = self.commit({"src/a.py": "x = 5\n", "tests/fixtures/case.json": "{}\n"})
+        for sha, why in ((dropped, "tests/test_a.py"), (fixture, "tests/fixtures/case.json")):
+            with self.subTest(why=why):
+                rc, _, err = debt("--fixed", "AUD-SEC-002", "--no-publish", q={**q, "headRefOid": sha})
+                self.assertEqual(rc, 2)
+                self.assertIn("xoá test hay chỉ sửa `fixtures/` không tính", err)
+                self.assertIn(why, err)  # file đã đổi vẫn được nêu
+        self.assertEqual(xt._regression_tests(self.base, head, "e" * 40, ["tests/test_a.py"]), [])  # lỗi git: từ chối
         # chỉ `--fixed` (không nợ): bản ghi hợp lệ (`_ledger_clean_valid`), lệnh đăng lại mang `--fixed` (review #ADR-0062)
         xt._write_reviews(self.base, {})
         self.assertEqual(debt("--fixed", "AUD-SEC-002", "--no-publish")[0], 0)
@@ -2558,6 +2593,11 @@ class PrNextCliTest(unittest.TestCase):
         both = {**rec, "debt": ["AUD-SEC-001"]}
         self.assertEqual(xt._republish_cmd(7, both), "xt.py pr debt --pr 7 --findings AUD-SEC-001 --fixed AUD-SEC-002")
         self.assertFalse(xt._ledger_clean_valid({**rec, "debt": "x"}))
+        # AUD-HAR-183: `fixed` không phải danh sách (sổ sửa tay) → không hợp lệ, không thành lệnh `--fixed A,U,D,…`/TypeError
+        for bad in ("AUD-SEC-002", 5, {"x": 1}):
+            with self.subTest(fixed=bad):
+                self.assertFalse(xt._ledger_clean_valid({**rec, "fixed": bad}))
+        self.assertFalse(xt._ledger_clean_valid({**rec, "fixed": [3]}))
         self.assertFalse(xt._ledger_clean_valid({"head": head, "debt": []}))
 
     def test_debt_fixed_refuses_row_already_fixed_at_review(self):
@@ -2713,8 +2753,9 @@ class PrNextCliTest(unittest.TestCase):
         """AUD-HAR-155: dự án ở thư mục con của repo (`apps/web`) — `pr debt` đọc sổ của dự án ở head (`head:./…`) và miễn
         đúng sổ đó (tiền tố dự án): commit chỉ sổ sau review cuối → rc 0; sửa mã, kể cả ngoài dự án, không `--fixed` → rc 2
         (ADR-0062). Tên thư mục có
-        dấu (`apps/wéb`): `git diff` không bọc nháy đường dẫn (`core.quotePath=false`) nên vẫn miễn đúng sổ."""
-        for name in ("web", "wéb"):
+        dấu (`apps/wéb`), `"`, `\\` hay ký tự điều khiển (AUD-HAR-165): `git diff -z` không bọc nháy đường dẫn nào nên vẫn
+        miễn đúng sổ."""
+        for name in ("web", "wéb", 'we"b', "we\\b", "we\tb"):
             with self.subTest(name):
                 self._debt_monorepo(name)
 
@@ -2950,7 +2991,11 @@ class PrNextCliTest(unittest.TestCase):
         self.assertEqual(self.calls, ["repos/o/r/pulls/7"])
         self.assertEqual(run(target="7")[0], 0)
         self.assertEqual(self.calls, ["repos/{owner}/{repo}/pulls/7"])
-        self.assertEqual(run(target="7\u0665")[0], 2)  # chữ số Unicode: `_pr_key` từ chối trước khi gọi GitHub
+        # AUD-TEST-057: chữ số Unicode — `_pr_key("7\u0665")` = "75" (không từ chối); GitHub giả VẪN được gọi và trả PR 7
+        # ≠ 75 → exit 2 do so số PR
+        rc, _, err = run(target="7\u0665")
+        self.assertEqual((rc, self.calls), (2, ["repos/{owner}/{repo}/pulls/75"]))
+        self.assertIn("không phải #75", err)
         last = xt.read_reviews(self.base)["7"]["reviews"][-1]
         self.assertEqual((last["clean"], last["author_model"]), (True, "dependabot[bot]"))
         rc, _, err = run_main(  # bot không tin cậy: luật họ model thường
@@ -3486,6 +3531,23 @@ class PrStewardTest(unittest.TestCase):
         self.assertNotRegex(body, xt.MODEL_FAMILY_RE)
         got = xt.published_reviews([mark(self.H, "debt", "2026-10-19T01:00:00Z")])
         self.assertEqual(got, [{"head": self.H, "clean": True, "at": "2026-10-19T01:00:00Z", "debt": True}])
+
+    def test_debt_mark_body_separates_fixed_red(self):
+        """AUD-HAR-184: 🔴 đã sửa (`--fixed`) không bị gọi là "ghi nợ" trong chữ cho người; dấu máy vẫn `verdict=debt`."""
+        only = xt.review_comment_body(self.H, True, fixed=["AUD-SEC-009"])
+        self.assertEqual(
+            only,
+            f"Review ở `{self.H[:7]}`: hết lượt review — 🔴 đã sửa kèm test (AUD-SEC-009).\n\n"
+            f"<!-- xt-review v1 head={self.H} verdict=debt -->",
+        )
+        self.assertNotIn("ghi nợ", only)
+        both = xt.review_comment_body(self.H, True, debt=["AUD-SEC-001"], fixed=["AUD-SEC-009"])
+        self.assertIn(
+            "hết lượt review — phát hiện còn lại ghi nợ ở sổ audit (AUD-SEC-001), sửa cuối pha; 🔴 đã sửa kèm test"
+            " (AUD-SEC-009).",
+            both,
+        )
+        self.assertIn("verdict=debt -->", both)
 
     def test_pr_rest_reads_marks_and_pr_next_uses_them(self):
         big = [{"path": "src/a.py", "additions": 400, "deletions": 0}]
