@@ -9973,9 +9973,13 @@ class _PaScanState:
 # tới hết dòng thì dòng không phải comment thụt sâu hơn cột cha (trong ngoặc: mọi dòng) là dòng tiếp của nó. Mọi
 # lặp possessive, mỗi token đọc một lần (tuyến tính). Không đặt nhóm bắt trong lặp possessive (`re` của Python 3.11
 # ném SystemError "span of capturing group is wrong") — cột `-` cuối của tiền tố tìm lại bằng `_PA_YAML_DASH_RE`.
+# Tag nguyên văn `!<URI>` được chứa `,[]` (ký tự URI của YAML 1.2, không có `<`: lần thử hỏng dừng ở `<` kế — tuyến
+# tính) — nhánh riêng trước `!tag` thường (AUD-SEC-395).
 _PA_YAML_DASH = r"(?:---|-|\?)(?=[ \t]|$)"
 _PA_YAML_NODE_RE = re.compile(
-    r"(?P<pre>(?:[ \t]*+(?:" + _PA_YAML_DASH + r"|[!&][^\s,\[\]{}]*+|[\[{]))*+)[ \t]*+"
+    r"(?P<pre>(?:[ \t]*+(?:"
+    + _PA_YAML_DASH
+    + r"|!<[\w\-#;/?:@&=+$,.!~*'()\[\]%]*+>|[!&][^\s,\[\]{}]*+|[\[{]))*+)[ \t]*+"
     r"(?:(?P<dq>\")|(?P<sq>')|(?P<close>[\]}])|(?P<block>[|>][-+1-9]*+[ \t]*+(?:#.*)?$)|(?P<end>#|$))?"
 )
 _PA_YAML_DASH_RE = re.compile(r"(?<![^ \t\[{])" + _PA_YAML_DASH)
@@ -9984,6 +9988,9 @@ _PA_YAML_PLAIN_RE = (
     re.compile(r"(?:[^\s:,\[\]{}]++|:(?=[^\s,\[\]{}])|\s++(?=[^\s#,\[\]{}]))*+"),
 )  # (ngữ cảnh khối, trong ngoặc)
 _PA_YAML_AFTER_RE = re.compile(r"[ \t]*+(?:(?P<colon>:)|(?P<comma>,)|(?P<close>[\]}]))?")
+# AUD-SEC-394: dòng directive `%…` và dấu tài liệu `---`/`...` ở cột 0 (PyYAML: directive chỉ ở cột 0) kết thúc plain
+# scalar, khối `|`/`>` và ngoặc đang mở; nhóm `rest`: dòng không còn nút (`%…`, `...`) — `---` đọc tiếp như tiền tố nút.
+_PA_YAML_DOC_RE = re.compile(r"%|\.\.\.(?=[ \t]|$)(?P<rest>)|---(?=[ \t]|$)")
 _PA_YAML_BODY = {'"': re.compile(r'(?:[^"\\]++|\\.)*+\\?(")?'), "'": re.compile(r"(?:[^']++|'')*+(')?")}
 
 
@@ -10042,11 +10049,25 @@ def _pa_yaml_after(
     return _pa_yaml_node(st, line, m.end(), start if m.lastgroup == "colon" else parent, spans)
 
 
+def _pa_yaml_doc_line(st: _PaScanState, line: str) -> bool:
+    """Dòng (ngoài chuỗi nháy còn mở) bắt đầu bằng directive `%` hay dấu tài liệu `---`/`...` ở cột 0 → xoá plain
+    scalar, khối, ngoặc đang mở; True khi dòng không còn gì để đọc (`%…`, `...`)."""
+    m = None if st.quote else _PA_YAML_DOC_RE.match(line)
+    if m is None:
+        return False
+    st.block = st.plain = None
+    st.flow = 0
+    return line[0] == "%" or m["rest"] is not None
+
+
 def _pa_yaml_spans(st: _PaScanState, line: str) -> List[Tuple[int, int]]:
-    """Khoảng thân chuỗi nháy kép YAML trên một dòng (cập nhật `st`): dòng trong khối `|`/`>` không có chuỗi; dòng
-    tiếp của chuỗi còn mở bắt đầu trong chuỗi; dòng tiếp của plain scalar nhiều dòng (dòng trống giữa giữ scalar mở)
-    đọc tiếp scalar; còn lại đọc nút → sau nút → … tới hết việc."""
+    """Khoảng thân chuỗi nháy kép YAML trên một dòng (cập nhật `st`): dòng directive/dấu tài liệu ở cột 0 kết thúc
+    scalar/khối trước nó (`_pa_yaml_doc_line`); dòng trong khối `|`/`>` không có chuỗi; dòng tiếp của chuỗi còn mở
+    bắt đầu trong chuỗi; dòng tiếp của plain scalar nhiều dòng (dòng trống giữa giữ scalar mở) đọc tiếp scalar; còn
+    lại đọc nút → sau nút → … tới hết việc."""
     spans: List[Tuple[int, int]] = []
+    if _pa_yaml_doc_line(st, line):
+        return spans
     indent = len(line) - len(line.lstrip(" "))
     text = line.strip()
     if (st.block is not None and indent > st.block) or ((st.block, st.plain) != (None, None) and not text):
@@ -10347,8 +10368,9 @@ def _pa_glob(path: str, pattern: str) -> bool:
 
 def _pa_target_problem(paths: Sequence[str]) -> Optional[str]:
     """Đích khai tường minh mà không có, hoặc không có file tài sản prompt nào dưới chúng → lỗi cách dùng (exit 2, không
-    "✓" — AUD-SEC-264); không khai đích (mặc định `PA_DIRS`) → None (fail-open: dự án chưa có thư mục nào)."""
-    missing = [p for p in paths if not Path(p).exists()]
+    "✓" — AUD-SEC-264); không khai đích (mặc định `PA_DIRS`) → None (fail-open: dự án chưa có thư mục nào). Đích vắng
+    thuộc `PA_DIRS` (liệt kê lại danh sách mặc định kèm đích riêng — `ai-security.md`) được bỏ qua (AUD-SEC-390)."""
+    missing = [p for p in paths if not Path(p).exists() and Path(p).as_posix() not in PA_DIRS]
     if missing:
         return f"không có đích: {', '.join(missing)}"
     if paths and not _pa_files(paths):

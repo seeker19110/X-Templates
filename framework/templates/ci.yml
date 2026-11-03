@@ -66,7 +66,8 @@ jobs:
       - name: Workflow (ghim SHA, quyền, timeout, secret trên PR) + cấu hình xt.yaml — `xt.py ci-check`
         run: python3 .xtemplates/scripts/xt.py ci-check
       # SEC-AI-018 (MUST@L)/SEC-AI-028/CMP-LIC-024: bật bằng cách tạo `prompt-assets-exempt.json` (`[]` hoặc miễn trừ có
-      # `reason` + `expires`); bộ lọc injection runtime có file mẫu riêng thì thêm `--patterns <file>` (cùng nguồn sự thật).
+      # `path` + `rule` bắt buộc — id luật, `"*"` = mọi luật — + `reason` + `expires`; `path` khớp theo đoạn: `dir/*` không
+      # phủ thư mục con, dùng `dir/**`); bộ lọc injection runtime có file mẫu riêng thì thêm `--patterns <file>` (cùng nguồn sự thật).
       # Tài liệu bảo mật/audit TRÍCH lệnh tấn công (sổ audit, ADR, runbook sự cố) sẽ khớp luật `danger` — miễn theo file,
       # đúng luật, có lý do và hạn, không miễn cả `docs/` (AUD-SEC-360), vd:
       #   {"path": "docs/ops/AUDIT-*.md", "rule": "danger", "reason": "sổ audit trích lệnh tái hiện", "expires": "YYYY-MM-DD"}
