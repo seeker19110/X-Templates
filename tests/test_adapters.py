@@ -231,7 +231,9 @@ class AdapterHostTest(unittest.TestCase):
                 ("GIT_CONFIG_PARAMETERS=\"'user.name'='x'\" git push origin feat", False),
                 ("git push origin feat", False),
                 ("git push -n origin feat", False),
-                ("git push origin -- --no-verify", False),
+                # sau `--` là refspec, không phải cờ; đích ghi rõ — không refspec thì guard lấy nhánh hiện tại (CI checkout
+                # khác máy dev, từng đỏ ở py311 #420)
+                ("git push origin feat -- --no-verify", False),
             ):
                 with self.subTest(host=host, cmd=cmd):
                     out, code = ad.run(host, _shell(host, cmd, str(ROOT)))
