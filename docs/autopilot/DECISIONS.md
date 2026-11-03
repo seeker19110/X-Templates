@@ -114,3 +114,10 @@
 - Chọn: Sửa mọi dạng do mã mới cho qua (D-324 thu hẹp: không miễn khi có cd/pushd/popd, stdin/here-string/đối số của trình chạy, writer ngoài cat/tee; /dev/ chỉ bỏ null/std*/fd/tty; mảng chữ thay phần tử vào argv rồi áp luật, $@ sau set --/hàm là mảng nhiễm) thành ID 🔴 mới đã sửa; lỗ liệt kê có từ trước ghi ID 🔴 mở riêng (chặn phát hành, PLAN kế); 🟠/🟢 sửa luôn
 - Lý do (tiêu chí chất lượng cuối): (1) đóng mọi lỗ do PR này mở ra, ghi trung thực phần còn lại (không khai đóng sớm — bài học #423); (4) giữ gỡ chặn oan D-324; lỗ liệt kê là giới hạn mô hình danh sách đen, cần ADR riêng (sandbox/allowlist trình chạy) — không vá tiếp trong lát này
 - Đường lùi: Revert commit sửa review #426
+
+### D-327 · 2026-11-03T13:21:18+00:00 · AUD-SEC-406: lỗ liệt kê trình chạy/trình ghi của luật ghi-rồi-chạy (AUD-SEC-400) — đóng bằng cách nào; và chặn oan 'cd trước cat > f' của D-326?
+
+- Phương án: (1) Vá tiếp danh sách trình chạy/trình ghi · (2) ADR-0066: xét theo TÊN tệp đích ghi được nhắc lại ở chỗ khác của lệnh (trừ lệnh chỉ đọc trong danh sách trắng với tệp không đuôi script), thêm -o/--output và đích ghi của bộ quét script; miễn D-324 chỉ mất khi cd nằm giữa ghi và chạy · (3) Bắt buộc sandbox Claude Code
+- Chọn: ADR-0066: xét theo TÊN tệp đích ghi được nhắc lại ở chỗ khác của lệnh (trừ lệnh chỉ đọc trong danh sách trắng với tệp không đuôi script), thêm -o/--output và đích ghi của bộ quét script; miễn D-324 chỉ mất khi cd nằm giữa ghi và chạy
+- Lý do (tiêu chí chất lượng cuối): (1) không phụ thuộc danh sách trình chạy — lệnh lạ bị tính (hướng an toàn); sandbox không chặn force-push qua mạng; (4) gỡ chặn oan cd-trước của D-326; (3) dùng dữ liệu đích ghi sẵn có, không suy cấu trúc mới (ADR-0065)
+- Đường lùi: Revert PR triển khai; AUD-SEC-406 về mở
