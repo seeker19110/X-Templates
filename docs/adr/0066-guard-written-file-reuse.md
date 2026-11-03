@@ -1,7 +1,7 @@
 # ADR-0066: Guard xét tệp do chính lệnh ghi theo TÊN tệp được nhắc lại, không liệt kê trình chạy
 
 - **Trạng thái:** Đã chấp nhận 2026-11-03 (phiên chính tự duyệt theo tiêu chí chất lượng cuối, ADR-0008 — **D-327**).
-- **Trạng thái triển khai:** chưa (PR kế sau #426).
+- **Trạng thái triển khai:** đã làm (PR #427) — `_reuse_why` trong `.claude/hooks/guard.py`.
 - **Ngày:** 2026-11-03.
 - **Thay:** cách đóng AUD-SEC-400 bằng danh sách trình chạy/trình ghi (`_script_run_why`, #426). **Giữ:** ADR-0063,
   ADR-0065, miễn D-324 (heredoc có nháy ghi bằng `cat`/`tee` rồi chạy ngay — quét thân như script) — lớp mới OR với
@@ -55,4 +55,15 @@ thư mục chung, thân quét đúng thư mục). Tên tệp có mở rộng (`$
   .ts .rb .pl .php .lua .awk .sed .mk`, `Makefile`): nhắc lại tên ở lệnh trong danh sách trắng thì không tính. Hướng an
   toàn: lệnh lạ (chưa biết có chạy mã không) bị tính — ngược với danh sách trình chạy của #426. Đo lại transcript như
   #426, ghi số vào PR.
+- Triển khai (#427) thêm ba miễn theo giá trị, mỗi miễn không mở đường chạy mã: (a) tên gốc bỏ đuôi chỉ tính khi đuôi
+  không phải dữ liệu (`.txt .log .md .json .diff .html .csv .yaml …` — không trình nạp mô-đun nào tìm `x` ra `x.log`);
+  (b) tệp không đuôi script chỉ là ĐỐI SỐ dữ liệu sau chương trình `-c`/`-` mà `_read_only_script` xác nhận chỉ đọc
+  (không exec/import động/ghi) và không nhắc tên tệp (`python3 -c '…json.load(open(sys.argv[1]))' p.json`); (c) tệp
+  nội dung của `gh pr|issue … -F`/`--body-file`/`< F` (gh gửi chữ, không chạy; nội dung do luật đăng bài D-270 xét).
+  Lệnh chỉ đọc mà stdout đổ vào lệnh lạ (`cat f | python3 x`) hay nằm trong `$(…)` vẫn tính.
+- Chặn oan có chủ đích (đổi kỳ vọng test/bench): tệp vừa ghi đi vào script có sẵn hay `-m` (`python3 sum.py < in.txt`,
+  `bash run.sh < in.txt`, `python3 -m json.tool out.json` — gỡ một phần AUD-SEC-407), `sed -n` đọc tệp vừa `sed -i`.
+  Đo 5 237 lệnh Bash thật (2026-11-03): so head b18ca759 — 340 qua→chặn (210 tệp dữ liệu vào lệnh lạ, 130 tệp script
+  sửa bằng `python3 - <<EOF` rồi đọc/chạy lại), 22 chặn→qua (20 dạng `cd` trước D-324, 2 AUD-SEC-410); so base
+  85662a7f — 638 qua→chặn (gồm 273 của AUD-SEC-400), 2 chặn→qua.
 - Đường lùi: revert PR triển khai; AUD-SEC-406 về `mở`.

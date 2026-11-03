@@ -1433,7 +1433,7 @@ def _allowlist_why(cmd: str) -> str:
     """ADR-0065: lý do chặn của lớp danh sách trắng (rỗng = qua); nợ cùng họ: mảng nhiễm làm đối số, ghi rồi chạy
     script, script từ đường dẫn fd (AUD-SEC-399/400/402)."""
     why = _dyn_head_why(cmd) or _reread_why(cmd) or _split_why(cmd) or _here_shell_why(cmd)
-    return why or _array_arg_why(cmd) or _script_run_why(cmd) or _fd_script_why(cmd)
+    return why or _array_arg_why(cmd) or _script_run_why(cmd) or _reuse_why(cmd) or _fd_script_why(cmd)
 
 
 def _reread_why(cmd: str) -> str:
@@ -1907,13 +1907,14 @@ def _dev_sink(path: str) -> bool:
 # lệnh còn lại trong `HEREDOC_RUN_SAFE` hay chỉ là gán biến, không lệnh nào khác ghi tệp, tên F không nhắc ở chỗ khác
 # (cả trong thân). So theo TÊN tệp (thư mục có mở rộng — `$S/x.py` — vẫn được): trình chạy mở tệp khác cùng tên (thư mục
 # khác, writer lỗi) là chạy tệp có sẵn — như `bash x.sh` đứng riêng, không phải nội dung guard chưa quét do lệnh này tạo.
-HEREDOC_RUN_SAFE = (
-    frozenset(  # review #426: không `cd`/`pushd`/`popd` (thân quét ở thư mục khác chỗ chạy), không `uniq`
-        "chmod mkdir echo printf true false : ls cat head tail grep wc sort diff pwd cut tr date basename dirname"
-        " realpath".split()
-        + [""]  # chỉ gán biến (`S=/tmp/x;`): không chạy gì
-    )
+HEREDOC_RUN_SAFE = frozenset(  # review #426: không `uniq`
+    "chmod mkdir echo printf true false : ls cat head tail grep wc sort diff pwd cut tr date basename dirname"
+    " realpath".split()
+    + [""]  # chỉ gán biến (`S=/tmp/x;`): không chạy gì
 )
+# ADR-0066 (thay luật "có cd thì mất miễn" của D-326): đổi thư mục GIỮA lệnh ghi và lệnh chạy → mất miễn (thân quét ở
+# thư mục khác chỗ chạy); MỘT lệnh đứng trước cả hai → thân quét ở thư mục đầu và sau lệnh đó (`_heredoc_run`).
+HEREDOC_RUN_MOVES = frozenset({"cd", "pushd", "popd"})
 HEREDOC_RUN_SEP_RE = re.compile(r"(?:&&|\|\||[;\n])+")
 
 
@@ -1935,7 +1936,17 @@ def _heredoc_run(cmd: str) -> Optional[str]:
         name
     )  # tên nhắc ở chỗ khác (thân heredoc, lệnh khác) — kể cả dạng đường dẫn khác — thì không miễn
     mentions = sum(t.count(base) for k, a in enumerate(argvs) if k in (writers[0], j) or a[:1] == ["chmod"] for t in a)
-    return None if cmd.count(base) > mentions else _heredoc_script(_interp_argv(argvs[j])[0], heres[0][2])
+    if cmd.count(base) > mentions:
+        return None
+    moves = [" ".join(cmds[k]) for k in range(writers[0]) if _heredoc_head(argvs[k]) in HEREDOC_RUN_MOVES]
+    script = _heredoc_script(_interp_argv(argvs[j])[0], heres[0][2])
+    # một lệnh đổi thư mục: thân quét ở CẢ thư mục đầu lẫn sau `cd` — `cd` trong `( … )`, sau `&`/`||`, hay lỗi thì không
+    # có hiệu lực; nhiều lệnh đổi thư mục (tổ hợp có/không) → không miễn
+    return None if len(moves) > 1 else "\n".join([script] + [m + "\n" + script for m in moves])
+
+
+def _heredoc_head(argv: List[str]) -> str:
+    return (_interp_argv(argv)[:1] or [""])[0]
 
 
 def _sep_commands(raw: List[str]) -> Tuple[List[List[str]], List[str]]:
@@ -1969,8 +1980,10 @@ def _heredoc_runner(argvs: List[List[str]], writers: List[int], name: str) -> in
     lệnh khác ngoài `HEREDOC_RUN_SAFE`, lệnh khác ghi tệp, trình chạy ghi chính F; review #426: trình chạy có chuyển
     hướng vào/here-string hay đối số sau F — thân có thể đọc lệnh từ đó)."""
     rest = [k for k in range(len(argvs)) if k != writers[0]]
-    runs = [k for k in rest if (_interp_argv(argvs[k])[:1] or [""])[0] not in HEREDOC_RUN_SAFE]
+    runs = [k for k in rest if _heredoc_head(argvs[k]) not in HEREDOC_RUN_SAFE | HEREDOC_RUN_MOVES]
     k = runs[0] if len(runs) == 1 else -1
+    if any(writers[0] < m < k for m in rest if _heredoc_head(argvs[m]) in HEREDOC_RUN_MOVES):
+        return -1  # đổi thư mục giữa ghi và chạy: trình chạy mở tệp ở thư mục khác chỗ ghi
     n = _interp_argv(argvs[k])
     files = _script_file(n) if k > writers[0] else None
     others = [w for i in rest if i != k for w in write_targets(normalize(argvs[i]), argvs[i]) if not _dev_sink(w)]
@@ -2050,6 +2063,217 @@ def _fd_script_why(cmd: str) -> str:
     argvs = [] if raw is None else [[_dequote(t) for t in c] for c in split_commands(raw)]
     files = [_norm_path(f) for a in argvs for f in _script_file(_interp_argv(a)) or []]  # `/dev/./fd/3`, `//dev/fd/3`
     return FD_SCRIPT_WHY if any(FD_SCRIPT_RE.fullmatch(f) and f not in STDIN_SCRIPTS for f in files) else ""
+
+
+# ADR-0066 (AUD-SEC-406): theo TÊN, không theo danh sách trình chạy — tệp F là đích ghi của một lệnh đơn (mọi cách guard
+# nhận ra, `-o`/`--output`, `open(…,'w')`/`writeFile` trong `-c`/`-e`) mà đường dẫn, tên gốc hay tên gốc bỏ đuôi của F
+# xuất hiện ở lệnh đơn KHÁC (từ, chữ `-c`/`-e`, thân heredoc, gán `PATH=`/`PYTHONSTARTUP=`, mẫu glob khớp F, thư mục của
+# F trong biến danh sách đường dẫn) → BUDGET. OR với `_script_run_why`; miễn D-324 giữ (thân quét như script).
+REUSE_WHY = (
+    "tệp do chính lệnh ghi (`>`, `tee`, `-o`, `open(…,'w')`…) được nhắc lại ở lệnh đơn khác của cùng lệnh — guard không"
+    " đọc tệp lúc chạy nên không biết lệnh đó có chạy nó không (AUD-SEC-406, ADR-0066); viết lại: ghi tệp bằng công cụ"
+    " Write rồi chạy ở lệnh Bash riêng"
+)
+REUSE_SCRIPT_RE = re.compile(r".*\.(?:sh|bash|zsh|py|js|mjs|cjs|ts|rb|pl|php|lua|awk|sed|mk)|(?:GNU)?[Mm]akefile", re.I)
+# Lệnh chỉ đọc không chạy mã: nhắc tên tệp KHÔNG đuôi script ở đây không tính (trừ cờ chạy chương trình ngoài).
+REUSE_READERS = frozenset("cat head tail grep rg wc diff cmp sort cut ls stat file jq less".split())
+REUSE_READER_EXEC = ("--compress-program", "--pre")  # `sort`/`rg` chạy chương trình theo giá trị cờ
+REUSE_GIT_READS = (["add"], ["diff"], ["show"], ["apply", "--check"])
+# Lệnh mà `-o` không phải tệp ra (tên tuỳ chọn, cờ bật/tắt): giá trị sau nó không là đích ghi
+REUSE_O_NOT_FILE = (
+    frozenset("set shopt grep egrep fgrep zgrep rg ls ps pgrep pkill ssh scp mount unzip".split()) | SHELLS
+)
+REUSE_DELETERS = frozenset("rm unlink shred rmdir find".split())  # đích của `write_targets` là tệp bị xoá
+REUSE_OUT_OPS = (">", ">>", ">|", "&>", "&>>")  # đích chuyển hướng ghi ở lệnh khác: chỉ ghi, không đọc/chạy
+REUSE_PATHLIST_RE = re.compile(r"(?:[A-Za-z_]\w*)?(?:PATH|LIB|PRELOAD)\+?=(.*)", re.S)
+REUSE_SHORT_RE = re.compile(r"-[A-Za-z0-9]{1,8}")  # cụm cờ ngắn dính giá trị: `-mx`, `-fp.awk`
+REUSE_ANY = "*"  # tầng lồng sâu hơn `SCRIPT_RUN_DEPTH`: mẫu glob khớp mọi tệp
+# Tên gốc bỏ đuôi chỉ để bắt trình nạp theo tên mô-đun (`-m x`, `import x`, `require("./x")`, `java X`, luật ngầm của
+# `make x`); không trình nạp nào tìm `x` ra tệp dữ liệu này — `echo audit=$?` sau `> audit.log` không phải nhắc lại.
+REUSE_DATA_EXT_RE = re.compile(r"\.(?:txt|log|md|json|jsonl|diff|patch|html|xml|csv|ya?ml|toml|out|err)$", re.I)
+
+
+class _ReuseCmd(NamedTuple):
+    argv: List[str]  # đã bỏ nháy; `$(…)`/backtick thay bằng `$_` (thân là lệnh đơn riêng)
+    texts: List[str]  # chữ có thể nhắc tên: từ (trừ đích `>`, thân `sh -c`/`eval`/`trap`) + thân heredoc của lệnh
+    bodies: List[str]  # thân heredoc gắn lệnh này
+    pipe: bool  # stdout đổ vào lệnh đơn kế (`|`)
+    top: bool  # tầng ngoài cùng (không trong `$(…)`/`sh -c`/`eval`)
+
+
+def _reuse_why(cmd: str) -> str:
+    if _heredoc_run(cmd) is not None:
+        return ""
+    cmds = _reuse_cmds(cmd, 0)
+    writes = [(i, w) for i, c in enumerate(cmds) for w in _reuse_writes(c)]
+    for i, f in dict.fromkeys(writes):
+        pat = _reuse_pattern(f)
+        if pat is not None and any(_reuse_counts(cmds, j, f, pat) for j in range(len(cmds)) if j != i):
+            return REUSE_WHY
+    return ""
+
+
+def _reuse_cmds(cmd: str, depth: int) -> List[_ReuseCmd]:
+    """Lệnh đơn của `cmd` và của script lồng (như `_nested_argvs`), mỗi lệnh kèm chữ có thể nhắc tên tệp."""
+    raw = _raw_tokens(cmd)
+    if raw is None:
+        return []
+    bodies = ["\n".join(b) for _, _, b in _heredocs(join_continuations(cmd))] if "<<" in cmd else []
+    inner = [body for text in _expanded_heredocs(cmd) for *_, body in _dollar_spans(text) + _backtick_spans(text)]
+    out: List[_ReuseCmd] = []
+    cmds, seps = _sep_commands(raw)
+    ops = sum(_dequote(t) == "<<" for c in cmds for t in c)
+    k = arith = 0
+    for c, before, sep in zip(cmds, seps, seps[1:] + [""]):
+        arith += before.count("((") - before.count("))")
+        if arith > 0:  # trong `((…))`/`for ((…))`: `>` là so sánh, không phải chuyển hướng
+            continue
+        words: List[str] = []
+        for t in c:
+            spans: List["Span"] = []
+            end = -1
+            for s in sorted(_dollar_spans(t) + _backtick_spans(t)):
+                spans, end = (spans + [s], s[1]) if s[0] >= end else (spans, end)
+            inner += [body for *_, body in spans]
+            for a, b, _ in reversed(spans):
+                t = t[:a] + "$_" + t[b:]
+            words.append(_dequote(t))
+        n = sum(w == "<<" for w in words)
+        mine = bodies[k : k + n] if ops == len(bodies) else bodies
+        k += n
+        scripts = [s for s in [_shell_c_script(words)] if s] + _eval_scripts(words)
+        inner += scripts
+        drop = set(scripts) | (set(normalize(words)[1:]) if normalize(words)[:1] == ["eval"] else set())
+        texts = [w for p, w in zip([""] + words, words) if p not in REUSE_OUT_OPS and w not in drop]
+        out.append(_ReuseCmd(words, texts + mine, mine, sep in ("|", "|&"), depth == 0))
+    if depth >= SCRIPT_RUN_DEPTH:
+        return out + ([_ReuseCmd(["$_"], [REUSE_ANY], [], False, False)] if inner else [])
+    return out + [c for text in inner for c in _reuse_cmds(text, depth + 1)]
+
+
+def _reuse_writes(c: _ReuseCmd) -> List[str]:
+    """Đích ghi của lệnh đơn: `write_targets`, giá trị `-o`/`--output[=]`, chuỗi là đích ghi của script trình thông
+    dịch (`-c`/`-e`/thân heredoc/here-string — bộ dò `_WriteProbe` sẵn có)."""
+    n = normalize(c.argv)
+    out = [c.argv[k + 1] for k, t in enumerate(c.argv[:-1]) if t in REDIRECTS]
+    if (n[:1] or [""])[0] not in REUSE_DELETERS and n[:2] != ["git", "rm"]:  # xoá tệp: không tạo nội dung
+        out += write_targets(n, c.argv) + write_targets(_no_redirects(n), [])  # `install … f <<< x`: toán hạng là f
+    if n and n[0] not in REUSE_O_NOT_FILE:
+        out += [v for v in _flag_values(n[1:], ("-o", "--output")) if v[:1] != "-"]
+    p = _interp_argv(c.argv)
+    if p and INTERP_RE.fullmatch(p[0]):
+        inline = _inline_scripts(p)
+        here = [c.argv[k + 1] for k, a in enumerate(c.argv[:-1]) if a == "<<<"]
+        for s in inline or c.bodies + here:
+            probe = _WriteProbe(s)
+            out += [PERL_OPEN_MODE_RE.sub("", x) for x in _script_literals(s) if probe(x)]
+    return [w for w in out if w not in ("", "-") and not _dev_sink(w)]
+
+
+def _reuse_pattern(f: str) -> Optional["re.Pattern[str]"]:
+    """Mẫu tìm đường dẫn, tên gốc, tên gốc bỏ đuôi (`x.py` → `x` của `-m x`/`import x`) của F; None khi tên có mở rộng
+    (luật `_script_run_why` xét) hay F là `.`/`..`/`/`."""
+    np = _norm_path(f)
+    b = posixpath.basename(np)
+    if b in ("", ".", "..") or SCRIPT_NAME_DYN_RE.search(b):
+        return None
+    stem = b.rsplit(".", 1)[0] if "." in b[1:] and not REUSE_DATA_EXT_RE.search(b) else b
+    forms = {b, stem} | {x for x in (f, np) if not SCRIPT_NAME_DYN_RE.search(x)}
+    alt = "|".join(map(re.escape, sorted(forms, key=len, reverse=True)))
+    return re.compile(rf"(?<![\w-])(?:{alt})(?![\w-])")
+
+
+def _reuse_counts(cmds: List[_ReuseCmd], j: int, f: str, pat: "re.Pattern[str]") -> bool:
+    """Lệnh đơn `j` nhắc F và không thuộc ngoại lệ: lệnh chỉ đọc (F không đuôi script), hay tệp dữ liệu là đối số sau
+    chương trình `-c`/`-` CHỈ ĐỌC (`_read_only_script`) của trình thông dịch — stdout không đổ vào lệnh lạ."""
+    c = cmds[j]
+    if not any(_reuse_hit(pat, f, t) for t in c.texts):
+        return False
+    script = REUSE_SCRIPT_RE.fullmatch(posixpath.basename(_norm_path(f)))
+    safe_out = c.top and all(_reuse_reader(d.argv) for d in _pipe_tail(cmds, j))
+    if script or not safe_out:
+        return True
+    if _reuse_reader(c.argv) or _reuse_gh_body(c, f, pat):
+        return False
+    return not _reuse_data_arg(c, f, pat)
+
+
+def _reuse_gh_body(c: _ReuseCmd, f: str, pat: "re.Pattern[str]") -> bool:
+    """F chỉ là tệp nội dung của `gh pr|issue …` (`-F F`, `--body-file F`, `-F - < F`) — gh gửi chữ, không chạy; nội
+    dung do luật đăng bài của guard xét (D-270, `_gh_body_why`)."""
+    if normalize(c.argv)[:2] not in (["gh", "pr"], ["gh", "issue"]):
+        return False
+    a = c.argv
+    body = {k + 1 for k, w in enumerate(a[:-1]) if w in ("-F", "--body-file", "<")}
+    body |= {k for k, w in enumerate(a) if w.startswith("--body-file=")}
+    left = [w for k, (p, w) in enumerate(zip([""] + a, a)) if k not in body and p not in REUSE_OUT_OPS]
+    return not any(_reuse_hit(pat, f, t) for t in left + c.bodies)
+
+
+def _pipe_tail(cmds: List[_ReuseCmd], j: int) -> List[_ReuseCmd]:
+    """Các lệnh đơn nhận stdout của lệnh `j` qua ống."""
+    out: List[_ReuseCmd] = []
+    while j < len(cmds) - 1 and cmds[j].pipe:
+        j += 1
+        out.append(cmds[j])
+    return out
+
+
+def _reuse_hit(pat: "re.Pattern[str]", f: str, t: str) -> bool:
+    """Chữ `t` nhắc F: tên/đường dẫn có biên, cụm cờ ngắn dính (`-mx`), mẫu glob khớp F, thư mục của F trong biến danh
+    sách đường dẫn (`PATH=.:$PATH`)."""
+    if pat.search(t):
+        return True
+    m = REUSE_SHORT_RE.match(t)
+    if m and any(pat.match(t[k:]) for k in range(2, m.end() + 1)):
+        return True
+    np = _norm_path(f)
+    if any(ch in t for ch in "*?[") and not any(ch.isspace() for ch in t):
+        if fnmatch.fnmatchcase(posixpath.basename(np), posixpath.basename(t)) or fnmatch.fnmatchcase(np, _norm_path(t)):
+            return True
+    m = REUSE_PATHLIST_RE.fullmatch(t)
+    d = posixpath.dirname(np) or "."
+    for e in m[1].split(":") if m else []:
+        e = _norm_path(e) if e else "."
+        if e == d or d != "." and posixpath.basename(e) == posixpath.basename(d):
+            return True
+    return False
+
+
+def _reuse_reader(argv: List[str]) -> bool:
+    """Lệnh trong danh sách trắng chỉ đọc (ADR-0066), không gán biến đầu lệnh, không cờ chạy chương trình ngoài."""
+    if not argv or ENV_ASSIGN_RE.fullmatch(argv[0]) or any(a.startswith(REUSE_READER_EXEC) for a in argv):
+        return False
+    head, args = posixpath.basename(argv[0]), argv[1:]
+    if head == "git":
+        return any(args[: len(s)] == s for s in REUSE_GIT_READS)
+    return not _uniq_output(args) if head == "uniq" else head in REUSE_READERS
+
+
+def _reuse_data_arg(c: _ReuseCmd, f: str, pat: "re.Pattern[str]") -> bool:
+    """F chỉ là ĐỐI SỐ dữ liệu sau chương trình `-c`/`-e` hay `-` (thân heredoc) của trình thông dịch, chương trình chỉ
+    đọc (`_read_only_script`: không exec/import động/ghi) và không nhắc F — `python3 -c '…json.load(open(sys.argv[1]))'
+    p.json`. Không áp cho `-m` (mã mô-đun không thấy), chữ trong `-c`, stdin của script có sẵn."""
+    n = _interp_argv(c.argv)
+    m = INTERP_RE.fullmatch(n[0]) if n else None
+    if not m or n != c.argv:
+        return False
+    rest = [a for a in _no_redirects(n) if a != "$"]
+    inline, i, stopped = _interp_opts(rest)
+    if stopped:
+        return False
+    if inline:
+        program, data = "\n".join(inline), rest[i:]
+    elif rest[i : i + 1] == ["-"] and len(c.bodies) == 1:
+        program, data = c.bodies[0], rest[i + 1 :]
+    else:
+        return False
+    left = list(c.texts)
+    for a in data:
+        if _norm_path(a) == _norm_path(f) and a in left:
+            left.remove(a)
+    family = frozenset({INTERP_FAMILY.get(m[1], m[1])})
+    return not any(_reuse_hit(pat, f, t) for t in left) and _read_only_script(program, family)
 
 
 # ADR-0063 T-3637 — shell lồng theo argv đã chuẩn hoá (AUD-SEC-309…311): chữ và argv là hai cách đọc cùng lệnh; guard
@@ -4599,7 +4823,12 @@ def _find_bad_start(s: str, root: str, cwd: Optional[str], moved: bool) -> bool:
 def find_root_scan(cmd: str, root: str, cwd: Optional[str]) -> str:
     """D-153: lý do chặn khi một `find` có hành động xoá/`-exec` bắt đầu từ gốc dự án, tổ tiên hay `gốc/.git`, không có
     điểm bắt đầu khi đang đứng ở đó, hoặc điểm bắt đầu không xác định (`$`, backtick, glob, `{}`, tương đối sau `cd`);
-    hoặc `-fprint*`/`-fls` ghi vào `gốc/.git`. Quét bản bỏ `"`/`'`/`\\` (`fi""nd`, `f\\ind` vẫn là find)."""
+    hoặc `-fprint*`/`-fls` ghi vào `gốc/.git`. Quét bản bỏ `"`/`'`/`\\` (`fi""nd`, `f\\ind` vẫn là find). AUD-SEC-410: chỉ
+    khi có TỪ `find` (token đã tách theo nháy) — chữ `find -exec` trong đối số có nháy của lệnh khác là dữ liệu; script
+    lồng (`sh -c`, `$(…)`, heredoc vào shell) do lượt quét lồng xét."""
+    raw = _raw_tokens(cmd)
+    if raw is not None and not any(posixpath.basename(_dequote(t)) == "find" for t in raw):
+        return ""
     norm = re.sub(r"[\"'\\]", "", join_continuations(cmd))
     for m in FIND_WORD_RE.finditer(norm):
         rest = norm[m.end() :]
