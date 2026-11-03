@@ -19542,6 +19542,36 @@
    "code": "BUDGET"
   },
   "note": "review adr-guard lượt 2: `command -v/-V` chỉ tra tên, không chạy — không phải từ lệnh"
+ },
+ {
+  "id": "r423-403-len",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-403"
+  ],
+  "input": {
+   "command": "read -r k < f; a=(x); echo ${#a[k]}; x=push4--force4origin4main; git $x"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "review #423: chỉ số `${#a[k]}`/khởi tạo mảng có nháy đánh giá đệ quy `k` (IFS=4) — đã chạy bash 5.2.21"
+ },
+ {
+  "id": "r423-403-init-q",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-403"
+  ],
+  "input": {
+   "command": "read -r k < f; declare -a 'a=([k]=v)'; x=push4--force4origin4main; git $x"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "review #423: chỉ số `${#a[k]}`/khởi tạo mảng có nháy đánh giá đệ quy `k` (IFS=4) — đã chạy bash 5.2.21"
  }
  ]
 }
