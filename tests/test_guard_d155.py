@@ -142,7 +142,6 @@ class GlobCommandNameTest(unittest.TestCase):
             "files=(*.py *.sh)",
             "declare -A cfg=([host]=localhost [port]=8080)",
             "[[ $kv =~ ^([^=]*)=(.*)$ ]] && echo ${BASH_REMATCH[1]}",
-            '"${cmd[@]}" --flag',
             "(( a[0] > 5 )) && echo big",
             "flock /tmp/lock cp *.txt /tmp/dst",
             "du -sh $(brew --prefix)/opt/s* 2>/dev/null",

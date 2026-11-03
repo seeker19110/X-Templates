@@ -4,6 +4,7 @@ Mỗi lớp một test đỏ trước khi sửa (mẫu tái hiện của sổ au
 
 from __future__ import annotations
 
+import contextlib
 import io
 import json
 import os
@@ -201,7 +202,8 @@ class DynamicCodeDenyTest(unittest.TestCase):
         'bash -c "for f in *.txt; do wc -l \\$f; done"',
         "PS4='+ '; set -x; true",
         "sed -i -e 's/a/b/g' -e 's|x|y|' f",
-        "sh -c \"$(cat <<'E'\necho hi\nE\n)\"",  # AUD-TEST-048: heredoc `cat` nháy đơn trong `$(…)` là chữ tĩnh
+        # AUD-TEST-048 `sh -c "$(cat <<'E'…)"`: ADR-0065 lớp A chặn (script lồng có từ lệnh dựng lúc chạy) — viết `sh <<'E'`
+        "sh <<'E'\necho hi\nE",
     )
 
     def test_documented_rewrites_pass(self):
@@ -714,6 +716,372 @@ class StageLedgerFindFilterTest(unittest.TestCase):
         for cmd in self.ALLOW:
             with self.subTest(cmd=cmd):
                 self.assertEqual(decide(cmd)["decision"], "", decide(cmd))
+
+    def assert_ledger(self, deny, allow):
+        for cmd in deny:
+            with self.subTest(cmd=cmd):
+                d = decide(cmd)
+                self.assertEqual((d["decision"], d.get("code")), ("deny", "EVIDENCE_HANDWRITE"), d)
+        for cmd in allow:
+            with self.subTest(cmd=cmd):
+                self.assertEqual(decide(cmd)["decision"], "", decide(cmd))
+
+    def test_ledger_find_quoted_source(self):
+        """AUD-SEC-393 (review nội bộ blk-guard): dấu có nháy/thoát trong nguồn `find` (`\\(`, `';'`, `'!'`) từng bị đọc như
+        toán tử điều khiển → mất nguồn ống, `xargs rm` xoá sổ. Ống xét cả trên token còn nháy: dấu là đối số."""
+        self.assert_ledger(
+            (
+                "find docs \\( -name STAGE.json \\) | xargs rm",
+                "find docs '(' -name STAGE.json ')' | xargs rm",
+                'find docs "(" -name STAGE.json ")" -print0 | xargs -0 rm -f',
+                "find docs -name STAGE.json ';' | xargs rm",
+                "find docs -name STAGE.json \\; | xargs rm",
+                "find docs '!' -name '*.md' | xargs rm",
+                "find docs \\! -name '*.md' | xargs sed -i s/a/b/",
+                "find docs \\( -name '*.md' \\) | xargs sed -i s/a/b/",  # ngoặc: ngoài tập con đọc chắc
+            ),
+            (
+                "find src \\( -name '*.py' \\) | xargs sed -i s/a/b/",
+                "find docs -name '*.md' -exec grep -l x {} \\;",
+            ),
+        )
+
+    def test_sed_upper_w_ledger(self):
+        """AUD-SEC-398 (review #422): lệnh `W` (chữ hoa — ghi dòng đầu pattern space) của sed ghi tệp như `w`."""
+        self.assert_ledger(
+            (
+                "sed -n -i 'W docs/autopilot/STAGE.json' docs/a.md",
+                "sed -n '1W docs/autopilot/STAGE.json' docs/a.md",
+                "sed -n -e '/x/W docs/autopilot/STAGE.json' docs/a.md",
+                # review adr-guard: GNU sed nhận tên tệp dính liền (`Wf`) và lệnh sau xuống dòng (đã chạy GNU sed 4.9)
+                *(
+                    f"sed -n {s} README.md"
+                    for c in "wW"
+                    for s in (
+                        f"'{c}docs/autopilot/STAGE.json'",
+                        f"'1{{\n{c} docs/autopilot/STAGE.json\n}}'",
+                        f"-e '{c}'\"docs/autopilot/STAGE.json\"",
+                        f"'p;{c}docs/autopilot/STAGE.json'",
+                    )
+                ),
+            ),
+            ("sed -n 'W /tmp/out.txt' docs/a.md", "sed -n 's/W x/y/p' docs/a.md", "sed -n 's/a/w/gp' docs/a.md"),
+        )
+
+    def test_ledger_find_editor_exemption_narrowed(self):
+        """AUD-SEC-396 (review #422 🟢): miễn trừ AUD-SEC-384 giả định sed chỉ sửa tệp nhận từ ống — không áp khi xargs đọc
+        đối số từ tệp (`-a`/`--arg-file`, cả cờ gộp), sed đọc chương trình từ tệp (`-f`, `--file`, cờ gộp `-nf`), hay
+        chương trình có lệnh ghi `w`/`W` (đích khác tệp nhận từ ống)."""
+        self.assert_ledger(
+            (
+                "find docs -name '*.md' | xargs -a l sed -i s/a/b/",
+                "find docs -name '*.md' | xargs --arg-file=l sed -i s/a/b/",
+                "find docs -name '*.md' | xargs sed -i -f x.sed",
+                "find docs -name '*.md' | xargs sed -i -nf x.sed",
+                "find docs -name '*.md' | xargs sed -i --file=x.sed",
+                "find docs -name '*.md' | xargs sed -n -i 'W docs/autopilot/STAGE.json'",
+                "find docs -name '*.md' | xargs sed -i 's/a/b/w docs/autopilot/STAGE.json'",
+            ),
+            (
+                "find docs -name '*.md' | xargs sed -i s/a/b/",
+                "find docs -name '*.md' | xargs -0 -n 1 sed -i -e s/a/b/",
+            ),
+        )
+
+
+class AllowlistLayerTest(unittest.TestCase):
+    """ADR-0065 (D-322): đơn vị của lớp danh sách trắng — tách lệnh đơn trên token còn nháy, vùng số học/mảng, `$`
+    trực tiếp trong nháy kép, thân heredoc; fuzz: hàm mới không ném ngoại lệ (ngoại lệ ở hook = cho qua — bài học #420)."""
+
+    def test_plain_argvs(self):
+        pa = guard._plain_argvs
+        self.assertEqual(pa(["a=", "(", "$x", ");", "$y"]), [["a="], ["$y"]])
+        self.assertEqual(pa(["a=", "(", "x", ")>", "f", "$c"]), [["a=", ">", "f", "$c"]])
+        self.assertIsNone(pa(["a=", "(", "x"]))  # mảng không đóng
+        self.assertEqual(pa(["((", "x", "))>", "f", ";", "ls"]), [["((", ">", "f"], ["ls"]])
+        self.assertEqual(pa(["if", "((", "$#", "))", ";", "then", ":"]), [["if", "(("], ["then", ":"]])
+        self.assertIsNone(pa(["((", "x", ")", ")"]))  # `) )`: bash đọc lại thành subshell lồng
+        self.assertIsNone(pa(["((", "x"]))  # không đóng
+        self.assertEqual(pa(["(((", "x", ")", "+", "1", "))"]), [["(("]])  # ngoặc trong biểu thức
+        self.assertEqual(pa(["echo", "((", "x"]), [["echo"], ["x"]])  # không ở vị trí lệnh: dấu thường
+        self.assertEqual(
+            pa(["diff", "<(", "sort", "a", ")", "$f", ";", "x", ")<(", "y", ")"]),
+            [["sort", "a"], ["diff", guard.PROCSUB_WORD, "$f"], ["x"], ["y"], [guard.PROCSUB_WORD]],
+        )
+        self.assertEqual(pa(["(", "$c", ")", ">", "f"]), [["$c"], [">", "f"]])
+        self.assertEqual(pa(["a", ")", "b", ";>", "$f"]), [["a"], ["b"], [">", "$f"]])
+
+    def test_command_heads(self):
+        heads = guard._command_heads
+        self.assertIsNone(heads("echo 'x"))
+        self.assertCountEqual(heads("exec > >(tee log) 2>&1"), ["exec", "tee"])  # thứ tự: lệnh trong `>(…)` ra trước
+        self.assertEqual(heads('A=1 env B=2 nice -n 5 "$c" x'), ['"$c"'])
+        self.assertEqual(guard._dyn_head_why("echo 'x"), guard.DYN_HEAD_WHY)  # không tách chắc: chặn
+        # review adr-guard 🔴: từ sau `{` trơn là từ lệnh (`function f { … }`, `coproc f { … }` không có dấu tách trước `{`)
+        self.assertEqual(heads('function f { "${a[@]}"; }'), ["function", '"${a[@]}"'])
+        self.assertEqual(heads("coproc f { $c; }"), ["coproc", "$c"])
+        self.assertEqual(heads("env A=1"), ["env"])  # lệnh bọc không kèm lệnh: chính nó là từ lệnh
+
+    def test_split_trigger(self):
+        tr = guard._split_trigger
+        self.assertTrue(tr("x", guard.STRICT_EVAL_DEPTH + 1))
+        self.assertTrue(tr("echo 'x", 0))  # không tách được
+        self.assertTrue(tr("echo " + BT + "x" + BT, 0))  # ngoài tập con đọc chắc
+        self.assertTrue(tr("echo I''FS", 0) and tr("echo I''FS 'x", 0))  # dạng chỉ-chữ-số, cả khi không tách được
+        self.assertFalse(tr('grep -rIF "SELECT" src', 0))
+        self.assertTrue(tr("coproc { :; }", 0))
+        self.assertTrue(tr('getopts ab "$n"', 0))
+        self.assertTrue(tr('trap "declare -n r=x" EXIT', 0))
+        self.assertTrue(tr("echo ${x~~}", 0))
+        self.assertFalse(tr("getopts ab opt; select x in a; do :; done; unset x; wait -n; echo ${x,,}", 0))
+        self.assertFalse(tr("cat <<'E'\n${!x} ${x^^}\nE", 0))  # thân heredoc có nháy là chữ
+        self.assertTrue(tr("cat <<E\n${!x}\nE", 0))  # thân không nháy: mở rộng thật
+        # review adr-guard 🔴: thân heredoc không nháy của builtin chạy trong shell này (`: <<E` ↵ `${!y:=/}`)
+        self.assertTrue(tr(": <<E\n${!y:=/}\nE", 0))
+        self.assertTrue(tr(": <<E\n${y^^}\nE", 0))
+        self.assertTrue(tr(": <<E\n$(( y ))\nE", 0))
+        # `unset` tên không nguyên văn (tên đích động — kể cả trong nháy kép)
+        self.assertTrue(tr("unset $y", 0) and tr('unset "$n"', 0))
+        # giá trị cờ không nháy của builtin gán biến: bash tách thành thêm cờ/tên đích (`read -t $T v`, T='1 IFS')
+        for cmd in ("read -t $T v", "read -d $D v", "read -u $FD v", "mapfile -n $N a", "readarray -s$N a"):
+            self.assertTrue(tr(cmd, 0), cmd)
+        for cmd in ("printf $F", "printf -v x $F", "printf -v$F x", "wait $p", "unset -v $(cat n)"):
+            self.assertTrue(tr(cmd, 0), cmd)
+        for cmd in ('read -t "$T" v', "printf '%s\\n' $x $(date)", "printf -v x '%s' $y", "printf -- $F", "wait $! $?"):
+            self.assertFalse(tr(cmd, 0), cmd)
+        self.assertEqual(guard._split_why("IFS=/; echo " + BT + "x" + BT), guard.SPLIT_WHY)
+
+    def test_unsafe_dollar_and_heredoc_body(self):
+        def unsafe(s: str) -> bool:
+            return guard._unsafe_dollar(guard._CodeView(s))
+
+        for s in ('echo "$x" "${#a[@]}" $? $$ $! $# $\'x\'', 'echo "$(( n + 1 ))" $((n+1))', 'x="$(echo "$y")"'):
+            self.assertFalse(unsafe(s), s)
+        for s in ("echo $x", "echo '$x'", 'echo "${a[$i]}"', 'echo "$(echo $y)"', "echo \\$x", "echo $((echo a) )"):
+            self.assertTrue(unsafe(s), s)
+        # review adr-guard 🔴: `\\$` trong nháy kép là chữ `$` mà `mapfile -C`/`${y@P}` đọc lại thành mở rộng — không
+        # có lớp lồng nào quét các chỗ đọc lại đó, nên không miễn theo cấu trúc (cả trong `sh -c "…"`)
+        for s in ('echo "\\$y"', 'mapfile -C "git \\$x #"', 'sh -c "git \\$x"'):
+            self.assertTrue(unsafe(s), s)
+        body = guard._here_body_unsafe
+        for s in ("$x ${y} $((n+1)) $(date)", "a\\b", "${x:-)} plain $y"):
+            self.assertFalse(body(s), s)
+        for s in ("$(echo $x)", "${x:-$y}", "\\$x", "\\`id\\`", BT + "id" + BT, "${x:-)}$(git $c)"):
+            self.assertTrue(body(s), s)
+
+    def test_split_name(self):
+        for w in ("x", "x=1", "a[0]=1", "a+=", '"x=$y"', "_a1"):
+            self.assertTrue(guard._split_name(w), w)
+        for w in ('"$n"', "{I,J}FS", "a[$i]=1", "1x", "a b", '"a b"', "a\\ b=1", "'I FS'"):
+            self.assertFalse(guard._split_name(w), w)
+        self.assertTrue(guard._split_name('"x=a b"'))  # khoảng trắng ở giá trị, không ở tên
+
+    def test_reread_and_stdin_fd(self):
+        """review adr-guard 🔴: chữ dữ liệu bash chạy lại như mã trong shell này (`mapfile -C`, `${x@P}`) → luôn chặn;
+        heredoc ghi fd tường minh (`bash 0<<E`, `bash 2>/dev/null <<E`) vẫn là shell đọc stdin."""
+        rr = guard._reread_why
+        for cmd in ('mapfile -c1 -C "$cb" a <<< 1', "readarray -tC cb a < f", 'echo "${y@P}"', "x=${a[0]@P}"):
+            self.assertEqual(rr(cmd), guard.REREAD_WHY, cmd)
+        self.assertEqual(rr("cat <<E\n${y@P}\nE"), guard.REREAD_WHY)  # thân heredoc không nháy: mở rộng thật
+        for cmd in ("mapfile -t a < f", 'echo "${y@Q}" "${y@A}"', "readarray -c 1 a < f", "echo C@P"):
+            self.assertEqual(rr(cmd), "", cmd)
+        # chữ dữ liệu (đo trên lệnh thật của phiên): thân heredoc có nháy, mẫu grep nháy đơn/`\\$` trong nháy kép
+        for cmd in (
+            "cat > f <<'E'\n${y@P}\nE",
+            "grep -n '${x@P}' f",
+            'grep -n "\\${x@P}" f',
+            "cat <<'E'\nmapfile -C x\nE",
+        ):
+            self.assertEqual(rr(cmd), "", cmd)
+        self.assertEqual(rr("echo 'x"), "")  # không tách được: lớp khác chặn
+        for argv in (["bash", "0", "<<", "E"], ["sh", "2", ">", "/dev/null", "<<", "E"], ["bash", "0", "<<", "-E"]):
+            self.assertTrue(guard._stdin_shell(argv), argv)
+        self.assertFalse(guard._stdin_shell(["bash", "s.sh", "0", "<", "f"]))
+
+    def test_fuzz_no_exception(self):
+        """Ghép ngẫu nhiên mảnh shell (nháy, ngoặc, heredoc, số học, mở rộng) qua mọi hàm mới và cả `bash_decision`:
+        chỉ được trả kết quả hoặc `ScanTooComplex` (chặn) — ngoại lệ khác làm hook cho qua."""
+        import random
+
+        rng = random.Random(3221)
+        parts = [
+            *("$c", '"$c"', "'$c'", "${a[@]}", '"${a[@]}"', "$(", ")", "(", "((", "))", "<(", ">(", "$((", "${", "}"),
+            *("'", '"', "\\", BT, ";", "|", "&&", "\n", "<<E", "<<'E'", "\nE\n", "IFS=/", "read -r", "eval", "x=("),
+            *(
+                " ",
+                " ",
+                "git",
+                "push",
+                "declare -n",
+                "printf -v",
+                "${!x}",
+                "$'\\x49'",
+                "#",
+                "a[$i]=",
+                "let",
+                "[[",
+                "]]",
+            ),
+            *("| bash", ". /dev/stdin", "find docs", "| xargs sed -i", "-name", "STAGE.json", "';'", "\\(", "W f"),
+        ]
+        funcs = (
+            guard._allowlist_why,
+            guard._command_heads,
+            lambda c: guard._split_trigger(c, 0),
+            guard._mentions_ifs,
+            guard._here_shell_why,
+            lambda c: guard._xargs_evidence(guard.tokenize(c), c),
+        )
+        for _ in range(1500):
+            cmd = "".join(rng.choice(parts) for _ in range(rng.randint(1, 14)))
+            for f in funcs:
+                with self.subTest(cmd=cmd, f=f), contextlib.suppress(guard.ScanTooComplex):
+                    f(cmd)  # chỉ đòi không lỗi khác: quá phức tạp là kết quả hợp lệ (BUDGET)
+        for _ in range(150):
+            cmd = "".join(rng.choice(parts) for _ in range(rng.randint(1, 10)))
+            with self.subTest(decision=cmd):
+                self.assertIn(guard.bash_decision(cmd, str(ROOT))["decision"], ("", "ask", "deny", "allow"))
+
+
+class AllowlistReview2Test(unittest.TestCase):
+    """Review lượt 2 nhánh adr-guard (dữ liệu, đã tái hiện trên bash 5.2.21 / GNU sed 4.9 trước khi sửa)."""
+
+    def assert_budget(self, deny, allow):
+        for cmd in deny:
+            with self.subTest(cmd=cmd):
+                d = decide(cmd)
+                self.assertEqual((d["decision"], d.get("code")), ("deny", "BUDGET"), d)
+        for cmd in allow:
+            with self.subTest(cmd=cmd):
+                self.assertEqual(decide(cmd)["decision"], "", decide(cmd))
+
+    def test_quoted_arith_operand_ifs(self):
+        """AUD-SEC-388 🔴 (lớp B): bash bỏ nháy toán hạng của `[[ … -eq … ]]` và chỉ số của `-v` (`[[ ]]`, `test`, `[`)
+        RỒI mới đánh giá số học — đệ quy giá trị biến (`k`=`IFS=4` từ tệp) gán `IFS`. Vùng nháy đơn/`$'…'`/ký tự thoát
+        không được coi là chữ khi tìm tên trong số học (đã chạy: mỗi dạng đổi IFS, `git $x` thành `git push --force …`)."""
+        tail = "; x=push4--force4origin4main; git $x"
+        forms = (
+            "[[ 'k' -eq 0 ]]",
+            "[[ 0 -eq 'k' ]]",
+            "[[ $'k' -eq 0 ]]",
+            "[[ $'\\153' -eq 0 ]]",
+            "[[ \\k -eq 0 ]]",
+            "[[ 'a[k]' -eq 0 ]]",
+            "[[ -v 'a[k]' ]]",
+            '[[ -v "a[k]" ]]',
+            "[[ -v a[\\k] ]]",
+            "[[ -v $n ]]",
+            "test -v 'a[k]'",
+            "test -v a\\[k]",
+            "[ -v 'a[k]' ]",
+            'if ! test -v "$n"; then :; fi',
+        )
+        allow = (
+            "[[ -v HOME ]] && echo $HOME",
+            "test -v a[0] && echo $x",
+            "[[ 'a' == 'b' ]] || echo $x",
+            "[[ -n 'k' ]] && echo $x",
+            "[ 'k' = k ] && echo $x",
+            "[[ -v x ]]; echo $x  # [[ 'k' -eq 0 ]]",  # comment: không phải mã
+        )
+        self.assert_budget([f"read -r k < f; {f}{tail}" for f in forms], allow)
+
+    def test_length_and_array_init_subscript_ifs(self):
+        """AUD-SEC-388 🔴 (review #423): chỉ số số học trong `${#a[k]}` và trong khởi tạo mảng (kể cả có nháy/thoát:
+        `declare -a 'a=([k]=v)'`, `a=(['k']=v)`) đánh giá đệ quy giá trị `k` (`IFS=4` từ tệp) — đã chạy bash 5.2.21: mỗi
+        dạng đổi IFS, `git $x` thành `git push --force …`; base và head trước khi sửa đều cho qua."""
+        tail = "; x=push4--force4origin4main; git $x"
+        forms = (
+            "a=(x); echo ${#a[k]}",
+            "a=(x); echo ${#a[$k]}",
+            'a=(x); echo "${#a[k]}"',
+            "a=(x); n=${#a[k]}",
+            "declare -a 'a=([k]=v)'",
+            "a=(['k']=v)",
+            'a=(["k"]=v)',
+            "a=([\\k]=v)",
+            'local -a "a=([k]=v)"',
+            'readonly -a "a=([k]=v)"',
+        )
+        allow = (
+            'a=(x); echo "${#a[@]}"; echo $x',
+            "a=([0]=v [1]=w); echo $x",
+            "echo ${#a[0]} $x",
+        )
+        self.assert_budget([f"read -r k < f; {f}{tail}" for f in forms], allow)
+
+    def test_cmdsub_arith_rewrites(self):
+        """AUD-SEC-397 (review 🟠): thay lệnh không nháy + số học nhắc tên là chặn có chủ đích (`n=$(printf 'IFS=4');
+        (( n ))` gán IFS — đã chạy); cách viết thay chạy được, câu `viết lại:` của vòng `for … in $(…)` không gợi nháy."""
+        deny = (
+            'n=$(grep -n foo f | cut -d: -f1); sed -n "$((n-25)),$((n+5))p" f',
+            "for i in $(seq 1 3); do echo $((i*2)); done",
+            "start=$(date +%s); end=$(date +%s); echo $((end-start))",
+            "len=$(wc -c < f); if (( len > 100 )); then echo big; fi",
+        )
+        allow = (
+            'n="$(grep -n foo f | cut -d: -f1)"; sed -n "$((n-25)),$((n+5))p" f',
+            "for ((i=1; i<=3; i++)); do echo $((i*2)); done",
+            "for i in 1 2 3; do echo $((i*2)); done",
+            "seq 1 3 | while read -r i; do echo $((i*2)); done",
+            'start="$(date +%s)"; end="$(date +%s)"; echo $((end-start))',
+            'len="$(wc -c < f)"; if (( len > 100 )); then echo big; fi',
+        )
+        self.assert_budget(deny, allow)
+        loop = decide(deny[1])["reason"]
+        self.assertIn("for ((", loop)
+        self.assertIn("while read -r", loop)
+        self.assertNotIn("for ((", decide(deny[0])["reason"])  # câu gợi vòng chỉ khi `for … in $(…)`
+
+    def test_command_query_not_head(self):
+        """Review 🟠: `command -v/-V NAME` chỉ tra tên, không chạy — tên tra không phải từ lệnh (như `type -P`, `which`);
+        `command NAME`/`command -p NAME` vẫn chạy NAME → từ lệnh động vẫn chặn."""
+        self.assert_budget(
+            ('command -p "$x"', 'command "$x"', 'command -- "$x"', 'command -p -- "$x" a', 'command -p env -v "$x"'),
+            (
+                'command -v "$tool" >/dev/null || echo "missing $tool"',
+                'for t in ruff mypy; do command -v "$t" >/dev/null || echo "missing $t"; done',
+                'if ! command -v "$bin" >/dev/null 2>&1; then echo "need $bin"; fi',
+                'command -V "$tool"',
+                'command -pv "$tool"',
+                'command -v -- "$tool"',
+                'command -p -v "$x"',
+            ),
+        )
+
+    def test_xargs_sed_exemption_real_writes_only(self):
+        """Review 🟠 (AUD-SEC-384/396): miễn trừ chỉ mất khi chương trình sed có lệnh ghi THẬT (`w`/`W` ở vị trí lệnh, cờ
+        `w` của `s` sau dấu phân cách thứ ba) hay lệnh chạy shell `e` — chữ `w`/`W` trong mẫu/thay thế không tính."""
+        src = "find docs -name '*.md' | xargs sed -i "
+        allow = (
+            "'s/Week/Tuan/g'",
+            "'s#http://example.com#https://www.example.com#g'",
+            "'s/re-write/rewrite/g'",
+            "'s/:warning:/WARN/g'",
+            "'s/foo/ want/'",
+            "-E 's/(Wiki|wiki)/Docs/g'",
+            "-e 's/[/]/w/' -e 'y/w/W/'",
+            "'/^W/d;s/a/b/2'",
+            "'s/[/]w/x/'",  # `[/]` là biểu thức ngoặc: `w` thuộc mẫu (GNU sed 4.9 không ghi tệp)
+        )
+        deny = ("'s/old/new/w changes.log'", "'s/a/b/gw x'", "'/x/W f'", "'s/x/y/e'", "'1e date'", "'s/[/]/x/w f'")
+        for cmd in deny:  # `s/x/y/e`: luật mã động chặn trước (BUDGET); còn lại mất miễn trừ → EVIDENCE_HANDWRITE
+            with self.subTest(cmd=cmd):
+                d = decide(src + cmd)
+                self.assertIn((d["decision"], d.get("code")), {("deny", "EVIDENCE_HANDWRITE"), ("deny", "BUDGET")}, d)
+        for cmd in allow:
+            with self.subTest(cmd=cmd):
+                self.assertEqual(decide(src + cmd)["decision"], "", decide(src + cmd))
+
+    def test_sed_has_write(self):
+        w = guard._sed_has_write
+        for s in ("s/a/b/g", "s/[/]/w/", "y/abc/xyz/", "1d;$!N;P;D", "/a/I,+2{p}", "\\%w%d", ":a;N;ba", "a\\\nw x", ""):
+            self.assertFalse(w(s), s)
+        for s in ("w f", "1w f", "Wf", "s/a/b/w f", "s/a/b/pw f", "/x/!w f", "1{\nW f\n}", ":a;w f", "y/a/b/;w f"):
+            self.assertTrue(w(s), s)
+        # đọc không chắc → coi như có ghi (không miễn): dấu phân cách chữ/khoảng trắng, chưa đóng, cờ lạ, lệnh lạ
+        for s in ("sgagbg", "s a b ", "s/a/b", "s/[a/b/", "s/a/b/ # x", "y/a/b", "K", "s/a/b/W f", "/a", "s/a\nb/c/"):
+            self.assertTrue(w(s), s)
 
 
 class ShellSourceReview405Test(unittest.TestCase):

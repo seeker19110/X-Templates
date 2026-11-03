@@ -10836,7 +10836,7 @@
   },
   {
    "id": "guard-control-d270-for-ar",
-   "origin": "control",
+   "origin": "adversarial-author",
    "refs": [],
    "input": {
     "command": "for ((i=0;i<3;i++)); do echo $i; done",
@@ -10847,8 +10847,10 @@
     }
    },
    "expect": {
-    "allowed": true
-   }
+    "allowed": false,
+    "code": "BUDGET"
+   },
+   "note": "ADR-0065 (D-322): chặn có chủ ý — mở rộng ngoài nháy kép khi lệnh nhắc IFS/gán tên-đích-động (số học nhắc tên); viết lại: `echo \"$i\"` (ca adr65-388-control-for-arith-quoted)"
   },
   {
    "id": "guard-control-d270-commit-F-hd",
@@ -10900,7 +10902,7 @@
   },
   {
    "id": "guard-control-d270-ar-space",
-   "origin": "control",
+   "origin": "adversarial-author",
    "refs": [],
    "input": {
     "command": "x=$(( (a+b) * 2 )); echo $x",
@@ -10911,12 +10913,14 @@
     }
    },
    "expect": {
-    "allowed": true
-   }
+    "allowed": false,
+    "code": "BUDGET"
+   },
+   "note": "ADR-0065 (D-322): chặn có chủ ý — mở rộng ngoài nháy kép khi lệnh nhắc IFS/gán tên-đích-động (số học nhắc tên); viết lại: `echo \"$x\"`"
   },
   {
    "id": "guard-control-d270-ar-cmd",
-   "origin": "control",
+   "origin": "adversarial-author",
    "refs": [],
    "input": {
     "command": "(( count++ )); echo $count",
@@ -10927,8 +10931,10 @@
     }
    },
    "expect": {
-    "allowed": true
-   }
+    "allowed": false,
+    "code": "BUDGET"
+   },
+   "note": "ADR-0065 (D-322): chặn có chủ ý — mở rộng ngoài nháy kép khi lệnh nhắc IFS/gán tên-đích-động (số học nhắc tên); viết lại: `echo \"$count\"`"
   },
   {
    "id": "guard-control-d270-ar-shift",
@@ -11108,7 +11114,7 @@
   },
   {
    "id": "guard-control-d270-arr-idx",
-   "origin": "control",
+   "origin": "adversarial-author",
    "refs": [],
    "input": {
     "command": "arr=(1 2 3); echo ${arr[$((i+1))]}",
@@ -11119,8 +11125,10 @@
     }
    },
    "expect": {
-    "allowed": true
-   }
+    "allowed": false,
+    "code": "BUDGET"
+   },
+   "note": "ADR-0065 (D-322): chặn có chủ ý — mở rộng ngoài nháy kép khi lệnh nhắc IFS/gán tên-đích-động (số học nhắc tên); viết lại: `echo \"${arr[$((i+1))]}\"`"
   },
   {
    "id": "guard-control-d270-awk-shift",
@@ -11236,7 +11244,7 @@
   },
   {
    "id": "guard-control-d270-ar-sub",
-   "origin": "control",
+   "origin": "adversarial-author",
    "refs": [],
    "input": {
     "command": "echo \"$(( $(wc -l < notes.txt) + 1 ))\"",
@@ -11247,8 +11255,10 @@
     }
    },
    "expect": {
-    "allowed": true
-   }
+    "allowed": false,
+    "code": "BUDGET"
+   },
+   "note": "ADR-0065 (D-322): chặn có chủ ý — mở rộng ngoài nháy kép khi lệnh nhắc IFS/gán tên-đích-động (số học nhắc tên); viết lại: `n=\"$(wc -l < notes.txt)\"; echo \"$((n + 1))\"`"
   },
   {
    "id": "guard-control-d270-ar-or",
@@ -11428,7 +11438,7 @@
   },
   {
    "id": "guard-control-d270-let-q",
-   "origin": "control",
+   "origin": "adversarial-author",
    "refs": [],
    "input": {
     "command": "let 'x = 1 << 2'; echo $x",
@@ -11439,8 +11449,10 @@
     }
    },
    "expect": {
-    "allowed": true
-   }
+    "allowed": false,
+    "code": "BUDGET"
+   },
+   "note": "ADR-0065 (D-322): chặn có chủ ý — mở rộng ngoài nháy kép khi lệnh nhắc IFS/gán tên-đích-động (số học nhắc tên); viết lại: `echo \"$x\"`"
   },
   {
    "id": "guard-control-d270-pytest",
@@ -14497,7 +14509,7 @@
  },
  {
   "id": "guard-adr63-control-arith-index",
-  "origin": "control",
+  "origin": "adversarial-author",
   "refs": [
    "AUD-SEC-249"
   ],
@@ -14505,9 +14517,10 @@
    "command": "arr=(1 2 3); echo ${arr[$((i+1))]}"
   },
   "expect": {
-   "allowed": true
+   "allowed": false,
+   "code": "BUDGET"
   },
-  "note": "ADR-0063 (D-299): tập con chuẩn của guard — đối chứng hợp lệ"
+  "note": "ADR-0065 (D-322): chặn có chủ ý — mở rộng ngoài nháy kép khi lệnh nhắc IFS/gán tên-đích-động (số học nhắc tên); viết lại: `echo \"${arr[$((i+1))]}\"` · trước: ADR-0063 (D-299): tập con chuẩn của guard — đối chứng hợp lệ"
  },
  {
   "id": "guard-adr63-control-ifs-assign",
@@ -16221,9 +16234,9 @@
   },
   "expect": {
    "allowed": false,
-   "code": "RULE_DENY"
+   "code": "BUDGET"
   },
-  "note": "review #405"
+  "note": "review #405 · ADR-0065: mã BUDGET của lệnh lồng đi lên lệnh gốc (trước RULE_DENY)"
  },
  {
   "id": "t405-338-env",
@@ -16236,9 +16249,9 @@
   },
   "expect": {
    "allowed": false,
-   "code": "RULE_DENY"
+   "code": "BUDGET"
   },
-  "note": "review #405"
+  "note": "review #405 · ADR-0065: mã BUDGET của lệnh lồng đi lên lệnh gốc (trước RULE_DENY)"
  },
  {
   "id": "t405-338-triple",
@@ -16251,9 +16264,9 @@
   },
   "expect": {
    "allowed": false,
-   "code": "RULE_DENY"
+   "code": "BUDGET"
   },
-  "note": "review #405"
+  "note": "review #405 · ADR-0065: mã BUDGET của lệnh lồng đi lên lệnh gốc (trước RULE_DENY)"
  },
  {
   "id": "t405-338-control-lc",
@@ -17648,7 +17661,7 @@
 },
 {
  "id": "og-388-control-read-loop",
- "origin": "control",
+ "origin": "adversarial-author",
  "refs": [
   "AUD-SEC-388"
  ],
@@ -17656,9 +17669,10 @@
   "command": "while IFS= read -r f; do wc -l $f; done < list.txt"
  },
  "expect": {
-  "allowed": true
+  "allowed": false,
+  "code": "BUDGET"
  },
- "note": "review #420: bash tách mở rộng không nháy theo IFS đã gán, guard tách theo khoảng trắng"
+ "note": "ADR-0065 (D-322): chặn có chủ ý — mở rộng ngoài nháy kép khi lệnh nhắc IFS/gán tên-đích-động (số học nhắc tên); viết lại: `wc -l \"$f\"` (ca adr65-388-control-read-loop-quoted) · trước: review #420: bash tách mở rộng không nháy theo IFS đã gán, guard tách theo khoảng trắng"
 },
 {
  "id": "og-388-control-quoted",
@@ -17834,7 +17848,7 @@
 },
 {
  "id": "og-388-control-for-list",
- "origin": "control",
+ "origin": "adversarial-author",
  "refs": [
   "AUD-SEC-388"
  ],
@@ -17842,9 +17856,10 @@
   "command": "IFS=$'\\n'; for f in $(ls); do echo \"$f\"; done"
  },
  "expect": {
-  "allowed": true
+  "allowed": false,
+  "code": "BUDGET"
  },
- "note": "review #420: bash tách mở rộng không nháy theo IFS đã gán, guard tách theo khoảng trắng"
+ "note": "ADR-0065 (D-322): chặn có chủ ý — mở rộng ngoài nháy kép khi lệnh nhắc IFS/gán tên-đích-động (số học nhắc tên); viết lại: `for f in \"$(ls)\"` hoặc `mapfile -t` · trước: review #420: bash tách mở rộng không nháy theo IFS đã gán, guard tách theo khoảng trắng"
 },
 {
  "id": "og-388-for-list-subst",
@@ -18131,7 +18146,7 @@
 },
 {
  "id": "og-388-control-grep-ifs",
- "origin": "control",
+ "origin": "adversarial-author",
  "refs": [
   "AUD-SEC-388"
  ],
@@ -18139,13 +18154,14 @@
   "command": "for f in .claude/hooks/*.py scripts/*.sh; do grep -c IFS $f; done"
  },
  "expect": {
-  "allowed": true
+  "allowed": false,
+  "code": "BUDGET"
  },
- "note": "review blk-guard: AUD-SEC-388 lượt 2 — từ khoá ở vị trí lệnh, tên đích động, ngữ cảnh số học, mã cùng shell"
+ "note": "ADR-0065 (D-322): chặn có chủ ý — mở rộng ngoài nháy kép khi lệnh nhắc IFS/gán tên-đích-động (số học nhắc tên); viết lại: `grep -c IFS \"$f\"` · trước: review blk-guard: AUD-SEC-388 lượt 2 — từ khoá ở vị trí lệnh, tên đích động, ngữ cảnh số học, mã cùng shell"
 },
 {
  "id": "og-388-control-git-log-s",
- "origin": "control",
+ "origin": "adversarial-author",
  "refs": [
   "AUD-SEC-388"
  ],
@@ -18153,13 +18169,14 @@
   "command": "git log -S IFS --oneline -- $(git ls-files '*.sh')"
  },
  "expect": {
-  "allowed": true
+  "allowed": false,
+  "code": "BUDGET"
  },
- "note": "review blk-guard: AUD-SEC-388 lượt 2 — từ khoá ở vị trí lệnh, tên đích động, ngữ cảnh số học, mã cùng shell"
+ "note": "ADR-0065 (D-322): chặn có chủ ý — mở rộng ngoài nháy kép khi lệnh nhắc IFS/gán tên-đích-động (số học nhắc tên); viết lại: `git ls-files -z '*.sh' | xargs -0 git log -S IFS --oneline --` · trước: review blk-guard: AUD-SEC-388 lượt 2 — từ khoá ở vị trí lệnh, tên đích động, ngữ cảnh số học, mã cùng shell"
 },
 {
  "id": "og-388-control-heredoc-data",
- "origin": "control",
+ "origin": "adversarial-author",
  "refs": [
   "AUD-SEC-388"
  ],
@@ -18167,13 +18184,14 @@
   "command": "cat > /tmp/pr-body.md <<'EOF'\n`IFS=/; c=...; $c` — bash tách\nEOF\nls $HOME"
  },
  "expect": {
-  "allowed": true
+  "allowed": false,
+  "code": "BUDGET"
  },
- "note": "review blk-guard: AUD-SEC-388 lượt 2 — từ khoá ở vị trí lệnh, tên đích động, ngữ cảnh số học, mã cùng shell"
+ "note": "ADR-0065 (D-322): chặn có chủ ý — mở rộng ngoài nháy kép khi lệnh nhắc IFS/gán tên-đích-động (số học nhắc tên); viết lại: `ls \"$HOME\"` (thân heredoc nhắc IFS) · trước: review blk-guard: AUD-SEC-388 lượt 2 — từ khoá ở vị trí lệnh, tên đích động, ngữ cảnh số học, mã cùng shell"
 },
 {
  "id": "og-388-control-export-env",
- "origin": "control",
+ "origin": "adversarial-author",
  "refs": [
   "AUD-SEC-388"
  ],
@@ -18181,9 +18199,10 @@
   "command": "export $(grep -v '^#' .env | xargs) && npm run dev"
  },
  "expect": {
-  "allowed": true
+  "allowed": false,
+  "code": "BUDGET"
  },
- "note": "review blk-guard: AUD-SEC-388 lượt 2 — từ khoá ở vị trí lệnh, tên đích động, ngữ cảnh số học, mã cùng shell"
+ "note": "ADR-0065 (D-322): chặn có chủ ý — mở rộng ngoài nháy kép khi lệnh nhắc IFS/gán tên-đích-động (số học nhắc tên); viết lại: `set -a; . ./.env; set +a` (export $(…) là tên đích từ dữ liệu) · trước: review blk-guard: AUD-SEC-388 lượt 2 — từ khoá ở vị trí lệnh, tên đích động, ngữ cảnh số học, mã cùng shell"
 },
 {
  "id": "og-388-control-read-prompt",
@@ -18201,7 +18220,7 @@
 },
 {
  "id": "og-388-control-ifs-pipe-read",
- "origin": "control",
+ "origin": "adversarial-author",
  "refs": [
   "AUD-SEC-388"
  ],
@@ -18209,9 +18228,10 @@
   "command": "while IFS=\\| read -r a b; do echo $a; done < table.txt"
  },
  "expect": {
-  "allowed": true
+  "allowed": false,
+  "code": "BUDGET"
  },
- "note": "review blk-guard: AUD-SEC-388 lượt 2 — từ khoá ở vị trí lệnh, tên đích động, ngữ cảnh số học, mã cùng shell"
+ "note": "ADR-0065 (D-322): chặn có chủ ý — mở rộng ngoài nháy kép khi lệnh nhắc IFS/gán tên-đích-động (số học nhắc tên); viết lại: `echo \"$a\"` · trước: review blk-guard: AUD-SEC-388 lượt 2 — từ khoá ở vị trí lệnh, tên đích động, ngữ cảnh số học, mã cùng shell"
 },
 {
  "id": "og-388-control-ifs-newline-read",
@@ -18391,6 +18411,1167 @@
   "allowed": true
  },
  "note": "review blk-guard: khoá -c/--config-env không nguyên văn có thể là core.hooksPath"
-}
+},
+{
+ "id": "adr65-388-function-body",
+ "origin": "adversarial-reviewer",
+ "refs": [
+  "AUD-SEC-388"
+ ],
+ "input": {
+  "command": "function f { IFS=/; }; f; c=push/--force/origin/main; git $c"
+ },
+ "expect": {
+  "allowed": false,
+  "code": "BUDGET"
+ },
+ "note": "review #422 (D-322): dạng lách IFS mà base cũng lọt — từ lệnh nguyên văn `git`, lớp B của ADR-0065 chặn"
+},
+{
+ "id": "adr65-388-fake-arith-quote",
+ "origin": "adversarial-reviewer",
+ "refs": [
+  "AUD-SEC-388"
+ ],
+ "input": {
+  "command": "IFS=/; c=push/--force/origin/main; : \"((\"; git $c; : \"))\""
+ },
+ "expect": {
+  "allowed": false,
+  "code": "BUDGET"
+ },
+ "note": "review #422 (D-322): dạng lách IFS mà base cũng lọt — từ lệnh nguyên văn `git`, lớp B của ADR-0065 chặn"
+},
+{
+ "id": "adr65-388-quoted-head",
+ "origin": "adversarial-reviewer",
+ "refs": [
+  "AUD-SEC-388"
+ ],
+ "input": {
+  "command": "IFS=/; c=x/git/push/--force/origin/main; 'env' a=$c"
+ },
+ "expect": {
+  "allowed": false,
+  "code": "BUDGET"
+ },
+ "note": "review #422 (D-322): dạng lách IFS mà base cũng lọt — từ lệnh nguyên văn `git`, lớp B của ADR-0065 chặn"
+},
+{
+ "id": "adr65-388-eval-read-def",
+ "origin": "adversarial-reviewer",
+ "refs": [
+  "AUD-SEC-388"
+ ],
+ "input": {
+  "command": "eval 'read() { git $c; }'; c=push/--force/origin/main; IFS=/ read"
+ },
+ "expect": {
+  "allowed": false,
+  "code": "BUDGET"
+ },
+ "note": "review #422 (D-322): dạng lách IFS mà base cũng lọt — từ lệnh nguyên văn `git`, lớp B của ADR-0065 chặn"
+},
+{
+ "id": "adr65-388-exec-read",
+ "origin": "adversarial-reviewer",
+ "refs": [
+  "AUD-SEC-388"
+ ],
+ "input": {
+  "command": "set -o posix; IFS=/ exec read; c=push/--force/origin/main; git $c"
+ },
+ "expect": {
+  "allowed": false,
+  "code": "BUDGET"
+ },
+ "note": "review #422 (D-322): dạng lách IFS mà base cũng lọt — từ lệnh nguyên văn `git`, lớp B của ADR-0065 chặn"
+},
+{
+ "id": "adr65-388-eval-arith-read",
+ "origin": "adversarial-author",
+ "refs": [
+  "AUD-SEC-388"
+ ],
+ "input": {
+  "command": "eval 'read -r a < f'; (( a )); c=push4--force4origin4main; git $c"
+ },
+ "expect": {
+  "allowed": false,
+  "code": "BUDGET"
+ },
+ "note": "ADR-0065: số học đánh giá đệ quy giá trị biến định nghĩa trong eval — luật cũ và luật lvalue-có-$ đều lọt"
+},
+{
+ "id": "adr65-388-eval-declare-upper",
+ "origin": "adversarial-author",
+ "refs": [
+  "AUD-SEC-388"
+ ],
+ "input": {
+  "command": "eval 'declare -u a; a=ifs=47'; (( a )); c=push4--force4origin4main; git $c"
+ },
+ "expect": {
+  "allowed": false,
+  "code": "BUDGET"
+ },
+ "note": "ADR-0065: số học đánh giá đệ quy giá trị biến định nghĩa trong eval — luật cũ và luật lvalue-có-$ đều lọt"
+},
+{
+ "id": "adr65-388-case-upper-arith",
+ "origin": "adversarial-author",
+ "refs": [
+  "AUD-SEC-388"
+ ],
+ "input": {
+  "command": "eval 'a=ifs=47'; : $(( ${a^^} )); c=push4--force4origin4main; git $c"
+ },
+ "expect": {
+  "allowed": false,
+  "code": "BUDGET"
+ },
+ "note": "ADR-0065: số học đánh giá đệ quy giá trị biến định nghĩa trong eval — luật cũ và luật lvalue-có-$ đều lọt"
+},
+{
+ "id": "adr65-388-control-read-quoted",
+ "origin": "control",
+ "refs": [
+  "AUD-SEC-388"
+ ],
+ "input": {
+  "command": "while IFS= read -r l; do echo \"$l\"; done < f"
+ },
+ "expect": {
+  "allowed": true
+ },
+ "note": "ADR-0065: mẫu thường ngày — mở rộng trong nháy kép, tên đích nguyên văn"
+},
+{
+ "id": "adr65-388-control-read-herestring",
+ "origin": "control",
+ "refs": [
+  "AUD-SEC-388"
+ ],
+ "input": {
+  "command": "IFS=, read -r a b <<< \"$x\""
+ },
+ "expect": {
+  "allowed": true
+ },
+ "note": "ADR-0065: mẫu thường ngày — mở rộng trong nháy kép, tên đích nguyên văn"
+},
+{
+ "id": "adr65-388-control-printf-v",
+ "origin": "control",
+ "refs": [
+  "AUD-SEC-388"
+ ],
+ "input": {
+  "command": "printf -v out '%s' \"$x\""
+ },
+ "expect": {
+  "allowed": true
+ },
+ "note": "ADR-0065: mẫu thường ngày — mở rộng trong nháy kép, tên đích nguyên văn"
+},
+{
+ "id": "adr65-388-control-read-loop-quoted",
+ "origin": "control",
+ "refs": [
+  "AUD-SEC-388"
+ ],
+ "input": {
+  "command": "while IFS= read -r f; do wc -l \"$f\"; done < list.txt"
+ },
+ "expect": {
+  "allowed": true
+ },
+ "note": "ADR-0065: mẫu thường ngày — mở rộng trong nháy kép, tên đích nguyên văn"
+},
+{
+ "id": "adr65-388-control-for-arith-quoted",
+ "origin": "control",
+ "refs": [
+  "AUD-SEC-388"
+ ],
+ "input": {
+  "command": "for ((i=0;i<3;i++)); do echo \"$i\"; done"
+ },
+ "expect": {
+  "allowed": true
+ },
+ "note": "ADR-0065: mẫu thường ngày — mở rộng trong nháy kép, tên đích nguyên văn"
+},
+{
+ "id": "adr65-388-control-count",
+ "origin": "control",
+ "refs": [
+  "AUD-SEC-388"
+ ],
+ "input": {
+  "command": "while IFS= read -r l; do n=$((n+1)); done < f; echo \"$n\""
+ },
+ "expect": {
+  "allowed": true
+ },
+ "note": "ADR-0065: mẫu thường ngày — mở rộng trong nháy kép, tên đích nguyên văn"
+},
+{
+ "id": "adr65-391-read-array",
+ "origin": "adversarial-reviewer",
+ "refs": [
+  "AUD-SEC-391"
+ ],
+ "input": {
+  "command": "read -ra a <<< 'git push --force origin main'; \"${a[@]}\""
+ },
+ "expect": {
+  "allowed": false,
+  "code": "BUDGET"
+ },
+ "note": "AUD-SEC-391: từ lệnh dựng lúc chạy (mảng/biến/thay lệnh) — lớp A của ADR-0065"
+},
+{
+ "id": "adr65-391-mapfile",
+ "origin": "adversarial-reviewer",
+ "refs": [
+  "AUD-SEC-391"
+ ],
+ "input": {
+  "command": "mapfile -d / a <<< 'git/push/--force/origin/main'; ${a[@]}"
+ },
+ "expect": {
+  "allowed": false,
+  "code": "BUDGET"
+ },
+ "note": "AUD-SEC-391: từ lệnh dựng lúc chạy (mảng/biến/thay lệnh) — lớp A của ADR-0065"
+},
+{
+ "id": "adr65-391-cat-heredoc-head",
+ "origin": "adversarial-author",
+ "refs": [
+  "AUD-SEC-391"
+ ],
+ "input": {
+  "command": "$(cat <<'E'\ngit push --force origin main\nE\n)"
+ },
+ "expect": {
+  "allowed": false,
+  "code": "BUDGET"
+ },
+ "note": "AUD-SEC-391: từ lệnh dựng lúc chạy (mảng/biến/thay lệnh) — lớp A của ADR-0065"
+},
+{
+ "id": "adr65-391-subst-head",
+ "origin": "adversarial-author",
+ "refs": [
+  "AUD-SEC-391"
+ ],
+ "input": {
+  "command": "x=$(\"${a[@]}\")"
+ },
+ "expect": {
+  "allowed": false,
+  "code": "BUDGET"
+ },
+ "note": "AUD-SEC-391: từ lệnh dựng lúc chạy (mảng/biến/thay lệnh) — lớp A của ADR-0065"
+},
+{
+ "id": "adr65-391-procsub-redirect-head",
+ "origin": "adversarial-author",
+ "refs": [
+  "AUD-SEC-391"
+ ],
+ "input": {
+  "command": "< <(echo x) $c"
+ },
+ "expect": {
+  "allowed": false,
+  "code": "BUDGET"
+ },
+ "note": "AUD-SEC-391: từ lệnh dựng lúc chạy (mảng/biến/thay lệnh) — lớp A của ADR-0065"
+},
+{
+ "id": "adr65-391-control-array-arg",
+ "origin": "control",
+ "refs": [
+  "AUD-SEC-391"
+ ],
+ "input": {
+  "command": "read -ra a <<< \"$s\"; printf '%s\\n' \"${a[@]}\""
+ },
+ "expect": {
+  "allowed": true
+ },
+ "note": "AUD-SEC-391: từ lệnh dựng lúc chạy (mảng/biến/thay lệnh) — lớp A của ADR-0065"
+},
+{
+ "id": "adr65-391-control-procsub-arg",
+ "origin": "control",
+ "refs": [
+  "AUD-SEC-391"
+ ],
+ "input": {
+  "command": "diff <(sort a) $f"
+ },
+ "expect": {
+  "allowed": true
+ },
+ "note": "AUD-SEC-391: từ lệnh dựng lúc chạy (mảng/biến/thay lệnh) — lớp A của ADR-0065"
+},
+{
+ "id": "adr65-392-cat-pipe-bash",
+ "origin": "adversarial-reviewer",
+ "refs": [
+  "AUD-SEC-392"
+ ],
+ "input": {
+  "command": "cat <<EOF | bash\n\\$(echo git push --force origin main)\nEOF"
+ },
+ "expect": {
+  "allowed": false,
+  "code": "BUDGET"
+ },
+ "note": "AUD-SEC-392: heredoc dấu kết không nháy đổ vào shell — thân mở rộng hai lần (lớp C ADR-0065)"
+},
+{
+ "id": "adr65-392-cat-pipe-escaped-var",
+ "origin": "adversarial-author",
+ "refs": [
+  "AUD-SEC-392"
+ ],
+ "input": {
+  "command": "cat <<EOF | sh\necho \\$HOME\nEOF"
+ },
+ "expect": {
+  "allowed": false,
+  "code": "BUDGET"
+ },
+ "note": "AUD-SEC-392: heredoc dấu kết không nháy đổ vào shell — thân mở rộng hai lần (lớp C ADR-0065)"
+},
+{
+ "id": "adr65-392-source-stdin",
+ "origin": "adversarial-author",
+ "refs": [
+  "AUD-SEC-392"
+ ],
+ "input": {
+  "command": ". /dev/stdin <<EOF\n\\$(id)\nEOF"
+ },
+ "expect": {
+  "allowed": false,
+  "code": "BUDGET"
+ },
+ "note": "AUD-SEC-392: heredoc dấu kết không nháy đổ vào shell — thân mở rộng hai lần (lớp C ADR-0065)"
+},
+{
+ "id": "adr65-392-control-quoted",
+ "origin": "control",
+ "refs": [
+  "AUD-SEC-392"
+ ],
+ "input": {
+  "command": "cat <<'EOF' | bash\necho hi\nEOF"
+ },
+ "expect": {
+  "allowed": true
+ },
+ "note": "AUD-SEC-392: heredoc dấu kết không nháy đổ vào shell — thân mở rộng hai lần (lớp C ADR-0065)"
+},
+{
+ "id": "adr65-392-control-data",
+ "origin": "control",
+ "refs": [
+  "AUD-SEC-392"
+ ],
+ "input": {
+  "command": "cat <<EOF > notes.md\nhome: $HOME\nEOF"
+ },
+ "expect": {
+  "allowed": true
+ },
+ "note": "AUD-SEC-392: heredoc dấu kết không nháy đổ vào shell — thân mở rộng hai lần (lớp C ADR-0065)"
+},
+{
+ "id": "adr65-393-paren-escaped",
+ "origin": "adversarial-reviewer",
+ "refs": [
+  "AUD-SEC-393"
+ ],
+ "input": {
+  "command": "find docs \\( -name STAGE.json \\) | xargs rm"
+ },
+ "expect": {
+  "allowed": false,
+  "code": "EVIDENCE_HANDWRITE"
+ },
+ "note": "AUD-SEC-393: dấu có nháy/thoát trong nguồn find không làm mất nguồn ống"
+},
+{
+ "id": "adr65-393-semicolon-quoted",
+ "origin": "adversarial-reviewer",
+ "refs": [
+  "AUD-SEC-393"
+ ],
+ "input": {
+  "command": "find docs -name STAGE.json ';' | xargs rm"
+ },
+ "expect": {
+  "allowed": false,
+  "code": "EVIDENCE_HANDWRITE"
+ },
+ "note": "AUD-SEC-393: dấu có nháy/thoát trong nguồn find không làm mất nguồn ống"
+},
+{
+ "id": "adr65-393-bang-quoted",
+ "origin": "adversarial-author",
+ "refs": [
+  "AUD-SEC-393"
+ ],
+ "input": {
+  "command": "find docs '!' -name '*.md' | xargs rm"
+ },
+ "expect": {
+  "allowed": false,
+  "code": "EVIDENCE_HANDWRITE"
+ },
+ "note": "AUD-SEC-393: dấu có nháy/thoát trong nguồn find không làm mất nguồn ống"
+},
+{
+ "id": "adr65-393-control-paren-src",
+ "origin": "control",
+ "refs": [
+  "AUD-SEC-393"
+ ],
+ "input": {
+  "command": "find src \\( -name '*.py' \\) | xargs sed -i s/a/b/"
+ },
+ "expect": {
+  "allowed": true
+ },
+ "note": "AUD-SEC-393: dấu có nháy/thoát trong nguồn find không làm mất nguồn ống"
+},
+{
+ "id": "adr65-398-sed-upper-w",
+ "origin": "adversarial-reviewer",
+ "refs": [
+  "AUD-SEC-398"
+ ],
+ "input": {
+  "command": "sed -n -i 'W docs/autopilot/STAGE.json' docs/a.md"
+ },
+ "expect": {
+  "allowed": false,
+  "code": "EVIDENCE_HANDWRITE"
+ },
+ "note": "AUD-SEC-398: lệnh `W` của sed ghi tệp như `w`"
+},
+{
+ "id": "adr65-398-control-sed-w-other",
+ "origin": "control",
+ "refs": [
+  "AUD-SEC-398"
+ ],
+ "input": {
+  "command": "sed -n 'W /tmp/out.txt' docs/a.md"
+ },
+ "expect": {
+  "allowed": true
+ },
+ "note": "AUD-SEC-398: lệnh `W` của sed ghi tệp như `w`"
+},
+{
+ "id": "adr65-396-xargs-argfile",
+ "origin": "adversarial-reviewer",
+ "refs": [
+  "AUD-SEC-396"
+ ],
+ "input": {
+  "command": "find docs -name '*.md' | xargs -a l sed -i s/a/b/"
+ },
+ "expect": {
+  "allowed": false,
+  "code": "EVIDENCE_HANDWRITE"
+ },
+ "note": "AUD-SEC-396: miễn trừ AUD-SEC-384 không áp khi xargs đọc đối số từ tệp hay sed đọc/ghi tệp khác"
+},
+{
+ "id": "adr65-396-sed-file",
+ "origin": "adversarial-reviewer",
+ "refs": [
+  "AUD-SEC-396"
+ ],
+ "input": {
+  "command": "find docs -name '*.md' | xargs sed -i -f x.sed"
+ },
+ "expect": {
+  "allowed": false,
+  "code": "EVIDENCE_HANDWRITE"
+ },
+ "note": "AUD-SEC-396: miễn trừ AUD-SEC-384 không áp khi xargs đọc đối số từ tệp hay sed đọc/ghi tệp khác"
+},
+{
+ "id": "adr65-396-sed-write",
+ "origin": "adversarial-reviewer",
+ "refs": [
+  "AUD-SEC-396"
+ ],
+ "input": {
+  "command": "find docs -name '*.md' | xargs sed -n -i 'W docs/autopilot/STAGE.json'"
+ },
+ "expect": {
+  "allowed": false,
+  "code": "EVIDENCE_HANDWRITE"
+ },
+ "note": "AUD-SEC-396: miễn trừ AUD-SEC-384 không áp khi xargs đọc đối số từ tệp hay sed đọc/ghi tệp khác"
+},
+  {
+   "id": "adr65r1-391-function-brace",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-391"
+   ],
+   "input": {
+    "command": "read -ra a <<< \"git push --force origin main\"; function f { \"${a[@]}\"; }; f"
+   },
+   "expect": {
+    "allowed": false,
+    "code": "BUDGET"
+   },
+   "note": "review adr-guard: `function NAME {` — từ sau `{` trơn là từ lệnh (lớp A)"
+  },
+  {
+   "id": "adr65r1-391-coproc-brace",
+   "origin": "adversarial-author",
+   "refs": [
+    "AUD-SEC-391"
+   ],
+   "input": {
+    "command": "coproc f { $c; }"
+   },
+   "expect": {
+    "allowed": false,
+    "code": "BUDGET"
+   },
+   "note": "review adr-guard: `function NAME {` — từ sau `{` trơn là từ lệnh (lớp A)"
+  },
+  {
+   "id": "adr65r1-391-control-function",
+   "origin": "control",
+   "refs": [
+    "AUD-SEC-391"
+   ],
+   "input": {
+    "command": "function f { echo \"$1\"; }; f x"
+   },
+   "expect": {
+    "allowed": true
+   },
+   "note": "review adr-guard: mẫu thường ngày gần ca chặn — vẫn chạy"
+  },
+  {
+   "id": "adr65r1-392-fd0",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-392"
+   ],
+   "input": {
+    "command": "bash 0<<EOF\ngit \\$(echo push) --force origin main\nEOF"
+   },
+   "expect": {
+    "allowed": false,
+    "code": "BUDGET"
+   },
+   "note": "review adr-guard: heredoc fd tường minh / trình thông dịch chạy stdin — thân mở rộng hai lần (lớp C)"
+  },
+  {
+   "id": "adr65r1-392-fd0-dash",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-392"
+   ],
+   "input": {
+    "command": "bash 0<<-EOF\n\tgit \\$(echo push) --force origin main\n\tEOF"
+   },
+   "expect": {
+    "allowed": false,
+    "code": "BUDGET"
+   },
+   "note": "review adr-guard: heredoc fd tường minh / trình thông dịch chạy stdin — thân mở rộng hai lần (lớp C)"
+  },
+  {
+   "id": "adr65r1-392-stderr-first",
+   "origin": "adversarial-author",
+   "refs": [
+    "AUD-SEC-392"
+   ],
+   "input": {
+    "command": "bash 2>/dev/null <<EOF\ngit \\$(echo push) --force origin main\nEOF"
+   },
+   "expect": {
+    "allowed": false,
+    "code": "BUDGET"
+   },
+   "note": "review adr-guard: heredoc fd tường minh / trình thông dịch chạy stdin — thân mở rộng hai lần (lớp C)"
+  },
+  {
+   "id": "adr65r1-401-perl-stdin",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-401"
+   ],
+   "input": {
+    "command": "cat <<EOF | perl -e 'system(<STDIN>)'\ngit \\$(echo push) --force origin main\nEOF"
+   },
+   "expect": {
+    "allowed": false,
+    "code": "BUDGET"
+   },
+   "note": "review adr-guard: heredoc fd tường minh / trình thông dịch chạy stdin — thân mở rộng hai lần (lớp C)"
+  },
+  {
+   "id": "adr65r1-401-control-python-plain",
+   "origin": "control",
+   "refs": [
+    "AUD-SEC-401"
+   ],
+   "input": {
+    "command": "python3 - <<EOF\nprint('$HOME')\nEOF"
+   },
+   "expect": {
+    "allowed": true
+   },
+   "note": "review adr-guard: mẫu thường ngày gần ca chặn — vẫn chạy"
+  },
+  {
+   "id": "adr65r1-388-mapfile-callback",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-388"
+   ],
+   "input": {
+    "command": "IFS=/; x=push/--force/origin/main; mapfile -c1 -C \"git \\$x #\" <<< 1"
+   },
+   "expect": {
+    "allowed": false,
+    "code": "BUDGET"
+   },
+   "note": "review adr-guard: chữ dữ liệu chạy như mã trong shell này (lớp D: mapfile -C, ${x@P})"
+  },
+  {
+   "id": "adr65r1-388-readarray-callback",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-388"
+   ],
+   "input": {
+    "command": "IFS=/; x=push/--force/origin/main; readarray -c1 -C \"git \\$x #\" <<< 1"
+   },
+   "expect": {
+    "allowed": false,
+    "code": "BUDGET"
+   },
+   "note": "review adr-guard: chữ dữ liệu chạy như mã trong shell này (lớp D: mapfile -C, ${x@P})"
+  },
+  {
+   "id": "adr65r1-388-prompt-expand",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-388"
+   ],
+   "input": {
+    "command": "IFS=/; x=push/--force/origin/main; y=\"\\$(git \\$x)\"; echo \"${y@P}\""
+   },
+   "expect": {
+    "allowed": false,
+    "code": "BUDGET"
+   },
+   "note": "review adr-guard: chữ dữ liệu chạy như mã trong shell này (lớp D: mapfile -C, ${x@P})"
+  },
+  {
+   "id": "adr65r1-388-heredoc-indirect",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-388"
+   ],
+   "input": {
+    "command": "y=$(cat n.txt); unset $y; : <<E\n${!y:=/}\nE\nc=push/--force/origin/main; git $c"
+   },
+   "expect": {
+    "allowed": false,
+    "code": "BUDGET"
+   },
+   "note": "review adr-guard: lớp B — bash 5.2 chạy `git push --force origin main`"
+  },
+  {
+   "id": "adr65r1-388-read-flag-split",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-388"
+   ],
+   "input": {
+    "command": "T=$(cat t.txt); read -t $T v <<< \"/ x\"; c=push/--force/origin/main; git $c"
+   },
+   "expect": {
+    "allowed": false,
+    "code": "BUDGET"
+   },
+   "note": "review adr-guard: lớp B — bash 5.2 chạy `git push --force origin main`"
+  },
+  {
+   "id": "adr65r1-388-mapfile-flag-split",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-388"
+   ],
+   "input": {
+    "command": "N=$(cat t.txt); mapfile -n $N a < f; c=push/--force/origin/main; git $c"
+   },
+   "expect": {
+    "allowed": false,
+    "code": "BUDGET"
+   },
+   "note": "review adr-guard: lớp B — bash 5.2 chạy `git push --force origin main`"
+  },
+  {
+   "id": "adr65r1-388-printf-format-split",
+   "origin": "adversarial-author",
+   "refs": [
+    "AUD-SEC-388"
+   ],
+   "input": {
+    "command": "F=$(cat t.txt); printf $F; c=push/--force/origin/main; git $c"
+   },
+   "expect": {
+    "allowed": false,
+    "code": "BUDGET"
+   },
+   "note": "review adr-guard: lớp B — bash 5.2 chạy `git push --force origin main`"
+  },
+  {
+   "id": "adr65r1-388-control-read-flag-quoted",
+   "origin": "control",
+   "refs": [
+    "AUD-SEC-388"
+   ],
+   "input": {
+    "command": "read -t \"$T\" -n 1 key; echo \"$key\""
+   },
+   "expect": {
+    "allowed": true
+   },
+   "note": "review adr-guard: mẫu thường ngày gần ca chặn — vẫn chạy"
+  },
+  {
+   "id": "adr65r1-388-control-printf-args",
+   "origin": "control",
+   "refs": [
+    "AUD-SEC-388"
+   ],
+   "input": {
+    "command": "printf '%s\\n' $(git rev-parse HEAD)"
+   },
+   "expect": {
+    "allowed": true
+   },
+   "note": "review adr-guard: mẫu thường ngày gần ca chặn — vẫn chạy"
+  },
+  {
+   "id": "adr65r1-388-control-commit-ifs-heredoc",
+   "origin": "control",
+   "refs": [
+    "AUD-SEC-388"
+   ],
+   "input": {
+    "command": "git commit -q -F- <<'EOF'\ndocs: nhắc $IFS\nEOF"
+   },
+   "expect": {
+    "allowed": true
+   },
+   "note": "review adr-guard: mẫu thường ngày gần ca chặn — vẫn chạy"
+  },
+  {
+   "id": "adr65r1-398-sed-W-glued",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-398"
+   ],
+   "input": {
+    "command": "sed -n 'Wdocs/autopilot/STAGE.json' README.md"
+   },
+   "expect": {
+    "allowed": false,
+    "code": "EVIDENCE_HANDWRITE"
+   },
+   "note": "review adr-guard: sed w/W dính liền tên tệp hay sau xuống dòng (GNU sed 4.9 ghi tệp)"
+  },
+  {
+   "id": "adr65r1-398-sed-w-newline",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-398"
+   ],
+   "input": {
+    "command": "sed -n '1{\nw docs/autopilot/STAGE.json\n}' README.md"
+   },
+   "expect": {
+    "allowed": false,
+    "code": "EVIDENCE_HANDWRITE"
+   },
+   "note": "review adr-guard: sed w/W dính liền tên tệp hay sau xuống dòng (GNU sed 4.9 ghi tệp)"
+  },
+  {
+   "id": "adr65r1-398-control-sed-s-w",
+   "origin": "control",
+   "refs": [
+    "AUD-SEC-398"
+   ],
+   "input": {
+    "command": "sed -n 's/a/w/gp' docs/a.md"
+   },
+   "expect": {
+    "allowed": true
+   },
+   "note": "review adr-guard: mẫu thường ngày gần ca chặn — vẫn chạy"
+  },
+ {
+  "id": "adr65r2-388-dbl-q",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-388"
+  ],
+  "input": {
+   "command": "read -r k < f; [[ 'k' -eq 0 ]]; x=push4--force4origin4main; git $x"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "review adr-guard lượt 2: bash bỏ nháy toán hạng `[[ -eq ]]`/chỉ số `-v` rồi mới đánh giá số học (đã chạy bash 5.2.21: IFS bị gán)"
+ },
+ {
+  "id": "adr65r2-388-dbl-ansi",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-388"
+  ],
+  "input": {
+   "command": "read -r k < f; [[ $'k' -eq 0 ]]; x=push4--force4origin4main; git $x"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "review adr-guard lượt 2: bash bỏ nháy toán hạng `[[ -eq ]]`/chỉ số `-v` rồi mới đánh giá số học (đã chạy bash 5.2.21: IFS bị gán)"
+ },
+ {
+  "id": "adr65r2-388-dbl-ansi-oct",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-388"
+  ],
+  "input": {
+   "command": "read -r k < f; [[ $'\\153' -eq 0 ]]; x=push4--force4origin4main; git $x"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "review adr-guard lượt 2: bash bỏ nháy toán hạng `[[ -eq ]]`/chỉ số `-v` rồi mới đánh giá số học (đã chạy bash 5.2.21: IFS bị gán)"
+ },
+ {
+  "id": "adr65r2-388-dbl-esc",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-388"
+  ],
+  "input": {
+   "command": "read -r k < f; [[ \\k -eq 0 ]]; x=push4--force4origin4main; git $x"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "review adr-guard lượt 2: bash bỏ nháy toán hạng `[[ -eq ]]`/chỉ số `-v` rồi mới đánh giá số học (đã chạy bash 5.2.21: IFS bị gán)"
+ },
+ {
+  "id": "adr65r2-388-v-sub",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-388"
+  ],
+  "input": {
+   "command": "read -r k < f; [[ -v 'a[k]' ]]; x=push4--force4origin4main; git $x"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "review adr-guard lượt 2: bash bỏ nháy toán hạng `[[ -eq ]]`/chỉ số `-v` rồi mới đánh giá số học (đã chạy bash 5.2.21: IFS bị gán)"
+ },
+ {
+  "id": "adr65r2-388-test-v",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-388"
+  ],
+  "input": {
+   "command": "read -r k < f; test -v 'a[k]'; x=push4--force4origin4main; git $x"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "review adr-guard lượt 2: bash bỏ nháy toán hạng `[[ -eq ]]`/chỉ số `-v` rồi mới đánh giá số học (đã chạy bash 5.2.21: IFS bị gán)"
+ },
+ {
+  "id": "adr65r2-388-brk-v",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-388"
+  ],
+  "input": {
+   "command": "read -r k < f; [ -v 'a[k]' ]; x=push4--force4origin4main; git $x"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "review adr-guard lượt 2: bash bỏ nháy toán hạng `[[ -eq ]]`/chỉ số `-v` rồi mới đánh giá số học (đã chạy bash 5.2.21: IFS bị gán)"
+ },
+ {
+  "id": "adr65r2-388-control-v-plain",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-388"
+  ],
+  "input": {
+   "command": "[[ -v HOME ]] && echo $HOME"
+  },
+  "expect": {
+   "allowed": true
+  },
+  "note": "review adr-guard lượt 2: bash bỏ nháy toán hạng `[[ -eq ]]`/chỉ số `-v` rồi mới đánh giá số học (đã chạy bash 5.2.21: IFS bị gán)"
+ },
+ {
+  "id": "adr65r2-397-for-cmdsub",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-397"
+  ],
+  "input": {
+   "command": "for i in $(seq 1 3); do echo $((i*2)); done"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "review adr-guard lượt 2: thay lệnh không nháy + số học nhắc tên vẫn chặn (AUD-SEC-397); cách viết thay chạy được"
+ },
+ {
+  "id": "adr65r2-397-control-for-arith",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-397"
+  ],
+  "input": {
+   "command": "for ((i=1; i<=3; i++)); do echo $((i*2)); done"
+  },
+  "expect": {
+   "allowed": true
+  },
+  "note": "review adr-guard lượt 2: thay lệnh không nháy + số học nhắc tên vẫn chặn (AUD-SEC-397); cách viết thay chạy được"
+ },
+ {
+  "id": "adr65r2-397-control-while-read",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-397"
+  ],
+  "input": {
+   "command": "seq 1 3 | while read -r i; do echo $((i*2)); done"
+  },
+  "expect": {
+   "allowed": true
+  },
+  "note": "review adr-guard lượt 2: thay lệnh không nháy + số học nhắc tên vẫn chặn (AUD-SEC-397); cách viết thay chạy được"
+ },
+ {
+  "id": "adr65r2-397-control-quoted-cmdsub",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-397"
+  ],
+  "input": {
+   "command": "n=\"$(grep -n foo f | cut -d: -f1)\"; sed -n \"$((n-25)),$((n+5))p\" f"
+  },
+  "expect": {
+   "allowed": true
+  },
+  "note": "review adr-guard lượt 2: thay lệnh không nháy + số học nhắc tên vẫn chặn (AUD-SEC-397); cách viết thay chạy được"
+ },
+ {
+  "id": "adr65r2-384-control-sed-week",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-384",
+   "AUD-SEC-396"
+  ],
+  "input": {
+   "command": "find docs -name '*.md' | xargs sed -i 's/Week/Tuan/g'"
+  },
+  "expect": {
+   "allowed": true
+  },
+  "note": "review adr-guard lượt 2: chữ `w`/`W` trong mẫu/thay thế của `s` không phải lệnh ghi — miễn trừ AUD-SEC-384 giữ"
+ },
+ {
+  "id": "adr65r2-384-control-sed-www",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-384",
+   "AUD-SEC-396"
+  ],
+  "input": {
+   "command": "find docs -name '*.md' | xargs sed -i 's#http://example.com#https://www.example.com#g'"
+  },
+  "expect": {
+   "allowed": true
+  },
+  "note": "review adr-guard lượt 2: chữ `w`/`W` trong mẫu/thay thế của `s` không phải lệnh ghi — miễn trừ AUD-SEC-384 giữ"
+ },
+ {
+  "id": "adr65r2-384-control-sed-rewrite",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-384",
+   "AUD-SEC-396"
+  ],
+  "input": {
+   "command": "find docs -name '*.md' | xargs sed -i 's/re-write/rewrite/g'"
+  },
+  "expect": {
+   "allowed": true
+  },
+  "note": "review adr-guard lượt 2: chữ `w`/`W` trong mẫu/thay thế của `s` không phải lệnh ghi — miễn trừ AUD-SEC-384 giữ"
+ },
+ {
+  "id": "adr65r2-384-control-sed-bracket",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-384",
+   "AUD-SEC-396"
+  ],
+  "input": {
+   "command": "find docs -name '*.md' | xargs sed -i 's/[/]w/x/'"
+  },
+  "expect": {
+   "allowed": true
+  },
+  "note": "review adr-guard lượt 2: chữ `w`/`W` trong mẫu/thay thế của `s` không phải lệnh ghi — miễn trừ AUD-SEC-384 giữ"
+ },
+ {
+  "id": "adr65r2-396-sed-s-wflag",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-396"
+  ],
+  "input": {
+   "command": "find docs -name '*.md' | xargs sed -i 's/old/new/w changes.log'"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "EVIDENCE_HANDWRITE"
+  },
+  "note": "review adr-guard lượt 2: cờ `w` thật của `s` — mất miễn trừ"
+ },
+ {
+  "id": "adr65r2-391-control-command-v",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-391"
+  ],
+  "input": {
+   "command": "command -v \"$tool\" >/dev/null || echo \"missing $tool\""
+  },
+  "expect": {
+   "allowed": true
+  },
+  "note": "review adr-guard lượt 2: `command -v/-V` chỉ tra tên, không chạy — không phải từ lệnh"
+ },
+ {
+  "id": "adr65r2-391-control-command-pv",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-391"
+  ],
+  "input": {
+   "command": "command -pv \"$tool\""
+  },
+  "expect": {
+   "allowed": true
+  },
+  "note": "review adr-guard lượt 2: `command -v/-V` chỉ tra tên, không chạy — không phải từ lệnh"
+ },
+ {
+  "id": "adr65r2-391-command-p-dyn",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-391"
+  ],
+  "input": {
+   "command": "command -p \"$x\""
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "review adr-guard lượt 2: `command -v/-V` chỉ tra tên, không chạy — không phải từ lệnh"
+ },
+ {
+  "id": "adr65r2-391-command-env-v-dyn",
+  "origin": "adversarial-author",
+  "refs": [
+   "AUD-SEC-391"
+  ],
+  "input": {
+   "command": "command -p env -v \"$x\""
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "review adr-guard lượt 2: `command -v/-V` chỉ tra tên, không chạy — không phải từ lệnh"
+ },
+ {
+  "id": "r423-403-len",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-403"
+  ],
+  "input": {
+   "command": "read -r k < f; a=(x); echo ${#a[k]}; x=push4--force4origin4main; git $x"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "review #423: chỉ số `${#a[k]}`/khởi tạo mảng có nháy đánh giá đệ quy `k` (IFS=4) — đã chạy bash 5.2.21"
+ },
+ {
+  "id": "r423-403-init-q",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-403"
+  ],
+  "input": {
+   "command": "read -r k < f; declare -a 'a=([k]=v)'; x=push4--force4origin4main; git $x"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "review #423: chỉ số `${#a[k]}`/khởi tạo mảng có nháy đánh giá đệ quy `k` (IFS=4) — đã chạy bash 5.2.21"
+ }
  ]
 }

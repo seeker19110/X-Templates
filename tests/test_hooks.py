@@ -751,15 +751,22 @@ class GuardMatrixTest(unittest.TestCase):
             "",
             [
                 'while IFS= read -r line; do echo "$line"; done < list.txt',
-                "while IFS= read -r f; do wc -l $f; done < list.txt",
-                "IFS=$'\\n' read -r a b <<< \"$s\"; echo $a",
                 'IFS=, read -ra parts <<< "a,b"; echo "${parts[0]}"',
                 'IFS=/; echo "$HOME"',
                 "IFS=/; echo $? $# $$",
                 "grep -rn IFS scripts/",
-                'c="git status"; $c',
                 'export PATH="$HOME/bin:$PATH"; ls $HOME',
                 'local_x=1; read -r a b <<< "$s"; echo $a',
+            ],
+        )
+        # ADR-0065 (D-322): lệnh nhắc IFS thì mọi mở rộng phải trong nháy kép; từ lệnh là biến → chặn. Các ca dưới từng
+        # cho qua ở lớp AUD-SEC-388 cũ — nay chặn có chủ ý (docs/adr/0065 §Hệ quả).
+        self.check(
+            "deny",
+            [
+                "while IFS= read -r f; do wc -l $f; done < list.txt",
+                "IFS=$'\\n' read -r a b <<< \"$s\"; echo $a",
+                'c="git status"; $c',
                 "IFS=$'\\n'; for f in $(ls); do echo \"$f\"; done",
                 'IFS=,; select x in ${opts[@]}; do echo "$x"; break; done',
             ],
@@ -825,6 +832,20 @@ class GuardMatrixTest(unittest.TestCase):
     )
     # Không gán IFS (hoặc chỉ gán cho `read`): chặn oan ở lượt 1, nay chạy.
     IFS_R2_OK = (
+        'grep -rIF "SELECT" src/ | head -$N',
+        "set -a; . ./.env; set +a; npm run dev",
+        'read -r -p "Nhánh [$def]: " b; git checkout $b',
+        "files=(); while IFS= read -r -d '' f; do files+=(\"$f\"); done < <(git ls-files -z '*.py'); echo ${#files[@]}",
+        "echo $((1 + 2)) $((a+b)); ls -la",
+        'for i in 1 2 3; do echo $i; done; declare -A m; echo "${m[0]}" $HOME',
+        "sleep 0 & wait $!; echo $HOME",
+        "if true; then echo for x in; fi; ls $HOME",
+        "A=1 B=$(date) make; ls $HOME",
+    )
+    # ADR-0065 (D-322): cho qua ở lượt 2, nay chặn CÓ CHỦ Ý — chữ thô nhắc `IFS` (cả trong thân heredoc/commit), tên đích
+    # từ dữ liệu (`export $(…)`), hay số học nhắc tên (bash đánh giá đệ quy giá trị biến) mà còn mở rộng ngoài nháy kép.
+    # Viết lại: đặt mở rộng trong nháy kép (`"$G"`, `"$(git rev-parse HEAD)"`, `"$i"`), `.env` qua `set -a; . ./.env`.
+    IFS_R2_NOW_DENY = (
         'G=.claude/hooks/guard.py && grep -n "^STRICT_IFS_RE\\|^def _letter_forms" $G | head',
         "for f in .claude/hooks/*.py scripts/*.sh; do grep -c IFS $f; done",
         "git log -S IFS --oneline -- $(git ls-files '*.sh')",
@@ -834,34 +855,26 @@ class GuardMatrixTest(unittest.TestCase):
         "cat > /tmp/pr-body.md <<'EOF'\n`IFS=/; c=...; $c` — bash tách\nEOF\nls $HOME",
         "cat > /tmp/x.yml <<'EOF'\n    shell: bash\n    run: IFS=$'\\n'; echo ${{ github.sha }}\nEOF\nls $HOME",
         "cat > /tmp/Makefile <<'EOF'\nSHELL := bash\nall:\n\t@IFS=$$'\\n'; echo $$x\nEOF\nls $HOME",
-        'grep -rIF "SELECT" src/ | head -$N',
         "export $(grep -v '^#' .env | xargs) && npm run dev",
-        "set -a; . ./.env; set +a; npm run dev",
-        'read -r -p "Nhánh [$def]: " b; git checkout $b',
-        "read -t $T -n 1 key; echo $key",
-        "files=(); while IFS= read -r -d '' f; do files+=(\"$f\"); done < <(git ls-files -z '*.py'); echo ${#files[@]}",
         "git ls-files '*.md' | while IFS= read -r f; do python3 -c \"print(open('x').read())\" $f; done",
         "while IFS=\\| read -r a b; do echo $a; done < table.txt",
         'IFS="$sep" read -ra parts <<< "$s"; echo ${parts[0]}',
-        "echo $((1 + 2)) $((a+b)); ls -la",
-        'for i in 1 2 3; do echo $i; done; declare -A m; echo "${m[0]}" $HOME',
-        "sleep 0 & wait $!; echo $HOME",
-        "if true; then echo for x in; fi; ls $HOME",
-        # số học nhắc tên nhưng lệnh không đưa vào biến giá trị có thể chứa IFS (biến môi trường: của người dùng)
         "declare -A c; for w in a b a; do (( c[$w] += 1 )); done; echo ${c[a]}",
         "echo $((a+b)); ls $HOME",
         "for ((i=0;i<3;i++)); do echo $i; done",
         "x=$(( (a+b) * 2 )); echo $x",
         "let 'x = 1 << 2'; echo $x",
-        'echo "$(( $(wc -l < notes.txt) + 1 ))"',  # thay lệnh trong số học: không tách; chặn khi có mở rộng khác
+        'echo "$(( $(wc -l < notes.txt) + 1 ))"',
         'n=$(grep -n x f | cut -d: -f1); sed -n "$((n-5)),$((n+5))p" f',
-        "A=1 B=$(date) make; ls $HOME",
+        # review adr-guard: giá trị cờ không nháy của `read` (T=`1 IFS` → `read -t 1 IFS …`) — viết `read -t "$T"`
+        "read -t $T -n 1 key; echo $key",
     )
 
     def test_guard_ifs_word_split_review_r2(self):
         """AUD-SEC-388 lượt 2 (review blk-guard): ngoại lệ `for … in`/`IFS=… read` chỉ khi từ khoá ở VỊ TRÍ LỆNH (từ
         token, không regex trên chữ); tên đích động/ngữ cảnh số học/mã cùng shell đều tính là có thể gán `IFS`; dò `IFS`
-        trên cấu trúc lệnh (gán ở vị trí mã), không trên chữ thô — grep/commit/heredoc dữ liệu nhắc IFS vẫn chạy."""
+        trên cấu trúc lệnh (gán ở vị trí mã), không trên chữ thô — grep/commit/heredoc dữ liệu nhắc IFS vẫn chạy. ADR-0065
+        (D-322) thêm lớp OR trên chữ thô: nhắc IFS mà còn mở rộng ngoài nháy kép thì chặn (`IFS_R2_NOW_DENY`)."""
         for cmd in self.IFS_R2_BAD:
             with self.subTest(cmd=cmd):
                 res = self.g.bash_decision(cmd, self.root)
@@ -879,6 +892,159 @@ class GuardMatrixTest(unittest.TestCase):
         for cmd in self.IFS_R2_OK:
             with self.subTest(cmd=cmd):
                 self.assertNotEqual(self.dec(cmd), "deny", self.g.bash_decision(cmd, self.root))
+        for cmd in self.IFS_R2_NOW_DENY:
+            with self.subTest(cmd=cmd):
+                res = self.g.bash_decision(cmd, self.root)
+                self.assertEqual((res["decision"], res.get("code")), ("deny", self.g.BUDGET), res)
+
+    def assert_budget(self, cmds, layer):
+        """Lệnh gốc bị chặn BUDGET (luật cũ hay lớp mới — OR), VÀ riêng lớp ADR-0065 `layer` cũng chặn (trên lệnh gốc,
+        hay ở lệnh lồng — lý do đi lên) với lý do có `viết lại:` — gỡ luật cũ không mở lại ca."""
+        for cmd in cmds:
+            with self.subTest(cmd=cmd):
+                res = self.g.bash_decision(cmd, self.root)
+                self.assertEqual((res["decision"], res.get("code")), ("deny", self.g.BUDGET), res)
+                why = layer(cmd) or str(res["reason"])
+                self.assertIn("ADR-0065", why)
+                self.assertIn("viết lại:", why)
+
+    # ADR-0065 lớp B (D-322): 5 dạng review #422 (base cũng lọt) — từ lệnh nguyên văn `git`, chỉ lớp B chặn được
+    IFS_ADR65_BAD = (
+        "function f { IFS=/; }; f; c=push/--force/origin/main; git $c",
+        'IFS=/; c=push/--force/origin/main; : "(("; git $c; : "))"',
+        "IFS=/; c=x/git/push/--force/origin/main; 'env' a=$c",
+        "eval 'read() { git $c; }'; c=push/--force/origin/main; IFS=/ read",
+        "set -o posix; IFS=/ exec read; c=push/--force/origin/main; git $c",
+        # số học đánh giá đệ quy giá trị biến định nghĩa trong `eval` (luật cũ lọt; bash 5.2 chạy `push --force …`)
+        "eval 'read -r a < f'; (( a )); c=push4--force4origin4main; git $c",
+        "eval 'declare -u a; a=ifs=47'; (( a )); c=push4--force4origin4main; git $c",
+        "eval 'a=ifs=47'; : $(( ${a^^} )); c=push4--force4origin4main; git $c",
+        # tên đích động / nameref / gián tiếp / mã cùng shell không đọc — không cần chữ IFS
+        'printf -v "$(cat n)" /; c=push/--force/origin/main; git $c',
+        'read -r "$n" < f; git $c',
+        'mapfile -t "$n" < f; git $c',
+        "declare -n r=$x; r=/; git $c",
+        "local -rn r=$x; git $c",
+        "export {I,J}FS=/; git $c",
+        "declare -$f r; git $c",
+        ": ${!n:=/}; git $c",
+        'for "$n" in /; do :; done; git $c',
+        'getopts : "$n"; git $c',
+        "mapfile -C cb -c 1 a < f; git $c",
+        ". ./env.sh; git $c",
+        "eval eval eval eval eval eval 'x=1'; git $c",
+        # mở rộng mà guard từng miễn theo cấu trúc: nháy đơn (thân eval), `${…}`, `$(…)`, `\\$` ngoài nháy kép
+        "IFS=/; c=push/--force/origin/main; eval 'git $c'",
+        'IFS=/; c=push/--force/origin/main; git "${x:-$c}"',
+        'IFS=/; c=push/--force/origin/main; echo "$(git $c)"',
+        "IFS=/; eval git \\$c",
+        "IFS=/; c=push/--force/origin/main; git $((echo $c) )",  # `$((` không đóng `))`: thay lệnh, không phải số học
+        # thân heredoc không nháy: mở rộng trong `$(…)` là mã
+        "IFS=/; c=push/--force/origin/main; cat <<EOF\n$(git $c)\nEOF",
+        "IFS=/; cat <<EOF\n${x:-$(id)}\nEOF",
+        "IFS=/; cat <<EOF\n\\$c\nEOF",
+        # review adr-guard 🔴 (bash 5.2 chạy `git push --force origin main` mọi ca): `\\$` trong nháy kép đọc lại bởi
+        # callback `mapfile -C` / `${y@P}` — không lớp lồng nào quét; nay `\\$` trong nháy kép không được miễn
+        'IFS=/; x=push/--force/origin/main; mapfile -c1 -C "git \\$x #" <<< 1',
+        'IFS=/; x=push/--force/origin/main; readarray -c1 -C "git \\$x #" <<< 1',
+        'IFS=/; x=push/--force/origin/main; mapfile -C "git \\$x #" -c 1 <<< 1',
+        'function f { IFS=/; }; f; x=push/--force/origin/main; mapfile -c1 -C "git \\$x #" <<< 1',
+        'IFS=/; x=push/--force/origin/main; y="\\$(git \\$x)"; : "${y@P}"',
+        'IFS=/; x=push/--force/origin/main; y="\\$(git \\$x)"; echo "${y@P}"',
+        # thân heredoc không nháy của builtin mở rộng trong shell này: `${!y:=/}` gán IFS khi `y` đọc từ tệp
+        "y=$(cat n.txt); unset $y; : <<E\n${!y:=/}\nE\nc=push/--force/origin/main; git $c",
+        # giá trị cờ không nháy: bash chạy `read -t 1 IFS v` khi t.txt chứa `1 IFS`
+        'T=$(cat t.txt); read -t $T v <<< "/ x"; c=push/--force/origin/main; git $c',
+        'D=$(cat t.txt); read -d $D v <<< "/ x"; c=push/--force/origin/main; git $c',
+        "FD=$(cat t.txt); read -u $FD v; c=push/--force/origin/main; git $c",
+        "N=$(cat t.txt); mapfile -n $N a < f; c=push/--force/origin/main; git $c",
+        "F=$(cat t.txt); printf $F; c=push/--force/origin/main; git $c",
+        # đổi kỳ vọng có chủ ý (review adr-guard): `\\$` trong nháy kép khi lệnh nhắc IFS — viết `git commit -F- <<'EOF'`
+        'git commit -q -m "docs: nhắc \\$IFS"',
+        # đổi kỳ vọng có chủ ý (review #423): chỉ số khởi tạo mảng có nháy là số học với mảng chỉ số (`a=(["k"]=v)`
+        # gán IFS qua `k`) — guard không phân biệt `-A`; viết `echo "$a"`
+        'declare -A m=(["a"]=1); export PATH="$HOME/bin:$PATH"; read -r a b < f; echo $a',
+    )
+    IFS_ADR65_OK = (
+        'while IFS= read -r l; do echo "$l"; done < f',
+        'IFS=, read -r a b <<< "$x"',
+        "printf -v out '%s' \"$x\"",
+        'while IFS= read -r l; do n=$((n+1)); done < f; echo "$n"',
+        'IFS=/; echo "$HOME" "${#HOME}" $? $# $$ $!',
+        "IFS=$'\\n'; echo \"$*\"",
+        "git commit -q -F- <<'EOF'\ndocs: nhắc $IFS\nEOF",
+        "printf '%s\\n' $(git rev-parse HEAD); sleep 1 & wait $!",
+        "IFS=/; cat <<EOF\n$HOME ${USER}\nEOF",
+        'IFS=/; x="$(( $# + 1 ))"; echo "${arr[$((i+1))]}"',
+        'declare -A m=(["a"]=1); export PATH="$HOME/bin:$PATH"; read -r a b < f; echo "$a"',
+        'for f in *.md; do wc -l "$f"; done; echo ${HOME:-x}',
+    )
+
+    def test_guard_ifs_word_split_adr65(self):
+        """ADR-0065 (D-322) lớp B — danh sách trắng thay vá theo cấu trúc: chữ thô nhắc `IFS` hay có gán tên-đích-động thì
+        mọi `$` không nằm trực tiếp trong nháy kép → BUDGET (AUD-SEC-388). Lý do kèm một dòng `viết lại:`."""
+        self.assert_budget(self.IFS_ADR65_BAD, self.g._split_why)
+        for cmd in self.IFS_ADR65_OK:
+            with self.subTest(cmd=cmd):
+                self.assertEqual(self.dec(cmd), "", self.g.bash_decision(cmd, self.root))
+
+    RUNTIME_HEAD_BAD = (
+        "read -ra a <<< 'git push --force origin main'; \"${a[@]}\"",
+        "mapfile -d / a <<< 'git/push/--force/origin/main'; ${a[@]}",
+        "$(cat <<'E'\ngit push --force origin main\nE\n)",
+        "\"$(cat <<'E'\ngit push --force origin main\nE\n)\"",
+        'x=$("${a[@]}")',
+        'echo "$(${a[@]})"',
+        "eval '\"${a[@]}\"'",
+        "trap '\"${a[@]}\"' EXIT",
+        "bash -c '\"${a[@]}\"'",
+        "< <(echo x) $c",
+        "cat <<'EOF' | bash\n\"${a[@]}\"\nEOF",
+        "timeout 5 $c --force",
+        'env A=1 "$CMD" push',
+        "while $cond; do :; done",
+        "if true; then $c; fi",
+        "( $c )",
+        "a=(x) $c",
+        "for ((i=0; i<1; i++)); do $c; done",
+        "diff <(sort a) <($c)",
+        "$PYTHON -m pip install a==1",
+        '"$(git rev-parse --show-toplevel)"/scripts/x.sh FOO=1',
+        '"${cmd[@]}" --flag',
+        "x=$(echo ''); $x",
+        "sh -c \"$(cat <<'E'\necho hi\nE\n)\"",
+        "((echo hi) ; git push)",  # `((` không đóng bằng `))` liền: bash đọc lại thành subshell lồng
+        "(( a ) )",
+        "a=(1 2",
+        # review adr-guard 🔴: `function NAME {` không có dấu tách trước `{` — từ sau `{` vẫn là từ lệnh
+        'read -ra a <<< "git push --force origin main"; function f { "${a[@]}"; }; f',
+        'function f() { "${a[@]}"; }',
+        "coproc f { $c; }",
+        "echo x | { $c; }",
+    )
+    RUNTIME_HEAD_OK = (
+        'read -ra a <<< "$s"; printf \'%s\\n\' "${a[@]}"',
+        "diff <(sort a) $f",
+        "cat < <(ls) | head",
+        "exec > >(tee -a log) 2>&1",
+        'a=($x $y); files=($(ls)); echo "${a[@]}"',
+        "(( x > 1 )) && echo hi; ((y++));",
+        "for ((i=0;i<n;i++)); do :; done",
+        'if (( $# > 0 )); then echo "$1"; fi',
+        "(( x )) > /dev/null; echo ok",
+        "case $x in a) echo a;; esac",
+        "$ ",
+        'function f { echo "$1"; }; f x',
+        "exec > >(tee -a log) 2>&1; nice -n 5",
+    )
+
+    def test_guard_runtime_array_command(self):
+        """AUD-SEC-391 (ADR-0065 lớp A): từ lệnh — sau gán đầu lệnh, từ khoá, lệnh bọc guard biết — có `$`/backtick (mảng
+        dựng lúc chạy, biến, thay lệnh, kể cả trong nháy) → BUDGET; trong `$(…)`, `<(…)`, thân eval/trap/sh -c cũng vậy."""
+        self.assert_budget(self.RUNTIME_HEAD_BAD, self.g._dyn_head_why)
+        for cmd in self.RUNTIME_HEAD_OK:
+            with self.subTest(cmd=cmd):
+                self.assertEqual(self.dec(cmd), "", self.g.bash_decision(cmd, self.root))
 
     def test_guard_ifs_scan_linear(self):
         """AUD-SEC-388 lượt 2 (review blk-guard 🟠 ReDoS): dò ngữ cảnh số học/danh sách `for` tuyến tính. Lượt 1

@@ -214,7 +214,8 @@ ALLOW = (
     "msg='fix: rm -rf ~ docs'; git status",
     "python3 -c \"import subprocess; subprocess.run(['ls', '-la'])\"",
     'echo "<<E" > /tmp/f',
-    'git commit -q -m "docs: nhắc <<E và \\$IFS"',
+    # bản nhắc `\\$IFS` nay chặn có chủ ý (ADR-0065: `\\$` trong nháy kép khi lệnh nhắc IFS — test_hooks IFS_ADR65_BAD)
+    'git commit -q -m "docs: nhắc <<E và \\$HOME"',
     "touch /tmp/x",
     "echo $'a\\tb'",
 )
@@ -763,9 +764,9 @@ class GuardGaps341Test(unittest.TestCase):
                 "x=$(echo hi); echo $x",
                 'read -r name <<< "$1"; echo $name',
                 "v=${VERSION:-dev}; echo $v",
-                "x=$(echo ''); $x",
             ),
         )
+        self.assert_all("deny", ("x=$(echo ''); $x",))  # ADR-0065 lớp A: từ lệnh là biến — chặn dù giá trị rỗng
         self.assert_all("deny", ("x=$(echo 'unterminated); echo $x",))  # ADR-0063: nháy không đóng (bash lỗi cú pháp)
 
     def test_lift_helpers(self) -> None:
@@ -884,10 +885,12 @@ class GuardGaps341Test(unittest.TestCase):
             "",
             (
                 "git commit -m \"$(cat <<'EOF'\nfix: chặn `rm -rf ~` trong guard\nEOF\n)\"",
-                "bash -c \"$(cat <<'E'\necho hi\nE\n)\"",
-                "bash -c \"$(tee <<'E'\necho hi\nE\n)\"",
+                "bash <<'E'\necho hi\nE",  # cách viết thay của hai ca dưới
             ),
         )
+        # ADR-0065 lớp A: script lồng của `bash -c` là `$(cat <<'E'…)` — từ lệnh dựng lúc chạy (ở lệnh gốc guard không quét
+        # thân như script: `$(cat <<'E'` ↵ `git push --force origin main` ↵ `E` ↵ `)` từng cho qua) → chặn
+        self.assert_all("deny", ("bash -c \"$(cat <<'E'\necho hi\nE\n)\"", "bash -c \"$(tee <<'E'\necho hi\nE\n)\""))
 
     def test_for_loop_values(self) -> None:
         many = " ".join(f"a{i}" for i in range(guard.VAR_FOR_PICKS + 1))

@@ -834,6 +834,9 @@ class _CodeView:
         self.s, self.kind, self.stack, self.why = s, ["q"] * len(s), [""], ""
         self.opens: List[int] = []  # vị trí `"` mở đang chờ đóng
         self.top = [False] * len(s)  # ký tự ở tầng ngoài cùng (không trong `$(`/`(`/nháy/`${`)
+        self.dq_dollars: Set[int] = set()  # `$` (không thoát) nằm TRỰC TIẾP trong chuỗi nháy kép (ADR-0065)
+        self.ansi_opens: Set[int] = set()  # `$` mở `$'…'` ở tầng mã — nháy, không phải mở rộng
+        self.comments: List[Tuple[int, int]] = []  # vùng comment `#…` (kind `q` như nháy đơn — tách riêng cho lớp B)
         i = 0
         while i < len(s) and not self.why:
             top = len(self.stack) == 1
@@ -851,6 +854,8 @@ class _CodeView:
             if ctx in ("$(", "(") and CASE_WORD_RE.search(m[0]):  # `)` của mẫu `case` đóng ngoặc sớm (review lát A 🔴)
                 self.why = "`case` trong `$(…)`/`(…)` — dùng `if`/`[[ ]]` hoặc tách lệnh"
             return m.end()
+        if ctx == '"' and s[i] == "$":  # `\$` không tính: chữ `$` mà `mapfile -C`/`${x@P}`/eval đọc lại thành mở rộng
+            self.dq_dollars.add(i)
         if s[i] == "`":
             self.why = "backtick — dùng `$(…)` (AUD-SEC-181/231/245)"
         if s[i] == "\\" or self.why:
@@ -889,6 +894,8 @@ class _CodeView:
             self.kind[i : i + 2] = ["c", "c"]
             return i + 2
         if c == "'" or s.startswith("$'", i):
+            if c == "$":
+                self.ansi_opens.add(i)
             return self._quoted(i, c == "$")
         if c == "#":
             return self._hash(i)
@@ -923,6 +930,7 @@ class _CodeView:
         end = len(s) if end < 0 else end
         if i and s[i - 1] == ")":  # nháy trong comment: D-274…D-276 (`_comment_desyncs_ansi`) đã đóng AUD-SEC-229/230
             self.why = "`#` ngay sau `)` (AUD-SEC-242)"
+        self.comments.append((i, end))
         return end
 
 
@@ -989,7 +997,7 @@ ARITH_SAFE_RE = re.compile(r"\$[$#?!-]")  # tham số đặc biệt ra số/cờ
 ARITH_TEST_OP_RE = re.compile(r"(?<![\w$])-[A-Za-z]+\b")  # toán tử `[[ … ]]` (`-eq`, `-f`): không phải tên
 ARITH_TEST_RE = re.compile(r"-(?:eq|ne|lt|le|gt|ge)\b")  # `[[ a -eq b ]]`: toán hạng là biểu thức số học
 ARITH_LIVE_RES = (  # mỗi lớp `[^…\[\]$]` dừng ở dấu mở kế: một lượt quét tuyến tính
-    re.compile(r"\$\{!?[A-Za-z_]\w*\[([^\[\]\n]*)\]"),  # chỉ số trong `${a[i]}`
+    re.compile(r"\$\{[!#]?[A-Za-z_]\w*\[([^\[\]\n]*)\]"),  # chỉ số trong `${a[i]}`, `${#a[i]}` (review #423)
     re.compile(r"\$\[([^\[\]\n]*)\]"),  # `$[…]` cũ
     re.compile(r"\$\{[A-Za-z_@*0-9]\w*(?:\[[^\[\]\n$]*\])?:(?![-=+?])([^}$\n]*\$?)"),  # `${x:off:len}`
 )
@@ -1368,6 +1376,372 @@ def _dyn_text_why(v: _CodeView, live: str, bare: str) -> str:
     return "biến bash tự chạy cùng ngữ cảnh kích hoạt (AUD-SEC-287/291/299/300)" if hit else ""
 
 
+# ADR-0065 (D-322): lớp mở rộng động theo DANH SÁCH TRẮNG. Ba lượt vá AUD-SEC-388 theo cấu trúc lệnh đều lọt dạng mới
+# (#372, review #422: hàm `function`, `((` giả trong nháy, từ lệnh có nháy, `read` định nghĩa trong `eval`, `exec read`).
+# OR với mọi luật cũ (bài học #352/#372); không suy cấu trúc (hàm, vòng `for`, vùng số học…) để miễn:
+# (A) từ lệnh — sau gán đầu lệnh, từ khoá, lệnh bọc guard biết — có `$`/backtick, kể cả trong nháy → chặn (AUD-SEC-391);
+# (B) chữ thô nhắc `IFS` (mọi dạng chỉ-chữ-số) hay có gán tên-đích-động (tên đích không nguyên văn, nameref, `${!x}`,
+#     đổi hoa từ dữ liệu, biểu thức số học nhắc tên/mở rộng — bash đánh giá ĐỆ QUY giá trị biến nên `(( a ))` với `a`
+#     đọc từ tệp trong `eval` gán được `IFS`, mã cùng shell guard không đọc) → mọi `$` KHÔNG nằm trực tiếp trong nháy kép
+#     (không nháy, nháy đơn — thân eval/trap/sh -c —, trong `${…}`/`$(…)`, `\\$` kể cả trong nháy kép — chữ mà
+#     `mapfile -C`/`${x@P}` đọc lại, review adr-guard) → chặn (AUD-SEC-388); giá trị cờ không nháy của
+#     read/mapfile/printf/wait/unset (bash tách thành thêm cờ/tên đích) và thân heredoc không nháy cũng bật (B). Chỉ miễn
+#     theo GIÁ TRỊ: `$?`/`$#`/`$$`/`$!`/`${#…}` (số), mở `$((…))` đóng như bash (số), mở `$'…'` (nháy, không mở rộng);
+# (C) heredoc dấu kết không nháy có `$`/backtick khi lệnh có shell đọc stdin (cả `bash 0<<E`) → chặn: thân mở rộng hai
+#     lần (AUD-SEC-392); trình thông dịch (perl/python/ruby…) cùng thân có dấu mở rộng lần hai (`\\$`, backtick) → chặn;
+# (D) chữ dữ liệu chạy như mã trong shell này mà guard không đọc: `mapfile`/`readarray -C`, `${x@P}` → luôn chặn.
+DYN_HEAD_WHY = (
+    'từ lệnh dựng lúc chạy (`$c`, `"${a[@]}"`, `$(…)`) — guard không biết lệnh nào chạy (AUD-SEC-391, ADR-0065);'
+    " viết lại: gọi lệnh bằng tên nguyên văn (`git push …`), dữ liệu để ở đối số trong nháy kép"
+)
+SPLIT_WHY = (
+    "mở rộng ngoài nháy kép khi lệnh nhắc `IFS` hay gán tên-đích-động — bash tách/đánh giá khác guard (AUD-SEC-388,"
+    ' ADR-0065); viết lại: đặt mọi mở rộng trong nháy kép (`"$c"`, `"${a[@]}"`, `"$(…)"`), tên đích nguyên văn'
+    " (`printf -v out`), tách phần nhắc `IFS` sang lệnh riêng"
+)
+# `for i in $(…)` không nháy được (nháy làm cả kết quả thành MỘT từ) — câu viết lại riêng (review adr-guard lượt 2 🟠)
+SPLIT_FOR_SUBST_RE = re.compile(r"(?:^|[\s;&|(])for[ \t]+\w+[ \t]+in[ \t][^;\n]*\$\(")
+SPLIT_FOR_HINT = (
+    "; vòng `for … in $(…)`: `for ((i=1; i<=N; i++))`, danh sách nguyên văn (`for i in 1 2 3`) hay"
+    " `cmd | while read -r i; do …; done`"
+)
+HERE_SHELL_WHY = (
+    "heredoc không nháy có `$`/backtick đi vào shell/trình thông dịch — thân mở rộng hai lần (AUD-SEC-392, ADR-0065);"
+    " viết lại: `<<'EOF'` có nháy, dữ liệu truyền qua biến môi trường/đối số"
+)
+REREAD_WHY = (
+    "chữ dữ liệu chạy như mã trong shell này (`mapfile -C`, `${x@P}`) — guard không đọc được (AUD-SEC-388, ADR-0065);"
+    " viết lại: vòng `while IFS= read -r l; do …; done` gọi lệnh nguyên văn, in chữ bằng `printf '%s' \"$x\"`"
+)
+REREAD_PROMPT_RE = re.compile(r"\$\{[^{}]*@P\}")  # `${x@P}`: mở rộng giá trị như dấu nhắc — chạy `$(…)` trong đó
+SPLIT_DECLARERS = frozenset("declare typeset local export readonly".split())
+SPLIT_NAME_RE = re.compile(r"[A-Za-z_]\w*(?:\[[^\[\]$`]*\])?\+?")  # đích nguyên văn: tên, chỉ số không mở rộng
+SPLIT_CASE_RE = re.compile(r"\$\{[#!]?\w+(?:\[[^\]]*\])?(?:\^|~|@[Uu])")  # đổi chữ thường từ dữ liệu thành hoa
+SPLIT_NUM_RE = re.compile(r"\$(?:[?#$!]|\{#)")  # `$?`/`$#`/`$$`/`$!`, độ dài `${#…}`: ra số
+
+
+def _allowlist_why(cmd: str) -> str:
+    """ADR-0065: lý do chặn của lớp danh sách trắng (rỗng = qua)."""
+    return _dyn_head_why(cmd) or _reread_why(cmd) or _split_why(cmd) or _here_shell_why(cmd)
+
+
+def _reread_why(cmd: str) -> str:
+    """(D) `mapfile`/`readarray -C` (callback là chữ chạy như mã) hay `${x@P}` (mở rộng dấu nhắc chạy `$(…)` trong giá
+    trị) — chữ dữ liệu chạy trong shell này, không lớp lồng nào quét (review adr-guard). `@P` xét trên chữ bash còn mở
+    rộng (cả thân heredoc không nháy); trong nháy đơn là chữ — thân eval/`sh -c` do lớp lồng quét như script."""
+    v, bodies = _split_view(cmd)
+    if REREAD_PROMPT_RE.search("\n".join([_code_views(v)[0], *bodies])):
+        return REREAD_WHY
+    for head, args in map(_ifs_head, _ifs_argvs(cmd) or []):
+        opts = "".join(_dequote(w)[1:] for w in _no_redirects(args) if _is_opt(w))
+        if head in ("mapfile", "readarray") and "C" in opts:
+            return REREAD_WHY
+    return ""
+
+
+def _dyn_head_why(cmd: str) -> str:
+    """(A) Từ lệnh không phải chữ nguyên văn (AUD-SEC-391: `read -ra a …; "${a[@]}"`)."""
+    heads = _command_heads(cmd)
+    return DYN_HEAD_WHY if heads is None or any(re.search(r"[$`]", h) for h in heads) else ""
+
+
+def _command_heads(cmd: str) -> Optional[List[str]]:
+    """Từ lệnh còn nháy của mọi lệnh đơn; None = không tách chắc. `$` trơn là token mờ của `_no_redirects` (đích chuyển
+    hướng bị cắt ở `>(`), không phải từ lệnh. `$(cat <<'X'`…`X)` làm từ lệnh cũng tính: ở lệnh gốc guard không quét thân
+    như script (base cho chạy `$(cat <<'E'` ↵ `git push --force origin main` ↵ `E` ↵ `)`). Mọi từ ngay sau `{` trơn cũng là
+    từ lệnh — không suy `function NAME {`/`coproc NAME {` là cấu trúc gì (review adr-guard: `function f { "${a[@]}"; }`);
+    lệnh bọc không kèm lệnh (`exec >log`, `env A=1`) thì chính nó là từ lệnh."""
+    raw = _raw_tokens(cmd, True)
+    argvs = None if raw is None else _plain_argvs(raw)
+    if argvs is None:
+        return None
+    heads: List[str] = []
+    for seg in (s for argv in argvs for s in _brace_segments(argv)):
+        rest = _ifs_prefix(seg)[1]
+        k = len(rest) - len(_strip_prefixes([_dequote(t) for t in rest]))
+        heads += [] if _command_query(rest[:k]) else [h for h in rest[k : k + 1] or rest[:1] if h != "$"]
+    return heads
+
+
+COMMAND_QUERY_RE = re.compile(r"-[pvV]*[vV][pvV]*")  # `command -v`/`-V`/`-pv`: tra tên, không chạy
+
+
+def _command_query(prefix: List[str]) -> bool:
+    """Phần lệnh bọc có `command` mà cờ NGAY SAU nó (tới `--`/từ đầu tiên không phải cờ) có `-v`/`-V` (cả gộp `-pv`):
+    mọi tên sau đó chỉ được tra (như `type -P`, `which`), không chạy — không phải từ lệnh (review adr-guard lượt 2 🟠).
+    `command NAME`/`command -p NAME`, cờ `-v` của lệnh bọc khác (`command -p env -v "$x"`) vẫn chạy NAME."""
+    plain = [_dequote(w) for w in prefix]
+    at = [i for i, w in enumerate(plain) if posixpath.basename(w) == "command"]
+    flags = itertools.takewhile(lambda w: w.startswith("-") and w != "--", plain[at[-1] + 1 :] if at else [])
+    return any(COMMAND_QUERY_RE.fullmatch(w) for w in flags)
+
+
+def _brace_segments(argv: List[str]) -> List[List[str]]:
+    """argv cắt ở mỗi token `{` trơn (không nháy): phần sau `{` đọc như một lệnh đơn mới."""
+    segs: List[List[str]] = [[]]
+    for t in argv:
+        if t == "{":
+            segs.append([])
+        else:
+            segs[-1].append(t)
+    return segs
+
+
+def _plain_argvs(tokens: List[str]) -> Optional[List[List[str]]]:
+    """Lệnh đơn trên token còn nháy (`_ArgvSplit`), bỏ phần tử mảng `a=(…)` (dữ liệu) và biểu thức của lệnh số học
+    `((…))` (luật số học xét riêng). `((` mà bash không đọc là số học (không đóng bằng `))` liền) hay mảng không đóng →
+    None."""
+    st = _ArgvSplit()
+    it = iter(tokens)
+    for t in it:
+        if not _is_punct(t):
+            st.cur.append(t)
+            continue
+        rest: Optional[str] = t
+        if t.startswith("(") and st.cur and st.cur[-1].endswith("="):
+            rest = _skip_array(it)
+        elif t.startswith("((") and all(_dequote(w) in (*SHELL_KEYWORDS, *ARITH_LEADS) for w in st.cur):
+            st.cur.append("((")
+            rest = _skip_arith(t, it)
+        if rest is None:
+            return None
+        st.punct(rest)
+    return [c for c in [*st.out, st.cur] if c]
+
+
+ARITH_LEADS = ("for", "time")  # cùng `SHELL_KEYWORDS`: `((` sau các từ này vẫn ở vị trí lệnh (`if ((`, `for ((`)
+# Mảnh của một dãy dấu: mở thay tiến trình, ngoặc, chuyển hướng (`>&`, `>|`, `&>>`, `<<<`), toán tử điều khiển.
+PUNCT_PIECE_RE = re.compile(r"[<>]\(|[()]|&>>?|[<>]+[&|]?|[;&|\n]+")
+PROCSUB_WORD = "_procsub_"  # chỗ của `<(…)`/`>(…)` trong argv lệnh ngoài (đích chuyển hướng, đối số)
+
+
+class _ArgvSplit:
+    """Tách lệnh đơn như `split_commands`, trừ thay tiến trình: `<(`/`>(` mở lệnh trong, `)` đóng nó thì từ sau vẫn là
+    đối số của lệnh ngoài (`diff <(cat a) $S/b` — `$S/b` không phải từ lệnh; `< <(x) $c` — `$c` là từ lệnh)."""
+
+    def __init__(self) -> None:
+        self.out: List[List[str]] = []
+        self.cur: List[str] = []
+        self.outer: List[Optional[List[str]]] = []  # mỗi `(` đang mở: argv ngoài của `<(`/`>(`, None với subshell
+
+    def new(self) -> None:
+        self.out.append(self.cur)
+        self.cur = []
+
+    def punct(self, p: str) -> None:
+        for piece in PUNCT_PIECE_RE.findall(p):
+            if piece in ("<(", ">("):
+                self.outer.append(self.cur)
+                self.cur = []
+            elif piece == "(":
+                self.outer.append(None)
+                self.new()
+            elif piece == ")":
+                back = self.outer.pop() if self.outer else None
+                self.new()
+                self.cur = self.cur if back is None else [*back, PROCSUB_WORD]
+            elif _is_redirect(piece):
+                self.cur.append(piece)
+            else:
+                self.new()
+
+
+def _skip_array(it: Iterator[str]) -> Optional[str]:
+    """Bỏ phần tử mảng tới token dấu có `)`; trả phần dấu sau `)` (None = không đóng)."""
+    for t in it:
+        if _is_punct(t) and ")" in t:
+            return t[t.index(")") + 1 :]
+    return None
+
+
+def _skip_arith(first: str, it: Iterator[str]) -> Optional[str]:
+    """Bỏ lệnh số học mở ở `first` (`((`…) như bash: đếm ngoặc tới `)` hạ về tầng `((` mà ký tự kế là `)`; trả phần dấu
+    sau `))` — `)` khác ở tầng đó (bash đọc lại thành subshell lồng) hay không đóng → None."""
+    depth = 0
+    for t in itertools.chain([first], it):
+        for k, ch in enumerate(t if _is_punct(t) else ""):
+            if ch == "(":
+                depth += 1
+            elif ch == ")" and depth == 2:
+                return t[k + 2 :] if t[k + 1 : k + 2] == ")" else None
+            elif ch == ")":
+                depth -= 1
+    return None
+
+
+def _split_why(cmd: str) -> str:
+    """(B) Có thể đổi `IFS`/gán biến tên lúc chạy mà còn `$` ngoài nháy kép trực tiếp (AUD-SEC-388)."""
+    if not _split_trigger(cmd, 0):
+        return ""
+    v, bodies = _split_view(cmd)
+    if not (v.why or _unsafe_dollar(v) or any(map(_here_body_unsafe, bodies))):
+        return ""
+    return SPLIT_WHY + (SPLIT_FOR_HINT if SPLIT_FOR_SUBST_RE.search(_code_views(v)[1]) else "")
+
+
+def _split_trigger(text: str, depth: int) -> bool:
+    """Chữ thô nhắc `IFS` (dạng chỉ-chữ-số, cả trong nháy/thân heredoc); trên chữ bash còn mở rộng (ngoài nháy đơn và
+    thân heredoc có nháy): `${!…}`, đổi hoa từ dữ liệu (`${x^^}`); tên đích không nguyên văn, nameref `-n`, `declare -u`,
+    gán có `$` trong số học, mã cùng shell guard không đọc (`source`/`.`, `mapfile -C`); thân `eval`/`trap` xét như lệnh
+    (sâu quá `STRICT_EVAL_DEPTH` tầng = có). Thân heredoc không nháy là chữ bash còn mở rộng — với builtin (`: <<E` ↵
+    `${!y:=/}`) mở rộng ngay trong shell này (review adr-guard)."""
+    if depth > STRICT_EVAL_DEPTH or _mentions_ifs(text):
+        return True
+    argvs = _ifs_argvs(text)
+    v = _CodeView(_fold_heredocs(join_continuations(text), True))
+    if argvs is None or v.why:
+        return True
+    live, bare = _code_views(v)
+    live = "\n".join([live, *_split_view(text)[1]])
+    if "${!" in live or SPLIT_CASE_RE.search(live):
+        return True
+    if any(map(_arith_dyn, _arith_texts(argvs, live, bare) + _unquoted_arith_texts(v, argvs))):
+        return True
+    return any(_argv_split_trigger(a, depth) for a in argvs)
+
+
+SPLIT_TEST_V_RE = re.compile(r"(?<![\w-])-v[ \t]")  # `[[ -v NAME[sub] ]]`/`test -v`: chỉ số mảng là biểu thức số học
+
+
+def _unquoted_arith_texts(v: _CodeView, argvs: List[List[str]]) -> List[str]:
+    """Toán hạng số học bash BỎ NHÁY rồi mới đánh giá (review adr-guard lượt 2 🔴): toán hạng `[[ … -eq … ]]` và chỉ số
+    của `-v` ở `[[ ]]`/`test`/`[` — `[[ 'k' -eq 0 ]]`, `[[ $'\\153' -eq 0 ]]`, `[[ \\k -eq 0 ]]`, `test -v 'a[k]'` đánh
+    giá đệ quy giá trị `k` (`IFS=4` đọc từ tệp gán `IFS` — đã chạy bash 5.2.21). Đọc trên chữ GIỮ nháy đơn/`$'…'`/ký tự
+    thoát (chỉ bỏ comment): nháy không làm toán hạng thành chữ. Toán hạng `-v` có `$`/backtick (tên đích lúc chạy) cả
+    chuỗi tính; không có `[`/`$` (`-v HOME`) thì chỉ tra biến, không đánh giá gì. Chỉ số khởi tạo mảng `[k]=` (cả trong
+    nháy của đối số `declare -a 'a=([k]=v)'`, `a=(['k']=v)`) cũng đánh giá đệ quy (review #423)."""
+    chars = list(v.s)
+    for a, b in v.comments:
+        chars[a:b] = [" "] * (b - a)
+    raw = "".join(chars)
+    tests = _double_brackets(raw)
+    texts = [ARITH_TEST_OP_RE.sub(" ", t) for t in tests if ARITH_TEST_RE.search(t)]
+    texts += [m[1] for m in ARITH_BARE_RES[1].finditer(raw)]
+    ops = [t[m.end() :] for t in tests for m in SPLIT_TEST_V_RE.finditer(t)]
+    for head, args in map(_ifs_head, argvs):
+        words = args if head in ("test", "[") else []
+        ops += [w for p, w in zip(words, words[1:]) if _dequote(p) == "-v"]
+    return texts + [op if re.search(r"[$`]", op) else op.partition("[")[2] for op in ops]
+
+
+def _mentions_ifs(text: str) -> bool:
+    """Chữ thô có `IFS` (cả trong nháy, comment, thân heredoc), hay một TỪ có `IFS` ở dạng chỉ-chữ-số (`I""FS`, `I\\FS`,
+    `$'\\x49'FS`, `{I,}FS`, `I${x}FS`) — không ghép chữ qua ranh giới từ (`grep -rIF "SELECT"` không tính)."""
+    if "IFS" in text:
+        return True
+    raw = _raw_tokens(text)
+    return any("IFS" in f for w in ([text] if raw is None else raw) for f in _letter_forms(w))
+
+
+def _argv_split_trigger(argv: List[str], depth: int) -> bool:
+    head, args = _ifs_head(argv)
+    words = _no_redirects(args)
+    opts = "".join(_dequote(w)[1:] for w in words if _is_opt(w))
+    if head in SPLIT_DECLARERS:
+        if re.search(r"[$`]", opts) or (head in IFS_DECLARERS and re.search(r"[nu]", opts)):
+            return True
+        return not all(_split_name(w) for w in words if not _is_opt(w))
+    if head in IFS_OPT_TARGETS:
+        takes, names, positional = IFS_OPT_TARGETS[head]
+        if ("C" in takes and "C" in opts) or any(map(_word_splits, _opt_words(head, words))):
+            return True
+        return not all(map(_split_name, _opt_targets(words, takes + names, names, positional)))
+    if head in ("for", "select", "coproc"):
+        return bool(words) and not _split_name(words[0])
+    if head == "getopts":
+        return len(words) > 1 and not _split_name(words[1])
+    if head in ("eval", "trap"):
+        return _split_trigger(" ".join(d for d in map(_dequote, words) if d != "--"), depth + 1)
+    return head in ("source", ".")
+
+
+def _opt_words(head: str, words: List[str]) -> List[str]:
+    """Từ mà bash còn đọc làm cờ/tên đích của read/mapfile/readarray/wait/unset/printf: mọi từ; với `printf` chỉ phần cờ
+    tới hết định dạng (từ đầu tiên không phải cờ — sau đó là đối số in ra, `printf '%s' $x` không gán gì; `-v` ăn một
+    từ; `--` hết cờ)."""
+    if head != "printf":
+        return [w for w in words if w != "$"]
+    i = 0
+    while i < len(words) and _is_opt(words[i]) and _dequote(words[i]) != "--":
+        i += 1 + (_dequote(words[i]) == "-v")
+    return words[: i + (i < len(words) and _dequote(words[i]) != "--")]
+
+
+def _word_splits(word: str) -> bool:
+    """Từ có mở rộng bash còn tách từ — `$` ở tầng ngoài, không nháy (nháy đơn/kép, `\\$` là chữ hay một từ), trừ giá
+    trị ra số (`$?`, `$((…))`); backtick/không đọc chắc cũng tính: giá trị cờ `read -t $T v` với T=`1 IFS` thành
+    `read -t 1 IFS v` (review adr-guard)."""
+    v = _CodeView(word)
+    arith = {a for a, _ in _arith_spans(_code_views(v)[0])}
+    bare = (i for i, c in enumerate(word) if c == "$" and v.top[i] and v.kind[i] == "c")
+    return bool(v.why) or any(not SPLIT_NUM_RE.match(word, i) and i + 1 not in arith for i in bare)
+
+
+def _split_name(word: str) -> bool:
+    """Đích gán nguyên văn: `NAME`, `NAME[chỉ số không mở rộng]`, có thể kèm `+`/`=giá trị` (giá trị không xét). Khoảng
+    trắng (trong nháy/thoát) ở phần tên: không phải tên (`_dequote` ghép `"a b"` thành `ab`)."""
+    name = word.partition("=")[0]
+    return not re.search(r"\s", name) and bool(SPLIT_NAME_RE.fullmatch(_dequote(word).partition("=")[0]))
+
+
+def _split_view(cmd: str) -> Tuple[_CodeView, List[str]]:
+    """(chữ mã — thân heredoc đã bỏ, thân các heredoc dấu kết không nháy)."""
+    lines = join_continuations(cmd).split("\n")
+    bodies: List[str] = []
+    for _, m, a, b, _ in _here_scan("\n".join(lines)):
+        if not _heredoc_word(m)[1]:
+            bodies.append("\n".join(lines[a:b]))
+            lines[a:b] = [" " * len(x) for x in lines[a:b]]
+    return _CodeView(_fold_heredocs("\n".join(lines), True)), bodies
+
+
+def _unsafe_dollar(v: _CodeView) -> bool:
+    """Có `$` không nằm trực tiếp trong nháy kép, trừ tham số ra số, mở `$((…))` số học, mở `$'…'`."""
+    live = _code_views(v)[0]
+    arith = {a for a, _ in _arith_spans(live)}
+    s, i = v.s, v.s.find("$")
+    while i >= 0:
+        num = SPLIT_NUM_RE.match(s, i)
+        if num:
+            i = s.find("$", num.end())
+            continue
+        if i not in v.dq_dollars and i not in v.ansi_opens and i + 1 not in arith:
+            return True
+        i = s.find("$", i + 1)
+    return False
+
+
+def _here_body_unsafe(body: str) -> bool:
+    """Thân heredoc không nháy (mở rộng như trong nháy kép): `$` bên trong `$(…)`/`${…}` (mã/biểu thức), `\\$`/`\\``
+    (thành mở rộng nếu thân bị đọc lại), backtick."""
+    depth = i = 0
+    while i < len(body):
+        c = body[i]
+        if c == "`" or (c == "\\" and body[i + 1 : i + 2] in ("$", "`")) or (c == "$" and depth):
+            return True
+        if c == "$" and body.startswith(("$(", "${"), i):
+            depth, i = 1, i + 2
+            continue
+        depth += (c in "({") - (c in ")}") if depth else 0
+        i += 2 if c == "\\" else 1
+    return False
+
+
+def _here_shell_why(cmd: str) -> str:
+    """(C) Heredoc dấu kết không nháy có `$`/backtick mà lệnh có shell đọc stdin (`| bash`, `bash <<E`, `. /dev/stdin`,
+    `| xargs sh -c`, cả fd tường minh `bash 0<<E`) — AUD-SEC-392: `cat <<EOF | bash` với `\\$(…)`. Lệnh có trình thông
+    dịch (perl/python/ruby… — có thể chạy chữ stdin qua shell: `perl -e 'system(<STDIN>)'`) mà thân có dấu mở rộng lần
+    hai (`_here_body_unsafe`: `\\$`, backtick, `$` trong `$(…)`/`${…}`) cũng chặn (review adr-guard)."""
+    bodies = [b for b in _split_view(cmd)[1] if re.search(r"[$`]", b)]
+    if not bodies:
+        return ""
+    raw = _raw_tokens(cmd)
+    argvs = [] if raw is None else [[_dequote(t) for t in c] for c in split_commands(raw)]
+    shell = raw is None or any(_stdin_shell(c) or _argless_shell_c(c) or _xargs_replace_shell(c) for c in argvs)
+    interp = any(INTERP_RE.fullmatch(posixpath.basename(h)) for c in argvs for h in normalize(c)[:1])
+    return HERE_SHELL_WHY if shell or (interp and any(map(_here_body_unsafe, bodies))) else ""
+
+
 # ADR-0063 T-3637 — shell lồng theo argv đã chuẩn hoá (AUD-SEC-309…311): chữ và argv là hai cách đọc cùng lệnh; guard
 # chỉ cho chạy khi hai cách đọc khớp nhau. Lớp này chạy SAU luật cũ nên lệnh luật cũ đã chặn giữ mã của luật cũ.
 STRICT_DYN_HERE_RE = re.compile(r"\$[({\w]|`")  # mở rộng trong thân heredoc/here-string không nháy
@@ -1382,13 +1756,15 @@ def _argv_shell_why(cmd: str, tokens: List[str]) -> str:
     for argv in split_commands(tokens):
         if _stdin_shell(argv) and "<<<" in argv[:-1] and STRICT_DYN_HERE_RE.search(argv[argv.index("<<<") + 1]):
             return "shell đọc here-string có mở rộng (AUD-SEC-310)"
-    return _raw_heads_why(cmd) or _procsub_shell_why(tokens) or _heredoc_shell_why(cmd) or _pipe_shell_why(tokens)
+    old = _raw_heads_why(cmd) or _procsub_shell_why(tokens) or _heredoc_shell_why(cmd) or _pipe_shell_why(tokens)
+    return old or _allowlist_why(cmd)
 
 
-def _raw_tokens(cmd: str) -> Optional[List[str]]:
+def _raw_tokens(cmd: str, subst: bool = False) -> Optional[List[str]]:
     """Token GIỮ nháy/thoát (shlex không POSIX) của chữ đã nối dòng, gấp heredoc, giải `$'…'` thành chữ nháy, bỏ comment
-    — cùng tiền xử lý `tokenize` trừ viết lại `$IFS`/`$(pwd)`; nháy không đóng → None."""
-    s = strip_comments(expand_ansi_c(_fold_heredocs(join_continuations(cmd), False, True)), True)
+    — cùng tiền xử lý `tokenize` trừ viết lại `$IFS`/`$(pwd)`; nháy không đóng → None. `subst`: gấp heredoc như
+    `_ShellScan` (thân có nháy trong `"$(…)"` thành dòng trống — chữ, ngoặc lẻ trong đó không làm hỏng tách từ)."""
+    s = strip_comments(expand_ansi_c(_fold_heredocs(join_continuations(cmd), subst, True)), True)
     out: List[str] = []
     word: List[str] = []
     i = 0
@@ -6177,8 +6553,10 @@ def _patch_targets(args: List[str]) -> List[str]:
     return pos[:1] + _flag_values(args, ("-o", "--output"))
 
 
-# `w f`, `1w f`, `$w f`, `/a/!w f`, `s/a/b/w f`, `s|a|b|w f`: lệnh `w` của sed (sau địa chỉ/cờ của `s`) ghi file
-SED_WRITE_RE = re.compile(r"(?:^|[0-9]|[^\w\s][gpIiMme0-9]*)[ \t]*w[ \t]+([^;\n}]+)")
+# `w f`, `1w f`, `$w f`, `/a/!w f`, `s/a/b/w f`, `s|a|b|w f`: lệnh `w` của sed (sau địa chỉ/cờ của `s`) ghi file; `W f`
+# (GNU: ghi dòng đầu của pattern space) cũng ghi file (AUD-SEC-398); GNU nhận tên tệp dính liền (`Wf`) và lệnh đầu dòng
+# sau xuống dòng (`1{` ↵ `W f` ↵ `}`) — review adr-guard. Bắt rộng (`s/a/w/` cho đích giả `/`): đích chỉ xét vùng rào.
+SED_WRITE_RE = re.compile(r"(?:^|[0-9]|[^\w\s][gpIiMme0-9]*)[ \t]*[wW][ \t]*([^;\n}]+)", re.M)
 AWK_WRITE_RE = re.compile(r">>?[ \t]*\"([^\"\n]+)\"")  # `print > "f"` trong chương trình awk
 
 
@@ -6190,6 +6568,87 @@ def _sed_scripts(args: List[str]) -> List[str]:
 
 def _sed_writes(args: List[str]) -> List[str]:
     return [m.group(1).strip() for sc in _sed_scripts(args) for m in SED_WRITE_RE.finditer(sc)]
+
+
+# Đọc chương trình sed như GNU sed 4.9 (review adr-guard lượt 2 🟠): `SED_WRITE_RE` bắt rộng cho đích trong vùng rào; miễn
+# trừ AUD-SEC-384 cần biết chương trình CÓ lệnh ghi thật hay không — chữ `w` trong mẫu/thay thế (`s/Week/…/`) không tính.
+SED_ADDR_CHARS = frozenset(" \t\n;0123456789$,~+!")  # số dòng, `$`, khoảng, bước, phủ định, phân cách lệnh
+SED_PLAIN_CMDS = frozenset("{}=dDgGhHlLnNpPxzFqQ")  # lệnh không đối số (số sau q/Q/l/L đọc như địa chỉ — vô hại)
+SED_LABEL_CMDS = frozenset("btT:v")  # đối số tới `;`/xuống dòng (GNU 4.9: `:a;w f` ghi f — đã chạy)
+SED_FLAG_CHARS = frozenset("gpiImM0123456789 \t")  # cờ của `s` không ghi/chạy gì
+
+
+def _sed_has_write(script: str) -> bool:
+    """Chương trình có lệnh ghi tệp (`w`/`W`, cờ `w` của `s`) hay chạy shell (`e`, cờ `e`); đọc không chắc → True."""
+    i = 0
+    while i < len(script):
+        i = _sed_skip_address(script, i)
+        if i < 0 or (i < len(script) and script[i] in "wWe"):
+            return True
+        i = _sed_command_end(script, i) if i < len(script) else i
+        if i < 0:
+            return True
+    return False
+
+
+def _sed_skip_address(s: str, i: int) -> int:
+    """Vị trí ký tự lệnh sau địa chỉ (`1`, `$`, `/re/I`, `\\%re%`, `a,+2`, `0~3`, `!`) và dấu phân cách; -1 = mẫu không đóng."""
+    while i < len(s) and i >= 0:
+        if s[i] in SED_ADDR_CHARS:
+            i += 1
+        elif s[i] in "/\\":
+            i = _sed_part_end(s, i + 1 + (s[i] == "\\"), s[i + (s[i] == "\\") : i + 1 + (s[i] == "\\")], True)
+            while 0 <= i < len(s) and s[i] in "IM":
+                i += 1
+        else:
+            break
+    return i
+
+
+def _sed_command_end(s: str, i: int) -> int:
+    """Vị trí sau lệnh ở `s[i]` (không phải `w`/`W`/`e`); -1 = lệnh lạ hay đọc không chắc."""
+    c = s[i]
+    if c in SED_PLAIN_CMDS:
+        return i + 1
+    if c in "aicrR#":
+        return _sed_line_end(s, i, c in "aic")
+    if c in SED_LABEL_CMDS:
+        return min((k for k in (s.find(";", i), s.find("\n", i)) if k >= 0), default=len(s))
+    if c not in "sy":
+        return -1
+    d = s[i + 1 : i + 2]
+    if not d or d.isalnum() or d.isspace() or d == "\\":
+        return -1
+    j = _sed_part_end(s, _sed_part_end(s, i + 2, d, c == "s"), d, False)
+    while c == "s" and 0 <= j < len(s) and s[j] in SED_FLAG_CHARS:
+        j += 1
+    return -1 if c == "s" and 0 <= j < len(s) and s[j] not in ";\n}" else j
+
+
+def _sed_part_end(s: str, i: int, d: str, regex: bool) -> int:
+    """Vị trí sau dấu phân cách `d` đóng phần bắt đầu ở `s[i]`: `\\x` là một ký tự; trong mẫu (`regex`), biểu thức ngoặc
+    `[…]` (`]` đầu là chữ; `\\` trong ngoặc là chữ) chứa được `d` (`s/[/]/X/` — GNU 4.9); xuống dòng trơn/không đóng → -1."""
+    while 0 <= i < len(s):
+        c = s[i]
+        if c == d:
+            return i + 1
+        if c == "\n":
+            return -1
+        if regex and c == "[":
+            k = i + 1 + (s[i + 1 : i + 2] == "^")
+            k = s.find("]", k + (s[k : k + 1] == "]"))
+            i = k + 1 if k >= 0 else -1
+            continue
+        i += 2 if c == "\\" else 1
+    return -1
+
+
+def _sed_line_end(s: str, i: int, text: bool) -> int:
+    """Vị trí sau dòng của lệnh có đối số tới hết dòng (`r f`, `# c`); văn bản `a`/`i`/`c` nối dòng kết bằng `\\`."""
+    j = s.find("\n", i)
+    while text and j > 0 and s[j - 1] == "\\":
+        j = s.find("\n", j + 1)
+    return len(s) if j < 0 else j + 1
 
 
 def _awk_targets(args: List[str]) -> List[str]:
@@ -7363,6 +7822,7 @@ class ScanBudget:
         self.loose: Set[str] = set()
         self.extracted: Set[str] = set()
         self.push_no_verify = False  # có lệnh (cả lồng) `git push --no-verify` — cờ cho adapter (AUD-SEC-352)
+        self.nested_deny: Tuple[str, str] = ("", "")  # (lý do, mã) của lệnh lồng bị chặn gần nhất — mã đi lên lệnh gốc
         # Đọc bảng alias: ngân sách TỔNG của quyết định gốc — lệnh con của `find -exec` được quét bằng quyết định mới
         # (nested) vẫn tiêu chung, không được thêm ALIAS_SECONDS mỗi lần.
         if not nested or ScanBudget.current_alias is None:
@@ -7437,7 +7897,7 @@ def _stdin_shell(argv: List[str]) -> bool:
         return _stdin_source(n)
     if not n or n[0] not in SHELLS:
         return False
-    rest = [a for i, a in enumerate(n) if not _is_redirect(a) and not (i > 0 and _is_redirect(n[i - 1]))]
+    rest = [a for a in _no_redirects(n) if a != "$"]  # cả số fd trước chuyển hướng (`bash 0<<E`, `2>/dev/null`)
     has_c, script = _shell_script_arg(rest)
     stdin = script is None or script in STDIN_SCRIPTS
     return not has_c and stdin and "-n" not in rest  # `bash -n`: chỉ kiểm cú pháp
@@ -8191,12 +8651,14 @@ def _xargs_fed_dest(down: List[str], inner: List[str]) -> bool:
     return any(mark in d for d in target or _positionals(inner[1:], COPY_DEST_OPTS)[-1:])
 
 
-def _xargs_evidence(tokens: List[str]) -> List[str]:
+def _xargs_evidence(tokens: List[str], cmd: str) -> List[str]:
     """`<nguồn nhắc .autopilot> | xargs <lệnh ghi/xoá>`: đích đến từ stdin nên guard không thấy file — nguồn đã nói rõ
     là bằng chứng của autopilot thì chặn như ghi tay (ADR-0026); nguồn có thể chỉ sổ giai đoạn (`_names_ledger`) mà chữ
-    từ ống là đích ghi (`_xargs_fed_dest`) → cũng chặn (AUD-SEC-340)."""
+    từ ống là đích ghi (`_xargs_fed_dest`) → cũng chặn (AUD-SEC-340). Ống xét cả trên token còn nháy của `cmd`: dấu có
+    nháy/thoát (`find docs \\( -name STAGE.json \\)`, `';'`) là đối số, không tách lệnh — nguồn không mất (AUD-SEC-393)."""
     asks: List[str] = []
-    for pipe in pipelines(tokens):
+    quoted = [[[_dequote(w) for w in c] for c in p] for p in pipelines(_raw_tokens(cmd) or [])]
+    for pipe in [*pipelines(tokens), *quoted]:
         for up, down in zip(pipe, pipe[1:]):
             inner = normalize(down)
             if (
@@ -8231,12 +8693,23 @@ XARGS_FILE_EDITORS = ("sed",)
 
 
 def _xargs_file_editor(down: List[str], inner: List[str]) -> bool:
-    """Lệnh sau xargs chỉ sửa nội dung từng file nhận từ ống (thư mục/tổ tiên của sổ in ra thì lỗi, không ghi)."""
+    """Lệnh sau xargs chỉ sửa nội dung từng file nhận từ ống (thư mục/tổ tiên của sổ in ra thì lỗi, không ghi). Không
+    miễn (AUD-SEC-396): xargs lấy đối số từ tệp (`-a`/`--arg-file`, cả cờ gộp), sed đọc chương trình từ tệp (`-f`/`--file`,
+    cả cờ gộp — guard không đọc), chương trình có lệnh ghi `w`/`W` hay chạy shell `e` thật (`_sed_has_write` — chữ `w`
+    trong mẫu/thay thế không tính, review adr-guard lượt 2)."""
+    opts = down[1 : len(down) - len(inner)]
     return (
         posixpath.basename(inner[0]) in XARGS_FILE_EDITORS
-        and _xargs_replace(down[1 : len(down) - len(inner)]) is None
-        and not any(a.startswith("--f") for a in inner[1:])
+        and _xargs_replace(opts) is None
+        and not any(a.startswith("--f") or _short_cluster_has(a, "f") for a in inner[1:])
+        and not any(a.startswith("--a") or _short_cluster_has(a, "a") for a in opts)
+        and not any(map(_sed_has_write, _sed_scripts(inner[1:])))
     )
+
+
+def _short_cluster_has(a: str, letter: str) -> bool:
+    """`a` là cờ ngắn (gộp) có chữ `letter` (`-f`, `-nf`, `-0a`)."""
+    return a.startswith("-") and not a.startswith("--") and letter in a[1:]
 
 
 def _find_skips_ledger(up: List[str]) -> bool:
@@ -8828,6 +9301,7 @@ def _scan_scripts(
         sub = bash_decision(script, root, cwd, depth + deeper, budget, 0 if deeper else rewrites + 1)
         budget.push_no_verify = budget.push_no_verify or bool(sub.get("push_no_verify"))
         if sub["decision"] == "deny":
+            budget.nested_deny = (str(sub["reason"]), str(sub.get("code") or ""))
             return str(sub["reason"])
         if sub["decision"] in ("ask", "allow") or sub["commit"]:
             asks.append(f"lệnh lồng trong shell: {str(sub['reason']) or 'git commit (cổng commit không chạy được)'}")
@@ -8848,7 +9322,7 @@ def _scan_nested(
     đụng file máy → chặn/hỏi của nó thành hỏi (ra mạng, thêm gói vẫn là việc thật)."""
     if max([0, *(_for_words(c) for c in split_commands(tokens))]) > VAR_FOR_PICKS:
         return f"Lệnh quá phức tạp để guard quét hết (vòng `for` hơn {VAR_FOR_PICKS} giá trị khác nhau): chia nhỏ lệnh."
-    asks += _opaque_shells(tokens) + _xargs_evidence(tokens)
+    asks += _opaque_shells(tokens) + _xargs_evidence(tokens, cmd)
     push_deny, push_asks = _unresolved_push(cmd, tokens, root, cwd or root)
     if push_deny:
         return push_deny
@@ -10640,6 +11114,15 @@ def _clean_strict(cmd: str, budget: ScanBudget) -> Tuple[str, bool]:
     return cmd, strict
 
 
+def _nested_deny_result(res: Dict[str, object], reason: str, budget: ScanBudget) -> Dict[str, object]:
+    """Lệnh lồng bị chặn → lệnh gốc chặn cùng lý do; lệnh lồng ngoài tập con đọc chắc (mã BUDGET) thì lệnh gốc cũng
+    mang mã BUDGET (autonomy-bench phân loại theo mã)."""
+    res.update(decision="deny", reason=reason)
+    if budget.nested_deny == (reason, BUDGET):
+        res["code"] = BUDGET
+    return res
+
+
 def _bash_decision(
     cmd: str, root: str, cwd: Optional[str], depth: int, budget: Optional[ScanBudget], rewrites: int
 ) -> Dict[str, object]:
@@ -10681,8 +11164,7 @@ def _bash_decision(
     ) or _scan_nested(cmd, tokens, root, cwd, depth, asks, budget, rewrites)
     nested_deny = nested_deny or _scan_glob_rewrites(cmd, tokens, root, cwd, depth, asks, budget, rewrites)
     if nested_deny:
-        res.update(decision="deny", reason=nested_deny)
-        return res
+        return _nested_deny_result(res, nested_deny, budget)
     commands = _commands_with_cwd(tokens, cwd)
     deny_reason = next((r for argv, here in commands if (r := _scan_command(argv, root, res, asks, here))), "")
     res.pop("exported_env", None)

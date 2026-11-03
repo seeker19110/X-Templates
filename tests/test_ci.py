@@ -249,10 +249,28 @@ class GateFanOutTest(unittest.TestCase):
         """`test_list` dùng ĐÚNG cách liệt kê lớp của `test` (CI shard và cổng local không lệch nhau)."""
         yaml = (ROOT / "xt.yaml").read_text(encoding="utf-8")
         test = re.search(r"^test: (.*)$", yaml, re.M).group(1)
-        listing = re.search(r"^test_list: \"\$\{XT_PY:-python3\}\" (-c '[^']+')$", yaml, re.M).group(1)
-        self.assertIn(f"python3 {listing} |", test)
+        line = re.search(r"^test_list: (.*)$", yaml, re.M).group(1)
+        listings = re.findall(r"\b(python3(?:\.11)?) -c ('[^']+')", line)
+        self.assertEqual([py for py, _ in listings], ["python3", "python3.11"])  # mỗi nhánh `if` một trình thông dịch
+        for _, listing in listings:
+            self.assertIn(f"python3 -c {listing} |", test)
         self.assertRegex(yaml, r"(?m)^test_combine: .*coverage report --fail-under=100$")
         self.assertIn("--fail-under=100", test)
+
+    def test_xt_yaml_commands_pass_repo_guard(self):
+        """Review adr-guard 🔴: mọi lệnh của `xt.yaml` qua guard của repo (LOOP-STOP-027 — `dev-task.sh` hỏi guard trước khi
+        chạy; từ lệnh động `"${XT_PY:-python3}"` từng làm shard CI và `gate` exit 126). `XT_PY` chọn trình thông dịch bằng
+        `if` trên tên nguyên văn; giá trị lạ → exit 2, không chạy gì."""
+        keys = xt._xt_keys(ROOT)
+        self.assertIn("test_list", keys)
+        whys = xt.guard_blocks(list(keys.values()), ROOT)
+        self.assertEqual({k: w for k, w in zip(keys, whys) if w}, {})
+        for key in ("test_list", "test_unit"):
+            with self.subTest(key=key):
+                env = {**{k: v for k, v in os.environ.items() if k != "XT_COV_DIR"}, "XT_PY": "python9"}
+                r = subprocess.run(["bash", "-c", keys[key], "_", "x"], env=env, capture_output=True, text=True)
+                self.assertEqual(r.returncode, 2, r.stderr)
+                self.assertIn("XT_PY", r.stderr)
 
 
 class SupplyChainArtifactsTest(unittest.TestCase):
