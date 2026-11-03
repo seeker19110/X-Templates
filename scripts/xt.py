@@ -9165,7 +9165,7 @@ LOOP_AGENTS: Dict[str, List[str]] = {
     "claude": ["claude", "-p", "--permission-mode", "auto"],
     "codex": ["codex", "exec"],
     "gemini": ["gemini", "-p"],
-    "cursor": ["agent", "-p", "--force"],
+    "cursor": ["agent", "-p"],  # không `--force` (cờ tự duyệt, LOOP-STOP-028 — AUD-DOC-232)
     "copilot": ["copilot", "-p"],
     "grok": ["grok", "-p"],
     "opencode": ["opencode", "run"],

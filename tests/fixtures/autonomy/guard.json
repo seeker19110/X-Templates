@@ -17444,6 +17444,48 @@
    "allowed": true
   },
   "note": "review lượt 2 nhánh orange-guard"
+ },
+ {
+  "id": "og-377-agent-force",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-377"
+  ],
+  "input": {
+   "command": "agent -p --force hi"
+  },
+  "expect": {
+   "allowed": false
+  },
+  "note": "review #418: binary `agent` của Cursor CLI"
+ },
+ {
+  "id": "og-377-agent-fp",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-377"
+  ],
+  "input": {
+   "command": "/usr/local/bin/agent -fp x"
+  },
+  "expect": {
+   "allowed": false
+  },
+  "note": "review #418: binary `agent` của Cursor CLI"
+ },
+ {
+  "id": "og-377-control-agent-p",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-377"
+  ],
+  "input": {
+   "command": "agent -p hi"
+  },
+  "expect": {
+   "allowed": true
+  },
+  "note": "review #418: binary `agent` của Cursor CLI"
  }
  ]
 }

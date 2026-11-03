@@ -5486,6 +5486,9 @@ AGENT_SELF_APPROVE = {
     "amp": {"--dangerously-allow-all"},
 }
 AGENT_SELF_APPROVE_ENV = {"copilot": "COPILOT_ALLOW_ALL", "aider": "AIDER_YES_ALWAYS"}
+# Tên binary khác của cùng CLI: Cursor CLI cài `agent` cùng `cursor-agent` (AUD-SEC-377, review #418) — tên chung nên
+# chặn cả công cụ khác tên `agent` dùng cờ trùng (hướng chặt, LOOP-STOP-028).
+AGENT_CLI_ALIASES = {"agent": "cursor-agent"}
 
 
 def _pkg_base(t: str) -> str:
@@ -5513,6 +5516,7 @@ def _agent_cli(n: List[str]) -> Tuple[str, List[str]]:
     if t >= 0:
         name, i = n[t], t + 1
     name = AGENT_CLI_PKGS.get(_pkg_base(name), _pkg_base(name))
+    name = AGENT_CLI_ALIASES.get(name, name)
     args = n[i:]
     if t >= 0 and args[:1] == ["--"]:  # `npx <gói> -- <args>`: `--` của trình chạy, không phải của CLI
         args = args[1:]

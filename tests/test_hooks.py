@@ -4594,6 +4594,20 @@ class GuardStored1018Test(unittest.TestCase):
         ):
             self.assertIsNone(self.bash(cmd), cmd)
 
+    def test_cursor_agent_binary_name(self):
+        """AUD-SEC-377 (review #418): Cursor CLI cài binary `agent` (cùng `cursor-agent`); guard chỉ biết `cursor-agent`
+        nên `agent -p --force` (tự duyệt mọi lệnh, LOOP-STOP-028) lọt — `loop run --agent cursor` từng tự bật `--force`."""
+        for cmd in (
+            "agent -p --force hi",
+            "agent -p hi --yolo",
+            "agent --print -f x",
+            "/usr/local/bin/agent -fp x",
+            "agent -p x --approve-mcps",
+        ):
+            self.assertEqual(self.bash(cmd), "deny", cmd)
+        for cmd in ("agent -p hi", "agent status", "echo agent --force"):
+            self.assertIsNone(self.bash(cmd), cmd)
+
     def test_review_117_bypasses_closed(self):
         for cmd in (
             "npx opencode-ai@latest run --auto x",
