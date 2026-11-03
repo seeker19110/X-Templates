@@ -9989,9 +9989,11 @@ _PA_YAML_PLAIN_RE = (
     re.compile(r"(?:[^\s:,\[\]{}]++|:(?=[^\s,\[\]{}])|\s++(?=[^\s#,\[\]{}]))*+"),
 )  # (ngữ cảnh khối, trong ngoặc)
 _PA_YAML_AFTER_RE = re.compile(r"[ \t]*+(?:(?P<colon>:)|(?P<comma>,)|(?P<close>[\]}]))?")
-# AUD-SEC-394: dòng directive `%…` và dấu tài liệu `---`/`...` ở cột 0 (PyYAML: directive chỉ ở cột 0) kết thúc plain
-# scalar, khối `|`/`>` và ngoặc đang mở; nhóm `rest`: dòng không còn nút (`%…`, `...`) — `---` đọc tiếp như tiền tố nút.
-_PA_YAML_DOC_RE = re.compile(r"%|\.\.\.(?=[ \t]|$)(?P<rest>)|---(?=[ \t]|$)")
+# AUD-SEC-394: dấu tài liệu `---`/`...` ở cột 0 kết thúc plain scalar, khối `|`/`>` và ngoặc đang mở; nhóm `rest`:
+# dòng không còn nút (`...`) — `---` đọc tiếp như tiền tố nút. `%` ở cột 0 KHÔNG kết thúc gì (review adr-pa lượt 2): trên
+# dòng tiếp của plain scalar nó là chữ (PyYAML: `[x⏎%y` → `x %y`); directive thật bắt buộc có `---` sau nên dòng `%…`
+# đọc như nút thường (plain, không mở chuỗi) rồi `---` đặt lại trạng thái.
+_PA_YAML_DOC_RE = re.compile(r"\.\.\.(?=[ \t]|$)(?P<rest>)|---(?=[ \t]|$)")
 _PA_YAML_BODY = {'"': re.compile(r'(?:[^"\\]++|\\.)*+\\?(")?'), "'": re.compile(r"(?:[^']++|'')*+(')?")}
 
 
@@ -10052,18 +10054,18 @@ def _pa_yaml_after(
 
 
 def _pa_yaml_doc_line(st: _PaScanState, line: str) -> bool:
-    """Dòng (ngoài chuỗi nháy còn mở) bắt đầu bằng directive `%` hay dấu tài liệu `---`/`...` ở cột 0 → xoá plain
-    scalar, khối, ngoặc đang mở; True khi dòng không còn gì để đọc (`%…`, `...`)."""
+    """Dòng (ngoài chuỗi nháy còn mở) bắt đầu bằng dấu tài liệu `---`/`...` ở cột 0 → xoá plain scalar, khối, ngoặc
+    đang mở; True khi dòng không còn gì để đọc (`...`)."""
     m = None if st.quote else _PA_YAML_DOC_RE.match(line)
     if m is None:
         return False
     st.block = st.plain = None
     st.flow = 0
-    return line[0] == "%" or m["rest"] is not None
+    return m["rest"] is not None
 
 
 def _pa_yaml_spans(st: _PaScanState, line: str) -> List[Tuple[int, int]]:
-    """Khoảng thân chuỗi nháy kép YAML trên một dòng (cập nhật `st`): dòng directive/dấu tài liệu ở cột 0 kết thúc
+    """Khoảng thân chuỗi nháy kép YAML trên một dòng (cập nhật `st`): dòng dấu tài liệu `---`/`...` ở cột 0 kết thúc
     scalar/khối trước nó (`_pa_yaml_doc_line`); dòng trong khối `|`/`>` không có chuỗi; dòng tiếp của chuỗi còn mở
     bắt đầu trong chuỗi; dòng tiếp của plain scalar nhiều dòng (dòng trống giữa giữ scalar mở) đọc tiếp scalar; còn
     lại đọc nút → sau nút → … tới hết việc."""
