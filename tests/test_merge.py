@@ -2895,8 +2895,12 @@ class PrNextCliTest(unittest.TestCase):
         giả PR và mọi commit không phải merge là bot; commit người/agent đẩy thêm → khai model của họ."""
         bot = {"login": "dependabot[bot]"}
         human = {"login": "someone"}
-        one = {"number": 7, "head": {"sha": self.head}, "user": bot}
-        commits = [{"author": bot, "parents": [{}]}, {"author": human, "parents": [{}, {}]}]  # merge từ main: bỏ qua
+        gh = {"login": "web-flow"}  # GitHub tạo/ký: commit của Dependabot, nút "Update branch" (REST thật #370)
+        signed = {"verification": {"verified": True, "reason": "valid"}}
+        one = {"number": 7, "head": {"sha": self.head}, "user": bot, "commits": 2}
+        mine = {"author": bot, "committer": gh, "commit": signed, "parents": [{}]}
+        merge = {"author": human, "committer": gh, "commit": signed, "parents": [{}, {}]}  # Update branch: được miễn
+        commits = [mine, merge]
 
         def run(pr: object = None, items: object = None, *extra: str, target: str = "7") -> tuple:
             with (
@@ -2915,8 +2919,29 @@ class PrNextCliTest(unittest.TestCase):
         self.assertIn("tác giả PR #7 là someone", err)
         self.assertNotIn("7", xt.read_reviews(self.base))
         self.assertIn("là ?", run({**one, "user": None})[2])
-        self.assertIn("có commit của someone", run(None, [{"author": human, "parents": [{}]}])[2])  # người đẩy thêm
-        self.assertIn("có commit của ?", run(None, [])[2])
+        self.assertIn("có commit của someone", run(None, [mine, {**mine, "author": human}])[2])  # người đẩy thêm
+        self.assertIn("không có commit nào của dependabot[bot]", run({**one, "commits": 0}, [])[2])
+        # AUD-SEC-355: merge giải xung đột do agent đẩy (committer = agent, ký hợp lệ — `4d1d34c` ở #401) không được miễn;
+        # PR bot chỉ có merge (dù GitHub tạo) cũng không
+        agent = {"login": "claude"}
+        pushed = {**merge, "author": agent, "committer": agent}
+        self.assertIn("có commit của claude", run(None, [mine, pushed])[2])
+        self.assertIn("không có commit nào của dependabot[bot]", run({**one, "commits": 1}, [merge])[2])
+        # AUD-SEC-356: tác giả git khai/giữ khi rebase là bot nhưng người/agent đẩy, hoặc GitHub không ký → không miễn
+        for bad in (
+            {**mine, "committer": agent},
+            {**mine, "commit": {"verification": {"verified": False, "reason": "unsigned"}}},
+            {**mine, "commit": {"verification": None}},
+            {**mine, "commit": None},
+            {**mine, "committer": None},
+        ):
+            with self.subTest(bad=bad):
+                self.assertIn("có commit của dependabot[bot]", run(None, [bad, merge])[2])
+        # AUD-HAR-212: REST `pulls/{n}/commits` trả tối đa 250 — số đọc được khác `commits` của PR → từ chối
+        self.assertIn("đọc được 2/251 commit", run({**one, "commits": 251})[2])
+        self.assertIn("đọc được 2/? commit", run({**one, "commits": None})[2])
+        self.assertIn("đọc được 2/? commit", run({**one, "commits": True})[2])
+        self.assertNotIn("7", xt.read_reviews(self.base))
         self.assertIn("không phải #7", run({**one, "number": 70})[2])  # GitHub trả PR khác số sổ ghi
         self.assertIn("không phải #7", run({**one, "head": {"sha": "f" * 40}})[2])
         self.assertIn("không phải #7", run({**one, "head": None})[2])

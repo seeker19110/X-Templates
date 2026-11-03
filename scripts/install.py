@@ -26,8 +26,10 @@ Dự án đã cài bản ≤ 2.x (`.xstored/`, `xs.py`, `xs.yaml`, `XS_*`): ch�
   giữ manifest hash, đổi `xs.yaml` → `xt.yaml`, xoá bản sao `.xstored/`; file người dùng còn nhắc tên cũ được liệt kê để sửa tay.
 
 Dùng:
-  python3 scripts/install.py <thư-mục-dự-án> [--force-harness] [--no-harness] [--with-github] [--preset safe|autonomous] [--stage-init] [--label v1.0.0] [--plan]
-  --plan: in JSON kế hoạch (quyền thêm/bớt, hook thêm/đổi matcher, file đè/giữ), không ghi gì (REC-09)
+  python3 scripts/install.py <thư-mục-dự-án> [--force-harness] [--no-harness] [--no-git-hooks] [--harness codex,…] [--with-github] [--preset safe|autonomous] [--stage-init] [--label v1.0.0] [--plan]
+  --plan: in JSON kế hoạch (quyền thêm/bớt, hook thêm/đổi matcher, file đè/giữ, git hook, adapter), không ghi gì (REC-09)
+  --no-git-hooks: không cài git hook sàn chung (`pre-commit`/`commit-msg`/`pre-push`); git hook + adapter khung đã ghi
+                  được liệt kê trong manifest.json (`git_hooks`, `adapters`) — AUD-HAR-204
   --preset: chính sách merge/review cho xt.yaml mới; cài lại giữ lựa chọn dự án (không cấu hình sandbox).
   --stage-init: dự án mới — tạo sổ giai đoạn sản phẩm docs/autopilot/STAGE.json (giai đoạn 1, ADR-0058) khi chưa có; không
                 cờ thì không tạo. Sau cài luôn kiểm sổ bằng `xt.py stage status` (sổ có sẵn giữ nguyên).
@@ -786,6 +788,30 @@ def write_manifests(
     labelled = {rel: hash_label(digest) for rel, digest in files.items()}
     write_atomic(target / MANIFEST, json.dumps(labelled, indent=2, sort_keys=True) + "\n")
     doc = {"schema": 1, "files": labelled, "rules": rules, "policy": manifest_policy(target, preset)}
+    doc.update({k: v for k, v in load_manifest_doc(target).items() if k in MANIFEST_PATH_LISTS})
+    write_atomic(target / MANIFEST_V2, json.dumps(doc, indent=2, sort_keys=True) + "\n")
+
+
+MANIFEST_PATH_LISTS = (
+    "git_hooks",
+    "adapters",
+)  # file khung ghi ngoài `files` (AUD-HAR-204) — giữ qua `write_manifests`
+
+
+def load_manifest_doc(target: Path) -> dict[str, Any]:
+    """manifest.json dạng object (thiếu/hỏng → {})."""
+    try:
+        doc = json.loads((target / MANIFEST_V2).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return doc if isinstance(doc, dict) else {}
+
+
+def record_manifest_paths(target: Path, key: str, paths: list[str]) -> None:
+    """Ghi danh sách đường dẫn khung đã ghi (`git_hooks`/`adapters`) vào manifest.json, giữ mọi khoá khác."""
+    doc = load_manifest_doc(target)
+    doc[key] = sorted(set(paths))
+    (target / MANIFEST_V2).parent.mkdir(parents=True, exist_ok=True)
     write_atomic(target / MANIFEST_V2, json.dumps(doc, indent=2, sort_keys=True) + "\n")
 
 
@@ -876,28 +902,65 @@ def git_hooks_dir(target: Path) -> Path | None:
     return Path(out) if Path(out).is_absolute() else target / out
 
 
+def git_hook_action(dst: Path) -> str:
+    """Quyết định (không ghi) cho một git hook: 'copied' (chưa có) | 'updated' (hook khung, khác bản mới) | 'kept' (hook
+    khung, giống bản mới) | 'kept-own' (hook không mang dấu khung — của dự án, husky, pre-commit… — hay symlink)."""
+    if dst.is_symlink():
+        return "kept-own"
+    if not dst.exists():
+        return "copied"
+    if GIT_HOOK_MARK not in dst.read_text(encoding="utf-8", errors="replace"):
+        return "kept-own"
+    return (
+        "kept"
+        if dst.read_bytes() == (SRC / "framework" / "templates" / "git-hooks" / dst.name).read_bytes()
+        else "updated"
+    )
+
+
+def shown_path(target: Path, path: Path) -> str:
+    """Đường dẫn để báo/ghi manifest: tương đối `target` khi nằm trong dự án, ngược lại tuyệt đối (worktree, hooksPath
+    ngoài dự án)."""
+    full = path.resolve()
+    return full.relative_to(target).as_posix() if full.is_relative_to(target) else full.as_posix()
+
+
+def git_hooks_plan(target: Path, no_harness: bool, no_git_hooks: bool) -> dict[str, Any]:
+    """Kế hoạch git hook (AUD-HAR-204): thư mục hook thật (`core.hooksPath` có thể là thư mục được track như `.husky/` —
+    `in_tree`: commit sẽ mang hook) và hành động từng hook; bỏ qua kèm lý do."""
+    reason = "--no-harness" if no_harness else "--no-git-hooks" if no_git_hooks else None
+    hooks = None if reason else git_hooks_dir(target)
+    if hooks is None:
+        return {"action": "skipped", "reason": reason or "không phải repo git"}
+    where = shown_path(target, hooks)
+    rows = [{"name": n, "path": shown_path(target, hooks / n), "action": git_hook_action(hooks / n)} for n in GIT_HOOKS]
+    in_tree = not Path(where).is_absolute() and ".git" not in Path(where).parts
+    return {"action": "install", "dir": where, "in_tree": in_tree, "hooks": rows}
+
+
 def install_git_hooks(target: Path) -> None:
     """Sàn chung không phụ thuộc hook của công cụ (ADR-0064 lát C): `pre-commit` (cổng commit), `commit-msg` (subject,
     ghi công AI), `pre-push` (nhánh chính, force). Hook đã có mà không mang dấu khung (của dự án, husky, pre-commit…)
-    giữ nguyên và báo để gộp tay; hook của khung thì cập nhật."""
+    giữ nguyên và báo để gộp tay; hook của khung thì cập nhật. Hook khung có mặt sau cài ghi vào manifest.json
+    (`git_hooks`, AUD-HAR-204)."""
     hooks = git_hooks_dir(target)
     if hooks is None:
         log("  git hook: không phải repo git — bỏ qua (chạy lại install.py sau `git init`)")
         return
     hooks.mkdir(parents=True, exist_ok=True)
+    ours: list[str] = []
     for name in GIT_HOOKS:
         dst = hooks / name
-        own = dst.is_symlink() or (
-            dst.exists() and GIT_HOOK_MARK not in dst.read_text(encoding="utf-8", errors="replace")
-        )
-        if own:
+        if git_hook_action(dst) == "kept-own":
             log(
                 f"  git hook {name}: dự án đã có hook riêng — giữ nguyên; gộp tay `.xtemplates/framework/templates/git-hooks/{name}`"
             )
             continue
         shutil.copy2(SRC / "framework" / "templates" / "git-hooks" / name, dst)
         dst.chmod(0o755)
+        ours.append(shown_path(target, dst))
         log(f"  git hook {name}: cài ({dst})")
+    record_manifest_paths(target, "git_hooks", ours)
 
 
 # Adapter hook cho công cụ agent khác (ADR-0064 lát B): host → (mẫu trong framework/templates/harness/, đích ở dự án).
@@ -912,9 +975,9 @@ ADAPTERS = {
 GEMINI_HOOK_NAME = "xt-guard"
 
 
-def merge_gemini_settings(dst: Path, src: Path) -> str:
-    """Gộp hook `BeforeTool` của khung (tên `xt-guard`) vào `.gemini/settings.json` có sẵn — giữ mọi khoá khác, thay bản
-    cũ của khung; file không đọc được dạng object JSON → giữ nguyên, báo. Trả 'merged' | 'kept'."""
+def gemini_merged(dst: Path, src: Path) -> dict[str, Any] | None:
+    """Nội dung `.gemini/settings.json` sau khi gộp hook `BeforeTool` của khung (tên `xt-guard`) — giữ mọi khoá khác,
+    thay bản cũ của khung; file không đọc được dạng object JSON → None (giữ nguyên). Không ghi gì."""
     ours = json.loads(src.read_text(encoding="utf-8"))["hooks"]["BeforeTool"]
     try:
         data = json.loads(dst.read_text(encoding="utf-8"))
@@ -922,30 +985,67 @@ def merge_gemini_settings(dst: Path, src: Path) -> str:
         data = None
     hooks = data.get("hooks") if isinstance(data, dict) else None
     if not isinstance(data, dict) or not isinstance(hooks, (dict, type(None))):
-        return "kept"
+        return None
     entries = (hooks or {}).get("BeforeTool")
     keep = [e for e in entries if GEMINI_HOOK_NAME not in json.dumps(e)] if isinstance(entries, list) else []
     data["hooks"] = {**(hooks or {}), "BeforeTool": keep + ours}
+    return data
+
+
+def merge_gemini_settings(dst: Path, src: Path) -> str:
+    """Ghi bản gộp của `gemini_merged` vào `.gemini/settings.json` có sẵn. Trả 'merged' | 'kept' (không đọc được)."""
+    data = gemini_merged(dst, src)
+    if data is None:
+        return "kept"
     dst.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return "merged"
 
 
+ADAPTER_OURS = ("copied", "kept", "updated")  # đích sau cài là bản khung → ghi manifest `adapters`
+
+
+def adapter_src(host: str) -> Path:
+    return SRC / "framework" / "templates" / "harness" / ADAPTERS[host][0]
+
+
+def adapter_action(target: Path, host: str) -> str:
+    """Quyết định (không ghi) cho adapter của `host`: Gemini có sẵn → 'merged' | 'kept'; còn lại như `classify_copy`."""
+    dst = target / ADAPTERS[host][1]
+    if host == "gemini" and dst.is_file():
+        return "merged" if gemini_merged(dst, adapter_src(host)) is not None else "kept"
+    return classify_copy(adapter_src(host), dst)[0]
+
+
+def adapters_plan(target: Path, hosts: list[str]) -> list[dict[str, str]]:
+    """Kế hoạch adapter (`--harness`, AUD-HAR-204): host, đường dẫn đích, hành động."""
+    return [{"host": h, "path": ADAPTERS[h][1], "action": adapter_action(target, h)} for h in hosts]
+
+
 def install_adapters(target: Path, hosts: list[str]) -> None:
     """Chép cấu hình hook của từng host (copy-if-absent; Gemini gộp vào settings có sẵn). Adapter gọi guard của harness
-    `.claude/` — không có harness thì hook của host cho qua (báo ở đây để người biết)."""
-    if hosts and not (target / ".claude" / "hooks" / "guard.py").is_file():
+    `.claude/` — không có harness thì hook của host cho qua (báo ở đây để người biết). Adapter là bản khung sau cài ghi
+    vào manifest.json (`adapters`, gộp với lần cài trước — AUD-HAR-204)."""
+    if not hosts:
+        return
+    if not (target / ".claude" / "hooks" / "guard.py").is_file():
         log("  ⚠ adapter cần harness `.claude/hooks/guard.py` (cài không `--no-harness`) — chưa có thì hook cho qua")
-    base = SRC / "framework" / "templates" / "harness"
+    recorded = load_manifest_doc(target).get("adapters")
+    ours = [p for p in recorded if isinstance(p, str)] if isinstance(recorded, list) else []
     for host in hosts:
-        name, rel = ADAPTERS[host]
+        rel = ADAPTERS[host][1]
         dst = target / rel
         if host == "gemini" and dst.is_file():
-            status = merge_gemini_settings(dst, base / name)
+            status = merge_gemini_settings(dst, adapter_src(host))
+            mine = status == "merged"  # `kept` ở đây = không đọc được, giữ file của dự án
         else:
-            status = copy_if_absent(base / name, dst)
+            status = copy_if_absent(adapter_src(host), dst)
+            mine = status in ADAPTER_OURS
+        if mine:
+            ours.append(rel)
         log(
             f"  adapter {host}: {rel} ({status}) — công cụ cần tin cậy hook dự án một lần (xem templates/harness/README.md)"
         )
+    record_manifest_paths(target, "adapters", ours)
 
 
 def install_root_templates(
@@ -1441,8 +1541,11 @@ def install_plan(
     with_github: bool = False,
     preset: str | None = None,
     stage_init: bool = False,
+    adapters: list[str] | None = None,
+    no_git_hooks: bool = False,
 ) -> int:
-    """`--plan`: in JSON kế hoạch (quyền/hook/file) ra stdout, KHÔNG ghi gì vào dự án. Thoát 0; 2 nếu đích không hợp lệ."""
+    """`--plan`: in JSON kế hoạch (quyền/hook/file/git hook/adapter) ra stdout, KHÔNG ghi gì vào dự án. Thoát 0; 2 nếu
+    đích không hợp lệ."""
     target = target.resolve()
     error = target_error(target, with_github)
     if error:
@@ -1459,6 +1562,8 @@ def install_plan(
         "legacy_migration": (target / LEGACY_DIR).is_dir() or (target / LEGACY_YAML).is_file(),
         "settings": {"action": "skipped"} if no_harness else plan_settings(target, force_harness, load_rules(target)),
         "files": files,
+        "git_hooks": git_hooks_plan(target, no_harness, no_git_hooks),
+        "adapters": adapters_plan(target, adapters or []),
         "preset": {
             "requested": preset,
             "template": selected or "autonomous",
@@ -1490,6 +1595,7 @@ def install(
     preset: str | None = None,
     stage_init: bool = False,
     adapters: list[str] | None = None,
+    no_git_hooks: bool = False,
 ) -> int:
     target = target.resolve()
     error = target_error(target, with_github)
@@ -1508,7 +1614,8 @@ def install(
     version = install_framework(xt_dir, label)
     if not no_harness:
         install_harness(target, force_harness)
-        install_git_hooks(target)
+        if not no_git_hooks:
+            install_git_hooks(target)
     install_adapters(target, adapters or [])
     install_root_templates(target, version, inferred, selected)
     if with_github:
@@ -1542,7 +1649,16 @@ def main(argv: list[str] | None = None) -> int:
         help="copy ruleset mẫu, PR template, Dependabot, workflow ci + secret-scan + pr-title + pr-steward (+ stub merge-gate tạm, "
         "D-122) vào .github/ (không đè)",
     )
-    p.add_argument("--plan", action="store_true", help="in JSON kế hoạch (quyền/hook/file) ra stdout, không ghi gì")
+    p.add_argument(
+        "--plan",
+        action="store_true",
+        help="in JSON kế hoạch (quyền/hook/file/git hook/adapter) ra stdout, không ghi gì",
+    )
+    p.add_argument(
+        "--no-git-hooks",
+        action="store_true",
+        help="không cài git hook sàn chung pre-commit/commit-msg/pre-push (ADR-0064 lát C)",
+    )
     p.add_argument(
         "--preset",
         choices=INSTALL_PRESETS,
@@ -1565,8 +1681,20 @@ def main(argv: list[str] | None = None) -> int:
         log(f"✗ --harness: không biết {', '.join(bad)} — chọn trong {', '.join(ADAPTERS)}")
         return 2
     if a.plan:
-        return install_plan(Path(a.target), a.force_harness, a.no_harness, a.with_github, a.preset, a.stage_init)
-    return install(Path(a.target), a.force_harness, a.no_harness, a.label, a.with_github, a.preset, a.stage_init, hosts)
+        return install_plan(
+            Path(a.target), a.force_harness, a.no_harness, a.with_github, a.preset, a.stage_init, hosts, a.no_git_hooks
+        )
+    return install(
+        Path(a.target),
+        a.force_harness,
+        a.no_harness,
+        a.label,
+        a.with_github,
+        a.preset,
+        a.stage_init,
+        hosts,
+        a.no_git_hooks,
+    )
 
 
 if __name__ == "__main__":

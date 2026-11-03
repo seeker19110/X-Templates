@@ -9,6 +9,7 @@ import contextlib
 import errno
 import json
 import os
+import shlex
 import subprocess
 import sys
 import threading
@@ -1544,6 +1545,47 @@ class LoopRunTest(TmpRepoCase):
             rc, out, err = run_main("loop", "run", "--agent", "codex", "--max-turns", "1")
         self.assertEqual(rc, 1)
         self.assertIn("⚠ agent:", err)
+
+    def test_claude_runs_in_auto_permission_mode(self) -> None:
+        """AUD-HAR-205: `claude -p` không cờ chạy ở chế độ hỏi — tool cần quyền bị từ chối, vòng ngoài dừng "không tiến
+        triển"; autopilot cần Auto (CLAUDE.md, ADR-0009; `--permission-mode auto`, docs CLI đọc 2026-11-02). Không
+        `--dangerously-skip-permissions`/`bypassPermissions` (bỏ cả bộ phân loại), không `--bare` (mất hook)."""
+        self.assertEqual(run_main("loop", "init")[0], 0)
+        rc, out, _ = run_main("loop", "run", "--agent", "claude", "--dry-run")
+        self.assertEqual(rc, 0)
+        cmd = shlex.split(out.splitlines()[-1])
+        self.assertEqual(cmd[:4], ["claude", "-p", "--permission-mode", "auto"])
+        self.assertIn("loop record --task T-001", cmd[4])
+        for bad in ("--dangerously-skip-permissions", "bypassPermissions", "--bare"):
+            self.assertNotIn(bad, cmd)
+
+    def test_agent_args_passed_before_prompt(self) -> None:
+        """AUD-HAR-205 phần còn (D-318): host khác Claude không có cờ quyền đã xác minh — người chạy truyền cờ của mình qua
+        `--agent-args` (tách theo shell), đặt sau lệnh của bảng, trước prompt; bảng lệnh không tự thêm cờ tự duyệt."""
+        self.assertEqual(run_main("loop", "init")[0], 0)
+        rc, out, _ = run_main("loop", "run", "--agent", "codex", "--agent-args", "--model x -c 'a b'", "--dry-run")
+        self.assertEqual(rc, 0)
+        cmd = shlex.split(out.splitlines()[-1])
+        self.assertEqual(cmd[:6], ["codex", "exec", "--model", "x", "-c", "a b"])
+        self.assertIn("loop record --task T-001", cmd[6])
+        rc, _, err = run_main("loop", "run", "--agent", "codex", "--agent-args", "'không đóng", "--dry-run")
+        self.assertEqual(rc, 2)
+        self.assertIn("--agent-args", err)
+
+    def test_agent_args_go_through_guard(self) -> None:
+        """Review #418 (🔴): `--agent-args=--yolo` mở agent lồng tự duyệt mà không qua guard (LOOP-STOP-028) — lệnh agent
+        đã ghép qua cùng kiểm guard như lệnh Gate (LOOP-STOP-027): bị cấm → exit 126, không chạy, kể cả `--dry-run`."""
+        self.assertEqual(run_main("loop", "init")[0], 0)
+        for agent, extra in (
+            ("codex", "--yolo"),
+            ("gemini", "--yolo"),
+            ("codex", "--dangerously-bypass-approvals-and-sandbox"),
+        ):
+            with self.subTest(agent=agent, extra=extra):
+                rc, out, err = run_main("loop", "run", "--agent", agent, f"--agent-args={extra}", "--dry-run")
+                self.assertEqual(rc, 126, out + err)
+                self.assertIn("LOOP-STOP-027", err)
+                self.assertNotIn(extra, out)
 
 
 if __name__ == "__main__":

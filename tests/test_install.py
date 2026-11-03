@@ -2314,6 +2314,82 @@ class GitHooksTest(unittest.TestCase):
         self.assertIn("không đẩy thẳng trunk", r.stderr)
         self.assertEqual(push(f"refs/heads/work {b} refs/heads/main {a}", XT_MAIN_BRANCH="trunk").returncode, 0)
 
+    def run_install(self, *args: str) -> str:
+        out = io.StringIO()
+        with redirect_stdout(out), redirect_stderr(io.StringIO()), mock.patch.dict(os.environ, self.env, clear=True):
+            self.assertEqual(install.main([str(self.target), "--label", "t", *args]), 0)
+        return out.getvalue()
+
+    def test_plan_lists_git_hooks_and_adapters_manifest_records_them(self):
+        """AUD-HAR-204: `--plan` liệt kê git hook (thư mục thật theo `core.hooksPath`, `in_tree` khi là thư mục được track
+        như `.husky/`) và adapter `--harness`, không ghi gì; `--no-git-hooks` không cài; cài thật ghi đường dẫn hook và
+        adapter của khung vào manifest.json (`git_hooks`, `adapters`), giữ qua lần cài sau."""
+
+        def plan(*extra: str) -> dict:
+            return json.loads(self.run_install("--plan", *extra))
+
+        p = plan()
+        self.assertEqual((p["git_hooks"], p["adapters"]), ({"action": "skipped", "reason": "không phải repo git"}, []))
+        hooks = self.init_repo()
+        hooks.mkdir(exist_ok=True)
+        (hooks / "pre-push").write_text("#!/bin/sh\n", encoding="utf-8")
+        p = plan("--harness", "codex,gemini")
+        self.assertEqual((p["git_hooks"]["dir"], p["git_hooks"]["in_tree"]), (".git/hooks", False))
+        acts = {h["name"]: (h["path"], h["action"]) for h in p["git_hooks"]["hooks"]}
+        self.assertEqual(acts["pre-commit"], (".git/hooks/pre-commit", "copied"))
+        self.assertEqual(acts["pre-push"][1], "kept-own")
+        want = [
+            {"host": "codex", "path": ".codex/hooks.json", "action": "copied"},
+            {"host": "gemini", "path": ".gemini/settings.json", "action": "copied"},
+        ]
+        self.assertEqual(p["adapters"], want)
+        self.assertFalse((hooks / "pre-commit").exists() or (self.target / ".codex").exists())  # plan không ghi
+        self.assertEqual(plan("--no-git-hooks")["git_hooks"], {"action": "skipped", "reason": "--no-git-hooks"})
+        self.assertEqual(plan("--no-harness")["git_hooks"], {"action": "skipped", "reason": "--no-harness"})
+        self.assertEqual(self.git("config", "core.hooksPath", ".husky").returncode, 0)
+        p = plan()
+        self.assertEqual((p["git_hooks"]["dir"], p["git_hooks"]["in_tree"]), (".husky", True))
+        self.git("config", "--unset", "core.hooksPath")
+        self.run_install("--no-git-hooks")
+        self.assertFalse((hooks / "pre-commit").exists())
+        self.run_install("--harness", "codex")
+        manifest = self.target / install.MANIFEST_V2
+        doc = json.loads(manifest.read_text(encoding="utf-8"))
+        self.assertEqual(doc["git_hooks"], [".git/hooks/commit-msg", ".git/hooks/pre-commit"])
+        self.assertEqual(doc["adapters"], [".codex/hooks.json"])
+        p = plan("--harness", "codex")
+        self.assertEqual({h["name"]: h["action"] for h in p["git_hooks"]["hooks"]}["pre-commit"], "kept")
+        self.assertEqual(p["adapters"][0]["action"], "kept")
+        (hooks / "pre-commit").write_text("#!/bin/sh\n# xtemplates-git-hook v0\n", encoding="utf-8")
+        self.assertEqual({h["name"]: h["action"] for h in plan()["git_hooks"]["hooks"]}["pre-commit"], "updated")
+        gem = self.target / ".gemini" / "settings.json"
+        gem.parent.mkdir()
+        gem.write_text("{hỏng", encoding="utf-8")
+        self.assertEqual(plan("--harness", "gemini")["adapters"][0]["action"], "kept")
+        self.run_install("--harness", "gemini")  # không đọc được: giữ file dự án, không ghi vào manifest
+        self.assertEqual(json.loads(manifest.read_text(encoding="utf-8"))["adapters"], [".codex/hooks.json"])
+        gem.write_text("{}", encoding="utf-8")
+        self.assertEqual(plan("--harness", "gemini")["adapters"][0]["action"], "merged")
+        self.run_install("--harness", "gemini")
+        doc = json.loads(manifest.read_text(encoding="utf-8"))
+        self.assertEqual(doc["adapters"], [".codex/hooks.json", ".gemini/settings.json"])  # gộp với lần trước
+        self.assertIn("files", doc)
+        manifest.write_text("[]", encoding="utf-8")  # manifest hỏng: ghi lại từ đầu
+        self.run_install("--harness", "codex")
+        self.assertEqual(json.loads(manifest.read_text(encoding="utf-8"))["adapters"], [".codex/hooks.json"])
+
+    def test_hooks_dir_outside_project_shown_absolute(self):
+        """AUD-HAR-204: `core.hooksPath` ngoài dự án (worktree, thư mục chung) → đường dẫn tuyệt đối trong kế hoạch."""
+        self.init_repo()
+        outside = Path(self.enterContext(tempfile.TemporaryDirectory())).resolve()
+        self.assertEqual(self.git("config", "core.hooksPath", str(outside)).returncode, 0)
+        p = json.loads(self.run_install("--plan"))["git_hooks"]
+        self.assertEqual((p["dir"], p["in_tree"]), (outside.as_posix(), False))
+        self.assertEqual(p["hooks"][0]["path"], (outside / "pre-commit").as_posix())
+        (outside / "commit-msg").symlink_to(outside / "khác")  # symlink: không đi theo, giữ như hook của dự án
+        p = json.loads(self.run_install("--plan"))["git_hooks"]
+        self.assertEqual({h["name"]: h["action"] for h in p["hooks"]}["commit-msg"], "kept-own")
+
 
 if __name__ == "__main__":
     unittest.main()
