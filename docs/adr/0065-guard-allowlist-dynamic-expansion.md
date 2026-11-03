@@ -2,7 +2,7 @@
 
 - **Trạng thái:** Đã chấp nhận 2026-11-03 (phiên chính tự duyệt theo tiêu chí chất lượng cuối, ADR-0008 — **D-322**).
 - **Trạng thái triển khai:** Đã làm bốn lớp A–D trong `.claude/hooks/guard.py` (`_allowlist_why`, gọi sau luật cũ ở
-  `_argv_shell_why`), PR nhánh `adr-guard`; đóng AUD-SEC-388 (gồm dạng toán hạng có nháy/thoát của review lượt 2 —
+  `_argv_shell_why`), PR nhánh `adr-guard`; đóng AUD-SEC-388 (gồm chỉ số `${#a[k]}`, `[k]=` khởi tạo mảng có nháy của review #423 và dạng toán hạng có nháy/thoát của review lượt 2 —
   base và lượt 1 cùng lọt)/391/392/393/396/398/401. Còn mở hai lỗ có từ trước ngoài
   phạm vi lớp này: AUD-SEC-399 (mảng nhiễm làm đối số), AUD-SEC-400 (ghi script rồi chạy trong cùng lệnh).
 - **Ngày:** 2026-11-03.

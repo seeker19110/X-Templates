@@ -4,6 +4,7 @@ Mỗi lớp một test đỏ trước khi sửa (mẫu tái hiện của sổ au
 
 from __future__ import annotations
 
+import contextlib
 import io
 import json
 import os
@@ -934,11 +935,8 @@ class AllowlistLayerTest(unittest.TestCase):
         for _ in range(1500):
             cmd = "".join(rng.choice(parts) for _ in range(rng.randint(1, 14)))
             for f in funcs:
-                with self.subTest(cmd=cmd, f=f):
-                    try:
-                        f(cmd)
-                    except guard.ScanTooComplex:
-                        pass
+                with self.subTest(cmd=cmd, f=f), contextlib.suppress(guard.ScanTooComplex):
+                    f(cmd)  # chỉ đòi không lỗi khác: quá phức tạp là kết quả hợp lệ (BUDGET)
         for _ in range(150):
             cmd = "".join(rng.choice(parts) for _ in range(rng.randint(1, 10)))
             with self.subTest(decision=cmd):
@@ -985,6 +983,30 @@ class AllowlistReview2Test(unittest.TestCase):
             "[[ -n 'k' ]] && echo $x",
             "[ 'k' = k ] && echo $x",
             "[[ -v x ]]; echo $x  # [[ 'k' -eq 0 ]]",  # comment: không phải mã
+        )
+        self.assert_budget([f"read -r k < f; {f}{tail}" for f in forms], allow)
+
+    def test_length_and_array_init_subscript_ifs(self):
+        """AUD-SEC-388 🔴 (review #423): chỉ số số học trong `${#a[k]}` và trong khởi tạo mảng (kể cả có nháy/thoát:
+        `declare -a 'a=([k]=v)'`, `a=(['k']=v)`) đánh giá đệ quy giá trị `k` (`IFS=4` từ tệp) — đã chạy bash 5.2.21: mỗi
+        dạng đổi IFS, `git $x` thành `git push --force …`; base và head trước khi sửa đều cho qua."""
+        tail = "; x=push4--force4origin4main; git $x"
+        forms = (
+            "a=(x); echo ${#a[k]}",
+            "a=(x); echo ${#a[$k]}",
+            'a=(x); echo "${#a[k]}"',
+            "a=(x); n=${#a[k]}",
+            "declare -a 'a=([k]=v)'",
+            "a=(['k']=v)",
+            'a=(["k"]=v)',
+            "a=([\\k]=v)",
+            'local -a "a=([k]=v)"',
+            'readonly -a "a=([k]=v)"',
+        )
+        allow = (
+            'a=(x); echo "${#a[@]}"; echo $x',
+            "a=([0]=v [1]=w); echo $x",
+            "echo ${#a[0]} $x",
         )
         self.assert_budget([f"read -r k < f; {f}{tail}" for f in forms], allow)
 

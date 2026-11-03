@@ -961,6 +961,9 @@ class GuardMatrixTest(unittest.TestCase):
         "F=$(cat t.txt); printf $F; c=push/--force/origin/main; git $c",
         # đổi kỳ vọng có chủ ý (review adr-guard): `\\$` trong nháy kép khi lệnh nhắc IFS — viết `git commit -F- <<'EOF'`
         'git commit -q -m "docs: nhắc \\$IFS"',
+        # đổi kỳ vọng có chủ ý (review #423): chỉ số khởi tạo mảng có nháy là số học với mảng chỉ số (`a=(["k"]=v)`
+        # gán IFS qua `k`) — guard không phân biệt `-A`; viết `echo "$a"`
+        'declare -A m=(["a"]=1); export PATH="$HOME/bin:$PATH"; read -r a b < f; echo $a',
     )
     IFS_ADR65_OK = (
         'while IFS= read -r l; do echo "$l"; done < f',
@@ -973,7 +976,7 @@ class GuardMatrixTest(unittest.TestCase):
         "printf '%s\\n' $(git rev-parse HEAD); sleep 1 & wait $!",
         "IFS=/; cat <<EOF\n$HOME ${USER}\nEOF",
         'IFS=/; x="$(( $# + 1 ))"; echo "${arr[$((i+1))]}"',
-        'declare -A m=(["a"]=1); export PATH="$HOME/bin:$PATH"; read -r a b < f; echo $a',
+        'declare -A m=(["a"]=1); export PATH="$HOME/bin:$PATH"; read -r a b < f; echo "$a"',
         'for f in *.md; do wc -l "$f"; done; echo ${HOME:-x}',
     )
 

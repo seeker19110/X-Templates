@@ -997,7 +997,7 @@ ARITH_SAFE_RE = re.compile(r"\$[$#?!-]")  # tham số đặc biệt ra số/cờ
 ARITH_TEST_OP_RE = re.compile(r"(?<![\w$])-[A-Za-z]+\b")  # toán tử `[[ … ]]` (`-eq`, `-f`): không phải tên
 ARITH_TEST_RE = re.compile(r"-(?:eq|ne|lt|le|gt|ge)\b")  # `[[ a -eq b ]]`: toán hạng là biểu thức số học
 ARITH_LIVE_RES = (  # mỗi lớp `[^…\[\]$]` dừng ở dấu mở kế: một lượt quét tuyến tính
-    re.compile(r"\$\{!?[A-Za-z_]\w*\[([^\[\]\n]*)\]"),  # chỉ số trong `${a[i]}`
+    re.compile(r"\$\{[!#]?[A-Za-z_]\w*\[([^\[\]\n]*)\]"),  # chỉ số trong `${a[i]}`, `${#a[i]}` (review #423)
     re.compile(r"\$\[([^\[\]\n]*)\]"),  # `$[…]` cũ
     re.compile(r"\$\{[A-Za-z_@*0-9]\w*(?:\[[^\[\]\n$]*\])?:(?![-=+?])([^}$\n]*\$?)"),  # `${x:off:len}`
 )
@@ -1608,12 +1608,15 @@ def _unquoted_arith_texts(v: _CodeView, argvs: List[List[str]]) -> List[str]:
     của `-v` ở `[[ ]]`/`test`/`[` — `[[ 'k' -eq 0 ]]`, `[[ $'\\153' -eq 0 ]]`, `[[ \\k -eq 0 ]]`, `test -v 'a[k]'` đánh
     giá đệ quy giá trị `k` (`IFS=4` đọc từ tệp gán `IFS` — đã chạy bash 5.2.21). Đọc trên chữ GIỮ nháy đơn/`$'…'`/ký tự
     thoát (chỉ bỏ comment): nháy không làm toán hạng thành chữ. Toán hạng `-v` có `$`/backtick (tên đích lúc chạy) cả
-    chuỗi tính; không có `[`/`$` (`-v HOME`) thì chỉ tra biến, không đánh giá gì."""
+    chuỗi tính; không có `[`/`$` (`-v HOME`) thì chỉ tra biến, không đánh giá gì. Chỉ số khởi tạo mảng `[k]=` (cả trong
+    nháy của đối số `declare -a 'a=([k]=v)'`, `a=(['k']=v)`) cũng đánh giá đệ quy (review #423)."""
     chars = list(v.s)
     for a, b in v.comments:
         chars[a:b] = [" "] * (b - a)
-    tests = _double_brackets("".join(chars))
+    raw = "".join(chars)
+    tests = _double_brackets(raw)
     texts = [ARITH_TEST_OP_RE.sub(" ", t) for t in tests if ARITH_TEST_RE.search(t)]
+    texts += [m[1] for m in ARITH_BARE_RES[1].finditer(raw)]
     ops = [t[m.end() :] for t in tests for m in SPLIT_TEST_V_RE.finditer(t)]
     for head, args in map(_ifs_head, argvs):
         words = args if head in ("test", "[") else []
