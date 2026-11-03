@@ -154,9 +154,10 @@ class PlanApiTest(unittest.TestCase):
 
     def test_plan_max_errors(self) -> None:
         self.put("p.md", "- [ ] `T-001` a\n")
-        for bad in ("0", "11", "x", "", "-1", "٣", "1.5"):
+        for bad in ("0", "6", "11", "x", "", "-1", "٣", "1.5"):  # AUD-XFEAT-041: trần cứng 5 như `plan waves`
             self.assertEqual(self.plan(path="p.md", max=bad)[0], 400, bad)
-        for good in ("1", "10"):
+        self.assertIn("từ 1 đến 5 (LOOP-ORCH-008)", self.plan(path="p.md", max="6")[1]["error"])
+        for good in ("1", "5"):
             self.assertEqual(self.plan(path="p.md", max=good)[0], 200, good)
 
     def test_plan_default_active_then_plan_md_then_empty(self) -> None:

@@ -950,6 +950,21 @@ class MonorepoFingerprintTest(unittest.TestCase):
         self.assertEqual(facts["release_changed"], ["docs/autopilot/DECISIONS.md"])
         self.assertEqual(facts["package_changed"], [])
 
+    def test_signoff_research_decisions_not_stale(self) -> None:
+        """AUD-HAR-164: chỉ sổ `docs/autopilot/DECISIONS.md` mà hàng `prod_switch` đọc làm kết quả `release-check` hết tươi
+        — DECISIONS.md ở chỗ khác (`research/DECISIONS.md`, kể cả chưa track) vẫn bị loại như vân tay gói."""
+        sha = self.git("rev-parse", "HEAD").strip()
+        (self.web / "research").mkdir()
+        (self.web / "research" / "DECISIONS.md").write_text("## R-001\n", encoding="utf-8")
+        self.commit("sổ nghiên cứu")
+        (self.web / "notes").mkdir()
+        (self.web / "notes" / "DECISIONS.md").write_text("chưa track\n", encoding="utf-8")
+        facts = xt.signoff_facts(self.web, {}, release={"head": sha})
+        self.assertEqual(facts["release_changed"], [])
+        (self.web / "docs" / "autopilot" / "DECISIONS.md").write_text("## D-001\n", encoding="utf-8")  # chưa track
+        facts = xt.signoff_facts(self.web, {}, release={"head": sha})
+        self.assertEqual(facts["release_changed"], ["docs/autopilot/DECISIONS.md"])
+
     def test_prod_switch_fact_reads_project_decisions(self) -> None:
         """AUD-HAR-169: hàng `prod_switch` của `release-check` trên cây dự án → `signoff_facts`: N/A BLOCKER (đề xuất
         `--prod` chờ quyết) → `prod_switch` = ["prod_switch"] (việc chờ người); FAIL (DECISIONS.md không đọc được) →
