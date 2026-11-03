@@ -338,31 +338,62 @@ def _bypass_edit(path: str, tool_input: Optional[Dict[str, object]]) -> str:
 
 
 # Git hook và cấu hình git của repo: không nằm trong commit (không có dấu vết PR) — sửa = tắt/bỏ qua hook của dự án.
-GIT_HOOK_PATTERNS = (".git/hooks", ".git/hooks/*", ".git/config")
+# AUD-SEC-429: cả `config.worktree` (git đọc khi `extensions.worktreeConfig` bật — `core.hooksPath` lấy từ đó, git 2.43)
+GIT_HOOK_PATTERNS = (
+    ".git/hooks",
+    ".git/hooks/*",
+    ".git/config",
+    ".git/config.worktree",
+    ".git/worktrees/*/config.worktree",
+)
 GIT_HOOK_WHY = "ghi {} — git hook/cấu hình git không vào commit, sửa là bỏ qua hook của dự án; người làm tay"
 # AUD-SEC-424: cấu hình git toàn cục/hệ thống mang cùng khoá chạy lệnh/hooksPath như `.git/config` (`diff.external`,
 # `core.hooksPath`, `alias.x = !…`, `core.fsmonitor`) — git đọc `$HOME/.gitconfig`, `$XDG_CONFIG_HOME/git/config`
 # (mặc định `~/.config/git/config`), `/etc/gitconfig` (git-config(1) FILES). Ghi thô (chuyển hướng/trình ghi) vào MỌI tệp
 # tên `.gitconfig` hay đuôi `git/config` (cả HOME giả `HOME=/tmp/h` có `/tmp/h/.gitconfig`) → như ghi `.git/config`.
-GLOBAL_GIT_CONFIG_RE = re.compile(r"(?:^|/)(?:\.gitconfig|git/config)$|^/etc/gitconfig$")
-GIT_CONFIG_ENV_RE = re.compile(r"(?<![\w$])GIT_CONFIG_(?:GLOBAL|SYSTEM)=(\S+)")  # tệp cấu hình chỉ định bằng biến
+# AUD-SEC-428: `$(prefix)/etc/gitconfig` (git-config(1) FILES: "System-wide configuration file" — `/usr/local/etc/`,
+# `/opt/homebrew/etc/`); chỉ tệp NGOÀI cây dự án (`dotfiles/.gitconfig`, `tests/fixtures/git/config` là dữ liệu dự án) —
+# trừ khi chính lệnh trỏ `HOME`/`XDG_CONFIG_HOME` vào thư mục chứa nó (`_git_config_env_asks`).
+GLOBAL_GIT_CONFIG_RE = re.compile(r"(?:^|/)(?:\.gitconfig|git/config|etc/gitconfig)$")
+GIT_CONFIG_ENV_RE = re.compile(r"(?<![\w$])(GIT_CONFIG_(?:GLOBAL|SYSTEM)|HOME|XDG_CONFIG_HOME)=(\S+)")
+GIT_CONFIG_ENV_FILES = {"HOME": (".gitconfig", ".config/git/config"), "XDG_CONFIG_HOME": ("git/config",)}
 
 
-def _global_git_config(path: str) -> bool:
-    return bool(path) and bool(GLOBAL_GIT_CONFIG_RE.search(_norm_path(path)))
+def _global_git_config(path: str, root: str = "") -> bool:
+    """`path` là tệp cấu hình git toàn cục/hệ thống: tên khớp và (không biết gốc, hay `~`/`$…`, hay ngoài cây `root`)."""
+    if not path or not GLOBAL_GIT_CONFIG_RE.search(_norm_path(path)):
+        return False
+    if not root or path.startswith(("~", "$")):
+        return True
+    p, r = _norm_path(posixpath.join(root, path)), _norm_path(root).rstrip("/")
+    return not (p == r or p.startswith(r + "/"))
 
 
 def _git_config_env_asks(tokens: List[str], commands: List[Tuple[List[str], Optional[str]]], root: str) -> List[str]:
-    """AUD-SEC-424: lệnh đặt `GIT_CONFIG_GLOBAL=F`/`GIT_CONFIG_SYSTEM=F` và ghi F trong cùng lệnh Bash — đích ghi xét cả
-    dạng đã giải theo thư mục đang đứng (`cd /tmp && printf x > gc`, review #431)."""
-    files = {_norm_path(_dequote(m[1])) for t in tokens for m in [GIT_CONFIG_ENV_RE.match(t)] if m}
+    """AUD-SEC-424: lệnh đặt `GIT_CONFIG_GLOBAL=F`/`GIT_CONFIG_SYSTEM=F` (hay `HOME=D`/`XDG_CONFIG_HOME=D` — tệp cấu hình
+    git dưới D, AUD-SEC-428) và ghi tệp đó trong cùng lệnh Bash — đích ghi xét cả dạng đã giải theo thư mục đang đứng
+    (`cd /tmp && printf x > gc`, review #431). Thiết bị (`/dev/null`) không phải tệp cấu hình (AUD-SEC-426)."""
+    files: Set[str] = set()
+    wild = False  # giá trị còn mở rộng (`HOME=$D`): mọi tệp tên cấu hình git đều có thể là nó
+    for t in tokens:
+        m = GIT_CONFIG_ENV_RE.match(t)
+        val = _resolve_target(_dequote(m[2]), root, root) if m else ""  # `$PWD/x` → gốc dự án (như `_where`)
+        if not m or not val or _dev_sink(val):
+            continue
+        wild = wild or "$" in val or "`" in val
+        subs = GIT_CONFIG_ENV_FILES.get(m[1], ("",))
+        for s in subs:
+            f = posixpath.join(val, s) if s else val
+            files |= {_norm_path(f), _norm_path(posixpath.join(root, f))}
     if not files:
         return []
     hits = [
         w
         for argv, here in commands
         for w in write_targets(normalize(argv), argv)
-        if w and {_norm_path(x) for x in [w, *_where(w, root, here)]} & files
+        if w
+        and not _dev_sink(w)
+        and ({_norm_path(x) for x in [w, *_where(w, root, here)]} & files or wild and _global_git_config(w))
     ]
     return [GIT_HOOK_WHY.format(w) for w in hits]
 
@@ -373,7 +404,7 @@ def edit_decision(path: str, root: str, tool_input: Optional[Dict[str, object]] 
     bypass = _bypass_edit(path, tool_input)
     if bypass:
         return "deny", f"Không ghi công tắc tắt hook (`{bypass}`) vào {rel} — hàng rào của khung (ADR-0018)."
-    if _match_any(rel, GIT_HOOK_PATTERNS) or _global_git_config(path):
+    if _match_any(rel, GIT_HOOK_PATTERNS) or _global_git_config(path, root):
         return "deny", GIT_HOOK_WHY.format(rel) + "."
     if kind == "capability":
         return "ask", "Sửa cấu hình " + CAPABILITY_WHY.format(rel) + "."
@@ -2661,7 +2692,10 @@ def _implicit_tools(c: "_ReuseCmd") -> Set[str]:
     out |= {"go"} if n[:1] == ["go"] and _go_subcmd(n) in GO_RUN_SUBCMDS else set()
     out |= {"deno"} if n[:1] == ["deno"] and "task" in n[1:] else set()
     out |= {"composer"} if any(posixpath.basename(a) == "composer.phar" for a in p[:2]) else set()
-    out |= {"cargo-src"} if n[:1] == ["cargo"] and set(n[1:]) & {"run", "test", "build", "r", "t", "b"} else set()
+    out |= (
+        {"cargo-src"} if n[:1] == ["cargo"] and set(n[1:]) & {"run", "test", "build", "bench", "r", "t", "b"} else set()
+    )
+    out |= {"login"} if n and n[0] in SHELLS and _exec_login(c.argv) else set()  # AUD-SEC-430
     if n[:1] == ["script"]:  # AUD-SEC-418/421: `script` chạy CMD qua shell; không `-c` = `$SHELL -i` (nạp rc)
         cmds, has_c = _script_c_commands(n)
         out |= set() if has_c else {"login", "zsh"}
@@ -2673,18 +2707,43 @@ def _implicit_tools(c: "_ReuseCmd") -> Set[str]:
     return out
 
 
+def _exec_login(argv: List[str]) -> bool:
+    """`exec -l CMD` (đặt `-` đầu argv[0]) hay `exec -a -NAME CMD` — bash coi là login shell, nạp ~/.bash_profile/
+    ~/.profile (bash(1) `exec`, INVOCATION; AUD-SEC-430). Cờ gộp `-cl`, `-la NAME`."""
+    words = [a for a in argv if not ENV_ASSIGN_RE.fullmatch(a)]
+    if words[:1] != ["exec"]:
+        return False
+    i = argv.index("exec") + 1
+    while i < len(argv) and argv[i][:1] == "-" and argv[i] != "--":
+        a = argv[i]
+        if "l" in a[1:]:
+            return True
+        if a.endswith("a"):  # `-a NAME`: tên bắt đầu `-` là login
+            if argv[i + 1 : i + 2] and argv[i + 1][:1] == "-":
+                return True
+            i += 1
+        i += 1
+    return False
+
+
 def _go_subcmd(n: List[str]) -> str:
-    """Lệnh con của `go` sau cờ toàn cục `-C DIR`/`-C=DIR` (go1.20+, AUD-SEC-422)."""
+    """Lệnh con của `go` sau cờ toàn cục `-C DIR`/`-C=DIR`/`-CDIR` (go1.20+, AUD-SEC-422) và `--C`/`--C=DIR` (flag của
+    Go nhận một hay hai gạch — AUD-SEC-427)."""
     i = 1
-    while i < len(n) and n[i].startswith("-C"):
-        i += 2 if n[i] == "-C" else 1
+    while i < len(n) and n[i].startswith(("-C", "--C")):
+        i += 2 if n[i] in ("-C", "--C") else 1
     return n[i] if i < len(n) else ""
+
+
+# `python -m unittest` (unittest.main) và `discover`: cờ ăn giá trị — `-k PAT`, `--durations N`, `-s/-p/-t` (docs.python.org
+# unittest "Command-line options"/"Test Discovery") — giá trị không phải tên test (AUD-SEC-428)
+UNITTEST_VALUE_OPTS = ("-k", "--durations", "-s", "-p", "-t", "--start-directory", "--pattern", "--top-level-directory")
 
 
 def _unittest_discovers(p: List[str]) -> bool:
     """`python -m unittest` không tên test (hay `discover`) thì tự dò `test*.py` (AUD-SEC-423)."""
     k = p.index("unittest") + 1 if "unittest" in p else len(p)
-    rest = [a for a in p[k:] if a[:1] != "-"]
+    rest = _positionals(p[k:], UNITTEST_VALUE_OPTS)
     return not rest or rest[0] == "discover"
 
 
@@ -8107,9 +8166,15 @@ def _write_asks(n: List[str], argv: List[str], root: str, cwd: Optional[str] = N
     asks += [FENCE_WHY.format(t) for t in found if _is_fence(t, root)]
     # AUD-SEC-424: ghi THÔ `>> ~/.gitconfig` (`git config -f ~/.gitconfig <khoá>` do luật khoá của git config xét)
     # review #431: cả đích đã giải theo thư mục đang đứng (`cd /etc && >> gitconfig`), như vòng `.git/config` dưới đây
-    asks += [
-        GIT_HOOK_WHY.format(x) for t in targets if t != cfg for x in [t, *_where(t, root, cwd)] if _global_git_config(x)
+    # AUD-SEC-428: chỉ tệp ngoài cây dự án; thư mục không biết (`cd "$X"`) → tên trơn vẫn tính (chiều chặt)
+    gcfg = [
+        x
+        for t in targets
+        if t != cfg
+        for x in ([(t, "")] if cwd is None else [(w, root) for w in _where(t, root, cwd)])
+        if _global_git_config(*x)
     ]
+    asks += [GIT_HOOK_WHY.format(x[0]) for x in gcfg]
     for target in (x for t in targets for x in _where(t, root, cwd)):
         kind = _target_kind(target, root)
         if _is_fence(target, root):
@@ -8999,7 +9064,8 @@ def _scan_command(
         remote = next((h for h in _env_hosts(assigns) if not _is_local_host(h)), "") or next(iter(docker), "")
         if remote:
             asks.append(f"{EGRESS_ASK} — {n[0]} tới máy chủ {remote}: {' '.join(argv)[:200]}")
-    if n[:2] == ["git", "commit"] and _commit_hooks_path(argv):
+    # AUD-SEC-430: cả `export GIT_CONFIG_KEY_0=core.hooksPath …; git commit` (biến đã đặt ở lệnh trước trong chuỗi)
+    if n[:2] == ["git", "commit"] and _commit_hooks_path(argv + [f"{k}={v}" for k, v in env.items()]):
         # `git -c core.hooksPath=… commit`, `GIT_CONFIG_KEY_n=core.hooksPath … git commit` = --no-verify: git hook của
         # dự án không chạy — cùng câu hỏi như --no-verify (strict hỏi người; mặc định cổng của khung vẫn chạy).
         res["no_verify"] = True
@@ -11480,6 +11546,7 @@ def _interp_literal_ask(
         # đường đủ — AUD-SEC-340
         kind = "evidence" if _ledger_tail(lit, script) else kind
         fence, git_hook = _is_fence(target, root), _match_any(rel, GIT_HOOK_PATTERNS)
+        git_hook = git_hook or _global_git_config(target, root)  # AUD-SEC-429: `open('/root/.gitconfig','a')`
         if not (fence or git_hook or kind in ("secret", "evidence")):
             continue
         if kind == "secret" and not (fence or git_hook) and build_local_secret(target, root, here):

@@ -21074,6 +21074,168 @@
    "code": "HOOK_BYPASS"
   },
   "note": "review #431: gitconfig hệ thống sau cd/pushd"
+ },
+ {
+  "id": "d431-427-go-dd-C",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-427"
+  ],
+  "input": {
+   "command": "echo x > a_test.go; go --C . test ./..."
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "nợ review #431 (AUD-SEC-426…430, T-3665)"
+ },
+ {
+  "id": "d431-427-go-dd-C-eq",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-427"
+  ],
+  "input": {
+   "command": "echo x > a_test.go; go --C=. test"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "nợ review #431 (AUD-SEC-426…430, T-3665)"
+ },
+ {
+  "id": "d431-429-worktree-cfg",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-429"
+  ],
+  "input": {
+   "command": "git config extensions.worktreeConfig true; printf '[core]\\n\\thooksPath = /dev/null\\n' >> .git/config.worktree"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "HOOK_BYPASS"
+  },
+  "note": "nợ review #431 (AUD-SEC-426…430, T-3665)"
+ },
+ {
+  "id": "d431-429-worktree-cfg-raw",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-429"
+  ],
+  "input": {
+   "command": "printf '[core]\\n\\thooksPath = /dev/null\\n' >> .git/config.worktree"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "HOOK_BYPASS"
+  },
+  "note": "nợ review #431 (AUD-SEC-426…430, T-3665)"
+ },
+ {
+  "id": "d431-429-py-gitconfig",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-429"
+  ],
+  "input": {
+   "command": "python3 -c \"open('/root/.gitconfig','a').write('x')\""
+  },
+  "expect": {
+   "allowed": false,
+   "code": "HOOK_BYPASS"
+  },
+  "note": "nợ review #431 (AUD-SEC-426…430, T-3665)"
+ },
+ {
+  "id": "d431-429-node-gitconfig",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-429"
+  ],
+  "input": {
+   "command": "node -e \"require('fs').appendFileSync('/root/.gitconfig', 'x')\""
+  },
+  "expect": {
+   "allowed": false,
+   "code": "HOOK_BYPASS"
+  },
+  "note": "nợ review #431 (AUD-SEC-426…430, T-3665)"
+ },
+ {
+  "id": "d431-430-exec-l",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-430"
+  ],
+  "input": {
+   "command": "echo x >> ~/.bash_profile; exec -l bash -c true"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "nợ review #431 (AUD-SEC-426…430, T-3665)"
+ },
+ {
+  "id": "d431-430-exec-a-dash",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-430"
+  ],
+  "input": {
+   "command": "echo x >> ~/.profile; exec -a -bash bash -c true"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "nợ review #431 (AUD-SEC-426…430, T-3665)"
+ },
+ {
+  "id": "d431-ctl-426-devnull-global",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-426"
+  ],
+  "input": {
+   "command": "GIT_CONFIG_GLOBAL=/dev/null git status > /dev/null 2>&1"
+  },
+  "expect": {
+   "allowed": true
+  },
+  "note": "nợ review #431 (AUD-SEC-426…430, T-3665)"
+ },
+ {
+  "id": "d431-ctl-426-devnull-system",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-426"
+  ],
+  "input": {
+   "command": "GIT_CONFIG_SYSTEM=/dev/null git status"
+  },
+  "expect": {
+   "allowed": true
+  },
+  "note": "nợ review #431 (AUD-SEC-426…430, T-3665)"
+ },
+ {
+  "id": "d431-ctl-430-exec-a-plain",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-430"
+  ],
+  "input": {
+   "command": "echo x >> ~/.profile; exec -a mybash bash -c true"
+  },
+  "expect": {
+   "allowed": true
+  },
+  "note": "nợ review #431 (AUD-SEC-426…430, T-3665)"
  }
  ]
 }
