@@ -211,3 +211,10 @@
 - Chọn: Giữ chặn; lý do chặn gợi viết "$var"
 - Lý do (tiêu chí chất lượng cuối): (1) an toàn: bash đánh giá đệ quy giá trị biến trong số học nên n=$(…) gán được IFS (đã tái hiện bash 5.2.21); danh sách lệnh 'chỉ in số' là danh sách trắng dễ lách (ADR-0063, bài học #372). (4) UX: đường viết thay một bước (nháy biến), đo 3884 lệnh thật chỉ 9 đổi quyết định
 - Đường lùi: Thêm danh sách trắng lệnh đếm khi đo được chặn oan đáng kể
+
+### D-322 · 2026-11-03T06:11:39+00:00 · PR 422: review tìm thêm 5 dạng lách IFS (function NAME { IFS=…}, "((" giả, từ lệnh có nháy, read định nghĩa trong eval, IFS=… exec read) — base cũng lọt cả 5; vá tiếp trong PR hay đổi cách?
+
+- Phương án: (1) Vá tiếp 5 dạng trong PR này (lần thứ tư) · (2) Merge PR (chặt hơn base, không mở đường mới — ADR-0056); AUD-SEC-388 trả về mở, liệt kê dạng còn lọt; PR kế: ADR mới — luật chung theo ADR-0063: mọi gán IFS/tên-đích-động có mặt thì mọi mở rộng không đọc chắc → BUDGET, chỉ một mẫu cho phép neo chặt (while IFS= read -r v … "$v"), không suy theo cấu trúc · (3) Chấp nhận lớp IFS là giới hạn đã biết, giao sandbox
+- Chọn: Merge PR (chặt hơn base, không mở đường mới — ADR-0056); AUD-SEC-388 trả về mở, liệt kê dạng còn lọt; PR kế: ADR mới — luật chung theo ADR-0063: mọi gán IFS/tên-đích-động có mặt thì mọi mở rộng không đọc chắc → BUDGET, chỉ một mẫu cho phép neo chặt (while IFS= read -r v … "$v"), không suy theo cấu trúc
+- Lý do (tiêu chí chất lượng cuối): (1) an toàn: ba lượt vá theo cấu trúc lệnh đều lọt dạng mới (#372, ADR-0061 max_rethink) — hội tụ cần đổi mô hình (danh sách trắng, không suy cấu trúc), là quyết định kiến trúc → ADR; head chặn mọi dạng đã biết trước đó, 5 dạng mới base cũng lọt nên merge không làm tệ hơn. (2) giữ đường lùi: 🔴 vẫn mở ở sổ → release-check chặn phát hành tới khi xong. Phương án 3 trái tiêu chí 1 khi sandbox chưa bắt buộc ở mọi quy mô
+- Đường lùi: Đóng PR 422, gom vào PR ADR mới
