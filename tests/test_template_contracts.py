@@ -34,7 +34,7 @@ def item_line(item_id: str) -> str:
 
 
 class TemplateContractTest(unittest.TestCase):
-    def test_risks_template_ids_match_pm_risk_001_check(self):
+    def test_risks_template_ids_match_pm_risk_001_check(self) -> None:
         """`PM-RISK-001` Kiểm `rg -n "^\\| RK-[0-9]{3}" docs/RISKS.md …`: mẫu từng dùng `R-001` (trùng không gian ID
         `R-NNN` của PROJECT.md) nên chép nguyên văn là đỏ MUST."""
         self.assertIn('"^\\| RK-[0-9]{3}"', item_line("PM-RISK-001"))
@@ -42,7 +42,7 @@ class TemplateContractTest(unittest.TestCase):
         self.assertTrue([r for r in rows if re.match(r"^\| RK-[0-9]{3}", r)])
         self.assertFalse([r for r in rows if re.match(r"^\| R-[0-9]{3}", r)])
 
-    def test_privacy_data_map_matches_cmp_priv_001_002(self):
+    def test_privacy_data_map_matches_cmp_priv_001_002(self) -> None:
         """AUD-DOC-218: `retention` của mẫu theo đúng lint `CMP-PRIV-002` (ISO 8601 duration hoặc `until-account-deleted`)
         và mẫu có trường "nơi sao chép" (`copies`) mà `CMP-PRIV-001` đòi."""
         self.assertIn("ISO 8601 duration hoặc `until-account-deleted`", item_line("CMP-PRIV-002"))
@@ -55,7 +55,7 @@ class TemplateContractTest(unittest.TestCase):
                 self.assertTrue(choice == "until-account-deleted" or ISO_DURATION_RE.fullmatch(choice), choice)
         self.assertRegex(block, r"(?m)^\s*copies:\s*\[")
 
-    def test_slo_file_name_is_one(self):
+    def test_slo_file_name_is_one(self) -> None:
         """AUD-DOC-217: một tên file SLO ở `OPS-SLO-001` (nhà), mẫu, chỉ mục mẫu và mục ngành — `slo.md` ≠ `SLO.md` trên
         Linux."""
         want = "`docs/ops/SLO.md`"
@@ -67,51 +67,73 @@ class TemplateContractTest(unittest.TestCase):
         self.assertNotIn("docs/ops/slo.md", "\n".join(p.read_text(encoding="utf-8") for p in FW.rglob("*.md")))
 
 
-def kiem_rg_cmds(item_id: str) -> list:
+def kiem_rg_cmds(item_id: str) -> list[str]:
     """Các lệnh `rg …` (đoạn trong backtick) ở phần `→ Kiểm:` của mục — đúng chuỗi dự án chép vào CI."""
     kiem = item_line(item_id).split("→ Kiểm:", 1)[1].split(" · Nguồn:", 1)[0]
     return [c for c in re.findall(r"`([^`]+)`", kiem) if c.startswith("rg ")]
 
 
-def rg_emulate(cmd: str, root: Path) -> list:
+def rg_emulate(cmd: str, root: Path) -> list[str]:
     """Chạy pipeline `rg … | rg …` bằng `re` của Python (CI không cài ripgrep; regex của các mục dùng cú pháp chung
     Rust/Python): khâu đầu đọc file khớp `-g` dưới đường dẫn, `-U` = khớp nhiều dòng (in mọi dòng của đoạn khớp), khâu
-    sau lọc dòng của khâu trước (`-v` đảo). Khâu đầu thiếu đường dẫn → AssertionError (rg sẽ đọc stdin — treo ở CI/hook)."""
-    lines: list = []
+    sau lọc dòng của khâu trước (`-v` đảo) hoặc `--passthru -r R` = giữ mọi dòng, thay đoạn khớp bằng R (`$1` = nhóm 1);
+    `^`/`$` khớp đầu/cuối dòng như rg. Khâu đầu thiếu đường dẫn → AssertionError (rg sẽ đọc stdin — treo ở CI/hook)."""
+    lines: list[str] = []
     for i, stage in enumerate(_stages(cmd)):
-        assert stage[0] == "rg", stage
-        flags, globs, rest = set(), [], []
-        args = iter(stage[1:])
-        for a in args:
-            if a == "-g":
-                globs.append(next(args))
-            elif a.startswith("--"):
-                flags.add(a)
-            elif a.startswith("-") and not rest:
-                flags.update(a[1:])
-            else:
-                rest.append(a)
-        pat = re.compile(rest[0], re.I if "i" in flags else 0)
-        if i:
+        flags, globs, rest, repl = _rg_args(stage)
+        pat = re.compile(rest[0], re.M | (re.I if "i" in flags else 0))
+        if repl is not None:
+            assert i and "--passthru" in flags, f"`-r` chỉ mô phỏng ở khâu sau kèm --passthru: {stage}"
+            lines = [pat.sub(repl, ln) for ln in lines]
+        elif i:
             lines = [ln for ln in lines if bool(pat.search(ln)) != ("v" in flags)]
-            continue
-        assert rest[1:] == ["."], f"khâu đầu thiếu đường dẫn `.`: {stage}"
-        for p in sorted(
-            x for x in root.rglob("*") if x.is_file() and (not globs or any(fnmatch.fnmatch(x.name, g) for g in globs))
-        ):
-            text, rel = p.read_text(encoding="utf-8"), "./" + p.relative_to(root).as_posix()
-            src = text.split("\n")
-            if "U" in flags:
-                for m in pat.finditer(text):
-                    a, b = text.count("\n", 0, m.start()), text.count("\n", 0, max(m.end() - 1, m.start()))
-                    lines += [f"{rel}:{k + 1}:{src[k]}" for k in range(a, b + 1)]
-            else:
-                lines += [f"{rel}:{k + 1}:{ln}" for k, ln in enumerate(src) if pat.search(ln)]
+        else:
+            assert rest[1:] == ["."], f"khâu đầu thiếu đường dẫn `.`: {stage}"
+            lines = _rg_files(pat, "U" in flags, globs, root)
     return lines
 
 
-def _stages(cmd: str) -> list:
-    out: list = [[]]
+def _rg_args(stage: list[str]) -> tuple[set[str], list[str], list[str], str | None]:
+    """(cờ, các `-g`, pattern + đường dẫn, chuỗi thay của `-r` đổi sang cú pháp `re.sub` hoặc None) của một khâu `rg`."""
+    assert stage[0] == "rg", stage
+    flags: set[str] = set()
+    globs: list[str] = []
+    rest: list[str] = []
+    repl: str | None = None
+    args = iter(stage[1:])
+    for a in args:
+        if a == "-g":
+            globs.append(next(args))
+        elif a == "-r":
+            repl = re.sub(r"\$\{?(\w+)\}?", r"\\g<\1>", next(args))
+        elif a.startswith("--"):
+            flags.add(a)
+        elif a.startswith("-") and not rest:
+            flags.update(a[1:])
+        else:
+            rest.append(a)
+    return flags, globs, rest, repl
+
+
+def _rg_files(pat: re.Pattern[str], multiline: bool, globs: list[str], root: Path) -> list[str]:
+    """Khâu đầu: `./file:dòng:nội dung` mọi dòng khớp (multiline = mọi dòng của đoạn khớp) dưới `root`."""
+    lines: list[str] = []
+    for p in sorted(
+        x for x in root.rglob("*") if x.is_file() and (not globs or any(fnmatch.fnmatch(x.name, g) for g in globs))
+    ):
+        text, rel = p.read_text(encoding="utf-8"), "./" + p.relative_to(root).as_posix()
+        src = text.split("\n")
+        if multiline:
+            for m in pat.finditer(text):
+                a, b = text.count("\n", 0, m.start()), text.count("\n", 0, max(m.end() - 1, m.start()))
+                lines += [f"{rel}:{k + 1}:{src[k]}" for k in range(a, b + 1)]
+        else:
+            lines += [f"{rel}:{k + 1}:{ln}" for k, ln in enumerate(src) if pat.search(ln)]
+    return lines
+
+
+def _stages(cmd: str) -> list[list[str]]:
+    out: list[list[str]] = [[]]
     for tok in shlex.split(cmd):
         if tok == "|":
             out.append([])
@@ -126,10 +148,20 @@ class KiemRegexTest(unittest.TestCase):
     def setUp(self) -> None:
         self.root = Path(self.enterContext(tempfile.TemporaryDirectory()))
 
-    def flagged(self, item_id: str) -> set:
-        return {ln.split(":", 2)[2] for c in kiem_rg_cmds(item_id) for ln in rg_emulate(c, self.root)}
+    def flagged(self, item_id: str) -> set[str]:
+        """`./file:dòng` mà Kiểm báo — so theo vị trí vì khâu `-r` có thể sửa nội dung dòng in ra."""
+        return {":".join(ln.split(":", 2)[:2]) for c in kiem_rg_cmds(item_id) for ln in rg_emulate(c, self.root)}
 
-    def test_base_sec_010_catches_every_non_loopback_publish(self):
+    def marked(self, tag: str) -> set[str]:
+        """`./file:dòng` của mọi dòng fixture có chữ `tag`."""
+        return {
+            f"./{p.name}:{k + 1}"
+            for p in self.root.iterdir()
+            for k, ln in enumerate(p.read_text(encoding="utf-8").split("\n"))
+            if tag in ln
+        }
+
+    def test_base_sec_010_catches_every_non_loopback_publish(self) -> None:
         (self.root / "docker-compose.yml").write_text(
             "services:\n  web:\n    ports:\n"
             '      - "127.0.0.1:8080:80"  # OK\n'
@@ -141,7 +173,9 @@ class KiemRegexTest(unittest.TestCase):
             '      - "[::]:6379:6379"  # BAD\n'
             "      - target: 80\n"
             "        published: 8083  # BAD long syntax\n"
-            "    environment:\n      - KEY=1\n    depends_on:\n      - db\n",
+            "    environment:\n      - KEY=1\n    depends_on:\n      - db\n"
+            '    expose:\n      - "3000"\n      - 8080\n    command:\n      - "8080"\n    group_add:\n      - "1000"\n'
+            "  db:\n    ports:  # cuối file, không xuống dòng\n\n      - 5433:5432  # BAD",
             encoding="utf-8",
         )
         (self.root / "README.md").write_text(
@@ -155,16 +189,18 @@ class KiemRegexTest(unittest.TestCase):
             "podman run -p 8084:80 img BAD\n"
             "docker run --publish published=8085,target=80 img BAD\n"
             "docker run -p8086:80 img BAD\n"
-            "docker run \\\n  --rm \\\n  -p 9001:9001 --label BAD \\\n  img\n",
+            "docker run \\\n  --rm \\\n  -p 9001:9001 --label BAD \\\n  img\n"
+            "docker run -p 8087:80 -p 127.0.0.1:9090:90 img BAD trộn\n"
+            "docker run -p 127.0.0.1:9091:90 -P img BAD trộn\n"
+            "docker run \\\n  -p 127.0.0.1:9092:90 \\\n  -p [::1]:9093:90 \\\n  img OK\n",
             encoding="utf-8",
         )
         got = self.flagged("BASE-SEC-010")
         self.assertTrue(got)
-        self.assertEqual({ln for ln in got if "BAD" not in ln}, set())
-        want = {ln for p in self.root.iterdir() for ln in p.read_text(encoding="utf-8").split("\n") if "BAD" in ln}
-        self.assertEqual(got, want)
+        self.assertEqual(got & self.marked("OK"), set())
+        self.assertEqual(got, self.marked("BAD"))
 
-    def test_sec_supply_032_catches_dict_and_underscore_flag(self):
+    def test_sec_supply_032_catches_dict_and_underscore_flag(self) -> None:
         (self.root / "load.py").write_text(
             "m = AutoModel.from_pretrained(x, trust_remote_code=True)\n"
             'kw = {"trust_remote_code": true}\n'
