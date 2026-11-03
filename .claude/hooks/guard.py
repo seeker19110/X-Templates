@@ -1838,9 +1838,13 @@ def _file_name(path: str) -> str:
 # — guard quét thân như script của trình chạy (`bash <<'D'`, `python3 - <<'D'`) thay vì chặn. Chỉ miễn theo giá trị khi
 # lệnh có đúng một heredoc, không script lồng, writer là nơi duy nhất ghi (`>`/`>|`, không `>>`/`tee -a`/`<<-`), đúng
 # một lệnh đơn chạy F bằng shell/`source`/trình thông dịch SAU writer (nối bằng `;`/`&&`/`||`/xuống dòng — không ống),
-# lệnh còn lại trong `HEREDOC_RUN_SAFE`, không lệnh nào khác ghi tệp, tên F không nhắc ở chỗ khác (cả trong thân).
+# lệnh còn lại trong `HEREDOC_RUN_SAFE` hay chỉ là gán biến, không lệnh nào khác ghi tệp, tên F không nhắc ở chỗ khác
+# (cả trong thân). So theo TÊN tệp (thư mục có mở rộng — `$S/x.py` — vẫn được): trình chạy mở tệp khác cùng tên (thư mục
+# khác, writer lỗi) là chạy tệp có sẵn — như `bash x.sh` đứng riêng, không phải nội dung guard chưa quét do lệnh này tạo.
 HEREDOC_RUN_SAFE = frozenset(
-    "cd chmod mkdir echo printf true false : ls cat head tail grep wc sort uniq diff pwd".split()
+    "cd chmod mkdir echo printf true false : ls cat head tail grep wc sort uniq diff pwd cut tr date basename dirname"
+    " realpath".split()
+    + [""]  # chỉ gán biến (`S=/tmp/x;`): không chạy gì
 )
 HEREDOC_RUN_SEP_RE = re.compile(r"(?:&&|\|\||[;\n])+")
 
@@ -1889,7 +1893,7 @@ def _heredoc_writer(a: List[str], m: "re.Match[str]") -> str:
     words = _no_redirects(normalize(a))
     files = outs if words == ["cat"] else words[1:] if words[:1] == ["tee"] and not outs else []
     plain = _heredoc_word(m)[1] and not m.group(0).startswith("<<-") and set(ops) <= {"<<", ">", ">|"}
-    return files[0] if plain and len(files) == 1 and not SCRIPT_NAME_DYN_RE.search(files[0]) else ""
+    return files[0] if plain and len(files) == 1 and not SCRIPT_NAME_DYN_RE.search(_file_name(files[0])) else ""
 
 
 def _heredoc_runner(argvs: List[List[str]], writers: List[int], name: str) -> int:

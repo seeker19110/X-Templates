@@ -1841,6 +1841,7 @@ class GuardStrictDebtTest(unittest.TestCase):
                 self.assertIn("push --force", d["reason"])
         allow = (
             "cat > x.py <<'EOF'\nprint(1)\nEOF\npython3 x.py",
+            "S=/tmp/sp; mkdir -p $S && cat > $S/x.py <<'EOF'\nprint(1)\nEOF\npython3 $S/x.py",  # thư mục có mở rộng
             "cd d && cat <<'EOF' > x.py && python3 x.py 2>&1 | tail -3\nprint(1)\nEOF",
             "tee x.sh <<\\EOF >/dev/null\necho hi\nEOF\nchmod +x x.sh; bash x.sh",
             'cat > x.sh <<"EOF"\necho hi\nEOF\nbash -e x.sh',
@@ -1865,6 +1866,9 @@ class GuardStrictDebtTest(unittest.TestCase):
             "cat > x.py <<'EOF'\nprint(1)\nEOF\npython3 - <<'PY'\nopen('x.py', 'w').write('x')\nPY\npython3 x.py",
             "cat a.sh > x.sh <<'EOF'\necho hi\nEOF\nbash x.sh",
             "cat > x.sh <<'EOF'\necho hi\nEOF\ncat > y.sh <<'EOF'\necho y\nEOF\nbash x.sh",
+            'cat > "$f" <<\'EOF\'\necho hi\nEOF\nbash "$f"',  # tên tệp có mở rộng
+            "cat > x.py <<'EOF'\nprint(1)\nEOF\ngit checkout -- x.py; python3 x.py",  # lệnh ngoài danh sách vô hại
+            "cat > x.py <<'EOF'\nprint(1)\nEOF\nprintf x > h.py; python3 x.py",  # lệnh khác ghi tệp
         )
         self.assert_budget(deny, allow, "AUD-SEC-400", guard._script_run_why)
         script = "XTEOF\nXTEOF_"
