@@ -1046,6 +1046,50 @@ class GuardMatrixTest(unittest.TestCase):
             with self.subTest(cmd=cmd):
                 self.assertEqual(self.dec(cmd), "", self.g.bash_decision(cmd, self.root))
 
+    # AUD-SEC-399 (review adr-guard): mảng dựng từ dữ liệu làm ĐỐI SỐ của lệnh guard xét đối số — base cho qua, bash 5.2
+    # chạy `git push --force origin main` (stub); biến vô hướng cùng nguồn (`read -r s f r b <<<`) thì RULE_DENY
+    TAINTED_ARRAY_ARGS_BAD = (
+        'read -ra a <<< "push --force origin main"; git "${a[@]}"',
+        "mapfile -t a < <(printf '%s\\n' push --force origin main); git \"${a[@]}\"",
+        'readarray -t a < f; rm -rf "${a[@]}"',
+        "IFS=, read -r -a a < f; git ${a[*]}",
+        'read -r -a a < f; sudo git "${a[@]}"',
+        'a=($(cat f)); git "${a[@]}"',
+        'a=("$x" --force); git push "${a[@]}"',
+        'a=(x); a+=($y); git "${a[@]}"',
+        'a=(x); a[1]=$y; git "${a[@]}"',
+        'declare -a a=(`cat f`); git "${a[@]:1}"',
+        'mapfile -t a < f; git "${a[0]}" "${a[1]}" origin main',
+        'read -ra a < f; echo "$(git "${a[@]}")"',
+        'a=(x); printf -v "a[1]" %s "$y"; git "${a[@]}"',
+        'a=(x); . ./env.sh; git "${a[@]}"',
+        'git "${a[@]}"',  # mảng không thấy gán trong lệnh (hàm/`source`/`eval`): nguồn không biết
+    )
+    TAINTED_ARRAY_ARGS_OK = (
+        'read -ra a <<< "$s"; printf \'%s\\n\' "${a[@]}"',
+        'mapfile -t a < f; echo "${#a[@]}"; git status',
+        'mapfile -t a < f; wc -l "${a[@]}"',
+        'files=(a.txt "b c.txt"); git add -- "${files[@]}"',
+        'read -ra a < f; for x in "${a[@]}"; do echo "$x"; done',
+    )
+
+    def test_guard_tainted_array_args(self):
+        """AUD-SEC-399 (ADR-0065): mảng dựng từ dữ liệu (đích `read -a`/`mapfile`/`readarray`, phần tử là mở rộng, gán
+        phần tử, nguồn không thấy) làm đối số `"${a[@]}"`/`${a[*]}`/`"${a[k]}"` của lệnh guard xét đối số → BUDGET. Lệnh
+        gốc bị chặn (luật cũ hay lớp mới — OR) VÀ riêng lớp mới cũng chặn: gỡ luật cũ không mở lại ca."""
+        for cmd in self.TAINTED_ARRAY_ARGS_BAD:
+            with self.subTest(cmd=cmd):
+                self.assertEqual(self.dec(cmd), "deny", self.g.bash_decision(cmd, self.root))
+                why = self.g._array_arg_why(cmd) or str(self.g.bash_decision(cmd, self.root)["reason"])
+                self.assertIn("AUD-SEC-399", why)
+                self.assertIn("viết lại:", why)
+        for cmd in self.TAINTED_ARRAY_ARGS_BAD[:2]:  # hai ca của sổ: mã BUDGET
+            res = self.g.bash_decision(cmd, self.root)
+            self.assertEqual((res.get("code"), "AUD-SEC-399" in str(res["reason"])), (self.g.BUDGET, True), res)
+        for cmd in self.TAINTED_ARRAY_ARGS_OK:
+            with self.subTest(cmd=cmd):
+                self.assertEqual(self.dec(cmd), "", self.g.bash_decision(cmd, self.root))
+
     def test_guard_ifs_scan_linear(self):
         """AUD-SEC-388 lượt 2 (review blk-guard 🟠 ReDoS): dò ngữ cảnh số học/danh sách `for` tuyến tính. Lượt 1
         `STRICT_ARITH_DYN_RE` O(n³) trên chữ thô: ca của review (4 KB `((`/`$` trong nháy đơn) 54 s, ~9 KB vượt timeout
@@ -1269,6 +1313,27 @@ class GuardMatrixTest(unittest.TestCase):
         subprocess.run(["git", "init", "-q", path], check=True)
         subprocess.run(["git", "-C", path, "symbolic-ref", "HEAD", f"refs/heads/{branch}"], check=True)
         return path
+
+    def test_guard_push_tokens_after_double_dash_are_refspecs(self):
+        """AUD-SEC-387 (review #420): sau `--` mọi token là refspec (git parse-options), kể cả token bắt đầu `-` — đích ghi
+        rõ thì không lấy nhánh hiện tại (`git push origin -- --no-verify` trên main từng PUSH_MAIN). Luật refspec áp cho
+        chúng (`-- +main`, `-- main`); cờ force đọc ở mọi vị trí như cũ (không nới)."""
+        main_repo = self.make_repo("main")
+
+        def dec_in(cmd: str) -> object:
+            return self.g.bash_decision(cmd, self.root, main_repo)["decision"]
+
+        self.assertEqual(dec_in("git push origin -- --no-verify"), "")
+        self.assertEqual(dec_in("git push origin -- -x"), "")
+        self.assertEqual(dec_in("git push origin -- -feat"), "deny")  # cụm cờ có `f` đọc ở mọi vị trí như cũ
+        self.assertEqual(dec_in("git push origin"), "ask")
+        self.assertEqual(dec_in("git push origin -- main"), "ask")
+        self.assertEqual(dec_in("git push origin -- -x main"), "ask")
+        self.assertEqual(dec_in("git push origin -- +feat"), "deny")
+        self.assertEqual(dec_in("git push origin -- --force"), "deny")  # giữ chặt: không nới luật force
+        self.assertEqual(
+            self.g._push_refs(["origin", "-o", "x", "a", "--", "-b", "--", "c"]), ["origin", "a", "-b", "--", "c"]
+        )
 
     def test_guard_push_without_refspec_follows_current_branch(self):
         main_repo, feat_repo = self.make_repo("main"), self.make_repo("feat/x")
@@ -4980,9 +5045,23 @@ class GuardStored1018Test(unittest.TestCase):
             "agent --print -f x",
             "/usr/local/bin/agent -fp x",
             "agent -p x --approve-mcps",
+            "agent --yolo x",
+            "npx agent --print --force x",
+            "cursor-agent --force",  # tên gốc giữ như cũ: `-f`/`--force` không cần `-p`
+            "cursor-agent -f x",
         ):
             self.assertEqual(self.bash(cmd), "deny", cmd)
-        for cmd in ("agent -p hi", "agent status", "echo agent --force"):
+        # AUD-SEC-385 (review #420): tên chung `agent` chỉ tự duyệt bằng `-f`/`--force` khi chạy không tương tác
+        # (`-p`/`--print`) — binary khác tên `agent` dùng cờ trùng không bị chặn oan
+        for cmd in (
+            "agent -p hi",
+            "agent status",
+            "echo agent --force",
+            "./bin/agent --force",
+            "npx agent -f config.yml",
+        ):
+            self.assertIsNone(self.bash(cmd), cmd)
+        for cmd in ("agent -f x -- -p", "agent --force --printer x"):
             self.assertIsNone(self.bash(cmd), cmd)
 
     def test_review_117_bypasses_closed(self):
@@ -5604,6 +5683,13 @@ class GuardTitleRuleTest(unittest.TestCase):
                 dec, why = self.g.mcp_decision(tool, inp, root)
                 self.assertEqual(dec, "deny", why)
                 self.assertIn(code, why)
+        # AUD-SEC-386 (review #420): tiêu đề issue thường bị chặn theo luật PR — lý do nói rõ vì sao và cách viết thay
+        inp = {"method": "update", "issue_number": 7, "title": "Crash on start when config missing"}
+        why = self.g.mcp_decision("mcp__github__issue_write", inp, d)[1]
+        self.assertIn("issue có thể là PR", why)
+        self.assertIn("issue thường:", why)
+        why = self.g.mcp_decision("mcp__github__update_pull_request", {"pullNumber": 7, "title": "Sửa lỗi"}, d)[1]
+        self.assertNotIn("issue có thể là PR", why)
         for tool, inp in (
             ("mcp__github__issue_write", {"method": "create", "title": "Bug: lỗi đăng nhập", "body": "x"}),
             ("mcp__github__issue_write", {"method": "update", "issue_number": 7, "title": "fix: a", "body": "x"}),

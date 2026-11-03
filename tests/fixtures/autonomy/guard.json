@@ -11240,7 +11240,8 @@
    },
    "expect": {
     "allowed": true
-   }
+   },
+   "note": "D-324 (AUD-SEC-400 phương án B): heredoc có nháy ghi ra tệp rồi chạy — guard quét thân như `bash <<'EOF'`, thân vô hại nên cho qua"
   },
   {
    "id": "guard-control-d270-ar-sub",
@@ -19572,6 +19573,125 @@
    "code": "BUDGET"
   },
   "note": "review #423: chỉ số `${#a[k]}`/khởi tạo mảng có nháy đánh giá đệ quy `k` (IFS=4) — đã chạy bash 5.2.21"
+ },
+ {
+  "id": "guard-strict-399-read-a",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-399"
+  ],
+  "input": {
+   "command": "read -ra a <<< \"push --force origin main\"; git \"${a[@]}\""
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "sổ AUD-SEC-399: mảng dựng từ dữ liệu làm đối số của git — bash 5.2 chạy push --force (stub)"
+ },
+ {
+  "id": "guard-strict-399-mapfile",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-399"
+  ],
+  "input": {
+   "command": "mapfile -t a < <(printf '%s\\n' push --force origin main); git \"${a[@]}\""
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "sổ AUD-SEC-399: mảng dựng từ dữ liệu làm đối số của git — bash 5.2 chạy push --force (stub)"
+ },
+ {
+  "id": "guard-strict-400-printf",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-400"
+  ],
+  "input": {
+   "command": "printf 'git push --force origin main\\n' > s.sh; bash s.sh"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "sổ AUD-SEC-400: tệp do chính lệnh ghi rồi chạy — guard không đọc tệp lúc chạy"
+ },
+ {
+  "id": "guard-strict-400-heredoc",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-400"
+  ],
+  "input": {
+   "command": "cat <<EOF > s.sh\ngit \\$(echo push) --force origin main\nEOF\nbash s.sh"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "sổ AUD-SEC-400: tệp do chính lệnh ghi rồi chạy — guard không đọc tệp lúc chạy"
+ },
+ {
+  "id": "guard-strict-402-fd",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-402"
+  ],
+  "input": {
+   "command": "bash /dev/fd/3 3<<E\ngit \\$(echo push) --force origin main\nE"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "sổ AUD-SEC-402: shell đọc script từ đường dẫn fd — thân heredoc chạy như script"
+ },
+ {
+  "id": "guard-strict-400-hd-rm",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-400"
+  ],
+  "input": {
+   "command": "cat > x.sh <<'EOF'\nrm -rf ~\nEOF\nbash x.sh"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "RULE_DENY"
+  },
+  "note": "D-324 (AUD-SEC-400 phương án B): heredoc có nháy ghi ra tệp rồi chạy — thân quét như dạng stdin"
+ },
+ {
+  "id": "guard-strict-400-hd-print",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-400"
+  ],
+  "input": {
+   "command": "cat > x.py <<'EOF'\nprint(1)\nEOF\npython3 x.py"
+  },
+  "expect": {
+   "allowed": true
+  },
+  "note": "D-324 (AUD-SEC-400 phương án B): heredoc có nháy ghi ra tệp rồi chạy — thân quét như dạng stdin"
+ },
+ {
+  "id": "guard-strict-400-hd-push",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-400"
+  ],
+  "input": {
+   "command": "cat > x.py <<'EOF'\nimport os; os.system(\"git push --force origin main\")\nEOF\npython3 x.py"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "RULE_DENY"
+  },
+  "note": "D-324 (AUD-SEC-400 phương án B): heredoc có nháy ghi ra tệp rồi chạy — thân quét như dạng stdin"
  }
  ]
 }
