@@ -105,6 +105,9 @@ mà luật nguy hiểm đã chặn — `LOOP-STOP-025`).
 |---|---|---|
 | `"${f#"$ROOT"/}"` — nháy lồng trong `${…}` (AUD-SEC-246; ShellCheck SC2295 khuyên dạng này) | `"${f:${#ROOT}+1}"` | Chỉ tương đương khi `$f` chắc bắt đầu bằng `$ROOT/` (vd. `for f in "$ROOT"/*`); không chắc thì bọc `case $f in "$ROOT"/*) … esac` |
 | `${DIR:-'.'}` — nháy lồng trong `${…}` (AUD-SEC-246) | `${DIR:-.}` hoặc `"${DIR:-.}"` | Giá trị mặc định là chữ thường thì không cần nháy |
+| `read -ra a …; git "${a[@]}"` — mảng từ dữ liệu làm đối số (AUD-SEC-399) | Đối số nguyên văn, hay `for x in "${a[@]}"; do git add -- "$x"; done` | Mảng chữ nguyên văn `a=(x 'y z')` vẫn chạy |
+| `printf … > s.sh; bash s.sh` — ghi rồi chạy trong cùng lệnh (AUD-SEC-400); `bash /dev/fd/3 3<<E` (AUD-SEC-402) | Ghi script bằng công cụ Write rồi chạy ở lệnh Bash riêng; heredoc vào stdin `bash <<'EOF'` | Guard không đọc tệp lúc chạy — lệnh riêng để người/review thấy nội dung |
+| `issue_write` sửa `title` không theo `<type>(scope): mô tả` (deny `LOOP-HARNESS-029`, AUD-SEC-386) | Tiêu đề dạng `fix: …`/`docs: …` (hợp lệ cả cho issue), hay chỉ sửa thân/nhãn | Số issue có thể là PR — guard không tra nên áp luật tiêu đề PR (chiều chặt) |
 
 ### Thang tin cậy T0–T4 cho mỗi việc giao (stored 23 §4.5)
 
