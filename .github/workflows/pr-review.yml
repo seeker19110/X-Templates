@@ -96,6 +96,7 @@ jobs:
             --json-schema '{"type":"object","additionalProperties":false,"required":["verdict","findings"],"properties":{"verdict":{"enum":["clean","blocking"]},"findings":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["severity","where","repro"],"properties":{"severity":{"enum":["red","orange","green"]},"where":{"type":"string"},"repro":{"type":"string"}}}},"suspicions":{"type":"array","items":{"type":"string"}}}}'
 
       - name: Ghi kết quả bằng danh tính reviewer (xt.py pr reviewed)
+        id: record
         env:
           GH_TOKEN: ${{ secrets.XT_REVIEWER_TOKEN }}
           GH_REPO: ${{ github.repository }}
@@ -121,6 +122,12 @@ jobs:
           # Họ reviewer = model THẬT đã chạy (`--reviewer-model`), họ tác giả đọc từ xt.yaml nhánh đích
           # (`author_model_family`); reviewer không cao hơn → xt.py từ chối (D-161) — không tin `reviewer_model_family` khai trong cấu hình.
           # PR của bot tin cậy (Dependabot): tác giả là bot, không có họ model — xt.py kiểm login thật trên GitHub (AUD-XFEAT-039).
+          # Chỉ gắn cờ bot khi MỌI commit của PR là của bot (AUD-HAR-213): PR Dependabot có commit agent/người, hoặc đọc
+          # commit lỗi → không cờ, họ tác giả theo xt.yaml như trước #413 (bước ghi không đỏ, không mất kết luận review);
+          # có cờ thì xt.py vẫn kiểm chặt tác giả/committer/chữ ký — không nới cổng.
           author=()
-          if [ "$PR_AUTHOR" = "dependabot[bot]" ]; then author=(--author-model "$PR_AUTHOR"); fi
+          if [ "$PR_AUTHOR" = "dependabot[bot]" ]; then
+            logins=$(gh api --paginate "repos/$GH_REPO/pulls/$PR/commits" --jq '.[] | .author.login // "?"' || echo "?")
+            if [ -n "$logins" ] && ! grep -qvxF -- "$PR_AUTHOR" <<<"$logins"; then author=(--author-model "$PR_AUTHOR"); fi
+          fi
           python3 scripts/xt.py pr reviewed --pr "$PR" --head "$HEAD_SHA" --reviewer-model "$REVIEW_MODEL" "${author[@]}" "$flag"

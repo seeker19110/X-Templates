@@ -126,6 +126,17 @@
 | typing-extensions | 4.16.0 | PSF-2.0 | như trên (bắc cầu của pyee) |
 | axe-core (vendored, `tests_e2e/vendor/axe/`) | 4.14.0 | MPL-2.0 (chấp nhận — xem trên) | chỉ test E2E, không phân phối kèm |
 
+## Binary CI: bun (test plugin OpenCode)
+
+| Gói | Bản | License | Nguồn và hash | Dùng ở |
+|---|---|---|---|---|
+| `@oven/bun-linux-x64` | 1.4.4 | MIT (`license` của registry npm, đọc 2026-11-03) | tarball <https://registry.npmjs.org/@oven/bun-linux-x64/-/bun-linux-x64-1.4.4.tgz>; `BUN_SHA256` ghim trong `.github/workflows/ci.yml` (sha256 tính trên tarball, khớp `dist.integrity` sha512 của registry) | job CI chạy `tests.test_adapters` (plugin OpenCode, AUD-TEST-056); không phân phối kèm |
+
+Không bot nào nâng bản ghim này (Dependabot không đọc biến `env` của workflow) — nâng tay (AUD-DEP-011): chọn bản đã qua
+cooldown `BASE-DEP-019`; `npm view @oven/bun-linux-x64@<X> license dist.tarball dist.integrity`; tải tarball, `sha256sum`,
+đối chiếu sha512 với `dist.integrity`; sửa `BUN_VERSION` + `BUN_SHA256` trong `ci.yml` (cùng commit, nêu lý do chạm CI). Cache
+tarball bằng `actions/cache` theo `BUN_SHA256`: đang cân nhắc (tải 4 lần/lượt CI), chưa làm.
+
 ## Cách tạo lại
 
 ```bash

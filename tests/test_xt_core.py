@@ -1718,6 +1718,27 @@ class LoopRecordBranchesTest(TmpMixin, RealAutopilotUntouchedMixin, unittest.Tes
             with redirect_stderr(err):
                 xt.main(["loop", "record", "--task", "T-002", "--executor", "opus", "--", "true"])
 
+    def test_deep_parallel_task_red_twice_not_escalated(self):
+        """AUD-TEST-041: task `(topo: parallel; exec: deep)` đã ở tầng sâu — đỏ 2 lần (lần chạy không phải của
+        `executor-deep`) KHÔNG báo "chuyển cấp" giả; `default_failures` vẫn đếm (khoá vế `not deep_already`)."""
+        write(
+            self.base / "docs" / "autopilot" / "PLAN.md",
+            """
+            ### Lát 1 — nền
+            - [ ] `T-001` việc (topo: parallel; exec: deep) — Gate: `true`
+            """,
+        )
+        st = xt.read_state(self.base)
+        st["started"] = "2026-10-19T00:00:00+00:00"
+        xt.write_state(st, self.base)
+        with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+            xt.loop_record("T-001", ["sh -c 'echo ea; exit 1'"], self.base, None)
+            xt.loop_record("T-001", ["sh -c 'echo eb; exit 1'"], self.base, None)  # chữ ký khác → chưa blocked
+        v = xt.loop_verdict(self.base)
+        self.assertEqual((v["executor"], v["escalated"], v["default_failures"]), ("executor-deep", False, 2))
+        self.assertIn("tầng sâu theo PLAN", v["reason"])
+        self.assertNotIn("chuyển cấp", v["reason"])
+
     def test_record_warns_executor_mismatch(self):
         """AUD-HAR-174: `loop record --executor` khác lựa chọn harness (task `self` → không agent nào; task `parallel` →
         `executor`) → cảnh báo stderr nhưng vẫn ghi như khai (LOOP-ORCH-020); khai đúng, không khai, task ngoài PLAN → im."""

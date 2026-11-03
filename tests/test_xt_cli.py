@@ -997,6 +997,22 @@ class RepoBlueprintKiemTest(TmpRepoCase):
         self.git("update-ref", "refs/remotes/origin/main", "HEAD")
         self.commit_as("t", "gộp job (#5)")  # sai dạng Conventional Commits
         self.assertEqual(self.kiem("BASE-REPO-005"), ["BASE-REPO-005"])
+        self.commit_as("t", "docs: đúng dạng (#6)")  # AUD-TEST-058: commit xấu ở GIỮA dải vẫn đỏ (duyệt mọi commit)
+        self.assertEqual(self.kiem("BASE-REPO-005"), ["BASE-REPO-005"])
+
+    def test_base_repo_005_subject_like_flag_is_red(self):
+        """AUD-CI-029: subject đúng bằng `--help`/`-h` không được thành cờ của `pr title-check` (argparse in help, exit 0 —
+        xanh giả); Kiểm gọi `pr title-check -- "$s"`."""
+        self.link_scripts()
+        self.commit_as("t", "chore: gốc")
+        self.git("tag", "v3.20.0")
+        for subject in ("--help (#2)", "-h (#2)"):
+            with self.subTest(subject=subject):
+                self.git("reset", "-q", "--hard", "v3.20.0")
+                self.commit_as("t", "feat(xt): thêm lệnh (#1)")
+                self.assertEqual(self.kiem("BASE-REPO-005"), [])
+                self.commit_as("t", subject)
+                self.assertEqual(self.kiem("BASE-REPO-005"), ["BASE-REPO-005"])
 
     def test_base_repo_005_has_no_sha_exemption_list(self):
         line = next(
@@ -1021,6 +1037,13 @@ class RepoBlueprintKiemTest(TmpRepoCase):
         self.git("add", "Dockerfile")
         for _ in range(10):
             self.assertEqual(self.kiem("BASE-SEC-006"), ["BASE-SEC-006"])
+
+    def test_base_sec_006_red_when_ls_files_fails(self):
+        """AUD-TEST-058: `git ls-files` lỗi (index hỏng) → Kiểm `BASE-SEC-006` đỏ, không xanh vì danh sách rỗng."""
+        self.link_scripts()
+        self.assertEqual(self.kiem("BASE-SEC-006"), [])
+        (self.repo / ".git" / "index").write_bytes(b"rac")
+        self.assertEqual(self.kiem("BASE-SEC-006"), ["BASE-SEC-006"])
 
     def test_prf_cli_004_escape_red_under_pipefail(self):
         """Cùng lớp AUD-CI-026 ở PRF-CLI-004: `! python3 … --help | grep -q $'\\x1b'` — grep thoát ở dòng đầu, python nhận
@@ -2859,7 +2882,7 @@ class ReleaseCheckTest(TmpRepoCase):
         self.assertIn("exit 3: khong-ve", r["rollback"]["evidence"])
         self.assertIn("rollback", d["fails"])  # AUD-HAR-190: đỏ của hàng mới vào `fails`
         self.assertNotIn("acceptance", d["fails"])
-        order = list(xt.RELEASE_ROWS)
+        order = [k for k, _ in xt.RELEASE_RUN_KEYS]  # AUD-TEST-043: thứ tự CHẠY, không phải thứ tự hiển thị
         self.assertLess(order.index("acceptance"), order.index("rollback"))  # AUD-HAR-189: nghiệm thu trước diễn tập
         self.assertIn("exit 4: lo-hong", r["attack"]["evidence"])
         self.assertIn("attack", d["fails"])

@@ -1,7 +1,7 @@
 ---
 title: Kiến trúc "Adaptive Agent" cho vòng lặp phát triển — đối chiếu đề xuất của chủ dự án với khung (2026-11-01)
 kind: research
-updated: 2026-11-01
+updated: 2026-11-03
 ---
 
 # Adaptive Agent: một agent chính, subagent theo loại việc, KPI đo thật — nghiên cứu 2026-11-01
@@ -22,7 +22,7 @@ updated: 2026-11-01
   theo "độ phức tạp × độ khép kín" + 3 lý do context, chưa có bảng **loại việc → cấu hình** (topology) máy đọc được.
 - Số đo của `LOOP-ORCH-020` **chưa bao giờ có** (PROGRESS 2026-10-25 → 2026-11-01: "chờ ≥ 10 task/nhóm"; `runs.jsonl` của
   clone = 0 dòng) — điều kiện đổi mặc định đặt ra 8 ngày trước không tích luỹ được vì không dự án nào chạy autopilot đủ dài.
-  Trong khi đó phiên 2026-10-31/11-01 (9 PR merge, 1 PR đóng) **thực tế** đã vận hành đúng mô hình đề xuất: phiên chính tự
+  Trong khi đó phiên 2026-10-31/11-01 (9 PR merge, 2 PR đóng — cửa sổ đếm và danh sách #N ở §Nguồn) **thực tế** đã vận hành đúng mô hình đề xuất: phiên chính tự
   viết mọi diff (guard, title 100, CI), chỉ giao `reviewer`/`researcher`/audit read-only, song song ≤ 3 — không giao `executor`
   lần nào. Chủ dự án có quyền cuối (AGENTS.md §1): đổi mặc định theo quyết định có ghi (D-NNN, ADR) là hợp lệ; điều kiện đo
   của `LOOP-ORCH-020` chuyển thành điều kiện cho **lần đổi kế tiếp** (tăng số agent) — đúng câu 5 của đề xuất.
@@ -108,4 +108,17 @@ Chưa xác minh: nội dung đổi của ba bài Anthropic có `modified` 2026-1
 - `research/2026-10-24-single-agent-loop.md`, ADR-0045, `LOOP-ORCH-017/019/020`, `LOOP-DESIGN-024` — đọc 2026-11-01.
 - `scripts/xt.py`: `loop_stats`/`_delegation_stats`, `pr_stats`, `plan_waves(max_parallel=5)`, `review_window`/`_rethink_pending` — đọc 2026-11-01.
 - Số đo phiên 2026-10-31/11-01: PR #363, #365–#368, #371, #375–#377 merge (9); #372 đóng sau 7 lượt review đăng dấu (REST, 2026-11-01; D-284…D-286, D-288…D-291 trên nhánh `seeker/wizardly-tesla-amsxmp`, không trong sổ `main`).
-- Nguồn sống §3 (đọc 2026-11-01): claude.com/blog *fold subagents* (2026-10-22); anthropic.com/engineering *harness-design-long-running-apps* (2026-03-24), *effective-harnesses-for-long-running-agents* (2025-11-26), *multi-agent-research-system* (2025-06-13); claude.com *how-to-manage-costs-and-demonstrate-roi-for-claude-code-on-google-cloud* (2026-10-27); code.claude.com/docs *sub-agents*, *env-vars*, *agent-teams*, *costs*, *advisor*; learn.chatgpt.com/docs *agent-configuration/subagents*; dora.dev/guides/dora-metrics (2026-01-05), DORA 2025 (2025-09-23); metr.org *2026-02-24-uplift-update*; arXiv 2608.16801; `seeker19110/stored` `7b63146` mục 01/03/23.
+  **Cửa sổ đếm (đính chính 2026-11-03, AUD-DOC-140):** PR có `merged_at`/`closed_at` trong [2026-10-31T12:00Z, 2026-11-01T03:23Z) — sau #362, trước khi mở #378 của chính note này. REST `gh api 'repos/{owner}/{repo}/pulls?state=all&per_page=60'` (đọc 2026-11-03) trong cửa sổ: **12 merge** (#363–#369, #371, #373, #375–#377) và **2 đóng không merge** (#372, #374 — cả hai ở nhánh `seeker/wizardly-tesla-amsxmp`). Tập "của phiên" (9 merge) là do phiên tự khai, bỏ #364/#373 (phiên khác) và #369 (Dependabot); "1 PR đóng" ở bản đầu sót #374. ADR-0061:23 giữ số cũ (ADR không sửa).
+- Nguồn sống §3 (đọc 2026-11-01; URL thêm và kiểm còn sống — HTTP 200, tiêu đề khớp — ngày 2026-11-03, AUD-DOC-147):
+  1. <https://claude.com/blog/building-agents-when-to-fold-subagents-into-your-main-agent-loop> (2026-10-22)
+  2. <https://www.anthropic.com/engineering/harness-design-long-running-apps> (2026-03-24)
+  3. <https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents> (2025-11-26)
+  4. <https://www.anthropic.com/engineering/multi-agent-research-system> (2025-06-13)
+  5. <https://claude.com/blog/how-to-manage-costs-and-demonstrate-roi-for-claude-code-on-google-cloud> (2026-10-27)
+  6. <https://code.claude.com/docs/en/sub-agents>, <https://code.claude.com/docs/en/env-vars>, <https://code.claude.com/docs/en/costs>, <https://code.claude.com/docs/en/advisor>
+  7. <https://code.claude.com/docs/en/agent-teams>
+  8. <https://learn.chatgpt.com/docs/agent-configuration/subagents>
+  9. <https://dora.dev/guides/dora-metrics/> (2026-01-05), DORA 2025 <https://dora.dev/research/2025/dora-report/> (2025-09-23)
+  10. <https://metr.org/blog/2026-02-24-uplift-update/>
+  11. <https://arxiv.org/abs/2608.16801>
+  12. `seeker19110/stored@7b63146` mục 01/03/23 (repo nguồn, ghim SHA).

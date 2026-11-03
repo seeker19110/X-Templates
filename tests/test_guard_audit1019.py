@@ -2718,6 +2718,9 @@ class AuditPhase1101GuardTest(unittest.TestCase):
 
         cpu_budget.assert_not_quadratic(self, work, 16, ratio=40)
         self.assertEqual(final("perl -e 'system 1;" + "%(" * 400 + "'"), "deny")
+        # AUD-TEST-045: một chuỗi 6 000 ký tự (dưới QUOTE_JOIN_MAX chuỗi) nằm giữa trần 4096 và trần cũ 16384 — hoàn tác
+        # AUD-PERF-007 → cho chạy → đỏ (n lần `%(` không phân biệt được: > QUOTE_JOIN_MAX chuỗi đã chặn trước)
+        self.assertEqual(final("perl -e 'system 1; print \"" + "a" * 6000 + "\"'"), "deny")
 
 
 class AuditRescan1101GuardTest(unittest.TestCase):

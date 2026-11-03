@@ -136,6 +136,16 @@ Chưa xác minh: shell tool tôn trọng `SHELL`/`PATH`; hook Cursor trong CLI; 
 - **Ghi chú 2026-11-02** (AUD-DOC-183, D-315): D-303 ghi `LOOP-HARNESS-022` → MUST@M; mức đúng là **MUST@L** như ADR này và
   `harness-files.md` — MUST@M vượt trần 4 MUST/module ở M (ADR-0004). D-315 đính chính, không đổi quyết định.
 - **Ghi chú 2026-11-02** (review #411, AUD-DOC-211): "đã làm cả năm lát" ở §Trạng thái triển khai là phần mã chính của mỗi lát. Lát B kiểm theo D-310 — test bảng `tests/test_adapters.py` (≥ 10 ca/host qua hàm thật, plugin OpenCode chạy bằng bun) thay `autonomy-bench` ≥ 10 ca/host; **chưa có**: fixture payload thật `tests/fixtures/harness/<tool>/` và cầu nối file hướng dẫn `GEMINI.md`, `.cursor/rules/xt.mdc`, `.github/copilot-instructions.md` (`XC-DOCAI-002`) — ghi ở PLAN `T-3642`…`T-3644`.
+- **Ghi chú 2026-11-03** (AUD-DOC-187): "991 ca" ở Lát A và §Ưu/nhược là số lúc viết (`1e3c060`); khi chấp nhận
+  (`9069947`) corpus đã 1015 ca, nay 1069 — tiêu chí là **toàn bộ** `tests/fixtures/autonomy/guard.json` không đổi quyết định.
+- **Ghi chú 2026-11-03** (AUD-DOC-189): bản nháp khác bản chấp nhận không chỉ ở trạng thái và ba lựa chọn — còn đổi nguồn
+  adapter lát B: từ "trong `.xtemplates/harness/<tool>/`" sang nguồn ở `framework/templates/harness/<tool>/`, `install.py`
+  chép thành `.xtemplates/harness/<tool>/` ở dự án đích (`git diff 0538cc8 4bdd134 -- docs/adr/0064-multi-provider-harness.md`).
+- **Ghi chú 2026-11-03** (AUD-DOC-190): "vòng ngoài là lớp chung" (lát D) không thay ADR-0009 — một phiên + Stop hook chặn
+  vẫn là đường mặc định cho host có Stop hook chặn; `xt.py loop run --agent` là vòng ngoài cho host không có (Gemini, Grok,
+  OpenCode, Cursor `-p` — `framework/11-autonomous-loop/harness-files.md` §Agent khác Claude Code).
+- **Ghi chú 2026-11-03** (AUD-DOC-191): mốc "Copilot GA 02/2026, Grok beta 05/2026" ở yếu tố 6 không có nguồn ở §3 của
+  research — đã gắn "(chưa xác minh)" và đưa vào §6 của `research/2026-11-02-multi-provider-harness.md`.
 
 ## Ưu / nhược từng phương án
 
