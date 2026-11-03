@@ -1803,7 +1803,10 @@ FD_SCRIPT_WHY = (
 
 
 def _script_run_why(cmd: str) -> str:
-    """Lệnh đơn này ghi tệp mà lệnh đơn KHÁC chạy (`python3 x.py > "$LOG"`: chuyển hướng mở trước khi chạy — không tính)."""
+    """Lệnh đơn này ghi tệp mà lệnh đơn KHÁC chạy (`python3 x.py > "$LOG"`: chuyển hướng mở trước khi chạy — không tính).
+    Dạng `_heredoc_run` (D-324) không chặn: thân được quét như script của trình chạy (`_nested_sources`)."""
+    if _heredoc_run(cmd) is not None:
+        return ""
     argvs = _nested_argvs(cmd, 0)
     writes = _file_index([[w for w in write_targets(normalize(a), a) if not w.startswith("/dev/")] for a in argvs])
     runs = _file_index([_run_files(a) for a in argvs] if writes else [])
@@ -1829,6 +1832,86 @@ def _file_index(files: List[List[str]]) -> Dict[str, Set[int]]:
 
 def _file_name(path: str) -> str:
     return posixpath.basename(posixpath.normpath(path))
+
+
+# D-324 (AUD-SEC-400 phương án B): nội dung tệp biết chắc khi `cat > F`/`tee F` chép một heredoc CÓ NHÁY (không mở rộng)
+# — guard quét thân như script của trình chạy (`bash <<'D'`, `python3 - <<'D'`) thay vì chặn. Chỉ miễn theo giá trị khi
+# lệnh có đúng một heredoc, không script lồng, writer là nơi duy nhất ghi (`>`/`>|`, không `>>`/`tee -a`/`<<-`), đúng
+# một lệnh đơn chạy F bằng shell/`source`/trình thông dịch SAU writer (nối bằng `;`/`&&`/`||`/xuống dòng — không ống),
+# lệnh còn lại trong `HEREDOC_RUN_SAFE`, không lệnh nào khác ghi tệp, tên F không nhắc ở chỗ khác (cả trong thân).
+HEREDOC_RUN_SAFE = frozenset(
+    "cd chmod mkdir echo printf true false : ls cat head tail grep wc sort uniq diff pwd".split()
+)
+HEREDOC_RUN_SEP_RE = re.compile(r"(?:&&|\|\||[;\n])+")
+
+
+def _heredoc_run(cmd: str) -> Optional[str]:
+    """Script tương đương để quét (`<trình> <<'D'` ↵ thân ↵ `D`) khi lệnh là dạng ghi heredoc có nháy rồi chạy; None nếu
+    không đúng dạng (khi đó `_script_run_why` chặn như cũ)."""
+    raw = _raw_tokens(cmd) if "<<" in cmd else None
+    heres = _heredocs(join_continuations(cmd)) if raw is not None else []
+    if raw is None or len(heres) != 1 or len(_nested_argvs(cmd, 0)) != len(split_commands(raw)):
+        return None
+    cmds, seps = _sep_commands(raw)
+    argvs = [[_dequote(t) for t in c] for c in cmds]
+    writers = [k for k, a in enumerate(argvs) if "<<" in a]
+    name = _heredoc_writer(argvs[writers[0]], heres[0][1]) if len(writers) == 1 else ""
+    j = _heredoc_runner(argvs, writers, name) if name else -1
+    if j < 0 or not all(HEREDOC_RUN_SEP_RE.fullmatch(s) for s in seps[writers[0] + 1 : j + 1]):
+        return None
+    base = _file_name(
+        name
+    )  # tên nhắc ở chỗ khác (thân heredoc, lệnh khác) — kể cả dạng đường dẫn khác — thì không miễn
+    mentions = sum(t.count(base) for k, a in enumerate(argvs) if k in (writers[0], j) or a[:1] == ["chmod"] for t in a)
+    return None if cmd.count(base) > mentions else _heredoc_script(_interp_argv(argvs[j])[0], heres[0][2])
+
+
+def _sep_commands(raw: List[str]) -> Tuple[List[List[str]], List[str]]:
+    """Lệnh đơn như `split_commands` kèm dấu nối đứng trước mỗi lệnh (gộp các dấu liền nhau)."""
+    cmds: List[List[str]] = []
+    seps: List[str] = []
+    cur: List[str] = []
+    sep = ""
+    for t in raw + [";"]:
+        if not (_is_punct(t) and not _is_redirect(t)):
+            cur.append(t)
+        elif cur:
+            cmds, seps, cur, sep = cmds + [cur], seps + [sep], [], t
+        else:
+            sep += t
+    return cmds, seps
+
+
+def _heredoc_writer(a: List[str], m: "re.Match[str]") -> str:
+    """Tệp F mà lệnh đơn `a` (`cat > F <<'D'`, `tee F <<'D'`) ghi từ heredoc có nháy; rỗng nếu khác dạng."""
+    ops = [t for t in a if _is_redirect(t)]
+    outs = [a[k + 1] for k, t in enumerate(a[:-1]) if t in (">", ">|") and not a[k + 1].startswith("/dev/")]
+    words = _no_redirects(normalize(a))
+    files = outs if words == ["cat"] else words[1:] if words[:1] == ["tee"] and not outs else []
+    plain = _heredoc_word(m)[1] and not m.group(0).startswith("<<-") and set(ops) <= {"<<", ">", ">|"}
+    return files[0] if plain and len(files) == 1 and not SCRIPT_NAME_DYN_RE.search(files[0]) else ""
+
+
+def _heredoc_runner(argvs: List[List[str]], writers: List[int], name: str) -> int:
+    """Chỉ số lệnh đơn DUY NHẤT chạy `name` bằng shell/`source`/trình thông dịch, sau writer; -1 nếu không đúng dạng (có
+    lệnh khác ngoài `HEREDOC_RUN_SAFE`, lệnh khác ghi tệp, trình chạy ghi chính F)."""
+    rest = [k for k in range(len(argvs)) if k != writers[0]]
+    runs = [k for k in rest if (_interp_argv(argvs[k])[:1] or [""])[0] not in HEREDOC_RUN_SAFE]
+    k = runs[0] if len(runs) == 1 else -1
+    files = _script_file(_interp_argv(argvs[k])) if k > writers[0] else None
+    others = [w for i in rest if i != k for w in write_targets(normalize(argvs[i]), argvs[i]) if w[:5] != "/dev/"]
+    own = [w for w in write_targets(normalize(argvs[k]), argvs[k]) if _file_name(w) == _file_name(name)]
+    same = files is not None and [_file_name(f) for f in files] == [_file_name(name)]
+    return k if same and not others and not own else -1
+
+
+def _heredoc_script(head: str, body: List[str]) -> str:
+    """`<trình> <<'D'` ↵ thân ↵ `D` — dấu kết không trùng dòng nào của thân; trình thông dịch đọc stdin bằng `-`."""
+    end = "XTEOF"
+    while end in body:
+        end += "_"
+    head = "bash" if head in ("source", ".") else head
+    return f"{head}{' -' if INTERP_RE.fullmatch(head) else ''} <<'{end}'\n" + "\n".join(body) + f"\n{end}"
 
 
 def _nested_argvs(cmd: str, depth: int) -> List[List[str]]:
@@ -9535,6 +9618,7 @@ def _nested_sources(
     nested += [(s, here) for _, here, scripts, _ in jobs for s in scripts]
     opaque += [f"{why}: {' '.join(c)[:200]}" for c, _, _, why in jobs if why]
     nested += _ipython_nested(cmd, tokens, start) + alias_ns
+    nested += [(s, start) for s in [_heredoc_run(cmd)] if s]  # D-324: thân heredoc có nháy ghi ra tệp rồi chạy
     if budget is not None:
         _mark_loose(budget, cmd, built, loose, runner + nested)
     return built + runner, nested + loose, opaque + alias_asks

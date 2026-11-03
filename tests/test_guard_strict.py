@@ -1821,6 +1821,63 @@ class GuardStrictDebtTest(unittest.TestCase):
         )
         self.assert_budget(deny, allow, "AUD-SEC-400", guard._script_run_why)
 
+    def test_quoted_heredoc_file_scanned(self):
+        """D-324 (AUD-SEC-400 phương án B): `cat`/`tee` là nơi DUY NHẤT ghi tệp F bằng `>` từ heredoc CÓ NHÁY, rồi một lệnh
+        đơn duy nhất chạy F bằng shell/`source`/trình thông dịch → guard quét thân như `bash <<'EOF'`/`python3 - <<'EOF'`
+        (lý do của luật thật, không BUDGET). Base cho chạy cả `rm -rf ~` theo đường này."""
+        rm = decide("cat > x.sh <<'EOF'\nrm -rf ~\nEOF\nbash x.sh")
+        self.assertEqual(rm["decision"], "deny", rm)
+        self.assertNotEqual(rm.get("code"), "BUDGET", rm)
+        self.assertIn("rm -rf ~", rm["reason"])
+        push = 'import os; os.system("git push --force origin main")'
+        stdin = decide(f"python3 - <<'EOF'\n{push}\nEOF")
+        for cmd in (
+            f"cat > x.py <<'EOF'\n{push}\nEOF\npython3 x.py",
+            f"tee x.py <<'EOF' >/dev/null\n{push}\nEOF\npython3 x.py",
+        ):
+            with self.subTest(cmd=cmd):
+                d = decide(cmd)
+                self.assertEqual((d["decision"], d.get("code")), (stdin["decision"], stdin.get("code")), d)
+                self.assertIn("push --force", d["reason"])
+        allow = (
+            "cat > x.py <<'EOF'\nprint(1)\nEOF\npython3 x.py",
+            "cd d && cat <<'EOF' > x.py && python3 x.py 2>&1 | tail -3\nprint(1)\nEOF",
+            "tee x.sh <<\\EOF >/dev/null\necho hi\nEOF\nchmod +x x.sh; bash x.sh",
+            'cat > x.sh <<"EOF"\necho hi\nEOF\nbash -e x.sh',
+            "cat > /tmp/x.py <<'EOF'\nprint(1)\nEOF\npython3 /tmp/x.py > out.json",
+            "cat > x.sh <<'EOF'\necho hi\nEOF\n. ./x.sh",
+        )
+        deny = (
+            "cat > x.sh <<EOF\necho hi\nEOF\nbash x.sh",  # không nháy: thân mở rộng lúc ghi
+            "cat > x.sh <<-'EOF'\n\techo hi\n\tEOF\nbash x.sh",
+            "cat >> x.sh <<'EOF'\necho hi\nEOF\nbash x.sh",  # nối vào nội dung cũ không biết
+            "tee -a x.sh <<'EOF'\necho hi\nEOF\nbash x.sh",
+            "cat > x.sh <<'EOF'\necho hi\nEOF\nsed -i s/hi/x/ x.sh; bash x.sh",
+            "cat > x.sh <<'EOF'\necho hi\nEOF\ncp y.sh x.sh; bash x.sh",
+            "cat > x.sh <<'EOF'\necho hi\nEOF\nbash x.sh; bash x.sh",
+            "cat > x.sh <<'EOF'\necho hi\nEOF\nchmod +x x.sh; ./x.sh",
+            "cat > x.sh <<'EOF'\necho hi\nEOF\nsh < x.sh",
+            "cat > x.sh <<'EOF'\necho hi\nEOF\nmake; bash x.sh",
+            "cat > x.sh <<'EOF'\necho hi\nEOF\nx=$(bash x.sh)",
+            "cat > x.sh <<'EOF' | bash x.sh\necho hi\nEOF",
+            "bash x.sh; cat > x.sh <<'EOF'\necho hi\nEOF",
+            "cat > x.py <<'EOF'\nimport h\nEOF\necho 'import os' > h.py; python3 x.py",
+            "cat > x.py <<'EOF'\nprint(1)\nEOF\npython3 - <<'PY'\nopen('x.py', 'w').write('x')\nPY\npython3 x.py",
+            "cat a.sh > x.sh <<'EOF'\necho hi\nEOF\nbash x.sh",
+            "cat > x.sh <<'EOF'\necho hi\nEOF\ncat > y.sh <<'EOF'\necho y\nEOF\nbash x.sh",
+        )
+        self.assert_budget(deny, allow, "AUD-SEC-400", guard._script_run_why)
+        script = "XTEOF\nXTEOF_"
+        self.assertEqual(  # dấu kết không trùng dòng nào của thân; `source`/`.` quét như shell
+            guard._heredoc_run(f"cat > x.sh <<'EOF'\n{script}\nEOF\nsource x.sh"),
+            f"bash <<'XTEOF__'\n{script}\nXTEOF__",
+        )
+        self.assertEqual(
+            guard._heredoc_run("cat > x.py <<'EOF'\nprint(1)\nEOF\npython3 -u x.py"),
+            "python3 - <<'XTEOF'\nprint(1)\nXTEOF",
+        )
+        self.assertIsNone(guard._heredoc_run("bash x.sh"))
+
     def test_fd_script_heredoc(self):
         """AUD-SEC-402 (review #423): shell/`source` đọc script từ ĐƯỜNG DẪN fd (`/dev/fd/N`, `/proc/self/fd/N`) — thân
         heredoc/here-string gắn fd đó chạy như script mà guard không quét (base cho qua cả heredoc có nháy). Chỉ stdin

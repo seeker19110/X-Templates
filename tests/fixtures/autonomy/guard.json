@@ -11228,7 +11228,7 @@
   },
   {
    "id": "guard-control-d270-hd-script",
-   "origin": "adversarial-author",
+   "origin": "control",
    "refs": [],
    "input": {
     "command": "cat <<'EOF' > s.sh\nfor ((i=0; i<3; i++)); do\n  echo $((i << 1))\ndone\nEOF\nbash s.sh",
@@ -11239,10 +11239,9 @@
     }
    },
    "expect": {
-    "allowed": false,
-    "code": "BUDGET"
+    "allowed": true
    },
-   "note": "AUD-SEC-400: chặn có chủ ý — tệp do chính lệnh ghi rồi chạy, guard không đọc tệp lúc chạy (base cho chạy cả `rm -rf ~` theo đường này); viết lại: ghi script bằng công cụ Write rồi `bash s.sh` ở lệnh riêng"
+   "note": "D-324 (AUD-SEC-400 phương án B): heredoc có nháy ghi ra tệp rồi chạy — guard quét thân như `bash <<'EOF'`, thân vô hại nên cho qua"
   },
   {
    "id": "guard-control-d270-ar-sub",
@@ -19649,6 +19648,50 @@
    "code": "BUDGET"
   },
   "note": "sổ AUD-SEC-402: shell đọc script từ đường dẫn fd — thân heredoc chạy như script"
+ },
+ {
+  "id": "guard-strict-400-hd-rm",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-400"
+  ],
+  "input": {
+   "command": "cat > x.sh <<'EOF'\nrm -rf ~\nEOF\nbash x.sh"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "RULE_DENY"
+  },
+  "note": "D-324 (AUD-SEC-400 phương án B): heredoc có nháy ghi ra tệp rồi chạy — thân quét như dạng stdin"
+ },
+ {
+  "id": "guard-strict-400-hd-print",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-400"
+  ],
+  "input": {
+   "command": "cat > x.py <<'EOF'\nprint(1)\nEOF\npython3 x.py"
+  },
+  "expect": {
+   "allowed": true
+  },
+  "note": "D-324 (AUD-SEC-400 phương án B): heredoc có nháy ghi ra tệp rồi chạy — thân quét như dạng stdin"
+ },
+ {
+  "id": "guard-strict-400-hd-push",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-400"
+  ],
+  "input": {
+   "command": "cat > x.py <<'EOF'\nimport os; os.system(\"git push --force origin main\")\nEOF\npython3 x.py"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "RULE_DENY"
+  },
+  "note": "D-324 (AUD-SEC-400 phương án B): heredoc có nháy ghi ra tệp rồi chạy — thân quét như dạng stdin"
  }
  ]
 }
