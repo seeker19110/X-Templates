@@ -2968,12 +2968,13 @@ class GuardDebt431Test(unittest.TestCase):
         )
 
     def test_aud_sec_428_project_gitconfig_unittest_flags_prefix(self):
-        """AUD-SEC-428 🟢: (a) tệp `.gitconfig`/`git/config` TRONG cây dự án không là cấu hình toàn cục — trừ khi chính
-        lệnh trỏ `HOME`/`XDG_CONFIG_HOME` vào đó; (b) giá trị cờ của `unittest` không phải tên test; (c) `cargo bench`,
-        `$(prefix)/etc/gitconfig` (git-config(1) FILES)."""
-        self.assert_pass(("printf x > dotfiles/.gitconfig", "cp x.cfg tests/fixtures/git/config"))
+        """AUD-SEC-428 🟢: (b) giá trị cờ của `unittest` không phải tên test; (c) `cargo bench`, `$(prefix)/etc/gitconfig`
+        (git-config(1) FILES). (a) bị review #432 thu hồi: tệp `.gitconfig`/`git/config` TRONG cây dự án vẫn chặn như base
+        (`HOME=$PWD`, `~+`, symlink tới HOME biến chúng thành cấu hình toàn cục) — kỳ vọng đổi từ cho qua về chặn."""
         self.assert_hook_bypass(
             (
+                "printf x > dotfiles/.gitconfig",
+                "cp x.cfg tests/fixtures/git/config",
                 f"{self.G} > fh/.gitconfig; HOME=fh git diff",
                 f"mkdir -p fh; {self.G} > fh/.gitconfig; export HOME=fh; git diff",
                 f"{self.G} > xdg/git/config; XDG_CONFIG_HOME=xdg git diff",
@@ -2995,8 +2996,8 @@ class GuardDebt431Test(unittest.TestCase):
             "AUD-SEC-416",
             guard._implicit_load_why,
         )
-        self.assertFalse(guard._global_git_config(str(ROOT / "dotfiles/.gitconfig"), str(ROOT)))
-        self.assertTrue(guard._global_git_config("/root/.gitconfig", str(ROOT)))
+        self.assertTrue(guard._global_git_config(str(ROOT / "dotfiles/.gitconfig")))
+        self.assertTrue(guard._global_git_config("/root/.gitconfig"))
 
     def test_aud_sec_429_worktree_config_and_interp(self):
         """AUD-SEC-429 🔴 (có từ trước): `config.worktree` là cấu hình git của repo; trình thông dịch ghi gitconfig toàn
@@ -3039,6 +3040,59 @@ class GuardDebt431Test(unittest.TestCase):
                 d = guard.bash_decision(cmd, str(ROOT))
                 self.assertEqual(d["decision"], "ask", d)
                 self.assertIn("core.hooksPath", d["reason"])
+
+
+class GuardReview432Test(unittest.TestCase):
+    """Review #432 (lượt sửa duy nhất): 🔴1/🔴2 — miễn 428(a) (tệp cấu hình git TRONG cây dự án) mở lại đường tắt hook
+    (`cd sub && > .gitconfig && HOME=$PWD git diff`, `~+`, symlink tới HOME) → thu hồi, về hành vi base 928af2ce; 🔴3 —
+    miễn 426 chỉ đúng `/dev/null` (`/dev/fd/3` là tệp thật). Mọi ca đỏ ở 191f161c."""
+
+    E = "printf '[diff]\\n\\texternal = touch /tmp/pwn\\n'"
+    assert_hook_bypass = GuardDebt431Test.assert_hook_bypass
+
+    def test_r432_1_in_tree_gitconfig_bash(self):
+        """🔴1: base chặn thì head còn chặn — ghi `.gitconfig`/`git/config` trong cây dự án (Bash)."""
+        e = self.E
+        self.assert_hook_bypass(
+            (
+                f"cd sub && {e} > .gitconfig && HOME=$PWD git diff",
+                f"cd sub && {e} > .gitconfig && HOME=~+ git diff",
+                f'cd sub && {e} > .gitconfig && HOME="$(pwd)" git diff',
+                f"cd sub && {e} > .gitconfig; export HOME=$PWD; git diff",
+                f"pushd sub && {e} > .gitconfig && HOME=$PWD git diff",
+                f"cd sub && mkdir -p git && {e} > git/config && XDG_CONFIG_HOME=$PWD git diff",
+                "cd sub && printf '[diff \"t\"]\\n\\ttextconv = touch /tmp/pwn;\\n' > .gitconfig && HOME=$PWD git log -p -1",
+                "cd sub && printf '[core]\\n\\tfsmonitor = touch /tmp/pwn\\n' > .gitconfig && HOME=$PWD git status",
+                f"{e} > .gitconfig && env -C sub HOME=.. git diff",
+                "printf '[core]\\n\\thooksPath = /tmp/h\\n' > .gitconfig",
+                f"{e} > dotfiles/.gitconfig && git diff",
+                "printf '[core]\\n\\thooksPath = /dev/null\\n' >> hm/.gitconfig",
+                "printf '[core]\\n\\thooksPath = /dev/null\\n' >> hm/.config/git/config",
+                "python3 -c \"open('dotfiles/.gitconfig','a').write('x')\"",
+            )
+        )
+        self.assertEqual(
+            decide(f"{e} > .gitconfig && HOME=`pwd` git diff")["decision"], "deny"
+        )  # backtick: BUDGET trước
+        with mock.patch.dict(os.environ, {"HOME": str(ROOT)}):  # gốc dự án = HOME
+            self.assert_hook_bypass(("printf '[core]\\n\\thooksPath = /dev/null\\n' >> .gitconfig",))
+
+    def test_r432_2_in_tree_gitconfig_edit(self):
+        """🔴2: Edit/Write `<root>/.gitconfig`, `git/config`, `.config/git/config`, `hm/.gitconfig` → deny như base."""
+        for rel in (".gitconfig", "git/config", ".config/git/config", "hm/.gitconfig", "dotfiles/.gitconfig"):
+            with self.subTest(rel=rel):
+                self.assertEqual(guard.edit_decision(str(ROOT / rel), str(ROOT))[0], "deny")
+
+    def test_r432_3_dev_null_only(self):
+        """🔴3: chỉ đúng `/dev/null` được miễn — `/dev/fd/3` mang nội dung thật."""
+        self.assert_hook_bypass((f"exec 3<>/tmp/gcf; {self.E} >/dev/fd/3; GIT_CONFIG_GLOBAL=/dev/fd/3 git diff",))
+        for cmd in (
+            "GIT_CONFIG_GLOBAL=/dev/null git status > /dev/null 2>&1",
+            "GIT_CONFIG_SYSTEM=/dev/null git status",
+            "env GIT_CONFIG_GLOBAL=/dev/null git status >/dev/null",
+        ):
+            with self.subTest(cmd=cmd):
+                self.assertEqual(decide(cmd)["decision"], "", decide(cmd))
 
 
 class LedgerMatchesGuardTest(unittest.TestCase):

@@ -351,49 +351,31 @@ GIT_HOOK_WHY = "ghi {} — git hook/cấu hình git không vào commit, sửa l�
 # `core.hooksPath`, `alias.x = !…`, `core.fsmonitor`) — git đọc `$HOME/.gitconfig`, `$XDG_CONFIG_HOME/git/config`
 # (mặc định `~/.config/git/config`), `/etc/gitconfig` (git-config(1) FILES). Ghi thô (chuyển hướng/trình ghi) vào MỌI tệp
 # tên `.gitconfig` hay đuôi `git/config` (cả HOME giả `HOME=/tmp/h` có `/tmp/h/.gitconfig`) → như ghi `.git/config`.
-# AUD-SEC-428: `$(prefix)/etc/gitconfig` (git-config(1) FILES: "System-wide configuration file" — `/usr/local/etc/`,
-# `/opt/homebrew/etc/`); chỉ tệp NGOÀI cây dự án (`dotfiles/.gitconfig`, `tests/fixtures/git/config` là dữ liệu dự án) —
-# trừ khi chính lệnh trỏ `HOME`/`XDG_CONFIG_HOME` vào thư mục chứa nó (`_git_config_env_asks`).
+# AUD-SEC-428: cả `$(prefix)/etc/gitconfig` (git-config(1) FILES: "System-wide configuration file" — `/usr/local/etc/`,
+# `/opt/homebrew/etc/`). Review #432: KHÔNG miễn tệp trong cây dự án — `HOME=$PWD`/`~+`/symlink tới HOME biến tệp dự án
+# thành cấu hình toàn cục mà guard không theo được hết.
 GLOBAL_GIT_CONFIG_RE = re.compile(r"(?:^|/)(?:\.gitconfig|git/config|etc/gitconfig)$")
-GIT_CONFIG_ENV_RE = re.compile(r"(?<![\w$])(GIT_CONFIG_(?:GLOBAL|SYSTEM)|HOME|XDG_CONFIG_HOME)=(\S+)")
-GIT_CONFIG_ENV_FILES = {"HOME": (".gitconfig", ".config/git/config"), "XDG_CONFIG_HOME": ("git/config",)}
+GIT_CONFIG_ENV_RE = re.compile(r"(?<![\w$])GIT_CONFIG_(?:GLOBAL|SYSTEM)=(\S+)")  # tệp cấu hình chỉ định bằng biến
+GIT_CONFIG_NULL = "/dev/null"  # AUD-SEC-426: chỉ đúng `/dev/null` (rỗng) — `/dev/fd/N` là tệp thật (review #432)
 
 
-def _global_git_config(path: str, root: str = "") -> bool:
-    """`path` là tệp cấu hình git toàn cục/hệ thống: tên khớp và (không biết gốc, hay `~`/`$…`, hay ngoài cây `root`)."""
-    if not path or not GLOBAL_GIT_CONFIG_RE.search(_norm_path(path)):
-        return False
-    if not root or path.startswith(("~", "$")):
-        return True
-    p, r = _norm_path(posixpath.join(root, path)), _norm_path(root).rstrip("/")
-    return not (p == r or p.startswith(r + "/"))
+def _global_git_config(path: str) -> bool:
+    return bool(path) and bool(GLOBAL_GIT_CONFIG_RE.search(_norm_path(path)))
 
 
 def _git_config_env_asks(tokens: List[str], commands: List[Tuple[List[str], Optional[str]]], root: str) -> List[str]:
-    """AUD-SEC-424: lệnh đặt `GIT_CONFIG_GLOBAL=F`/`GIT_CONFIG_SYSTEM=F` (hay `HOME=D`/`XDG_CONFIG_HOME=D` — tệp cấu hình
-    git dưới D, AUD-SEC-428) và ghi tệp đó trong cùng lệnh Bash — đích ghi xét cả dạng đã giải theo thư mục đang đứng
-    (`cd /tmp && printf x > gc`, review #431). Thiết bị (`/dev/null`) không phải tệp cấu hình (AUD-SEC-426)."""
-    files: Set[str] = set()
-    wild = False  # giá trị còn mở rộng (`HOME=$D`): mọi tệp tên cấu hình git đều có thể là nó
-    for t in tokens:
-        m = GIT_CONFIG_ENV_RE.match(t)
-        val = _resolve_target(_dequote(m[2]), root, root) if m else ""  # `$PWD/x` → gốc dự án (như `_where`)
-        if not m or not val or _dev_sink(val):
-            continue
-        wild = wild or "$" in val or "`" in val
-        subs = GIT_CONFIG_ENV_FILES.get(m[1], ("",))
-        for s in subs:
-            f = posixpath.join(val, s) if s else val
-            files |= {_norm_path(f), _norm_path(posixpath.join(root, f))}
+    """AUD-SEC-424: lệnh đặt `GIT_CONFIG_GLOBAL=F`/`GIT_CONFIG_SYSTEM=F` và ghi F trong cùng lệnh Bash — đích ghi xét cả
+    dạng đã giải theo thư mục đang đứng (`cd /tmp && printf x > gc`, review #431). `/dev/null` không là tệp cấu hình
+    (AUD-SEC-426) — chỉ đúng `/dev/null`, `/dev/fd/3` vẫn tính."""
+    files = {_norm_path(_dequote(m[1])) for t in tokens for m in [GIT_CONFIG_ENV_RE.match(t)] if m}
+    files.discard(GIT_CONFIG_NULL)
     if not files:
         return []
     hits = [
         w
         for argv, here in commands
         for w in write_targets(normalize(argv), argv)
-        if w
-        and not _dev_sink(w)
-        and ({_norm_path(x) for x in [w, *_where(w, root, here)]} & files or wild and _global_git_config(w))
+        if w and _norm_path(w) != GIT_CONFIG_NULL and {_norm_path(x) for x in [w, *_where(w, root, here)]} & files
     ]
     return [GIT_HOOK_WHY.format(w) for w in hits]
 
@@ -404,7 +386,7 @@ def edit_decision(path: str, root: str, tool_input: Optional[Dict[str, object]] 
     bypass = _bypass_edit(path, tool_input)
     if bypass:
         return "deny", f"Không ghi công tắc tắt hook (`{bypass}`) vào {rel} — hàng rào của khung (ADR-0018)."
-    if _match_any(rel, GIT_HOOK_PATTERNS) or _global_git_config(path, root):
+    if _match_any(rel, GIT_HOOK_PATTERNS) or _global_git_config(path):
         return "deny", GIT_HOOK_WHY.format(rel) + "."
     if kind == "capability":
         return "ask", "Sửa cấu hình " + CAPABILITY_WHY.format(rel) + "."
@@ -8166,15 +8148,9 @@ def _write_asks(n: List[str], argv: List[str], root: str, cwd: Optional[str] = N
     asks += [FENCE_WHY.format(t) for t in found if _is_fence(t, root)]
     # AUD-SEC-424: ghi THÔ `>> ~/.gitconfig` (`git config -f ~/.gitconfig <khoá>` do luật khoá của git config xét)
     # review #431: cả đích đã giải theo thư mục đang đứng (`cd /etc && >> gitconfig`), như vòng `.git/config` dưới đây
-    # AUD-SEC-428: chỉ tệp ngoài cây dự án; thư mục không biết (`cd "$X"`) → tên trơn vẫn tính (chiều chặt)
-    gcfg = [
-        x
-        for t in targets
-        if t != cfg
-        for x in ([(t, "")] if cwd is None else [(w, root) for w in _where(t, root, cwd)])
-        if _global_git_config(*x)
+    asks += [
+        GIT_HOOK_WHY.format(x) for t in targets if t != cfg for x in [t, *_where(t, root, cwd)] if _global_git_config(x)
     ]
-    asks += [GIT_HOOK_WHY.format(x[0]) for x in gcfg]
     for target in (x for t in targets for x in _where(t, root, cwd)):
         kind = _target_kind(target, root)
         if _is_fence(target, root):
@@ -11546,7 +11522,7 @@ def _interp_literal_ask(
         # đường đủ — AUD-SEC-340
         kind = "evidence" if _ledger_tail(lit, script) else kind
         fence, git_hook = _is_fence(target, root), _match_any(rel, GIT_HOOK_PATTERNS)
-        git_hook = git_hook or _global_git_config(target, root)  # AUD-SEC-429: `open('/root/.gitconfig','a')`
+        git_hook = git_hook or _global_git_config(target)  # AUD-SEC-429: `open('/root/.gitconfig','a')`
         if not (fence or git_hook or kind in ("secret", "evidence")):
             continue
         if kind == "secret" and not (fence or git_hook) and build_local_secret(target, root, here):
