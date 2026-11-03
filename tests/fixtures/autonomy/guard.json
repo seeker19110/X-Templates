@@ -20556,7 +20556,7 @@
    "AUD-SEC-414"
   ],
   "input": {
-   "command": "HOME=/tmp/h git config --global user.name x"
+   "command": "HOME=/tmp/h ls ~"
   },
   "expect": {
    "allowed": true
@@ -21264,6 +21264,154 @@
    "allowed": false
   },
   "note": "review #432: miễn mới mở lỗ cấu hình git (đã chạy git 2.43)"
+ },
+ {
+  "id": "d432-432-exec-a-attached",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-432"
+  ],
+  "input": {
+   "command": "echo x >> ~/.profile; exec -a-bash bash -c true"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "nợ review #432 (AUD-SEC-432/434/435, T-3666, D-336)"
+ },
+ {
+  "id": "d432-434-home-diff",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-434",
+   "AUD-SEC-433"
+  ],
+  "input": {
+   "command": "HOME=. git diff"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "nợ review #432 (AUD-SEC-432/434/435, T-3666, D-336)"
+ },
+ {
+  "id": "d432-434-cd-home-log",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-434"
+  ],
+  "input": {
+   "command": "cd sub && HOME=$PWD git log -p"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "nợ review #432 (AUD-SEC-432/434/435, T-3666, D-336)"
+ },
+ {
+  "id": "d432-434-xdg-status",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-434"
+  ],
+  "input": {
+   "command": "export XDG_CONFIG_HOME=$PWD; git status"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "nợ review #432 (AUD-SEC-432/434/435, T-3666, D-336)"
+ },
+ {
+  "id": "d432-434-gcg-diff",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-434"
+  ],
+  "input": {
+   "command": "GIT_CONFIG_GLOBAL=gc git diff"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "nợ review #432 (AUD-SEC-432/434/435, T-3666, D-336)"
+ },
+ {
+  "id": "d432-435-ln-s-write",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-435"
+  ],
+  "input": {
+   "command": "ln -s ~/.gitconfig lnk && printf '[core]\\n\\thooksPath = /dev/null\\n' >> lnk"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "HOOK_BYPASS"
+  },
+  "note": "nợ review #432 (AUD-SEC-432/434/435, T-3666, D-336)"
+ },
+ {
+  "id": "d432-435-ln-sf-cp",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-435"
+  ],
+  "input": {
+   "command": "ln -sf /etc/gitconfig g2; cp /tmp/x g2"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "HOOK_BYPASS"
+  },
+  "note": "nợ review #432 (AUD-SEC-432/434/435, T-3666, D-336)"
+ },
+ {
+  "id": "d432-ctl-434-devnull",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-434"
+  ],
+  "input": {
+   "command": "GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null git log -1"
+  },
+  "expect": {
+   "allowed": true
+  },
+  "note": "nợ review #432 (AUD-SEC-432/434/435, T-3666, D-336)"
+ },
+ {
+  "id": "d432-ctl-434-home-nogit",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-434"
+  ],
+  "input": {
+   "command": "HOME=/tmp/h python3 -c 1"
+  },
+  "expect": {
+   "allowed": true
+  },
+  "note": "nợ review #432 (AUD-SEC-432/434/435, T-3666, D-336)"
+ },
+ {
+  "id": "d432-ctl-432-exec-al",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-432"
+  ],
+  "input": {
+   "command": "echo x >> ~/.profile; exec -al bash -c true"
+  },
+  "expect": {
+   "allowed": true
+  },
+  "note": "nợ review #432 (AUD-SEC-432/434/435, T-3666, D-336)"
  }
  ]
 }

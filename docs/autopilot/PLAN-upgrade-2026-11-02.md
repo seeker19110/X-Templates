@@ -81,7 +81,8 @@
 - [x] `T-3663` 🔴 AUD-SEC-414/415/416 (dạng nguyên văn guard còn lọt: `~` sau `HOME=` chữ, `patch`/`git apply` đích trong heredoc, trình ghi chưa liệt kê, tệp nạp ngầm) — luật tĩnh, ADR-0066 "lệnh lạ bị tính" (sau: T-3662; files: .claude/hooks/guard.py, tests/, docs/ops/AUDIT-STATUS.md, CHANGELOG.md) — Gate: `python3 scripts/xt.py audit check docs/ops/AUDIT-STATUS.md --strict`
 - [x] `T-3664` nợ review #430 AUD-SEC-420…424 (sau: T-3663; files: .claude/hooks/guard.py, tests/, docs/ops/AUDIT-STATUS.md, CHANGELOG.md) — Gate: `python3 -m unittest -q tests.test_guard_strict.GuardDebt430Test`
 - [x] `T-3665` nợ review #431 AUD-SEC-426…430 (sau: T-3664; files: .claude/hooks/guard.py, tests/, docs/ops/AUDIT-STATUS.md, CHANGELOG.md) — Gate: `python3 -m unittest -q tests.test_guard_strict.GuardDebt431Test`
-- [x] `T-3635` AUD-DOC-159; 🟢 nợ review: sửa nhóm tài liệu rẻ, còn lại `chấp nhận` (chủ + hạn, lý do từng dòng); 🔴/🟠 lát A–E `đã sửa` (sau: T-3665; files: docs/, CHANGELOG.md) — Gate: `python3 scripts/xt.py audit check docs/ops/AUDIT-STATUS.md --strict`
+- [x] `T-3666` nợ review #432 AUD-SEC-432…435 (luật phía đọc cấu hình git, D-336) (sau: T-3665; files: .claude/hooks/guard.py, tests/, docs/ops/AUDIT-STATUS.md, CHANGELOG.md) — Gate: `python3 -m unittest -q tests.test_guard_strict.GuardDebt432Test`
+- [x] `T-3635` AUD-DOC-159; 🟢 nợ review: sửa nhóm tài liệu rẻ, còn lại `chấp nhận` (chủ + hạn, lý do từng dòng); 🔴/🟠 lát A–E `đã sửa` (sau: T-3666; files: docs/, CHANGELOG.md) — Gate: `python3 scripts/xt.py audit check docs/ops/AUDIT-STATUS.md --strict`
 - [ ] `T-3636` `loop verify --all` xanh, `release-check` chỉ còn hàng chờ người (`prod_switch`, chữ ký GO-NO-GO) (sau: T-3635; topo: audit) — Gate: `python3 scripts/xt.py audit check docs/ops/AUDIT-STATUS.md --strict && python3 scripts/xt.py blueprint-status BLUEPRINT.md --strict`
 
 ## Không làm trong PLAN này (ghi để không quên)

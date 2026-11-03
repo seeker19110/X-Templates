@@ -2366,7 +2366,7 @@ class GuardLiteralFormsT3663Test(unittest.TestCase):
         self.assert_allow(
             (
                 "HOME=/tmp/h; ls ~",
-                "HOME=/tmp/h git config --global user.name x",
+                "HOME=/tmp/h python3 -c 1",  # AUD-SEC-434 (D-336): `HOME=… git …` nay BUDGET
                 "cd ~ && ls",
                 "git log --oneline HEAD~3..HEAD",
                 "HOME=.claude; ls ~/hooks",
@@ -2396,7 +2396,7 @@ class GuardLiteralFormsT3663Test(unittest.TestCase):
                 "[[ -v HOME ]] && printf -v HOME %s .claude; rm -f ~/settings.json",
             ),
             (
-                'HOME="$(mktemp -d)" git config --global user.name x',
+                'HOME="$(mktemp -d)" python3 -c 1',  # AUD-SEC-434 (D-336): `HOME=… git …` nay BUDGET
                 "echo $HOME; ls ~",
                 'HOME=/tmp/h; echo "${HOME}"',
                 "[[ -v HOME ]] && echo $HOME",
@@ -3093,6 +3093,86 @@ class GuardReview432Test(unittest.TestCase):
         ):
             with self.subTest(cmd=cmd):
                 self.assertEqual(decide(cmd)["decision"], "", decide(cmd))
+
+
+class GuardDebt432Test(unittest.TestCase):
+    """Nợ review #432 + có từ trước (T-3666): AUD-SEC-432 (`exec` getopt), AUD-SEC-434 (luật PHÍA ĐỌC cấu hình git —
+    D-336), AUD-SEC-435 (realpath/symlink tới tệp cấu hình git). Mọi ca đỏ ở e3516017."""
+
+    assert_budget = GuardStrictDebtTest.assert_budget
+    assert_hook_bypass = GuardDebt431Test.assert_hook_bypass
+
+    def test_aud_sec_432_exec_getopt(self):
+        """AUD-SEC-432 🟠: `exec -a-bash` (giá trị dính) là login; `exec -al bash` là `-a l` — không login."""
+        self.assert_budget(
+            ("echo x >> ~/.profile; exec -a-bash bash -c true",),
+            ("echo x >> ~/.profile; exec -al bash -c true",),
+            "AUD-SEC-416",
+            guard._implicit_load_why,
+        )
+        self.assertTrue(guard._exec_login(["exec", "-cl", "bash"]))
+        self.assertTrue(guard._exec_login(["exec", "-ca", "-x", "bash"]))
+        self.assertFalse(guard._exec_login(["exec", "-a"]))
+
+    def test_aud_sec_434_read_side_git_config(self):
+        """AUD-SEC-434 🔴 (D-336): lệnh git chạy với `HOME`/`XDG_CONFIG_HOME`/`GIT_CONFIG_GLOBAL|SYSTEM` (khác
+        `/dev/null`)/`GIT_CONFIG_PARAMETERS|COUNT|KEY_n|VALUE_n` gán trong cùng lệnh (đầu lệnh, `export`, `declare -x`,
+        `env`): commit/push… → câu hỏi bỏ hook (`no_verify`); lệnh git khác → BUDGET."""
+        hooky = (
+            "GIT_CONFIG_GLOBAL=gc git commit -m 'docs: x'",
+            "HOME=. git commit -m x",
+            "XDG_CONFIG_HOME=. git commit -m x",
+            "declare -x GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0=/dev/null; git commit -m x",
+            "typeset -x HOME=.; git commit -m x",
+            "env GIT_CONFIG_PARAMETERS=\"'core.hooksPath'='/tmp/h'\" git commit -m x",
+            "export HOME=$PWD; git push origin feat",
+            "HOME=. git merge feat",
+            "HOME=. git rebase main",
+        )
+        for cmd in hooky:
+            with self.subTest(cmd=cmd), mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(ROOT)}):
+                d = guard.bash_decision(cmd, str(ROOT))
+                self.assertIn(d["decision"], ("ask", "deny"), d)
+                if d["decision"] == "ask":  # deny: luật cũ chặn trước (`declare …; git commit` = tách lệnh)
+                    self.assertIn("git hook", d["reason"])  # câu mới, hay câu `core.hooksPath` (GIT_CONFIG_PARAMETERS)
+                    self.assertTrue(d.get("no_verify"), d)
+        self.assert_budget(
+            (
+                "HOME=. git diff",
+                "cd sub && HOME=$PWD git log -p",
+                "export XDG_CONFIG_HOME=$PWD; git status",
+                "GIT_CONFIG_GLOBAL=gc git diff",
+                "env HOME=. git status",
+                "declare -x GIT_CONFIG_SYSTEM=/tmp/s; git log -1",
+            ),
+            (
+                "GIT_CONFIG_GLOBAL=/dev/null git status > /dev/null 2>&1",
+                "GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null git log -1",
+                "HOME=/tmp/h ls; git status",
+                "git status",
+                "HOME=/tmp/h python3 -c 1",
+            ),
+            "AUD-SEC-434",
+            guard._git_cfg_env_why,
+        )
+
+    def test_aud_sec_435_symlink_to_git_config(self):
+        """AUD-SEC-435 🟠: ghi qua symlink tên trung tính tới tệp cấu hình git (symlink có lúc kiểm, hay `ln -s` cùng
+        lệnh) → HOOK_BYPASS (Bash + Edit/Write)."""
+        with tempfile.TemporaryDirectory() as d:
+            real = Path(d) / ".gitconfig"
+            real.write_text("")
+            lnk = Path(d) / "lnk"
+            lnk.symlink_to(real)
+            self.assert_hook_bypass((f"printf '[core]\\n\\thooksPath = /dev/null\\n' >> {lnk}",))
+            self.assertEqual(guard.edit_decision(str(lnk), str(ROOT))[0], "deny")
+        self.assert_hook_bypass(
+            (
+                "ln -s ~/.gitconfig lnk && printf '[core]\\n\\thooksPath = /dev/null\\n' >> lnk",
+                "ln -sf /etc/gitconfig g2; cp /tmp/x g2",
+            )
+        )
+        self.assertEqual(decide("ln -s ~/.gitconfig lnk2 && cat lnk2")["decision"], "")
 
 
 class LedgerMatchesGuardTest(unittest.TestCase):
