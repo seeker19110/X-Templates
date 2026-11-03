@@ -1,62 +1,55 @@
-# ADR-0067: Guard là lớp phân tích tĩnh có giới hạn — lớp lách bằng tên/mã dựng lúc chạy chấp nhận có hạn, ranh giới cứng ở lớp ngoài
+# ADR-0067: Tên tệp/mô-đun DỰNG LÚC CHẠY trong lệnh tự ghi tệp — giới hạn phân tích tĩnh, chấp nhận có hạn
 
-- **Trạng thái:** Đã chấp nhận 2026-11-03 (phiên chính tự duyệt theo tiêu chí chất lượng cuối, ADR-0008 — **D-331**).
-- **Trạng thái triển khai:** đã làm (sổ + tài liệu, PR kế sau #427); việc đánh giá sandbox mở ở `PROGRESS.md` *Tiếp theo*.
+- **Trạng thái:** Đã chấp nhận 2026-11-03 (phiên chính tự duyệt theo tiêu chí chất lượng cuối, ADR-0008 — **D-331**,
+  thu hẹp sau review #428 — **D-332**).
+- **Trạng thái triển khai:** đã làm (sổ + tài liệu, #428); đánh giá sandbox opt-in ở `PROGRESS.md` *Tiếp theo*.
 - **Ngày:** 2026-11-03.
-- **Giữ:** ADR-0002 (fail-closed hành động nguy hiểm), ADR-0063/0065/0066 (guard chỉ cho chạy tập con đọc chắc; danh
-  sách trắng mở rộng động; tệp tự ghi theo tên nhắc lại) — mọi luật hiện có giữ nguyên, không nới.
-- **Liên quan:** ADR-0018/0019 (guard không hỏi người), ADR-0061 (`max_rethink`), ADR-0064 (sandbox kiểm bằng `doctor`),
-  D-322, D-326, D-329; mốc xét lại hàng rào 2027-01-21 (`LOOP-DESIGN-014`).
+- **Thay một phần:** ADR-0065 §Quyết định ("dạng lách mới thì mở rộng điều kiện kích hoạt, không thêm miễn trừ") —
+  CHỈ cho lớp hẹp ở §Quyết định dưới đây. **Giữ:** ADR-0002, ADR-0063/0065/0066 cho mọi lớp khác; không nới luật nào.
+- **Liên quan:** ADR-0018/0019, ADR-0061 (`max_rethink`), ADR-0062 (🔴 không thành nợ), ADR-0064 (sandbox kiểm bằng
+  `doctor`), D-322, D-326, D-329; mốc xét lại hàng rào 2027-01-21 (`LOOP-DESIGN-014`).
 
 ## Bối cảnh
 
-Từ #420 tới #427 (2026-11-02…03), mỗi lượt review đối kháng guard (bash 5.2.21 + stub `git`, chạy thật) đều tìm thêm dạng
-lách cùng một lớp: lệnh dựng TÊN hoặc MÃ lúc chạy mà phân tích tĩnh không giải được, rồi chạy nó — tách từ theo `IFS`
-(AUD-SEC-388), mảng/tham số vị trí từ dữ liệu (399/405), ghi tệp rồi chạy (400/404/406), tên mô-đun dựng lúc chạy
-(`python3 -m "${y:-x}"`, `__import__("X".lower())`), tên tệp nạp ngầm (`> Makefile; make`, `> conftest.py; pytest`,
-`> ~/.bashrc; bash -ic`), đổi `HOME`/`CDPATH` trước `cd` (AUD-SEC-414). Ba lần vá cũng tự mở lỗ mới (hồi quy #426/#427,
-D-326/D-329). Sổ còn hai 🔴 `mở` của lớp này (AUD-SEC-406 phần tên dựng/ngầm, AUD-SEC-414) — `audit check --strict` đỏ
-nên không cắt được bản nào, dù mọi dạng NGUYÊN VĂN đã chặn.
+ADR-0066 (#427) chặn tệp do chính lệnh ghi mà TÊN được nhắc lại nguyên văn ở lệnh đơn khác. Review #427/#428 (bash 5.2.21,
+stub `git`) chỉ ra phần còn lại của AUD-SEC-406 gồm hai loại khác nhau về bản chất:
 
-Lớp ngoài hiện có (đọc 2026-11-03): ruleset GitHub của repo bật `non_fast_forward` + `deletion` + `pull_request` cho nhánh
-chính (`.github/rulesets/main.json`, Kiểm BASE-REPO-008/013) — force-push/xoá nhánh chính bị máy chủ từ chối dù guard bị
-lách; CI là cổng đầy đủ, merge ghim head sau review (ADR-0036/0062); phiên cloud chạy trong container tạm. Sandbox Bash
-của Claude Code (<https://code.claude.com/docs/en/sandboxing>, đọc 2026-11-03): mặc định TẮT, giới hạn ghi trong thư mục
-làm việc + temp, mạng qua proxy theo `allowedDomains`; Linux cần bubblewrap + socat; không khởi động được thì mặc định
-chạy KHÔNG sandbox (trừ `sandbox.failIfUnavailable`); không che công cụ ghi tệp/hook/MCP.
+- **Tên dựng lúc chạy** — tên tệp/mô-đun KHÔNG xuất hiện nguyên văn mà do shell/trình thông dịch tính ra:
+  `python3 -m "${y:-x}"`, `python3 -m "$(printf '\x78')"`, `python3 -m "${m,,}"`, `__import__("X".lower())`,
+  `f=s.sh; printf … > "$f"; PATH=.:$PATH s.sh`. Đóng lớp này bằng cách "mở rộng điều kiện kích hoạt" (ADR-0065) nghĩa là
+  chặn MỌI mở rộng (kể cả trong nháy kép) và mọi chữ trong `-c`/`-e` của mọi lệnh có ghi tệp — vì tên có thể là kết quả
+  của tính toán tuỳ ý (đọc tệp, giải mã, đổi hoa) mà phân tích tĩnh không giải được theo nguyên lý.
+- **Dạng nguyên văn chưa phủ** — tên nằm ngay trên dòng lệnh: trình ghi chưa liệt kê (`sponge`, `tar -x`, `unzip`,
+  `openssl … -out`, `xxd -r`), tệp nạp ngầm (`Makefile`/`GNUmakefile`, `package.json`, `conftest.py`, `~/.bashrc`),
+  `~` sau `HOME=` gán bằng chữ, `patch`/`git apply` có đích trong thân heredoc. Lớp này sửa được bằng luật tĩnh.
 
-## Yếu tố quyết định
+ADR-0065 loại phương án "chấp nhận + giao sandbox" vì sandbox chưa bắt buộc ở mọi quy mô; điều kiện đó vẫn đúng. Điều mới:
+ở lớp tên dựng lúc chạy, phương án thay (chặn mọi mở rộng trong lệnh ghi tệp) đã đo: luật hẹp hơn của #426/#427 chặn oan
+6 % lệnh thật, bản rộng chặn cả `"$f"` trong nháy kép mà ADR-0065 khuyên dùng — tức mâu thuẫn chính câu `viết lại:` của nó.
 
-- (1) đúng và an toàn: không khai "đóng" khi còn lọt; không nới luật nào đang chặn.
-- (2) đường lùi: quyết định chỉ đổi trạng thái sổ, đảo được bằng một dòng.
-- (3) bền: dừng vòng vá vô hạn (bài học #372, ADR-0061) — phân tích tĩnh của shell không đầy đủ được theo nguyên lý
-  (tên/mã dựng lúc chạy là tính toán tuỳ ý).
+Lớp ngoài thật (đọc 2026-11-03): ruleset GitHub nhánh mặc định (`non_fast_forward`, `deletion`, required checks
+quality/protection-guard/gitleaks/dep-audit; `required_approving_review_count: 0` — review là quy trình do harness cưỡng
+chế, KHÔNG phải ranh giới máy chủ). Sandbox Bash của Claude Code (<https://code.claude.com/docs/en/sandboxing>): mặc định
+tắt, Linux cần bubblewrap + socat, không khởi động được thì chạy không sandbox trừ `failIfUnavailable`; khi bật, tệp
+settings là "protected paths". **Nhóm "tắt hook cục bộ" (ghi `.claude/`) không có lớp cứng nào khi sandbox tắt.**
 
 ## Các phương án đã cân nhắc
 
-1. **Vá tiếp từng dạng** — mỗi lượt lộ dạng mới và hồi quy; không điểm dừng; trái (3), và (1) vì hồi quy.
-2. **Chặn mọi mở rộng không nháy/mọi tệp ghi trong lệnh có chạy mã** — chặn oan ước > 20 % lệnh thật (số đo #426/#427:
-   6 % chỉ với luật hẹp hơn), agent phải tách mọi lệnh; trái (4) nặng, không đóng được tên ngầm.
-3. **Bật sandbox bắt buộc trong `.claude/settings.json` của khung** — container cloud có thể thiếu bubblewrap (rơi về
-   không sandbox), `allowedDomains` rỗng làm hỏng pip/gh/curl; không chặn force-push (mạng tới GitHub là việc thường).
-   Cần đánh giá riêng, chưa áp được ngay.
-4. **Chấp nhận có hạn lớp "lách bằng tên/mã dựng lúc chạy"** (chọn): ghi rõ giới hạn, dựa ranh giới cứng ở lớp ngoài,
-   hạn = mốc xét lại hàng rào, kèm việc đánh giá sandbox opt-in.
+1. **Chặn mọi mở rộng/chữ `-c` trong lệnh có ghi tệp** — chặn oan lớn, trái câu `viết lại:` của ADR-0065.
+2. **Vá theo từng dạng tên dựng** — mỗi lượt lộ dạng mới (#420…#427), không điểm dừng (ADR-0061).
+3. **Chấp nhận có hạn ĐÚNG lớp tên dựng lúc chạy** (chọn); mọi dạng nguyên văn vẫn là 🔴 `mở` phải sửa.
 
 ## Quyết định
 
-Chọn **4**. Guard là lớp phân tích tĩnh **chặn dạng nguyên văn và dạng thường gặp** (kể cả vô ý); nó **không** là ranh
-giới chống agent cố ý làm rối lệnh. Phát hiện thuộc đúng lớp "tên hoặc mã dựng lúc chạy rồi chạy" mà mọi dạng nguyên văn
-của nó đã chặn được ghi `chấp nhận` (giữ mức gốc, `chủ:` phiên chính, `hạn:` 2027-01-21, lý do trỏ ADR này), không ghi
-`đã sửa`. Không áp cho: hồi quy (head cho qua mà base chặn), lỗ do miễn trừ mới, hay dạng nguyên văn — các loại đó vẫn là
-🔴 phải sửa trong PR (ADR-0062).
+Chọn **3**. Phát hiện chỉ được ghi `chấp nhận` theo ADR này khi đủ cả: (a) tên tệp/mô-đun mà lệnh chạy KHÔNG xuất hiện
+nguyên văn ở đâu trong lệnh (do mở rộng/tính toán lúc chạy sinh ra); (b) mọi dạng cùng hành vi với tên nguyên văn đã bị
+guard chặn (có test); (c) không phải hồi quy hay lỗ do miễn trừ mới (ADR-0062). Chủ: phiên chính; hạn 2027-01-21.
+Tệp nạp ngầm, trình ghi chưa liệt kê, `~` sau `HOME=` chữ, `patch`/`git apply` **không** thuộc lớp này.
 
 ## Hệ quả
 
-- AUD-SEC-406 (phần tên dựng/ngầm) và AUD-SEC-414 → `chấp nhận` (D-331); hai 🟢 chặn oan AUD-SEC-410/413 → `chấp nhận`
-  cùng hạn (sửa cần miễn theo giá trị đã chứng minh — vòng sau). `audit check --strict` xanh trở lại.
-- Mức an toàn thực tế của dự án đích phụ thuộc lớp ngoài: ruleset nhánh chính (đã có trong mẫu `install.py`), CI là cổng
-  đầy đủ, review trước merge; máy dev cá nhân nên bật sandbox (`/sandbox`) — ghi vào `PROGRESS.md` *Tiếp theo*: đánh giá
-  sandbox opt-in cho khung (`doctor` cảnh báo khi tắt, ADR-0064) trước 2027-01-21.
-- Hết hạn 2027-01-21 mà chưa có sandbox/lớp mới → `audit check` đỏ lại (chấp nhận quá hạn) — buộc xét lại.
-- Đường lùi: đổi các dòng về `mở`.
+- AUD-SEC-406 thu về đúng phần tên dựng lúc chạy → `chấp nhận`. Phần nguyên văn tách ID 🔴 `mở` mới (trình ghi chưa
+  liệt kê; tệp nạp ngầm); AUD-SEC-414 về `mở` — `audit check --strict` đỏ tới khi sửa (task `T-3663`).
+- Dự án đích: bật ruleset nhánh chính; trên máy dev nên bật `/sandbox` — guard không che được tên dựng lúc chạy.
+- Hết hạn 2027-01-21 → `audit check` đỏ (chấp nhận quá hạn), buộc xét lại cùng mốc hàng rào.
+- Đường lùi: đổi AUD-SEC-406 về `mở`.

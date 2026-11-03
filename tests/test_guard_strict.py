@@ -2327,5 +2327,30 @@ class GuardReview427Test(unittest.TestCase):
         )
 
 
+class LedgerMatchesGuardTest(unittest.TestCase):
+    """Review #428 🔴 (AUD-DOC-243): sổ không được ghi `chấp nhận`/`đã sửa` cho phát hiện mà guard còn cho qua DẠNG
+    NGUYÊN VĂN của nó — `audit check --strict` xanh giả. Ca nguyên văn còn lọt thì hàng sổ phải `mở`; khi T-3663 sửa
+    guard, ca hết lọt và hàng chuyển `đã sửa` (ADR-0067 §Quyết định: chỉ tên dựng lúc chạy được chấp nhận)."""
+
+    LITERAL = {
+        "AUD-SEC-414": ("HOME=.claude; rm -f ~/settings.json",),
+        "AUD-SEC-415": ("sponge s.sh < in.txt; bash s.sh", "tar -xf a.tar s.sh; bash s.sh"),
+        "AUD-SEC-416": ("printf 'all:\\n\\ttrue\\n' > GNUmakefile && make",),
+    }
+
+    def test_open_while_literal_form_passes(self):
+        rows = {}
+        for line in (ROOT / "docs" / "ops" / "AUDIT-STATUS.md").read_text(encoding="utf-8").splitlines():
+            cells = [c.strip() for c in line.split("|")]
+            if len(cells) > 4 and cells[1] in self.LITERAL:
+                rows[cells[1]] = cells[3]
+        for fid, cmds in self.LITERAL.items():
+            with self.subTest(fid=fid):
+                self.assertIn(fid, rows)
+                passes = [c for c in cmds if decide(c)["decision"] in ("", "allow")]
+                if passes:
+                    self.assertEqual(rows[fid], "mở", f"{fid}: guard còn cho qua {passes} — hàng sổ phải `mở`")
+
+
 if __name__ == "__main__":
     unittest.main()
