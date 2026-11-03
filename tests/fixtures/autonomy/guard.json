@@ -16355,6 +16355,1239 @@
    "allowed": true
   },
   "note": "T-3640 (D-308)"
+ },
+ {
+  "id": "og-340-rsync-glob",
+  "origin": "repro",
+  "refs": [
+   "AUD-SEC-340"
+  ],
+  "input": {
+   "command": "rsync -a src/* docs/autopilot/",
+   "files": {
+    "docs/autopilot/STAGE.json": "{}\n",
+    "docs/autopilot/PLAN-a.md": "# a\n"
+   }
+  },
+  "expect": {
+   "allowed": false,
+   "code": "EVIDENCE_HANDWRITE"
+  },
+  "note": "nợ review #405 (T-orange-guard)"
+ },
+ {
+  "id": "og-340-rsync-name",
+  "origin": "repro",
+  "refs": [
+   "AUD-SEC-340"
+  ],
+  "input": {
+   "command": "rsync -a src/STAGE.json docs/autopilot/",
+   "files": {
+    "docs/autopilot/STAGE.json": "{}\n",
+    "docs/autopilot/PLAN-a.md": "# a\n"
+   }
+  },
+  "expect": {
+   "allowed": false,
+   "code": "EVIDENCE_HANDWRITE"
+  },
+  "note": "nợ review #405 (T-orange-guard)"
+ },
+ {
+  "id": "og-340-xargs-cp",
+  "origin": "repro",
+  "refs": [
+   "AUD-SEC-340"
+  ],
+  "input": {
+   "command": "echo docs/autopilot/STAGE.json | xargs -I{} cp x {}",
+   "files": {
+    "docs/autopilot/STAGE.json": "{}\n",
+    "docs/autopilot/PLAN-a.md": "# a\n"
+   }
+  },
+  "expect": {
+   "allowed": false,
+   "code": "EVIDENCE_HANDWRITE"
+  },
+  "note": "nợ review #405 (T-orange-guard)"
+ },
+ {
+  "id": "og-340-xargs-sed",
+  "origin": "repro",
+  "refs": [
+   "AUD-SEC-340"
+  ],
+  "input": {
+   "command": "ls docs/autopilot/* | xargs sed -i s/a/b/",
+   "files": {
+    "docs/autopilot/STAGE.json": "{}\n",
+    "docs/autopilot/PLAN-a.md": "# a\n"
+   }
+  },
+  "expect": {
+   "allowed": false,
+   "code": "EVIDENCE_HANDWRITE"
+  },
+  "note": "nợ review #405 (T-orange-guard)"
+ },
+ {
+  "id": "og-340-unzip-d",
+  "origin": "repro",
+  "refs": [
+   "AUD-SEC-340"
+  ],
+  "input": {
+   "command": "unzip -o a.zip -d docs",
+   "files": {
+    "docs/autopilot/STAGE.json": "{}\n",
+    "docs/autopilot/PLAN-a.md": "# a\n"
+   }
+  },
+  "expect": {
+   "allowed": false,
+   "code": "EVIDENCE_HANDWRITE"
+  },
+  "note": "nợ review #405 (T-orange-guard)"
+ },
+ {
+  "id": "og-340-bsdtar-C",
+  "origin": "repro",
+  "refs": [
+   "AUD-SEC-340"
+  ],
+  "input": {
+   "command": "bsdtar -xf a.tar -C docs",
+   "files": {
+    "docs/autopilot/STAGE.json": "{}\n",
+    "docs/autopilot/PLAN-a.md": "# a\n"
+   }
+  },
+  "expect": {
+   "allowed": false,
+   "code": "EVIDENCE_HANDWRITE"
+  },
+  "note": "nợ review #405 (T-orange-guard)"
+ },
+ {
+  "id": "og-340-7z-o",
+  "origin": "repro",
+  "refs": [
+   "AUD-SEC-340"
+  ],
+  "input": {
+   "command": "7z x a.7z -odocs/autopilot",
+   "files": {
+    "docs/autopilot/STAGE.json": "{}\n",
+    "docs/autopilot/PLAN-a.md": "# a\n"
+   }
+  },
+  "expect": {
+   "allowed": false,
+   "code": "EVIDENCE_HANDWRITE"
+  },
+  "note": "nợ review #405 (T-orange-guard)"
+ },
+ {
+  "id": "og-340-cpio-D",
+  "origin": "repro",
+  "refs": [
+   "AUD-SEC-340"
+  ],
+  "input": {
+   "command": "cpio -idm -D docs < a.cpio",
+   "files": {
+    "docs/autopilot/STAGE.json": "{}\n",
+    "docs/autopilot/PLAN-a.md": "# a\n"
+   }
+  },
+  "expect": {
+   "allowed": false,
+   "code": "EVIDENCE_HANDWRITE"
+  },
+  "note": "nợ review #405 (T-orange-guard)"
+ },
+ {
+  "id": "og-340-tar-transform",
+  "origin": "repro",
+  "refs": [
+   "AUD-SEC-340"
+  ],
+  "input": {
+   "command": "tar -xf a.tar --transform 's,^,docs/,'",
+   "files": {
+    "docs/autopilot/STAGE.json": "{}\n",
+    "docs/autopilot/PLAN-a.md": "# a\n"
+   }
+  },
+  "expect": {
+   "allowed": false,
+   "code": "EVIDENCE_HANDWRITE"
+  },
+  "note": "nợ review #405 (T-orange-guard)"
+ },
+ {
+  "id": "og-340-py-extract",
+  "origin": "repro",
+  "refs": [
+   "AUD-SEC-340"
+  ],
+  "input": {
+   "command": "python3 -c 'import tarfile; t=tarfile.open(\"a.tar\"); [t.extract(m, \"docs/autopilot\") for m in t]'",
+   "files": {
+    "docs/autopilot/STAGE.json": "{}\n",
+    "docs/autopilot/PLAN-a.md": "# a\n"
+   }
+  },
+  "expect": {
+   "allowed": false,
+   "code": "EVIDENCE_HANDWRITE"
+  },
+  "note": "nợ review #405 (T-orange-guard)"
+ },
+ {
+  "id": "og-340-py-move",
+  "origin": "repro",
+  "refs": [
+   "AUD-SEC-340"
+  ],
+  "input": {
+   "command": "python3 -c 'import shutil; shutil.move(\"x\", \"docs/autopilot\")'",
+   "files": {
+    "docs/autopilot/STAGE.json": "{}\n",
+    "docs/autopilot/PLAN-a.md": "# a\n"
+   }
+  },
+  "expect": {
+   "allowed": false,
+   "code": "EVIDENCE_HANDWRITE"
+  },
+  "note": "nợ review #405 (T-orange-guard)"
+ },
+ {
+  "id": "og-340-py-path-join",
+  "origin": "repro",
+  "refs": [
+   "AUD-SEC-340"
+  ],
+  "input": {
+   "command": "python3 -c 'from pathlib import Path; Path(\"docs/autopilot\",\"STAGE.json\").write_text(\"{}\")'",
+   "files": {
+    "docs/autopilot/STAGE.json": "{}\n",
+    "docs/autopilot/PLAN-a.md": "# a\n"
+   }
+  },
+  "expect": {
+   "allowed": false,
+   "code": "EVIDENCE_HANDWRITE"
+  },
+  "note": "nợ review #405 (T-orange-guard)"
+ },
+ {
+  "id": "og-340-node-copysync",
+  "origin": "repro",
+  "refs": [
+   "AUD-SEC-340"
+  ],
+  "input": {
+   "command": "node -e 'require(\"fs-extra\").copySync(\"x\", \"docs/autopilot\")'",
+   "files": {
+    "docs/autopilot/STAGE.json": "{}\n",
+    "docs/autopilot/PLAN-a.md": "# a\n"
+   }
+  },
+  "expect": {
+   "allowed": false,
+   "code": "EVIDENCE_HANDWRITE"
+  },
+  "note": "nợ review #405 (T-orange-guard)"
+ },
+ {
+  "id": "og-340-perl-dircopy",
+  "origin": "repro",
+  "refs": [
+   "AUD-SEC-340"
+  ],
+  "input": {
+   "command": "perl -MFile::Copy::Recursive=dircopy -e 'dircopy(\"x\", \"docs/autopilot\")'",
+   "files": {
+    "docs/autopilot/STAGE.json": "{}\n",
+    "docs/autopilot/PLAN-a.md": "# a\n"
+   }
+  },
+  "expect": {
+   "allowed": false,
+   "code": "EVIDENCE_HANDWRITE"
+  },
+  "note": "nợ review #405 (T-orange-guard)"
+ },
+ {
+  "id": "og-340-control-rsync-other",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-340"
+  ],
+  "input": {
+   "command": "rsync -a src/notes.md docs/autopilot/",
+   "files": {
+    "docs/autopilot/STAGE.json": "{}\n",
+    "docs/autopilot/PLAN-a.md": "# a\n"
+   }
+  },
+  "expect": {
+   "allowed": true
+  },
+  "note": "nợ review #405 (T-orange-guard)"
+ },
+ {
+  "id": "og-340-control-unzip-tmp",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-340"
+  ],
+  "input": {
+   "command": "unzip -o a.zip -d /tmp/x",
+   "files": {
+    "docs/autopilot/STAGE.json": "{}\n",
+    "docs/autopilot/PLAN-a.md": "# a\n"
+   }
+  },
+  "expect": {
+   "allowed": true
+  },
+  "note": "nợ review #405 (T-orange-guard)"
+ },
+ {
+  "id": "og-340-control-read-ledger",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-340"
+  ],
+  "input": {
+   "command": "python3 -c 'import json; print(json.load(open(\"docs/autopilot/STAGE.json\")))'",
+   "files": {
+    "docs/autopilot/STAGE.json": "{}\n",
+    "docs/autopilot/PLAN-a.md": "# a\n"
+   }
+  },
+  "expect": {
+   "allowed": true
+  },
+  "note": "nợ review #405 (T-orange-guard)"
+ },
+ {
+  "id": "og-340-control-copytree-out",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-340"
+  ],
+  "input": {
+   "command": "python3 -c 'import shutil; shutil.copytree(\"docs/autopilot\", \"/tmp/bk\")'",
+   "files": {
+    "docs/autopilot/STAGE.json": "{}\n",
+    "docs/autopilot/PLAN-a.md": "# a\n"
+   }
+  },
+  "expect": {
+   "allowed": true
+  },
+  "note": "nợ review #405 (T-orange-guard)"
+ },
+ {
+  "id": "og-341-eval-dot",
+  "origin": "repro",
+  "refs": [
+   "AUD-SEC-341"
+  ],
+  "input": {
+   "command": "eval . <(cat f)"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "nợ review #405 (T-orange-guard)"
+ },
+ {
+  "id": "og-341-eval-sh",
+  "origin": "repro",
+  "refs": [
+   "AUD-SEC-341"
+  ],
+  "input": {
+   "command": "eval sh <(cat f)"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "nợ review #405 (T-orange-guard)"
+ },
+ {
+  "id": "og-341-dev-stdin",
+  "origin": "repro",
+  "refs": [
+   "AUD-SEC-341"
+  ],
+  "input": {
+   "command": "bash /dev/stdin < <(cat f)"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "nợ review #405 (T-orange-guard)"
+ },
+ {
+  "id": "og-341-dot-dev-stdin",
+  "origin": "repro",
+  "refs": [
+   "AUD-SEC-341"
+  ],
+  "input": {
+   "command": ". /dev/stdin < <(cat f)"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "nợ review #405 (T-orange-guard)"
+ },
+ {
+  "id": "og-341-pipe-tcsh",
+  "origin": "repro",
+  "refs": [
+   "AUD-SEC-341"
+  ],
+  "input": {
+   "command": "cat f.sh | tcsh"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "nợ review #405 (T-orange-guard)"
+ },
+ {
+  "id": "og-341-pipe-toybox",
+  "origin": "repro",
+  "refs": [
+   "AUD-SEC-341"
+  ],
+  "input": {
+   "command": "cat f.sh | toybox sh"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "nợ review #405 (T-orange-guard)"
+ },
+ {
+  "id": "og-341-pipe-yash",
+  "origin": "repro",
+  "refs": [
+   "AUD-SEC-341"
+  ],
+  "input": {
+   "command": "cat f.sh | yash"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "nợ review #405 (T-orange-guard)"
+ },
+ {
+  "id": "og-341-control-diff-procsub",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-341"
+  ],
+  "input": {
+   "command": "diff <(cat a) <(cat b)"
+  },
+  "expect": {
+   "allowed": true
+  },
+  "note": "nợ review #405 (T-orange-guard)"
+ },
+ {
+  "id": "og-341-control-script-stdin",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-341"
+  ],
+  "input": {
+   "command": "bash script.sh < <(cat f)"
+  },
+  "expect": {
+   "allowed": true
+  },
+  "note": "nợ review #405 (T-orange-guard)"
+ },
+ {
+  "id": "og-342-execvp",
+  "origin": "repro",
+  "refs": [
+   "AUD-SEC-342"
+  ],
+  "input": {
+   "command": "python3 -c 'import os; os.execvp(\"bash\", [\"bash\", \"-c\", \"rm -rf ~\"])'"
+  },
+  "expect": {
+   "allowed": false
+  },
+  "note": "nợ review #405 (T-orange-guard)"
+ },
+ {
+  "id": "og-342-subprocess-shell",
+  "origin": "repro",
+  "refs": [
+   "AUD-SEC-342"
+  ],
+  "input": {
+   "command": "python3 -c 'import asyncio; asyncio.run(asyncio.create_subprocess_shell(\"rm -rf ~\"))'"
+  },
+  "expect": {
+   "allowed": false
+  },
+  "note": "nợ review #405 (T-orange-guard)"
+ },
+ {
+  "id": "og-342-list-shell-true",
+  "origin": "repro",
+  "refs": [
+   "AUD-SEC-342"
+  ],
+  "input": {
+   "command": "python3 -c 'import subprocess; subprocess.run([\"rm -rf ~\"], shell=True)'"
+  },
+  "expect": {
+   "allowed": false
+  },
+  "note": "nợ review #405 (T-orange-guard)"
+ },
+ {
+  "id": "og-342-tuple-argv",
+  "origin": "repro",
+  "refs": [
+   "AUD-SEC-342"
+  ],
+  "input": {
+   "command": "python3 -c 'import subprocess; subprocess.run((\"rm\", \"-rf\", \"~\"))'"
+  },
+  "expect": {
+   "allowed": false
+  },
+  "note": "nợ review #405 (T-orange-guard)"
+ },
+ {
+  "id": "og-342-node-spawnsync",
+  "origin": "repro",
+  "refs": [
+   "AUD-SEC-342"
+  ],
+  "input": {
+   "command": "node -e 'require(\"child_process\").spawnSync(\"bash\", [\"-c\", \"rm -rf ~\"])'"
+  },
+  "expect": {
+   "allowed": false
+  },
+  "note": "nợ review #405 (T-orange-guard)"
+ },
+ {
+  "id": "og-342-node-execfilesync",
+  "origin": "repro",
+  "refs": [
+   "AUD-SEC-342"
+  ],
+  "input": {
+   "command": "node -e 'require(\"child_process\").execFileSync(\"bash\", [\"-c\", \"rm -rf ~\"])'"
+  },
+  "expect": {
+   "allowed": false
+  },
+  "note": "nợ review #405 (T-orange-guard)"
+ },
+ {
+  "id": "og-342-quote-in-comment",
+  "origin": "repro",
+  "refs": [
+   "AUD-SEC-342"
+  ],
+  "input": {
+   "command": "python3 -c \"# don't\nimport os; os.system('rm -rf ~')\n# it's\""
+  },
+  "expect": {
+   "allowed": false
+  },
+  "note": "nợ review #405 (T-orange-guard)"
+ },
+ {
+  "id": "og-342-control-execvp-ls",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-342"
+  ],
+  "input": {
+   "command": "python3 -c 'import os; os.execvp(\"ls\", [\"ls\", \"-la\"])'"
+  },
+  "expect": {
+   "allowed": true
+  },
+  "note": "nợ review #405 (T-orange-guard)"
+ },
+ {
+  "id": "og-342-control-tuple-status",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-342"
+  ],
+  "input": {
+   "command": "python3 -c 'import subprocess; subprocess.run((\"git\", \"status\"))'"
+  },
+  "expect": {
+   "allowed": true
+  },
+  "note": "nợ review #405 (T-orange-guard)"
+ },
+ {
+  "id": "og-perf015-200-verbatim-calls",
+  "origin": "repro",
+  "refs": [
+   "AUD-PERF-015"
+  ],
+  "input": {
+   "command": "python3 -c 'import subprocess\nsubprocess.run([\"bash\",\"-c\",\"ls 0\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 1\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 2\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 3\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 4\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 5\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 6\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 7\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 8\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 9\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 10\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 11\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 12\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 13\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 14\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 15\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 16\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 17\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 18\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 19\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 20\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 21\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 22\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 23\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 24\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 25\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 26\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 27\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 28\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 29\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 30\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 31\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 32\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 33\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 34\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 35\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 36\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 37\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 38\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 39\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 40\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 41\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 42\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 43\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 44\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 45\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 46\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 47\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 48\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 49\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 50\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 51\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 52\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 53\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 54\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 55\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 56\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 57\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 58\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 59\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 60\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 61\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 62\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 63\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 64\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 65\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 66\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 67\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 68\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 69\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 70\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 71\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 72\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 73\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 74\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 75\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 76\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 77\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 78\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 79\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 80\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 81\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 82\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 83\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 84\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 85\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 86\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 87\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 88\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 89\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 90\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 91\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 92\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 93\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 94\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 95\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 96\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 97\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 98\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 99\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 100\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 101\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 102\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 103\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 104\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 105\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 106\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 107\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 108\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 109\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 110\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 111\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 112\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 113\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 114\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 115\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 116\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 117\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 118\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 119\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 120\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 121\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 122\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 123\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 124\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 125\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 126\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 127\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 128\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 129\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 130\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 131\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 132\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 133\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 134\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 135\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 136\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 137\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 138\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 139\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 140\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 141\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 142\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 143\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 144\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 145\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 146\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 147\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 148\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 149\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 150\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 151\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 152\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 153\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 154\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 155\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 156\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 157\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 158\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 159\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 160\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 161\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 162\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 163\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 164\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 165\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 166\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 167\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 168\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 169\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 170\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 171\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 172\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 173\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 174\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 175\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 176\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 177\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 178\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 179\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 180\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 181\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 182\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 183\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 184\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 185\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 186\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 187\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 188\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 189\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 190\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 191\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 192\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 193\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 194\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 195\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 196\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 197\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 198\"])\nsubprocess.run([\"bash\",\"-c\",\"ls 199\"])'"
+  },
+  "expect": {
+   "allowed": true
+  },
+  "note": "nợ review #405 (T-orange-guard)"
+ },
+ {
+  "id": "og-344-issue-write-title",
+  "origin": "repro",
+  "refs": [
+   "AUD-SEC-344"
+  ],
+  "input": {
+   "tool": "mcp",
+   "tool_name": "mcp__github__issue_write",
+   "tool_input": {
+    "method": "update",
+    "owner": "o",
+    "repo": "r",
+    "issue_number": 7,
+    "title": "Sửa lỗi"
+   }
+  },
+  "expect": {
+   "allowed": false
+  },
+  "note": "nợ review #406 (T-orange-guard)"
+ },
+ {
+  "id": "og-344-issue-write-review-mark",
+  "origin": "repro",
+  "refs": [
+   "AUD-SEC-344"
+  ],
+  "input": {
+   "tool": "mcp",
+   "tool_name": "mcp__github__issue_write",
+   "tool_input": {
+    "method": "update",
+    "owner": "o",
+    "repo": "r",
+    "issue_number": 7,
+    "body": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->"
+   }
+  },
+  "expect": {
+   "allowed": false
+  },
+  "note": "nợ review #406 (T-orange-guard)"
+ },
+ {
+  "id": "og-344-control-issue-create",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-344"
+  ],
+  "input": {
+   "tool": "mcp",
+   "tool_name": "mcp__github__issue_write",
+   "tool_input": {
+    "method": "create",
+    "owner": "o",
+    "repo": "r",
+    "title": "Bug: lỗi đăng nhập",
+    "body": "x"
+   }
+  },
+  "expect": {
+   "allowed": true
+  },
+  "note": "nợ review #406 (T-orange-guard)"
+ },
+ {
+  "id": "og-344-control-issue-close",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-344"
+  ],
+  "input": {
+   "tool": "mcp",
+   "tool_name": "mcp__github__issue_write",
+   "tool_input": {
+    "method": "update",
+    "owner": "o",
+    "repo": "r",
+    "issue_number": 7,
+    "state": "closed"
+   }
+  },
+  "expect": {
+   "allowed": true
+  },
+  "note": "nợ review #406 (T-orange-guard)"
+ },
+ {
+  "id": "og-344-actions-run-strict",
+  "origin": "repro",
+  "refs": [
+   "AUD-SEC-344"
+  ],
+  "input": {
+   "tool": "mcp",
+   "tool_name": "mcp__github__actions_run_trigger",
+   "tool_input": {
+    "method": "run_workflow",
+    "owner": "o",
+    "repo": "r",
+    "workflow_id": "ci.yml",
+    "ref": "main"
+   },
+   "policy": "strict"
+  },
+  "expect": {
+   "allowed": false
+  },
+  "note": "nợ review #406 (T-orange-guard)"
+ },
+ {
+  "id": "og-344-control-actions-rerun-strict",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-344"
+  ],
+  "input": {
+   "tool": "mcp",
+   "tool_name": "mcp__github__actions_run_trigger",
+   "tool_input": {
+    "method": "rerun_failed_jobs",
+    "owner": "o",
+    "repo": "r",
+    "run_id": 1
+   },
+   "policy": "strict"
+  },
+  "expect": {
+   "allowed": true
+  },
+  "note": "nợ review #406 (T-orange-guard)"
+ },
+ {
+  "id": "og-340-unzip-cluster-d",
+  "origin": "repro",
+  "refs": [
+   "AUD-SEC-340"
+  ],
+  "input": {
+   "command": "unzip -qd docs a.zip",
+   "files": {
+    "docs/autopilot/STAGE.json": "{}\n",
+    "docs/autopilot/PLAN-a.md": "# a\n"
+   }
+  },
+  "expect": {
+   "allowed": false,
+   "code": "EVIDENCE_HANDWRITE"
+  },
+  "note": "review lượt 2 nhánh orange-guard"
+ },
+ {
+  "id": "og-340-py-zipfile-cli",
+  "origin": "repro",
+  "refs": [
+   "AUD-SEC-340"
+  ],
+  "input": {
+   "command": "python3 -m zipfile -e a.zip docs",
+   "files": {
+    "docs/autopilot/STAGE.json": "{}\n",
+    "docs/autopilot/PLAN-a.md": "# a\n"
+   }
+  },
+  "expect": {
+   "allowed": false,
+   "code": "EVIDENCE_HANDWRITE"
+  },
+  "note": "review lượt 2 nhánh orange-guard"
+ },
+ {
+  "id": "og-340-jar-x",
+  "origin": "repro",
+  "refs": [
+   "AUD-SEC-340"
+  ],
+  "input": {
+   "command": "cd docs && jar xf a.jar",
+   "files": {
+    "docs/autopilot/STAGE.json": "{}\n",
+    "docs/autopilot/PLAN-a.md": "# a\n"
+   }
+  },
+  "expect": {
+   "allowed": false,
+   "code": "EVIDENCE_HANDWRITE"
+  },
+  "note": "review lượt 2 nhánh orange-guard"
+ },
+ {
+  "id": "og-340-cp-parents",
+  "origin": "repro",
+  "refs": [
+   "AUD-SEC-340"
+  ],
+  "input": {
+   "command": "cp --parents autopilot/STAGE.json docs/",
+   "files": {
+    "docs/autopilot/STAGE.json": "{}\n",
+    "docs/autopilot/PLAN-a.md": "# a\n"
+   }
+  },
+  "expect": {
+   "allowed": false,
+   "code": "EVIDENCE_HANDWRITE"
+  },
+  "note": "review lượt 2 nhánh orange-guard"
+ },
+ {
+  "id": "og-340-rsync-relative",
+  "origin": "repro",
+  "refs": [
+   "AUD-SEC-340"
+  ],
+  "input": {
+   "command": "rsync -aR autopilot/STAGE.json docs/",
+   "files": {
+    "docs/autopilot/STAGE.json": "{}\n",
+    "docs/autopilot/PLAN-a.md": "# a\n"
+   }
+  },
+  "expect": {
+   "allowed": false,
+   "code": "EVIDENCE_HANDWRITE"
+  },
+  "note": "review lượt 2 nhánh orange-guard"
+ },
+ {
+  "id": "og-340-grep-docs-xargs-sed",
+  "origin": "repro",
+  "refs": [
+   "AUD-SEC-340"
+  ],
+  "input": {
+   "command": "grep -rl approved docs | xargs sed -i s/false/true/",
+   "files": {
+    "docs/autopilot/STAGE.json": "{}\n",
+    "docs/autopilot/PLAN-a.md": "# a\n"
+   }
+  },
+  "expect": {
+   "allowed": false,
+   "code": "EVIDENCE_HANDWRITE"
+  },
+  "note": "review lượt 2 nhánh orange-guard"
+ },
+ {
+  "id": "og-340-find-stage-glob-xargs-rm",
+  "origin": "repro",
+  "refs": [
+   "AUD-SEC-340"
+  ],
+  "input": {
+   "command": "find . -name 'STAGE*' | xargs rm",
+   "files": {
+    "docs/autopilot/STAGE.json": "{}\n",
+    "docs/autopilot/PLAN-a.md": "# a\n"
+   }
+  },
+  "expect": {
+   "allowed": false,
+   "code": "EVIDENCE_HANDWRITE"
+  },
+  "note": "review lượt 2 nhánh orange-guard"
+ },
+ {
+  "id": "og-340-control-xargs-copy-out",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-340"
+  ],
+  "input": {
+   "command": "find docs/autopilot -name '*.md' | xargs -I{} cp {} /tmp/bk/",
+   "files": {
+    "docs/autopilot/STAGE.json": "{}\n",
+    "docs/autopilot/PLAN-a.md": "# a\n"
+   }
+  },
+  "expect": {
+   "allowed": true
+  },
+  "note": "review lượt 2 nhánh orange-guard"
+ },
+ {
+  "id": "og-340-control-xargs-plan-sed",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-340"
+  ],
+  "input": {
+   "command": "ls docs/autopilot/PLAN-*.md | xargs sed -i s/foo/bar/",
+   "files": {
+    "docs/autopilot/STAGE.json": "{}\n",
+    "docs/autopilot/PLAN-a.md": "# a\n"
+   }
+  },
+  "expect": {
+   "allowed": true
+  },
+  "note": "review lượt 2 nhánh orange-guard"
+ },
+ {
+  "id": "og-340-control-tempdir-stage-name",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-340"
+  ],
+  "input": {
+   "command": "python3 -c 'import tempfile,os; d=tempfile.mkdtemp(); open(os.path.join(d, \"STAGE.json\"), \"w\").write(\"{}\")'",
+   "files": {
+    "docs/autopilot/STAGE.json": "{}\n",
+    "docs/autopilot/PLAN-a.md": "# a\n"
+   }
+  },
+  "expect": {
+   "allowed": true
+  },
+  "note": "review lượt 2 nhánh orange-guard"
+ },
+ {
+  "id": "og-341-dev-fd-procsub",
+  "origin": "repro",
+  "refs": [
+   "AUD-SEC-341"
+  ],
+  "input": {
+   "command": ". /dev/fd/3 3< <(cat f)"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "review lượt 2 nhánh orange-guard"
+ },
+ {
+  "id": "og-341-bash-dev-fd-procsub",
+  "origin": "repro",
+  "refs": [
+   "AUD-SEC-341"
+  ],
+  "input": {
+   "command": "bash /dev/fd/3 3< <(cat f)"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "review lượt 2 nhánh orange-guard"
+ },
+ {
+  "id": "og-341-eval-dashdash",
+  "origin": "repro",
+  "refs": [
+   "AUD-SEC-341"
+  ],
+  "input": {
+   "command": "eval -- . <(cat f)"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "review lượt 2 nhánh orange-guard"
+ },
+ {
+  "id": "og-341-pipe-rbash",
+  "origin": "repro",
+  "refs": [
+   "AUD-SEC-341"
+  ],
+  "input": {
+   "command": "cat f.sh | rbash"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "review lượt 2 nhánh orange-guard"
+ },
+ {
+  "id": "og-341-control-cat-dev-fd",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-341"
+  ],
+  "input": {
+   "command": "cat /dev/fd/3 3< <(cat f)"
+  },
+  "expect": {
+   "allowed": true
+  },
+  "note": "review lượt 2 nhánh orange-guard"
+ },
+ {
+  "id": "og-342-floordiv-string-parity",
+  "origin": "repro",
+  "refs": [
+   "AUD-SEC-342"
+  ],
+  "input": {
+   "command": "python3 -c $'n = 7 // 2; s = \\'a\\\\\\nb\\'; import os; os.system(\"rm -rf ~\"); print(\\'x\\')'"
+  },
+  "expect": {
+   "allowed": false
+  },
+  "note": "review lượt 2 nhánh orange-guard"
+ },
+ {
+  "id": "og-342-shell-truthy",
+  "origin": "repro",
+  "refs": [
+   "AUD-SEC-342"
+  ],
+  "input": {
+   "command": "python3 -c 'import subprocess; subprocess.run([\"rm -rf ~\"], shell=1)'"
+  },
+  "expect": {
+   "allowed": false
+  },
+  "note": "review lượt 2 nhánh orange-guard"
+ },
+ {
+  "id": "og-342-args-keyword",
+  "origin": "repro",
+  "refs": [
+   "AUD-SEC-342"
+  ],
+  "input": {
+   "command": "python3 -c 'import subprocess; subprocess.run(args=[\"bash\", \"-c\", \"rm -rf ~\"])'"
+  },
+  "expect": {
+   "allowed": false
+  },
+  "note": "review lượt 2 nhánh orange-guard"
+ },
+ {
+  "id": "og-342-executable-keyword",
+  "origin": "repro",
+  "refs": [
+   "AUD-SEC-342"
+  ],
+  "input": {
+   "command": "python3 -c 'import subprocess; subprocess.Popen([\"x\", \"-c\", \"rm -rf ~\"], executable=\"/bin/sh\")'"
+  },
+  "expect": {
+   "allowed": false
+  },
+  "note": "review lượt 2 nhánh orange-guard"
+ },
+ {
+  "id": "og-342-control-floordiv-ls",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-342"
+  ],
+  "input": {
+   "command": "python3 -c $'n = 7 // 2; s = \\'a\\\\\\nb\\'; import os; os.system(\"ls\"); print(\\'x\\')'"
+  },
+  "expect": {
+   "allowed": true
+  },
+  "note": "review lượt 2 nhánh orange-guard"
+ },
+ {
+  "id": "og-342-control-shell-false",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-342"
+  ],
+  "input": {
+   "command": "python3 -c 'import subprocess; subprocess.run([\"rm -rf ~\"], shell=False)'"
+  },
+  "expect": {
+   "allowed": true
+  },
+  "note": "review lượt 2 nhánh orange-guard"
+ },
+ {
+  "id": "og-377-agent-force",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-377"
+  ],
+  "input": {
+   "command": "agent -p --force hi"
+  },
+  "expect": {
+   "allowed": false
+  },
+  "note": "review #418: binary `agent` của Cursor CLI"
+ },
+ {
+  "id": "og-377-agent-fp",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-377"
+  ],
+  "input": {
+   "command": "/usr/local/bin/agent -fp x"
+  },
+  "expect": {
+   "allowed": false
+  },
+  "note": "review #418: binary `agent` của Cursor CLI"
+ },
+ {
+  "id": "og-377-control-agent-p",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-377"
+  ],
+  "input": {
+   "command": "agent -p hi"
+  },
+  "expect": {
+   "allowed": true
+  },
+  "note": "review #418: binary `agent` của Cursor CLI"
+ },
+ {
+  "id": "og-308-param-pattern-nested-quote",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-308"
+  ],
+  "input": {
+   "command": "for f in \"$ROOT\"/*; do echo \"${f#\"$ROOT\"/}\"; done"
+  },
+  "expect": {
+   "allowed": false,
+   "decision": "deny",
+   "code": "BUDGET"
+  },
+  "note": "AUD-SEC-308: chặn thừa theo ADR-0063, cách viết thay ở LOOP-STOP §Điểm dừng"
+ },
+ {
+  "id": "og-308-param-default-nested-quote",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-308"
+  ],
+  "input": {
+   "command": "cd ${DIR:-'.'}"
+  },
+  "expect": {
+   "allowed": false,
+   "decision": "deny",
+   "code": "BUDGET"
+  },
+  "note": "AUD-SEC-308: chặn thừa theo ADR-0063, cách viết thay ở LOOP-STOP §Điểm dừng"
+ },
+ {
+  "id": "og-308-control-substring",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-308"
+  ],
+  "input": {
+   "command": "for f in \"$ROOT\"/*; do echo \"${f:${#ROOT}+1}\"; done"
+  },
+  "expect": {
+   "allowed": true
+  },
+  "note": "AUD-SEC-308: chặn thừa theo ADR-0063, cách viết thay ở LOOP-STOP §Điểm dừng"
+ },
+ {
+  "id": "og-308-control-default-bare",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-308"
+  ],
+  "input": {
+   "command": "cd \"${DIR:-.}\""
+  },
+  "expect": {
+   "allowed": true
+  },
+  "note": "AUD-SEC-308: chặn thừa theo ADR-0063, cách viết thay ở LOOP-STOP §Điểm dừng"
+ },
+ {
+  "id": "og-382-trailing-m-rm",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-382"
+  ],
+  "input": {
+   "command": "python3 -m; rm -rf ~"
+  },
+  "expect": {
+   "allowed": false
+  },
+  "note": "review #420: -m cuối làm guard ném IndexError"
+ },
+ {
+  "id": "og-382-trailing-m-push",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-382"
+  ],
+  "input": {
+   "command": "python3 -m && git push --force origin main"
+  },
+  "expect": {
+   "allowed": false
+  },
+  "note": "review #420: -m cuối làm guard ném IndexError"
+ },
+ {
+  "id": "og-382-control-m",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-382"
+  ],
+  "input": {
+   "command": "python3 -m"
+  },
+  "expect": {
+   "allowed": true
+  },
+  "note": "review #420: -m cuối làm guard ném IndexError"
  }
  ]
 }

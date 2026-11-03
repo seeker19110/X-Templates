@@ -30,7 +30,14 @@ EDIT_TOOLS = {
 }
 PATCH_TOOLS = {"apply_patch"}  # Codex, OpenCode: đường file nằm trong thân patch
 PATCH_PATH_RE = re.compile(r"^\*\*\* (?:Add File|Update File|Delete File|Move to): (.+?)\s*$", re.M)
-PATH_KEYS = ("file_path", "filePath", "path", "target_file")
+# Khoá đối số: bản đầu theo research §9; khoá thay thế (`cmd`, `file`, `filename`, `paths`, `patch`) là dạng các host
+# từng dùng mà khoá thật chưa xác minh — đọc được thì xét, không trích được lệnh/đường nào → deny UNPARSED, không cho
+# qua im lặng (AUD-SEC-351).
+SHELL_KEYS = ("command", "cmd")
+PATH_KEYS = ("file_path", "filePath", "path", "target_file", "file", "filename", "notebook_path")
+PATH_LIST_KEYS = ("paths", "files", "file_paths")
+PATCH_KEYS = ("command", "patchText", "input", "patch")
+UNPARSED = "UNPARSED"
 HOSTS = ("codex", "gemini", "cursor", "copilot", "grok", "opencode")
 
 
@@ -77,24 +84,37 @@ def mcp_name(host: str, name: str) -> Optional[str]:
     return None
 
 
+def _strings(args: Dict[str, Any], keys: Tuple[str, ...]) -> List[str]:
+    return [v for k in keys for v in [args.get(k)] if isinstance(v, str) and v]
+
+
 def _paths(args: Dict[str, Any]) -> List[str]:
-    return [v for k in PATH_KEYS for v in [args.get(k)] if isinstance(v, str) and v]
+    lists = [args.get(k) for k in PATH_LIST_KEYS]
+    return _strings(args, PATH_KEYS) + [p for v in lists if isinstance(v, list) for p in v if isinstance(p, str) and p]
+
+
+def _unparsed(tool: str, what: str) -> Core:
+    why = f"adapter: tool {tool!r} không có {what} đọc được (khoá đối số lạ) — guard không xét được nên chặn (AUD-SEC-351)"
+    return {"tool": UNPARSED, "reason": why}
 
 
 def to_core(host: str, tool: str, args: Any, cwd: str, root: str) -> List[Core]:
-    """Một lời gọi tool của host → các payload trung lập cần xét (rỗng = không có gì để chặn)."""
+    """Một lời gọi tool của host → các payload trung lập cần xét (rỗng = không có gì để chặn). Tool shell/ghi/patch mà
+    không trích được lệnh/đường → một payload `UNPARSED` (`decide` chặn)."""
     args = args if isinstance(args, dict) else {}
     base: Core = {"cwd": cwd, "project_dir": root}
     low = tool.lower()
     if low in SHELL_TOOLS:
-        return [{**base, "tool": "bash", "command": args.get("command")}]
+        cmds = _strings(args, SHELL_KEYS)
+        return [{**base, "tool": "bash", "command": cmds[0]}] if cmds else [_unparsed(tool, "lệnh (`command`)")]
     if low in PATCH_TOOLS:
-        text = args.get("command") or args.get("patchText") or args.get("input") or ""
-        return [{**base, "tool": "edit", "path": os.path.join(cwd, p)} for p in PATCH_PATH_RE.findall(str(text))]
-    if low in EDIT_TOOLS:
-        return [{**base, "tool": "edit", "path": p, "input": args} for p in _paths(args)] or [
-            {**base, "tool": "edit", "path": "", "input": args}
+        found = [p for t in _strings(args, PATCH_KEYS)[:1] for p in PATCH_PATH_RE.findall(t)]
+        return [{**base, "tool": "edit", "path": os.path.join(cwd, p)} for p in found] or [
+            _unparsed(tool, "đường file")
         ]
+    if low in EDIT_TOOLS:
+        cores = [{**base, "tool": "edit", "path": p, "input": args} for p in _paths(args)]
+        return cores or [_unparsed(tool, "đường file")]
     name = mcp_name(host, tool)
     return [{**base, "tool": "mcp", "tool_name": name, "input": args}] if name else []
 
@@ -118,6 +138,8 @@ def parse(host: str, raw: Any) -> Tuple[str, Any, str, str]:
 def decide(guard: types.ModuleType, cores: List[Core]) -> Tuple[bool, str, str]:
     """(chặn?, mã, lý do) — chặn ngay ở payload đầu tiên bị deny."""
     for core in cores:
+        if core["tool"] == UNPARSED:
+            return True, UNPARSED, str(core["reason"])
         try:
             out = guard.apply_policy(guard._core_decision(core))
         except Exception:  # bộ luật lỗi giữa chừng: như guard.main — fail-open trừ merge
@@ -128,6 +150,9 @@ def decide(guard: types.ModuleType, cores: List[Core]) -> Tuple[bool, str, str]:
             return True, str(out.get("code") or ""), str(out.get("reason") or "")
         if out.get("commit") and out.get("no_verify"):  # Claude Code: hook Bash tự chạy cổng; host khác chỉ có git hook
             why = "`git commit --no-verify` bỏ qua sàn git hook — host này không có cổng commit của hook Claude (ADR-0064 lát C)"
+            return True, "NO_VERIFY", why
+        if out.get("push_no_verify"):  # AUD-SEC-352: sàn `pre-push` (nhánh chính, force, xoá nhánh từ xa) là git hook
+            why = "`git push --no-verify`/`core.hooksPath` bỏ qua git hook `pre-push` — sàn của khung ở host này (ADR-0064 lát C)"
             return True, "NO_VERIFY", why
     return False, "", ""
 

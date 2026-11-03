@@ -294,12 +294,14 @@
    ]
   },
   {
-   "reason": "Hình payload chế độ `guard.py core` (tên tool không chuẩn, `project_dir`) — corpus guard chỉ có lệnh bash; đỡ bằng Gate unittest `tests.test_guard_strict.ReasonCodeLockTest` (ca core) và `tests.test_adapters`",
+   "reason": "Hình payload chế độ `guard.py core` (tên tool không chuẩn, `project_dir`) — corpus guard chỉ có lệnh bash; đỡ bằng Gate unittest `tests.test_guard_strict.ReasonCodeLockTest` (ca core) và `tests.test_adapters`; adapter host khác (khoá đối số lệch → UNPARSED, `git push --no-verify` → NO_VERIFY — quyết định của hook Claude không đổi): `tests.test_adapters -k unparsed`, `-k push_no_verify`",
    "ids": [
     "AUD-SEC-346",
     "AUD-HAR-201",
     "AUD-SEC-349",
-    "AUD-SEC-350"
+    "AUD-SEC-350",
+    "AUD-SEC-351",
+    "AUD-SEC-352"
    ]
   },
   {

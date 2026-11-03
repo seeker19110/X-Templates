@@ -180,6 +180,26 @@ CWD_RELATIVE: Dict[str, str] = {
     "guard-har154-git-mv-ledger-dir": "docs/autopilot tương đối → /tmp/docs/autopilot",
     "guard-har154-cp-into-ledger-dir": "docs/autopilot/ tương đối → /tmp/docs/autopilot",
     "guard-har154-git-C-rm-ledger-dir": "git -C docs tương đối → /tmp/docs/autopilot",
+    **{
+        f"og-340-{k}": f"{v} tương đối → /tmp/{v} (AUD-SEC-340)"
+        for k, v in (
+            ("rsync-glob", "docs/autopilot/"),
+            ("rsync-name", "docs/autopilot/"),
+            ("unzip-d", "docs"),
+            ("bsdtar-C", "docs"),
+            ("7z-o", "docs/autopilot"),
+            ("cpio-D", "docs"),
+            ("py-extract", "docs/autopilot"),
+            ("py-move", "docs/autopilot"),
+            ("node-copysync", "docs/autopilot"),
+            ("perl-dircopy", "docs/autopilot"),
+            ("unzip-cluster-d", "docs"),  # review lượt 2
+            ("py-zipfile-cli", "docs"),
+            ("jar-x", "docs"),
+            ("cp-parents", "docs/"),
+            ("rsync-relative", "docs/"),
+        )
+    },
     "guard-sec188-pr-create-combined-title": "`ai_attribution: forbid` ở xt.yaml của repo ca; /tmp không khai",
     "guard-sec188-pr-create-combined-body": "`ai_attribution: forbid` ở xt.yaml của repo ca; /tmp không khai",
 }

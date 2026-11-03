@@ -44,6 +44,28 @@ class CommitGateKeyTest(unittest.TestCase):
             self.assertFalse([f for f in xt._doctor_xt_yaml(self.base, self.base) if f.level == "error"], value)
             self.assertEqual(run_main("ci-check")[0], 0, value)
 
+    def test_max_rethink_bad_value_warned_by_doctor(self):
+        """AUD-HAR-175: `max_rethink` hỏng âm thầm về trần mặc định (`rethink_cap`) — `doctor` cảnh báo (warn, không
+        error: trần vẫn chặt), giá trị hợp lệ (vắng, rỗng, số nguyên ≥ 0) không cảnh báo."""
+        for ok in ({}, {"max_rethink": ""}, {"max_rethink": "0"}, {"max_rethink": "1"}, {"max_rethink": "007"}):
+            self.assertIsNone(xt.max_rethink_error(ok), ok)
+        for bad in ("abc", "-1", "+1", "1.0", " 2"):
+            err = xt.max_rethink_error({"max_rethink": bad}) or ""
+            self.assertIn(f"max_rethink '{bad}' không hợp lệ (số nguyên ≥ 0 — ADR-0061)", err)
+        # cùng một luật đọc với `rethink_cap`: giá trị nó nhận (kể cả chữ số Unicode `int()` đọc được) không bị cảnh báo
+        for v, cap in (("3", 3), ("１２", 12)):
+            self.assertEqual(
+                (xt.max_rethink_error({"max_rethink": v}), xt.rethink_cap({"max_rethink": v})), (None, cap)
+            )
+        head = "lint: x\ntypecheck: x\ntest: x\nbuild: x\n"
+        (self.base / "xt.yaml").write_text(head + "max_rethink: 'abc'  # x\n")
+        found = [f for f in xt._doctor_xt_yaml(self.base, self.base) if "max_rethink" in f.msg]
+        self.assertEqual([(f.code, f.level) for f in found], [("xt-yaml", "warn")])
+        self.assertTrue(found[0].msg.endswith(f"đang dùng trần mặc định {xt.MAX_RETHINK_DEFAULT}"))
+        for value in ("2", '"0"', ""):
+            (self.base / "xt.yaml").write_text(head + f"max_rethink: {value}\n")
+            self.assertFalse([f for f in xt._doctor_xt_yaml(self.base, self.base) if "max_rethink" in f.msg], value)
+
     def test_commit_gate_cli_reads_like_doctor(self):
         """AUD-XFEAT-017: `xt.py commit-gate` (hook gọi) đọc khoá như `doctor`: dòng cuối thắng, `#` dính liền thuộc giá
         trị; chỉ đúng `fast` mới là fast, còn lại (vắng, full, lạ) → full."""
