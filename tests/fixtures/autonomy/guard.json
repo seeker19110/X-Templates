@@ -21044,6 +21044,36 @@
    "allowed": true
   },
   "note": "nợ review #430 (AUD-SEC-420…424, T-3664)"
+ },
+ {
+  "id": "r431-425-cd-etc",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-425"
+  ],
+  "input": {
+   "command": "cd /etc && printf '[diff]\\n\\texternal = sh\\n' >> gitconfig"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "HOOK_BYPASS"
+  },
+  "note": "review #431: gitconfig hệ thống sau cd/pushd"
+ },
+ {
+  "id": "r431-425-pushd-etc",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-425"
+  ],
+  "input": {
+   "command": "pushd /etc && printf '[diff]\\n\\texternal = sh\\n' >> gitconfig"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "HOOK_BYPASS"
+  },
+  "note": "review #431: gitconfig hệ thống sau cd/pushd"
  }
  ]
 }
