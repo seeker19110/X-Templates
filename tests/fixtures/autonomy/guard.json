@@ -17486,6 +17486,66 @@
    "allowed": true
   },
   "note": "review #418: binary `agent` của Cursor CLI"
+ },
+ {
+  "id": "og-308-param-pattern-nested-quote",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-308"
+  ],
+  "input": {
+   "command": "for f in \"$ROOT\"/*; do echo \"${f#\"$ROOT\"/}\"; done"
+  },
+  "expect": {
+   "allowed": false,
+   "decision": "deny",
+   "code": "BUDGET"
+  },
+  "note": "AUD-SEC-308: chặn thừa theo ADR-0063, cách viết thay ở LOOP-STOP §Điểm dừng"
+ },
+ {
+  "id": "og-308-param-default-nested-quote",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-308"
+  ],
+  "input": {
+   "command": "cd ${DIR:-'.'}"
+  },
+  "expect": {
+   "allowed": false,
+   "decision": "deny",
+   "code": "BUDGET"
+  },
+  "note": "AUD-SEC-308: chặn thừa theo ADR-0063, cách viết thay ở LOOP-STOP §Điểm dừng"
+ },
+ {
+  "id": "og-308-control-substring",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-308"
+  ],
+  "input": {
+   "command": "for f in \"$ROOT\"/*; do echo \"${f:${#ROOT}+1}\"; done"
+  },
+  "expect": {
+   "allowed": true
+  },
+  "note": "AUD-SEC-308: chặn thừa theo ADR-0063, cách viết thay ở LOOP-STOP §Điểm dừng"
+ },
+ {
+  "id": "og-308-control-default-bare",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-308"
+  ],
+  "input": {
+   "command": "cd \"${DIR:-.}\""
+  },
+  "expect": {
+   "allowed": true
+  },
+  "note": "AUD-SEC-308: chặn thừa theo ADR-0063, cách viết thay ở LOOP-STOP §Điểm dừng"
  }
  ]
 }
