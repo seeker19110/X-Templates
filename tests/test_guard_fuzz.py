@@ -222,6 +222,37 @@ CWD_RELATIVE: Dict[str, str] = {
     },
     "guard-sec188-pr-create-combined-title": "`ai_attribution: forbid` ở xt.yaml của repo ca; /tmp không khai",
     "guard-sec188-pr-create-combined-body": "`ai_attribution: forbid` ở xt.yaml của repo ca; /tmp không khai",
+    # T-3673 (AUD-SEC-468…477): đích tương đối của ca (thư mục canh, Git dir `gd`) → dưới /tmp sau `cd /tmp`
+    **{
+        f"t3673-{k}": f"{v} tương đối → /tmp/{v} sau cd /tmp ({ref})"
+        for k, v, ref in (
+            ("468-cpio-Fat-ledger", "docs/autopilot", "AUD-SEC-468"),
+            ("468-cpio-Htar-gitdir", "gd", "AUD-SEC-468"),
+            ("468-cpio-Htar-ledger", "docs/autopilot", "AUD-SEC-468"),
+            ("469-cp-ft-evidence", ".autopilot", "AUD-SEC-469"),
+            ("470-cp-claude-into-root", ".", "AUD-SEC-470"),
+            ("471-tar-double-dash-O", ".claude/hooks", "AUD-SEC-471"),
+            ("471-tar-exclude-eats-O", ".claude/hooks", "AUD-SEC-471"),
+            ("471-tar-ge-abbrev", ".claude/hooks", "AUD-SEC-471"),
+            ("472-py-Im-tarfile", ".claude/hooks", "AUD-SEC-472"),
+            ("472-py-tarfile-extract-eq", ".autopilot", "AUD-SEC-472"),
+            ("472-py-tarfile-filter-value", ".claude/hooks", "AUD-SEC-472"),
+            ("472-py-zipfile-e-abbrev", ".claude/hooks", "AUD-SEC-472"),
+            ("473-ar-output-abbrev", ".claude/hooks", "AUD-SEC-473"),
+            ("473-ar-target-value", ".claude/hooks", "AUD-SEC-473"),
+            ("473-jar-v-x-f", ".claude/hooks", "AUD-SEC-473"),
+            ("473-unzip-O-charset", ".claude/hooks", "AUD-SEC-473"),
+            ("473-unzip-negated-list", ".claude/hooks", "AUD-SEC-473"),
+            ("474-tar-options-env", ".claude/hooks", "AUD-SEC-474"),
+            ("474-tar-options-export", "gd", "AUD-SEC-474"),
+            ("474-unzip-env", ".claude/hooks", "AUD-SEC-474"),
+            ("475-tar-create-evidence", ".autopilot", "AUD-SEC-475"),
+            ("476-rsync-P-evidence", ".autopilot", "AUD-SEC-476"),
+            ("477-cpio-dir-abbrev", "gd", "AUD-SEC-477"),
+            ("477-cpio-ext-abbrev", "gd", "AUD-SEC-477"),
+            ("477-cpio-iD-cluster", ".claude/hooks", "AUD-SEC-477"),
+        )
+    },
 }
 
 

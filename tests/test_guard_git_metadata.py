@@ -825,5 +825,270 @@ class CwdCandidates3672Test(unittest.TestCase):
             self.assertNotEqual(self.policy(cmd)["decision"], "deny", cmd)  # gửi ra máy khác: hỏi-cho-qua như cũ
 
 
+class OptionParse3673Test(unittest.TestCase):
+    """T-3673 (audit delta 2026-11-04): cờ của từng lệnh đọc như getopt/argp/argparse/popt (`_getopt`) — cụm cờ, giá
+    trị dính liền, tên dài viết tắt, `--`; đích ghi ngầm của chép/giải nén/tạo archive. Mỗi ca chặn đỏ ở f47c8c9."""
+
+    git_init = GitMetadataTest.git_init
+    policy = GitMetadataTest.policy
+    assert_code = GitMetadataTest.assert_code
+
+    def setUp(self):
+        GitMetadataTest.setUp(self)
+        for d in ("src", "dist", "build", ".claude/hooks", ".autopilot", "docs/autopilot"):
+            (self.root / d).mkdir(parents=True)
+
+    def assert_codes(self, code, *cmds):
+        for cmd in cmds:
+            self.assert_code(cmd, code)
+
+    def test_468_cpio_value_letters_are_not_flags(self):
+        bare = self.bare
+        self.assert_codes(
+            "EVIDENCE_HANDWRITE",
+            "cd docs/autopilot && cpio -idHtar < /tmp/a.tar",
+            "cd docs/autopilot && cpio -idRroot < a.cpio",
+            "cd docs/autopilot && cpio -iFat",
+            "cd docs/autopilot && cpio -id -H tar < a.tar",  # đối chứng base
+        )
+        self.assert_codes("HOOK_BYPASS", f"cd {bare} && cpio -idHtar < a.tar", "cd .claude/hooks && cpio -idHtar < a")
+        self.assert_codes(
+            "NONE", "cpio -it < a.cpio", "cd docs/autopilot && cpio -itv < a.cpio", "cd .claude/hooks && cpio -itHtar"
+        )
+        self.assertEqual(guard._unpack_dirs("cpio", ["-idHtar"]), ["."])
+        self.assertEqual(guard._unpack_dirs("cpio", ["-it"]), [])
+
+    def test_469_copy_target_directory_cluster_attached_abbrev(self):
+        self.assert_codes(
+            "HOOK_BYPASS",
+            "cp -ft .claude/hooks /tmp/guard.py",
+            "install -Dt .claude/hooks /tmp/guard.py",
+            "ln -sft .claude/hooks /tmp/guard.py",
+            "cp --target=.claude/hooks /tmp/guard.py",
+            "cp --t .claude/hooks /tmp/guard.py",
+            "cp -t.claude/hooks /tmp/guard.py",
+            "cp -rt .claude /tmp/evil/hooks",
+            "mv --targ .claude/hooks /tmp/guard.py",
+            "install -m 755 -t.claude/hooks /tmp/guard.py",
+            "cp -ft .git/hooks /tmp/pre-commit",
+        )
+        self.assert_codes(
+            "EVIDENCE_HANDWRITE", "cp -ft .autopilot /tmp/state.json", "cp -ft docs/autopilot /x/STAGE.json"
+        )
+        self.assert_codes(
+            "NONE",
+            "cp -ft dist a b",
+            "cp -r src dist",
+            "cp -St .claude/hooks x",  # `-S` ăn `t`: toán hạng `.claude/hooks` là nguồn, đích là `x`
+            "install -m 644 -t dist a",
+            "cp --suffix .claude/hooks a b",
+        )
+        self.assertEqual(guard._copy_targets("cp", ["-ft", "D", "a"]), ["D/a"])
+        self.assertEqual(guard._copy_targets("mv", ["--t=D", "a"]), ["D/a", "a"])
+        self.assertEqual(guard._removed_targets(["mv", "-ftD", "a", "b"]), ["a", "b"])
+
+    def test_470_copy_dir_into_parent_with_same_name(self):
+        root = self.root
+        self.assert_codes("HOOK_BYPASS", "cp -r /tmp/evil/.claude .", "cp -r /tmp/evil/.git .", "rsync -a /x/.git ./")
+        self.assert_codes("EVIDENCE_HANDWRITE", f"cp -a /tmp/evil/.autopilot {root}/", "cp -r /tmp/evil/docs .")
+        self.assert_codes("NONE", "cp -r /tmp/evil/src .", "cp -r src dist", "cp a.txt dist/", "mv build/x .")
+
+    def test_471_tar_members_double_dash_abbrev(self):
+        self.assert_codes(
+            "HOOK_BYPASS",
+            "cd .claude/hooks && tar -xf /tmp/a.tar guard.py -C /tmp",
+            "cd .claude/hooks && tar -x --exclude -O -f /tmp/a.tar",
+            "cd .claude/hooks && tar -xf /tmp/a.tar -- -O guard.py",
+            "cd .claude/hooks && tar -x --exclude=x --strip-components 1 -f /tmp/a.tar",
+            "tar --ge -f /tmp/a.tar -C .claude/hooks",
+            "tar -x --file=/tmp/a.tar --dir=.claude/hooks",
+        )
+        self.assert_codes(
+            "NONE",
+            "tar -xf a.tar",
+            "cd .claude/hooks && tar -xOf /tmp/a.tar",
+            "cd .claude/hooks && tar -x --to-s -f /tmp/a.tar",
+            "cd .claude/hooks && tar -xf /tmp/a.tar -C /tmp guard.py",
+            "cd .claude/hooks && tar -tf /tmp/a.tar -- -O",
+            "tar -czf build/out.tgz src",
+        )
+        self.assertEqual(guard._tar_extract_dirs(["-xf", "a", "m", "-C", "d"]), [".", "./d"])
+        self.assertEqual(guard._tar_extract_dirs(["-xf", "a", "-C", "d", "m"]), ["./d"])
+
+    def test_472_python_archive_modules_argparse(self):
+        self.assert_codes(
+            "HOOK_BYPASS",
+            "python3 -Im tarfile -e /tmp/a.tar .claude/hooks",
+            "python3 -IBm zipfile -e /tmp/a.zip .claude/hooks",
+            "python3 -m zipfile --e /tmp/a.zip .claude/hooks",
+            "cd .claude/hooks && python3 -m tarfile -ea.tar",
+            "cd .git && python3 -m tarfile -e /tmp/a.tar --filter data",
+            "python3 -mtarfile -ve /tmp/a.tar .claude/hooks",
+        )
+        self.assert_codes("EVIDENCE_HANDWRITE", "cd .autopilot && python3 -m tarfile --extract=/tmp/a.tar")
+        self.assert_codes(
+            "NONE",
+            "python3 -m zipfile -l a.zip",
+            "python3 -m tarfile -e /tmp/a.tar build",
+            "cd .claude/hooks && python3 -m tarfile -l /tmp/a.tar",
+            "cd .claude/hooks && python3 -m tarfile -t /tmp/a.tar",
+            "python3 -m tarfile -e /tmp/a.tar build --filter data",
+            "python3 -c pass -m tarfile -e /tmp/a.tar",
+        )
+
+    def test_473_jar_ar_unzip_flags(self):
+        self.assert_codes(
+            "HOOK_BYPASS",
+            "cd .claude/hooks && jar --verbose -x --file /tmp/a.jar",
+            "cd .claude/hooks && jar -v -x -f /tmp/a.jar",
+            "cd .claude/hooks && ar --target elf64-x86-64 x /tmp/a.a",
+            "cd .claude/hooks && ar --plugin /p.so x /tmp/a.a",
+            "ar x /tmp/a.a --o=.claude/hooks",
+            "ar x /tmp/a.a --outp .claude/hooks",
+            "ar -v -x /tmp/a.a --output=.claude/hooks",
+            "cd .claude/hooks && unzip -l --l /tmp/a.zip",
+            "cd .claude/hooks && unzip -l- -l /tmp/a.zip",
+            "cd .claude/hooks && unzip --- -l /tmp/a.zip",
+            "cd .claude/hooks && unzip -Ol /tmp/a.zip",
+            "cd .claude/hooks && unzip -Il /tmp/a.zip",
+        )
+        self.assert_codes(
+            "NONE",
+            "cd .claude/hooks && jar -tf /tmp/a.jar",
+            "cd .claude/hooks && jar --list --file /tmp/a.jar",
+            "cd .claude/hooks && ar t /tmp/a.a",
+            "cd .claude/hooks && ar --target elf64-x86-64 t /tmp/a.a",
+            "unzip -l a.zip",
+            "cd .claude/hooks && unzip -qql /tmp/a.zip",
+            "cd .claude/hooks && unzip -l- /tmp/a.zip",
+            "cd .claude/hooks && unzip -O cp437 -l /tmp/a.zip",
+        )
+
+    def test_474_options_from_environment(self):
+        bare = self.bare
+        self.assert_codes(
+            "HOOK_BYPASS",
+            "TAR_OPTIONS=-C.claude/hooks tar -xf /tmp/a.tar",
+            f"export TAR_OPTIONS=-C{bare}; tar -xf a.tar",
+            "TAR_OPTIONS='-C .claude/hooks' tar xf /tmp/a.tar",
+            "env TAR_OPTIONS=-C.claude/hooks tar -xf /tmp/a.tar",
+            "UNZIP=-d.claude/hooks unzip /tmp/a.zip",
+            "UNZIPOPT='-d .claude/hooks' unzip /tmp/a.zip",
+            "export UNZIP=-l-; cd .claude/hooks && unzip -l /tmp/a.zip",  # `-` cuối phủ định `-l` của argv (đo)
+        )
+        self.assert_codes(
+            "NONE",
+            "TAR_OPTIONS=-v tar -xf a.tar -C build",
+            "cd .claude/hooks && TAR_OPTIONS=-O tar -xf /tmp/a.tar",
+            "cd .claude/hooks && UNZIP=-l unzip /tmp/a.zip",
+            "cd .claude/hooks && UNZIP=--l unzip -l /tmp/a.zip",  # `--l` tự phủ định trong biến; `-l` argv vẫn liệt kê
+            "TAR_OPTIONS=-C.claude/hooks tar -cf build/a.tar src",
+        )
+
+    def test_475_created_archive_is_write_target(self):
+        self.assert_codes(
+            "HOOK_BYPASS",
+            "tar -cf .claude/hooks/guard.py /tmp/src",
+            "cd .git/hooks && tar -cf pre-commit /tmp/payload",
+            "tar --create --file=.git/hooks/pre-commit src",
+            "tar cf .claude/hooks/guard.py src",
+            "python3 -m zipfile -c .git/hooks/pre-commit /tmp/src",
+            "python3 -m tarfile --create .claude/hooks/guard.py src",
+            "zip -q .claude/hooks/x.zip src",
+            "ar rc .claude/hooks/x.a a.o",
+            "jar cf .claude/hooks/x.jar src",
+            "cpio -o -F .claude/hooks/x.cpio < list",
+            "pax -w -f .claude/hooks/x.pax src",
+            "7z a .claude/hooks/x.7z src",
+        )
+        self.assert_codes("EVIDENCE_HANDWRITE", "tar -czf .autopilot/state.json /tmp/src")
+        self.assert_codes(
+            "NONE",
+            "tar -czf build/out.tgz src",
+            "python3 -m zipfile -c build/a.zip src",
+            "zip -r build/a.zip src",
+            "tar -cf - src > build/x.tar",
+            "ar t .claude/hooks/x.a",
+            "jar tf .claude/hooks/x.jar",
+            "tar -tf .claude/hooks/x.tar",
+        )
+
+    def test_476_rsync_own_option_table(self):
+        self.assert_codes(
+            "HOOK_BYPASS",
+            "rsync -P /tmp/guard.py .claude/hooks/",
+            "rsync -av -P /tmp/evil/ .claude/",
+            "rsync -r -l /tmp/guard.py .claude/hooks/",
+            "rsync -a -p /tmp/evil/hooks .claude/",
+            "rsync -a -o -i /tmp/guard.py .claude/hooks/",
+        )
+        self.assert_codes("EVIDENCE_HANDWRITE", "rsync -av -P /tmp/state.json .autopilot/")
+        self.assert_codes(
+            "NONE", "rsync -av src/ build/", "rsync -av --exclude .claude src/ build/", "rsync -a -e ssh src/ build/"
+        )
+
+    def test_477_cpio_directory_cluster_abbrev(self):
+        bare = self.bare
+        self.assert_codes(
+            "HOOK_BYPASS",
+            "cpio -iD .claude/hooks < /tmp/a.cpio",
+            f"cpio -idD{bare} < a.cpio",
+            f"cpio -i --dir={bare} < a.cpio",
+            f"cd {bare} && cpio --ext < a.cpio",
+            "cpio --extract --directory .claude/hooks < a.cpio",
+        )
+        self.assert_codes("NONE", "cpio -i -D build < a.cpio", "cpio -it -D .claude/hooks < a", "cpio -o > b.cpio")
+
+    def test_shared_reader_edges(self):
+        cp = guard.COPY_OPT_TABLES["cp"]
+        self.assertEqual(
+            guard._getopt(["--t", "D", "-fS~", "a", "--", "-x"], cp)[:3],
+            [("target-directory", "D"), ("f", None), ("S", "~")],
+        )
+        self.assertEqual(guard._operands(guard._getopt(["--t", "D", "-fS~", "a", "--", "-x"], cp)), ["a", "-x"])
+        self.assertEqual(
+            guard._getopt(["--p", "--=x", "-t"], cp), [("p", None), ("-", "x"), ("t", None)]
+        )  # mơ hồ, rỗng
+        self.assertEqual(guard._getopt(["--exc"], guard.RSYNC_OPTS), [("exc", None)])  # popt không nhận viết tắt
+        self.assertEqual(guard._old_style(["xfC", "a"], guard.TAR_SHORT_VALUE), ["-x", "-f", "a", "-C"])
+        self.assertEqual(
+            guard._py_module(["--check-hash-based-pycs", "always", "--help", "-X", "dev", "-mzipfile"]), ("zipfile", [])
+        )
+        self.assertEqual(guard._py_module(["-Wignore", "-I"]), ("", []))
+        self.assertEqual(guard._py_module(["--", "-m", "x"]), ("", []))
+        table = guard.PY_ARCHIVE_OPTS["tarfile"]
+        self.assertEqual(guard._argparse(["--zz", "-q", "-e", "a", "--", "b"], table), {"extract": ["a"], "": ["b"]})
+        self.assertEqual(guard._argparse(["-e=a", "--fil=x"], table), {"extract": ["a"], "filter": ["x"]})
+        self.assertEqual(guard._py_archive(["-m", "zipfile", "-e", "a.zip"]), ([], []))  # nargs=2 thiếu: lỗi, không ghi
+        self.assertEqual(guard._unzip_parse(["a.zip", "-d"]), ([], False))
+        self.assertEqual(guard._unzip_parse(["-qd", "x", "a.zip", "-l", "-dy"]), (["x", "y"], False))
+        self.assertEqual(guard._ar_parse(["--plugin", "p", "rc", "a.a", "o"])[:2], ("rc", ["a.a", "o"]))
+        self.assertEqual(guard._ar_archive(["rb", "m", "a.a", "o"]), ["a.a"])
+        self.assertEqual(guard._ar_archive(["t", "a.a"]), [])
+        self.assertEqual(guard._cpio_dirs(["-pdm", "dest"]), ["dest"])
+        self.assertEqual(
+            guard._archive_outputs("zip", ["-b", "/tmp", "-r", "o.zip", "src", "--out", "n.zip"]), ["o.zip", "n.zip"]
+        )
+        self.assertEqual(guard._archive_outputs("jar", ["--create", "--file=x.jar", "a"]), ["x.jar"])
+        self.assertEqual(guard._archive_outputs("pax", ["-r", "-f", "x"]), [])
+        self.assertEqual(guard._archive_outputs("gzip", ["x"]), [])
+        self.assertEqual(
+            guard._with_env_opts(["tar", "xf", "a"], ["TAR_OPTIONS=-v", "tar", "xf", "a"], None),
+            ["tar", "-v", "-x", "-f", "a"],
+        )
+        self.assertEqual(
+            guard._with_env_opts(["tar", "xf", "a"], ["tar", "xf", "a"], {"TAR_OPTIONS": ""}), ["tar", "xf", "a"]
+        )
+        self.assertEqual(guard._copy_into_positionals(["mv", "-t", "D", "a"]), ["a", "D"])
+        self.assertEqual(guard._copied_into(["rsync", "a", "host:d/"], str(self.root), str(self.root)), [])
+        self.assertTrue(guard._keeps_path(["rsync", "-aR", "a", "d/"]))
+        self.assertFalse(guard._keeps_path(["cp", "--p", "a", "d/"]))  # `--p` mơ hồ (parents/preserve)
+
+    def test_green_scp_sink_and_7z_case(self):
+        self.assert_codes("HOOK_BYPASS", "scp -t .claude/hooks", "cd .claude/hooks && 7z X /tmp/a.7z")
+        self.assert_codes("HOOK_BYPASS", "7z x /tmp/a.7z -O.claude/hooks")
+        self.assert_codes("NONE", "scp -f src", "7z l /tmp/a.7z", "7z x /tmp/a.7z -obuild")
+
+
 if __name__ == "__main__":
     unittest.main()

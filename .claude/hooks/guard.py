@@ -5009,6 +5009,70 @@ def _parse_opts(args: List[str], short_val: str, long_val: Tuple[str, ...]) -> P
     return flags, pos, vals
 
 
+# T-3673: bộ đọc tuỳ chọn dùng chung cho lệnh ngoài git — mục ("", toán hạng) | (chữ cờ ngắn hay tên dài đầy đủ, giá
+# trị|None), giữ thứ tự (tar `-C` theo vị trí). Bảng theo lệnh: (chữ cờ ngắn ăn giá trị, mọi tên dài, tên dài bắt buộc
+# giá trị, nhận viết tắt). Đọc sai cờ từng làm lọt cả họ lỗ (AUD-SEC-468…477): cụm `-ft D`, dính `-tD`, `--t D`, `--`.
+OptItems = List[Tuple[str, Optional[str]]]
+OptTable = Tuple[str, Tuple[str, ...], Tuple[str, ...], bool]
+
+
+def _long_name(name: str, longs: Tuple[str, ...], abbrev: bool = True) -> str:
+    """Tên dài đầy đủ như getopt_long/argp/argparse: trùng khớp, hay tiền tố của đúng một tên; mơ hồ (công cụ báo lỗi,
+    không chạy) hay lạ → giữ nguyên. popt (rsync) không nhận viết tắt (`abbrev` False)."""
+    hits = [x for x in longs if x.startswith(name)] if abbrev and name not in longs else [name]
+    return (hits[0] if len(hits) == 1 else name) or "-"
+
+
+def _getopt(args: List[str], table: OptTable) -> OptItems:
+    """Đọc `args` như getopt_long (hoán vị, GNU): cụm cờ ngắn dừng ở chữ ăn giá trị (phần còn lại của cụm, không thì
+    token kế), `--tên=v`/`--tên v` (tên bắt buộc giá trị), tên viết tắt, sau `--` và `-` là toán hạng."""
+    short_val, longs, long_val, abbrev = table
+    out: OptItems = []
+    i = 0
+    while i < len(args):
+        a, i = args[i], i + 1
+        if a == "--":
+            return out + [("", x) for x in args[i:]]
+        if a.startswith("--"):
+            name, eq, val = a[2:].partition("=")
+            name = _long_name(name, longs, abbrev)
+            took = [val] if eq else args[i : i + 1] if name in long_val else []
+            i += 0 if eq else len(took)
+            out.append((name, took[0] if took else None))
+        elif a.startswith("-") and len(a) > 1:
+            flags, got, ate = _short_cluster(a, args[i : i + 1], short_val)
+            out += [(f[1:], None) for f in flags[: len(flags) - len(got)]] + [(k[1:], v) for k, v in got]
+            i += ate
+        else:
+            out.append(("", a))
+    return out
+
+
+def _opt_keys(items: OptItems) -> Set[str]:
+    return {k for k, _ in items if k}
+
+
+def _opt_vals(items: OptItems, *keys: str) -> List[str]:
+    return [v for k, v in items if k in keys and v is not None]
+
+
+def _operands(items: OptItems) -> List[str]:
+    return [v for k, v in items if not k and v is not None]
+
+
+def _old_style(args: List[str], short_val: str) -> List[str]:
+    """Kiểu cũ của tar/jar (`xfC a d` = `-x -f a -C d`): chữ ăn giá trị lấy token kế theo thứ tự chữ."""
+    if not args or not re.fullmatch(r"[A-Za-z0-9]+", args[0]):
+        return args
+    out, k = [], 1
+    for ch in args[0]:
+        out.append("-" + ch)
+        if ch in short_val and k < len(args):
+            out.append(args[k])
+            k += 1
+    return out + args[k:]
+
+
 def _has_opt(flags: Set[str], opts: Set[str]) -> bool:
     longs = tuple(o for o in opts if o.startswith("--"))
     return any(f in opts or _long_match(f, longs) for f in flags)
@@ -6094,7 +6158,6 @@ def _snapshot_update_rule(n: List[str]) -> Tuple[str, str]:
 # `--del`, `--delete`, `--delete-after`, cả tên nhiều đoạn `--delete-missing-args` (AUD-SEC-076)
 RSYNC_DELETE_RE = re.compile(r"--(?:del|delete(?:-[\w-]+)?)(?:=.*)?")
 HOME_ROOT_TARGETS = {"/", "~", "$HOME", "${HOME}"}  # dời đi đâu cũng là mất (`mv ~ ./x`)
-MV_VALUE_OPTS = ("-t", "--target-directory", "-S", "--suffix")
 
 
 def _drop_redirects(args: List[str]) -> List[str]:
@@ -6111,9 +6174,38 @@ def _drop_redirects(args: List[str]) -> List[str]:
     return out
 
 
+# Bảng popt của rsync (options.c, RsyncProject/rsync master, đọc 2026-11-04): chữ ngắn ăn giá trị `@BMTef`, tên dài bắt
+# buộc giá trị dưới đây; popt KHÔNG nhận tên viết tắt (popt.c `longOptionStrcmp` so cả độ dài) — AUD-SEC-476: bảng cờ
+# của ssh (`-P -p -l -o -i -F -J` ăn giá trị) từng nuốt nguồn và làm mất đích.
+RSYNC_LONG_VALUE: Tuple[str, ...] = (
+    "address",
+    "backup-dir",
+    "block-size",
+    "bwlimit",
+    "cc",
+    "checksum-choice",
+    "checksum-seed",
+    "chmod",
+)
+RSYNC_LONG_VALUE += ("chown", "compare-dest", "compress-choice", "compress-level", "compress-threads", "config")
+RSYNC_LONG_VALUE += ("confine-root", "contimeout", "copy-as", "copy-dest", "debug", "dparam", "early-input", "exclude")
+RSYNC_LONG_VALUE += ("exclude-from", "files-from", "filter", "groupmap", "iconv", "include", "include-from", "info")
+RSYNC_LONG_VALUE += ("link-dest", "log-file", "log-file-format", "log-format", "max-alloc", "max-delete", "max-size")
+RSYNC_LONG_VALUE += ("min-size", "modify-window", "nice", "only-write-batch", "out-format", "outbuf", "partial-dir")
+RSYNC_LONG_VALUE += ("password-file", "port", "protocol", "read-batch", "remote-option", "rsh", "rsync-path")
+RSYNC_LONG_VALUE += ("skip-compress", "sockopts", "stderr", "stop-after", "stop-at", "suffix", "temp-dir", "time-limit")
+RSYNC_LONG_VALUE += ("timeout", "usermap", "write-batch", "zc", "zl", "zt")
+RSYNC_OPTS: OptTable = ("@BMTef", (), RSYNC_LONG_VALUE, False)
+
+
+def _rsync_pos(args: List[str]) -> List[str]:
+    """Toán hạng của rsync (nguồn…, đích) theo bảng popt riêng."""
+    return _operands(_getopt(args, RSYNC_OPTS))
+
+
 def _rsync_wipes(args: List[str], root: str, cwd: Optional[str]) -> List[str]:
     """`rsync --delete` lên đích local ngoài dự án; `--remove-source-files` xoá nguồn ngoài dự án."""
-    pos = _positionals(args, COPY_VALUE_OPTS["rsync"])
+    pos = _rsync_pos(args)
     out = [s for s in pos[:-1] if _outside_project(s, root, cwd)] if "--remove-source-files" in args else []
     deleting = pos and any(RSYNC_DELETE_RE.fullmatch(a) for a in args) and not REMOTE_SPEC_RE.match(pos[-1])
     return out + ([pos[-1]] if deleting and _outside_project(pos[-1], root, cwd) else [])
@@ -6122,9 +6214,8 @@ def _rsync_wipes(args: List[str], root: str, cwd: Optional[str]) -> List[str]:
 def _mv_wipes(args: List[str], root: str, cwd: Optional[str]) -> List[str]:
     """`mv` dời gốc/home (đi đâu cũng mất) hoặc dời thư mục ngoài dự án sang chỗ khác ngoài dự án (`mv ~/x /tmp/y`);
     dời một file ngoài dự án (`mv ~/Downloads/a.zip /tmp/`) là đổi chỗ, không phải xoá."""
-    pos = _positionals(args, MV_VALUE_OPTS)
-    target = _flag_value(args, "-t") or _flag_value(args, "--target-directory")
-    srcs, dest = (pos, target) if target else (pos[:-1], pos[-1] if pos else "")
+    t_dirs, pos, _ = _copy_opts("mv", args)
+    srcs, dest = (pos, t_dirs[-1]) if t_dirs else (pos[:-1], pos[-1] if pos else "")
     away = bool(dest) and not _inside_root(dest, root, cwd)
     return [
         s
@@ -8248,12 +8339,52 @@ def _git_exec_config(n: List[str], argv: Optional[List[str]] = None, exported: O
 REDIRECTS = (">", ">>", ">|", "&>", "&>>", "<>")
 
 
+# Bảng getopt của cp/mv/ln/install (`--help` của coreutils 9.4): `-t`/`-S` (install thêm `-g -m -o`) ăn giá trị; tên dài
+# viết tắt được (`--t D` = `--target-directory D` — AUD-SEC-469).
+_COPY_LONG = ("backup", "help", "no-target-directory", "suffix", "target-directory", "verbose", "version")
+_CP_MV = ("context", "debug", "force", "interactive", "no-clobber", "strip-trailing-slashes", "update")
+_CP_ONLY: Tuple[str, ...] = (
+    "archive",
+    "attributes-only",
+    "copy-contents",
+    "dereference",
+    "link",
+    "no-dereference",
+    "no-preserve",
+)
+_CP_ONLY += ("one-file-system", "parents", "preserve", "recursive", "reflink", "remove-destination", "sparse")
+_LN_ONLY = ("directory", "force", "interactive", "logical", "no-dereference", "physical", "relative", "symbolic")
+_INSTALL_ONLY: Tuple[str, ...] = (
+    "compare",
+    "context",
+    "debug",
+    "directory",
+    "group",
+    "mode",
+    "owner",
+    "preserve-context",
+)
+_INSTALL_ONLY += ("preserve-timestamps", "strip", "strip-program")
+_COPY_VAL = ("suffix", "target-directory")  # bắt buộc giá trị ở cả bốn lệnh
+COPY_OPT_TABLES: Dict[str, OptTable] = {
+    "cp": ("St", _COPY_LONG + _CP_MV + _CP_ONLY + ("symbolic-link",), _COPY_VAL + ("no-preserve", "sparse"), True),
+    "mv": ("St", _COPY_LONG + _CP_MV + ("no-copy",), _COPY_VAL, True),
+    "ln": ("St", _COPY_LONG + _LN_ONLY, _COPY_VAL, True),
+    "install": ("Sgmot", _COPY_LONG + _INSTALL_ONLY, _COPY_VAL + ("group", "mode", "owner", "strip-program"), True),
+}
+
+
+def _copy_opts(name: str, args: List[str]) -> Tuple[List[str], List[str], Set[str]]:
+    """(thư mục `-t`, toán hạng, khoá cờ) của cp/mv/ln/install."""
+    items = _getopt(args, COPY_OPT_TABLES[name])
+    return _opt_vals(items, "t", "target-directory"), _operands(items), _opt_keys(items)
+
+
 def _copy_targets(name: str, args: List[str]) -> List[str]:
     """cp/install/ln: thư mục `-t` hoặc đích cuối; mv: cả nguồn (bị dời đi = xoá ở chỗ cũ) lẫn đích (AUD-SEC-019)."""
-    t_dir = _flag_value(args, "-t") or _flag_value(args, "--target-directory")
-    pos = _positionals(args, ("-t", "--target-directory", "-m", "--mode", "-S", "--suffix"))
-    if t_dir:  # `-t DIR nguồn…`: file đích là DIR/<tên nguồn>
-        dests = [posixpath.join(t_dir, posixpath.basename(s)) for s in pos]
+    t_dirs, pos, _ = _copy_opts(name, args)
+    if t_dirs:  # `-t DIR nguồn…`: file đích là DIR/<tên nguồn>
+        dests = [posixpath.join(t, posixpath.basename(s.rstrip("/"))) for t in t_dirs for s in pos]
         return dests + (pos if name == "mv" else [])
     if name == "mv":
         return pos
@@ -8304,14 +8435,20 @@ def _wget_outputs(args: List[str]) -> List[str]:
 
 
 def _rsync_dest(args: List[str]) -> List[str]:
-    pos = _positionals(args, REMOTE_VALUE_FLAGS)
+    pos = _rsync_pos(args)
     return pos[-1:] if len(pos) >= 2 and ":" not in pos[-1] else []
 
 
 def _scp_dest(args: List[str]) -> List[str]:
-    """`scp [cờ] nguồn… đích`: đích cục bộ (không `host:`/`scp://`) bị ghi như `cp` (AUD-SEC-449, review #438)."""
-    pos = _positionals(args, COPY_VALUE_OPTS["scp"])
-    return pos[-1:] if len(pos) >= 2 and not REMOTE_SPEC_RE.match(pos[-1]) else []
+    """`scp [cờ] nguồn… đích`: đích cục bộ (không `host:`/`scp://`) bị ghi như `cp` (AUD-SEC-449, review #438); `-t D`
+    (chế độ nhận ẩn của OpenSSH, ghi tệp từ stdin vào D — scp.c, chưa đo: máy không có scp) → D."""
+    items = _getopt(args, SCP_OPTS)
+    pos = _operands(items)
+    many = len(pos) >= 2 or "t" in _opt_keys(items)
+    return pos[-1:] if pos and many and not REMOTE_SPEC_RE.match(pos[-1]) else []
+
+
+SCP_OPTS: OptTable = ("cDFiJloPSX", (), (), False)  # scp(1) OpenSSH: cờ ngắn ăn giá trị, không tên dài
 
 
 def _patch_targets(args: List[str]) -> List[str]:
@@ -8429,12 +8566,26 @@ def _awk_targets(args: List[str]) -> List[str]:
 
 
 def _tar_dest(args: List[str]) -> List[str]:
-    """Thư mục giải nén của `tar -x … -C d` (tạo/liệt kê lưu trữ với `-C` chỉ đọc thư mục đó)."""
-    short = "".join(a[1:] for a in args if a[:1] == "-" and a[1:2] != "-") + (
-        args[0] if args and args[0][:1] != "-" else ""
-    )
-    extract = "x" in short or any(a in ("--extract", "--get") for a in args)
-    return _flag_values(args, ("-C", "--directory")) if extract else []
+    """Thư mục giải nén của `tar -x … -C d` (tạo/liệt kê lưu trữ với `-C` chỉ đọc thư mục đó) và tệp archive mà chế độ
+    tạo/ghi archive ghi ra (`tar -czf F` — AUD-SEC-475)."""
+    opts = _tar_opts(args)
+    dirs = _opt_vals(opts, "C", "directory") if _opt_keys(opts) & TAR_EXTRACT else []
+    return dirs + _tar_archives(opts)
+
+
+# Tuỳ chọn truyền qua biến môi trường, ghép vào trước argv (AUD-SEC-474): GNU tar `TAR_OPTIONS` (đo trên tar 1.35: kiểu
+# cũ `xf` vẫn đọc được), UnZip `UNZIP`/`UNZIPOPT` (đo trên UnZip 6.00 Debian) — gán đầu lệnh, `env`, `export` trước đó.
+ENV_OPTS = {"tar": ("TAR_OPTIONS",), "gtar": ("TAR_OPTIONS",), "unzip": ("UNZIP", "UNZIPOPT")}
+
+
+def _with_env_opts(n: List[str], argv: List[str], env: Optional[Dict[str, str]]) -> List[str]:
+    """`n` với tuỳ chọn từ biến môi trường của lệnh ghép vào sau tên lệnh (kiểu cũ của tar nở trước)."""
+    names = ENV_OPTS.get(n[0], ()) if n else ()
+    vals = {**(env or {}), **_assign_values(argv[: len(argv) - len(_strip_prefixes(argv))])} if names else {}
+    extra = [w for k in names for w in _split_words(vals.get(k, ""))]
+    if not extra:
+        return n
+    return [n[0], *extra, *(_old_style(n[1:], TAR_SHORT_VALUE) if n[0] != "unzip" else n[1:])]
 
 
 def _extract_here(n: List[str]) -> List[str]:
@@ -8444,7 +8595,7 @@ def _extract_here(n: List[str]) -> List[str]:
     khẩu `-d`), `7z x|e`, `cpio -i`, `jar x`, `python -m zipfile -e` theo `_unpack_dirs`; `pax -r` (`_pax_dirs`)."""
     name, args = (n[0], n[1:]) if n else ("", [])
     if name in TAR_NAMES:
-        keys = {k for k, _ in _tar_opts(args)}
+        keys = _opt_keys(_tar_opts(args))
         return [] if keys & {"O", "to-stdout", "to-command"} else _tar_extract_dirs(args)
     return _pax_dirs(args) if name == "pax" else _unpack_dirs(name, args)
 
@@ -8458,6 +8609,12 @@ def _pax_dirs(args: List[str]) -> List[str]:
     if "-r" not in flags:
         return []
     return pos[-1:] if "-w" in flags else ["."]
+
+
+def _pax_archive(args: List[str]) -> List[str]:
+    """`pax -w -f F` (ghi archive, không `-r`) ghi F (AUD-SEC-475)."""
+    flags, _, vals = _parse_opts(args, PAX_SHORT_VALUE, ())
+    return [v for k, v in vals if k == "-f"] if "-w" in flags and "-r" not in flags else []
 
 
 UNIQ_VALUE_OPTS = ("-f", "-s", "-w", "--skip-fields", "--skip-chars", "--check-chars")
@@ -8474,6 +8631,11 @@ def _uniq_output(args: List[str]) -> List[str]:
     return (pos + words[k + 1 :])[1:2]
 
 
+def _archive_writer(name: str) -> Callable[[List[str]], List[str]]:
+    """Hàm đích ghi của trình tạo archive `name` (`_archive_outputs` định nghĩa sau, gọi lúc chạy)."""
+    return lambda a: _archive_outputs(name, a)
+
+
 FILE_WRITERS: Dict[str, Callable[[List[str]], List[str]]] = {
     "curl": _curl_outputs,
     "wget": _wget_outputs,
@@ -8484,7 +8646,11 @@ FILE_WRITERS: Dict[str, Callable[[List[str]], List[str]]] = {
     "awk": _awk_targets,
     "gawk": _awk_targets,
     "tar": _tar_dest,
-    "unzip": lambda a: _flag_values(a, ("-d",)),
+    "gtar": _tar_dest,
+    "bsdtar": _tar_dest,
+    "unzip": lambda a: _unzip_parse(a)[0],
+    # tệp archive tạo ra là đích ghi (AUD-SEC-475)
+    **{k: _archive_writer(k) for k in ("zip", "jar", "ar", "cpio", "pax", "7z", "7za", "7zr", "7zz")},
     "split": lambda a: _positionals(a, ("-l", "-b", "-C", "-n", "-a", "-t", "--additional-suffix"))[1:2],
     "csplit": lambda a: _flag_values(a, ("-f", "--prefix")),
     "dd": lambda a: [x[3:] for x in a if x.startswith("of=")],  # review #186 lần 2: `dd of=.env` là ghi
@@ -8559,7 +8725,8 @@ def write_targets(n: List[str], argv: List[str]) -> List[str]:
         return out + FILE_WRITERS[name](args)
     if name == "sed":
         out += _sed_writes(args)
-    return out + _inplace_targets(name, args)
+    created = _py_archive(args)[1] if PY_UNPACK_RE.fullmatch(name) else []  # `python -m zipfile -c F` (AUD-SEC-475)
+    return out + created + _inplace_targets(name, args)
 
 
 COMMIT_LONG_OPTS_WITH_VALUE = ("--message", "--file", "--author", "--date", "--template", "--reuse-message")
@@ -8696,15 +8863,18 @@ def _perm_asks(n: List[str], argv: List[str], root: str, cwd: Optional[str]) -> 
     return asks + ([PERM_NO_TARGET_WHY] if hidden else [])
 
 
-def _write_asks(n: List[str], argv: List[str], root: str, cwd: Optional[str] = None) -> List[str]:
+def _write_asks(
+    n: List[str], argv: List[str], root: str, cwd: Optional[str] = None, env: Optional[Dict[str, str]] = None
+) -> List[str]:
     """Câu hỏi xác nhận cho file hàng rào/bí mật/cổng/migration mà lệnh có thể ghi (bỏ qua /dev/*). `cwd` None = thư
-    mục đang đứng không biết (D-106, `_where`)."""
+    mục đang đứng không biết (D-106, `_where`); `env`: biến chuỗi lệnh đã đặt (`TAR_OPTIONS`, `UNZIP` — AUD-SEC-474)."""
+    n = _with_env_opts(n, argv, env)
     asks = _perm_asks(n, argv, root, cwd) if n and n[0] in PERM_CMDS else []
     cfg = _git_config_file(n)
     find_evidence = _find_evidence_targets(n[1:]) if n[:1] == ["find"] else []
     # AUD-SEC-458: giải nén không nêu thư mục ghi vào thư mục đang đứng — xét như `-C .`/`-d .` (chỉ ở đây: `.` không
-    # là đích của luật tệp-vừa-ghi-rồi-chạy, ADR-0066)
-    targets = [*write_targets(n, argv), *([cfg] if cfg else []), *_extract_here(n)]
+    # là đích của luật tệp-vừa-ghi-rồi-chạy, ADR-0066); AUD-SEC-470: chép VÀO thư mục → cả `đích/<tên nguồn>`
+    targets = [*write_targets(n, argv), *([cfg] if cfg else []), *_extract_here(n), *_copied_into(n, root, cwd)]
     found = [x for t in find_evidence for x in _where(t, root, cwd) if t not in targets]
     asks += [EVIDENCE_WHY.format(t) for t in found if _target_kind(t, root) == "evidence"]
     asks += [FENCE_WHY.format(t) for t in found if _is_fence(t, root)]
@@ -8759,7 +8929,6 @@ def _write_asks(n: List[str], argv: List[str], root: str, cwd: Optional[str] = N
 
 # sổ giai đoạn và thư mục tổ tiên của nó (`docs/autopilot`, `docs`)
 LEDGER_PATHS = tuple(STAGE_LEDGER.rsplit("/", i)[0] for i in range(STAGE_LEDGER.count("/") + 1))
-COPY_DEST_OPTS = ("-t", "--target-directory", "-m", "--mode", "-S", "--suffix")
 
 
 def _ledger_hit(rel: str) -> bool:
@@ -8779,8 +8948,8 @@ def _removed_targets(n: List[str]) -> List[str]:
         pos = _positionals(args[1:])
         return pos if args[0] == "rm" else pos[:-1]
     if name == "mv":
-        pos = _positionals(args, MV_VALUE_OPTS)
-        return pos if _flag_value(args, "-t") or _flag_value(args, "--target-directory") else pos[:-1]
+        t_dirs, pos, _ = _copy_opts("mv", args)
+        return pos if t_dirs else pos[:-1]
     if name in ("rm", "unlink", "shred"):
         return _positionals(args)
     return _find_ledger_roots(args) if name == "find" else _git_file_targets(n)
@@ -8812,11 +8981,7 @@ def _ledger_asks(n: List[str], argv: List[str], root: str, cwd: Optional[str]) -
     base = _git_path_dir(n, argv, cwd) if removed else cwd  # chỉ đọc `-C` khi có đích xoá/dời
     found = dict.fromkeys(x for t in removed for x in _where(t, root, base))
     hits = [x for x in found if _ledger_hit(_rel_dir(x, root))]
-    pos = _copy_into_positionals(n)
-    for d in _where(pos[-1], root, cwd) if len(pos) > 1 else []:
-        if pos[-1].endswith("/") or os.path.isdir(os.path.join(root, d)):
-            joined = [posixpath.join(d, _copied_name(n, s)) for s in pos[:-1]]
-            hits += [j for j in joined if _ledger_hit(_rel_dir(j, root))]
+    hits += [j for j in _copied_into(n, root, cwd) if _ledger_hit(_rel_dir(j, root))]
     hits += [x for t in _merge_roots(n) for x in _where(t, root, cwd) if _ledger_hit(_rel_dir(x, root))]
     hits += [posixpath.join(root, STAGE_LEDGER)] if _merge_renamed(n) else []
     return [EVIDENCE_WHY.format(h) for h in dict.fromkeys(hits)]
@@ -8824,18 +8989,31 @@ def _ledger_asks(n: List[str], argv: List[str], root: str, cwd: Optional[str]) -
 
 def _copy_into_positionals(n: List[str]) -> List[str]:
     """Đối số vị trí của lệnh chép/dời VÀO thư mục có sẵn (nguồn…, đích): `cp`/`mv`/`install`/`ln`, cả `rsync`
-    (`rsync -a src/* docs/autopilot/` — AUD-SEC-340); lệnh khác → rỗng."""
-    if n[:1] and n[0] in ("cp", "mv", "install", "ln"):
-        return _positionals(n[1:], COPY_DEST_OPTS)
-    return _positionals(n[1:], COPY_VALUE_OPTS["rsync"]) if n[:1] == ["rsync"] else []
+    (`rsync -a src/* docs/autopilot/` — AUD-SEC-340), `scp` đích cục bộ; `-t D` → (nguồn…, D); lệnh khác → rỗng."""
+    if n[:1] and n[0] in COPY_OPT_TABLES:
+        t_dirs, pos, _ = _copy_opts(n[0], n[1:])
+        return pos + t_dirs[-1:]
+    if n[:1] == ["scp"]:
+        return _operands(_getopt(n[1:], SCP_OPTS))
+    return _rsync_pos(n[1:]) if n[:1] == ["rsync"] else []
+
+
+def _copied_into(n: List[str], root: str, cwd: Optional[str]) -> List[str]:
+    """`đích/<tên nguồn>` khi lệnh chép/dời VÀO thư mục (đích kết `/` hay đã là thư mục): `cp -r X/.claude .` gộp đè
+    `./.claude` có sẵn — luật đích bảo vệ phải xét cả đường này, không chỉ `.` (AUD-SEC-470)."""
+    pos = _copy_into_positionals(n)
+    if len(pos) < 2 or REMOTE_SPEC_RE.match(pos[-1]):
+        return []
+    dirs = [d for d in _where(pos[-1], root, cwd) if pos[-1].endswith("/") or os.path.isdir(os.path.join(root, d))]
+    return [posixpath.join(d, _copied_name(n, s)) for d in dirs for s in pos[:-1]]
 
 
 def _keeps_path(n: List[str]) -> bool:
     """Chép giữ đường nguồn dưới đích (review lượt 2): `cp --parents` (cả tiền tố `--pa…`), `rsync -R/--relative`."""
-    args = list(itertools.takewhile(lambda a: a != "--", n[1:]))
     if n[:1] == ["cp"]:
-        return any(len(a) > 3 and "--parents".startswith(a) for a in args)
-    return n[:1] == ["rsync"] and ("--relative" in args or "R" in _short_flags(args))
+        return "parents" in _copy_opts("cp", n[1:])[2]
+    keys = _opt_keys(_getopt(n[1:], RSYNC_OPTS)) if n[:1] == ["rsync"] else set()
+    return bool(keys & {"R", "relative"})
 
 
 def _copied_name(n: List[str], src: str) -> str:
@@ -8860,13 +9038,12 @@ def _merge_roots(n: List[str]) -> List[str]:
     tiên của nó → ghi tay sổ (`_ledger_hit`)."""
     name, args = (n[0], n[1:]) if n else ("", [])
     if name in ("cp", "install"):
-        t_dir = _flag_value(args, "-t") or _flag_value(args, "--target-directory")
-        pos = _positionals(args, COPY_DEST_OPTS)
-        srcs, dest = (pos, t_dir) if t_dir else (pos[:-1], pos[-1] if len(pos) > 1 else "")
-        no_t = not t_dir and ("--no-target-directory" in args or "T" in _short_flags(args))
+        t_dirs, pos, keys = _copy_opts(name, args)
+        srcs, dest = (pos, t_dirs[-1]) if t_dirs else (pos[:-1], pos[-1] if len(pos) > 1 else "")
+        no_t = not t_dirs and bool(keys & {"T", "no-target-directory"})
         return [dest] if dest and (no_t or any(map(_dot_source, srcs))) else []
     if name == "rsync":
-        pos = _positionals(args, COPY_VALUE_OPTS["rsync"])
+        pos = _rsync_pos(args)
         return pos[-1:] if any(s.endswith("/") or _dot_source(s) for s in pos[:-1]) else []
     return _tar_extract_dirs(args) if name in TAR_NAMES else _unpack_dirs(name, args)
 
@@ -8875,64 +9052,267 @@ def _merge_roots(n: List[str]) -> List[str]:
 # -D …`/`cpio -p <đích>`, `jar x` (review lượt 2), `python -m zipfile|tarfile -e A [D]`; vắng cờ đích = thư mục đang
 # đứng. Chế độ chỉ liệt kê/kiểm/in ra stdout → không ghi. `tar`/`gtar`/`bsdtar`: `TAR_NAMES`.
 SEVEN_ZIP = ("7z", "7za", "7zr", "7zz")
-UNZIP_READ_FLAGS = set("ltvpczZ")
-CPIO_VALUE_OPTS = ("-D", "-E", "-F", "-H", "-I", "-M", "-O", "-R", "--directory", "--file", "--format", "--owner")
 PY_UNPACK_RE = re.compile(r"python[\d.]*")
-JAR_MODE_RE = re.compile(r"-?[A-Za-z0-9]*x[A-Za-z0-9]*")
+# UnZip 6.00 (unzip.c `uz_opts`, đo trên bản Debian): `-` trong cụm phủ định chữ cờ KẾ TIẾP, kể cả sang token sau
+# (`-l --l`, `-l- -l`, `--- -l` đều giải nén); `-d -P -O -I` ăn giá trị (phần còn lại của cụm, không thì token kế);
+# chữ cờ chỉ đọc (cùng nhóm thì cộng/trừ chung); tuỳ chọn sau tên zip là mẫu tên tệp, trừ `-d` — AUD-SEC-473.
+UNZIP_READ = {"l": "v", "v": "v", "t": "t", "c": "c", "p": "c", "z": "z", "Z": "Z"}
+
+
+def _unzip_parse(args: List[str]) -> Tuple[List[str], bool]:
+    """(thư mục `-d`, chỉ đọc/liệt kê/in ra stdout) của `unzip`."""
+    counts: Dict[str, int] = {}
+    neg, dirs, i, seen_zip = 0, [], 0, False
+    while i < len(args):
+        a, i = args[i], i + 1
+        if a[:1] != "-" or a == "-" or (seen_zip and a[:2] != "-d"):
+            seen_zip = True
+            continue
+        for j, c in enumerate(a[1:], 2):
+            if c == "-":
+                neg += 1
+                continue
+            if c in "dPOI":
+                val = a[j:] or (args[i] if i < len(args) else None)
+                i += 0 if a[j:] else 1
+                dirs += [val] if c == "d" and val is not None else []
+                neg = 0
+                break
+            key = UNZIP_READ.get(c, "")
+            counts[key] = max(counts.get(key, 0) - neg, 0) if neg else counts.get(key, 0) + 1
+            neg = 0
+    return dirs, any(v for k, v in counts.items() if k)
 
 
 def _unzip_dirs(args: List[str]) -> List[str]:
-    """Thư mục đích của `unzip`: `-d D`, `-dD`, cụm `-qd D`/`-qdD` (chữ sau `d`/`P` trong cụm là giá trị — mật khẩu
-    `-P` không phải cờ); chế độ đọc → []."""
-    flags, dirs, i = "", [], 0
+    """Thư mục đích của `unzip`: `-d D`, `-dD`, cụm `-qd D`; vắng = thư mục đang đứng; chế độ đọc → []."""
+    dirs, reading = _unzip_parse(args)
+    return [] if reading else (dirs or ["."])
+
+
+# CPython: cụm cờ của trình thông dịch (`-Im tarfile`, `-mtarfile`), `-W`/`-X`/`--check-hash-based-pycs` ăn giá trị,
+# `-c`/`--`/tên script thì không còn `-m`. Mô-đun lưu trữ đọc đối số bằng argparse (Lib/tarfile.py, Lib/zipfile/
+# __init__.py của 3.13): {tên dài: (chữ ngắn, nargs)}; tên dài nhận tiền tố duy nhất (`--e` = `--extract`) — AUD-SEC-472.
+PY_ARCHIVE_OPTS: Dict[str, Dict[str, Tuple[str, int]]] = {  # nargs −1 = `+`
+    "tarfile": {"verbose": ("v", 0), "filter": ("", 1), "list": ("l", 1), "extract": ("e", -1), "create": ("c", -1)},
+    "zipfile": {"metadata-encoding": ("", 1), "list": ("l", 1), "extract": ("e", 2), "create": ("c", -1)},
+}
+PY_ARCHIVE_OPTS["tarfile"]["test"] = PY_ARCHIVE_OPTS["zipfile"]["test"] = ("t", 1)
+
+
+def _py_module(args: List[str]) -> Tuple[str, List[str]]:
+    """(mô-đun của `-m`, đối số của nó) theo cách CPython đọc dòng lệnh; không có `-m` → ("", [])."""
+    i = 0
     while i < len(args):
-        body = args[i][1:] if args[i][:1] == "-" and args[i][1:2] not in ("", "-") else ""
-        head, opt, val = min(body.partition("d"), body.partition("P"), key=lambda x: len(x[0]))
-        flags += head
-        dirs += ([val] if val else args[i + 1 : i + 2]) if opt == "d" else []
-        i += 2 if opt and not val else 1
-    return [] if UNZIP_READ_FLAGS & set(flags) else (dirs or ["."])
+        a, i = args[i], i + 1
+        if a == "--check-hash-based-pycs":
+            i += 1
+        elif a[:1] != "-" or a in ("-", "--"):
+            return "", []
+        elif a[:2] != "--":
+            for j, c in enumerate(a[1:], 2):
+                if c in "cm":
+                    mod = a[j:] or (args[i] if i < len(args) else "")
+                    return (mod, args[i + (0 if a[j:] else 1) :]) if c == "m" else ("", [])
+                if c in "WX":
+                    i += 0 if a[j:] else 1
+                    break
+    return "", []
 
 
-def _py_unpack_dirs(args: List[str]) -> List[str]:
-    """`python -m zipfile|tarfile -e|--extract A [D]` (argparse nhận tiền tố `--ext`): D, vắng = thư mục đang đứng."""
-    # `-m` đứng cuối: không có tên module (review #420, AUD-SEC-382 — IndexError từng làm guard thả cửa cả lệnh)
-    mod = next(
-        (
-            (args[i + 1] if i + 1 < len(args) else "") if a == "-m" else a[2:]
-            for i, a in enumerate(args)
-            if a.startswith("-m")
-        ),
-        "",
-    )
-    if mod not in ("zipfile", "tarfile"):
-        return []
-    rest = args[args.index("-m") + 2 if "-m" in args else args.index("-m" + mod) + 1 :]
-    k = next((i for i, a in enumerate(rest) if a == "-e" or (len(a) > 3 and "--extract".startswith(a))), None)
-    return [] if k is None else ([a for a in rest[k + 1 :] if not a.startswith("-")][1:2] or ["."])
+def _argparse(args: List[str], table: Dict[str, Tuple[str, int]]) -> Dict[str, List[str]]:
+    """Giá trị (lần cuối) của từng tuỳ chọn theo argparse: `-eA`, `-e=A`, cụm cờ không giá trị (`-ve`), `--ext=A`, tiền tố
+    duy nhất; nargs `+` ăn mọi token không bắt đầu bằng `-`, số n ăn tối đa n token. Token thừa → khoá "" (argparse báo
+    lỗi; người gọi đọc theo chiều chặt)."""
+    out: Dict[str, List[str]] = {}
+    args, i = list(args), 0
+    while i < len(args):
+        a, i = args[i], i + 1
+        if a[:1] != "-" or a in ("-", "--"):
+            out.setdefault("", []).extend(args[i:] if a == "--" else [a])
+            i = len(args) if a == "--" else i
+            continue
+        if a[:2] == "--":
+            name, eq, val = a[2:].partition("=")
+            hits = [k for k in table if k.startswith(name)]
+            key, explicit = (name if name in table else hits[0] if len(hits) == 1 else ""), (val if eq else None)
+        else:
+            key = next((k for k, (s, _) in table.items() if s and s == a[1]), "")
+            explicit = a[3:] if a[2:3] == "=" else a[2:] or None
+        if not key:
+            continue
+        nargs = table[key][1]
+        if nargs == 0:
+            args[i:i] = ["-" + explicit] if explicit and a[:2] != "--" else []
+            out[key] = []
+            continue
+        k = i
+        while explicit is None and k < len(args) and args[k][:1] != "-" and (nargs < 0 or k - i < nargs):
+            k += 1
+        out[key], i = ([explicit] if explicit is not None else args[i:k]), k
+    return out
+
+
+def _py_archive(args: List[str]) -> Tuple[List[str], List[str]]:
+    """(thư mục giải nén, tệp archive tạo ra) của `python -m tarfile|zipfile`: tarfile `-e A [D]` (vắng D = thư mục đang
+    đứng), zipfile `-e A D`; `-c F nguồn…` ghi F (AUD-SEC-475). Sai số đối số → argparse/mô-đun báo lỗi, không ghi."""
+    mod, rest = _py_module(args)
+    table = PY_ARCHIVE_OPTS.get(mod)
+    if table is None:
+        return [], []
+    got = _argparse(rest, table)
+    ext = got.get("extract", [])
+    dirs = ext[1:2] if len(ext) == 2 else ["."] if len(ext) == 1 and mod == "tarfile" else []
+    # token thừa (`-e A -v out`: Python 3.13 báo lỗi, không ghi) — chiều chặt: cả `.` lẫn token đó là đích
+    stray = got.get("", []) if "extract" in got else []
+    return (dirs or ["."] * bool(stray)) + stray, got.get("create", [])[:1]
+
+
+# jar của JDK (`jar --help`, JDK 21): cụm đầu (có hay không `-`) là kiểu cũ (`xf a.jar`, `-cvfm a m`); sau đó kiểu GNU
+# (`-x -f a`, `--file=a`), tên dài không viết tắt; chế độ ở MỌI token (`jar -v -x -f a` — AUD-SEC-473).
+JAR_LONG_VALUE: Tuple[str, ...] = (
+    "file",
+    "generate-index",
+    "main-class",
+    "manifest",
+    "release",
+    "module-version",
+    "hash-modules",
+)
+JAR_LONG_VALUE += ("module-path", "date", "dir")
+JAR_OPTS: OptTable = ("Cefimp", (), JAR_LONG_VALUE, False)
+
+
+def _jar_opts(args: List[str]) -> OptItems:
+    old = bool(args) and bool(re.fullmatch(r"-?[A-Za-z0-9]+", args[0]))
+    return _getopt(_old_style([args[0].lstrip("-"), *args[1:]], "fme") if old else args, JAR_OPTS)
+
+
+def _jar_extract(items: OptItems) -> bool:
+    keys = _opt_keys(items)
+    return bool(keys & {"x", "extract"}) and not keys & {"c", "t", "u", "create", "list", "update"}
+
+
+# GNU ar 2.42 (`ar --help`, binutils ar.c): token đầu không `-` là cụm khoá (`xv`); tên dài qua getopt_long (viết tắt
+# được: `--o=D`, `--outp D`), `--plugin`/`--target`/`--output`/`--record-libdeps` ăn giá trị; khoá cũng có thể là toán
+# hạng đầu sau các tuỳ chọn (`ar --target T x a.a`) — AUD-SEC-473.
+_AR_VALUE = ("output", "plugin", "record-libdeps", "target")
+AR_OPTS: OptTable = ("", _AR_VALUE + ("help", "thin", "version"), _AR_VALUE, True)
+
+
+def _ar_parse(args: List[str]) -> Tuple[str, List[str], OptItems]:
+    """(chữ khoá/sửa đổi, toán hạng sau khoá, mục tuỳ chọn) của `ar`."""
+    items = _getopt(["-" + args[0], *args[1:]] if args and args[0][:1] != "-" else args, AR_OPTS)
+    letters, pos = "".join(k for k, _ in items if len(k) == 1), _operands(items)
+    if not set(letters) & set("dmpqrstx") and pos:
+        letters, pos = letters + pos[0], pos[1:]
+    return letters, pos, items
+
+
+def _ar_archive(args: List[str]) -> List[str]:
+    """Tệp archive mà `ar r|q|m|d|s` ghi: toán hạng sau khoá, bỏ thành viên mốc (`a`/`b`/`i`) và số đếm (`N`)."""
+    letters, pos, _ = _ar_parse(args)
+    skip = bool(set(letters) & set("abi")) + ("N" in letters)
+    return pos[skip : skip + 1] if set(letters) & set("rqmds") else []
+
+
+# GNU cpio (src/main.c, argp + ARGP_IN_ORDER): chữ ngắn ăn giá trị, mọi tên dài (viết tắt được) — chữ `t` trong
+# `-idHtar` là giá trị của `-H`, không phải liệt kê (AUD-SEC-468); `-iD D`, `--dir=D`, `--ext` (AUD-SEC-477).
+CPIO_LONG_VALUE: Tuple[str, ...] = (
+    "block-size",
+    "directory",
+    "file",
+    "format",
+    "io-size",
+    "message",
+    "owner",
+    "pattern-file",
+)
+CPIO_LONG_VALUE += ("rename-batch-file", "rsh-command", "warning")
+_CPIO_FLAGS = "absolute-filenames append create debug dereference device-independent dot extract force-local help"
+_CPIO_FLAGS += " ignore-devno link list make-directories no-absolute-filenames no-preserve-owner nonmatching null"
+_CPIO_FLAGS += " numeric-uid-gid only-verify-crc pass-through preserve-modification-time quiet rename renumber-inodes"
+_CPIO_FLAGS += " reproducible reset-access-time sparse swap swap-bytes swap-halfwords to-stdout unconditional usage"
+_CPIO_FLAGS += " verbose version"
+CPIO_OPTS: OptTable = ("CDEFHIMORW", CPIO_LONG_VALUE + tuple(_CPIO_FLAGS.split()), CPIO_LONG_VALUE, True)
+
+
+def _cpio_dirs(args: List[str]) -> List[str]:
+    items = _getopt(args, CPIO_OPTS)
+    keys, dirs = _opt_keys(items), _opt_vals(items, "D", "directory")
+    if keys & {"p", "pass-through"}:
+        return dirs + _operands(items)[-1:]
+    listing = keys & {"t", "list", "to-stdout"}  # `cpio -it`: chỉ liệt kê (AUD-SEC-462)
+    return (dirs or ["."]) if keys & {"i", "extract"} and not listing else []
+
+
+def _cpio_archive(args: List[str]) -> List[str]:
+    """`cpio -o` ghi archive ra `-O F`/`-F F`/`--file=F` (AUD-SEC-475)."""
+    items = _getopt(args, CPIO_OPTS)
+    return _opt_vals(items, "O", "F", "file") if _opt_keys(items) & {"o", "create"} else []
+
+
+def _seven_zip(args: List[str]) -> Tuple[List[str], List[str]]:
+    """(thư mục giải nén, archive ghi) của 7z: lệnh và khoá chuyển không phân biệt hoa thường (chưa đo: máy không có 7z
+    — https://7-zip.opensource.jp/chm/cmdline/syntax.htm); `x|e` giải vào `-o<D>` (vắng = `.`), `a|u|d|rn` ghi archive."""
+    pos = _positionals(args)
+    cmd = pos[0].lower() if pos else ""
+    dirs = [a[2:] for a in args if a[:2].lower() == "-o"] or ["."]
+    return (dirs if cmd in ("x", "e") else []), (pos[1:2] if cmd in ("a", "u", "d", "rn") else [])
 
 
 def _unpack_dirs(name: str, args: List[str]) -> List[str]:
     if name == "unzip":
         return _unzip_dirs(args)
     if PY_UNPACK_RE.fullmatch(name):
-        return _py_unpack_dirs(args)
+        return _py_archive(args)[0]
     if name == "jar":
-        extract = bool(args) and (bool(JAR_MODE_RE.fullmatch(args[0])) or "--extract" in args)
-        return (_flag_values(args, ("-C", "--dir")) or ["."]) if extract else []
+        items = _jar_opts(args)
+        return (_opt_vals(items, "C", "dir") or ["."]) if _jar_extract(items) else []
     if name in SEVEN_ZIP:
-        return (_flag_values(args, ("-o",)) or ["."]) if _positionals(args)[:1] in (["x"], ["e"]) else []
+        return _seven_zip(args)[0]
     if name == "ar":  # `ar x|-xv a.a [thành viên…]` giải vào thư mục đang đứng, `--output D` (AUD-SEC-462)
-        key = next((a for a in args if not a.startswith("--")), "").lstrip("-")
-        return (_flag_values(args, ("--output",)) or ["."]) if re.fullmatch(r"[A-Za-z]*x[A-Za-z]*", key) else []
-    if name != "cpio":
-        return []
-    flags = _short_flags([a for i, a in enumerate(args) if not (i and args[i - 1] in CPIO_VALUE_OPTS)])
-    dirs = _flag_values(args, ("-D", "--directory"))
-    if "p" in flags or "--pass-through" in args:
-        return dirs + _positionals(args, CPIO_VALUE_OPTS)[-1:]
-    listing = "t" in flags or bool({"--list", "--to-stdout"} & set(args))  # `cpio -it`: chỉ liệt kê (AUD-SEC-462)
-    return (dirs or ["."]) if ("i" in flags or "--extract" in args) and not listing else []
+        letters, _, items = _ar_parse(args)
+        return (_opt_vals(items, "output") or ["."]) if "x" in letters else []
+    return _cpio_dirs(args) if name == "cpio" else []
+
+
+def _archive_outputs(name: str, args: List[str]) -> List[str]:
+    """Tệp archive mà lệnh tạo/ghi archive ghi ra (AUD-SEC-475): `zip F`, `jar c|u` kèm `f`, `ar r|q`, `cpio -o`, `7z a`,
+    `pax -w -f`, `python -m zipfile|tarfile -c F` (tar: `_tar_dest`)."""
+    if name == "zip":
+        return _positionals(args, ZIP_VALUE_OPTS)[:1] + _flag_values(args, ("-O", "--out", "--output-file"))
+    if name == "jar":
+        items = _jar_opts(args)
+        return _opt_vals(items, "f", "file") if _opt_keys(items) & {"c", "u", "create", "update"} else []
+    if name == "ar":
+        return _ar_archive(args)
+    if name == "cpio":
+        return _cpio_archive(args)
+    if name in SEVEN_ZIP:
+        return _seven_zip(args)[1]
+    return _pax_archive(args) if name == "pax" else _py_archive(args)[1] if PY_UNPACK_RE.fullmatch(name) else []
+
+
+# Info-ZIP zip 3.0 (`zip -h2`): tuỳ chọn là cả token (`-tt`, `-ds`), các tuỳ chọn ăn giá trị dưới; toán hạng đầu là
+# archive, `-O`/`--out` là tệp ra.
+ZIP_VALUE_OPTS: Tuple[str, ...] = (
+    "-b",
+    "-n",
+    "-t",
+    "-tt",
+    "-P",
+    "-Z",
+    "-s",
+    "-ds",
+    "-O",
+    "-TT",
+    "-lf",
+    "--out",
+    "--temp-path",
+)
+ZIP_VALUE_OPTS += ("--password", "--suffixes", "--compression-method", "--split-size", "--from-date", "--before-date")
+ZIP_VALUE_OPTS += ("--unzip-command", "--logfile-path", "--output-file")
 
 
 def _merge_renamed(n: List[str]) -> bool:
@@ -8940,69 +9320,74 @@ def _merge_renamed(n: List[str]) -> bool:
     có thể ghi sổ (AUD-SEC-340)."""
     if not n or n[0] not in TAR_NAMES or not _tar_extract_dirs(n[1:]):
         return False
-    keys = {k for k, _ in _tar_opts(n[1:])}
+    keys = _opt_keys(_tar_opts(n[1:]))
     return bool(keys & {"transform", "xform"}) or (n[0] == "bsdtar" and "s" in keys)
 
 
-# Cờ ngắn của GNU tar ăn một giá trị (trong cụm `-xC d`: phần còn lại của cụm, không thì token kế; kiểu cũ `xfC a d`:
-# token kế theo thứ tự chữ). Cờ dài viết tắt được (getopt): tiền tố ≥ 3 chữ của tên dưới (`--dir=` = `--directory=`).
+# Bảng argp của GNU tar 1.35 (`tar --help`, đo 2026-11-04): chữ ngắn ăn giá trị; mọi tên dài (viết tắt được nếu là
+# tiền tố của đúng một tên: `--dir=` = `--directory=`, `--ge` = `--get`; mơ hồ như `--fil` thì tar báo lỗi) và tên bắt
+# buộc giá trị (`--exclude -O` là mẫu `-O`, không phải ra stdout — AUD-SEC-471). Kiểu cũ `xfC a d`: `_old_style`.
 TAR_SHORT_VALUE = "bCfFgHIKLNTVX"
-TAR_LONG_NAMES = ("directory", "extract", "one-top-level", "transform", "xform", "to-stdout", "to-command")
-TAR_LONG_VALUE = ("directory", "file", "transform", "xform", "to-command")
+TAR_LONG_VALUE: Tuple[str, ...] = (
+    "add-file",
+    "after-date",
+    "blocking-factor",
+    "checkpoint-action",
+    "directory",
+    "exclude",
+)
+TAR_LONG_VALUE += ("exclude-from", "exclude-ignore", "exclude-ignore-recursive", "exclude-tag", "exclude-tag-all")
+TAR_LONG_VALUE += ("exclude-tag-under", "file", "files-from", "format", "group", "group-map", "hole-detection")
+TAR_LONG_VALUE += ("index-file", "info-script", "label", "level", "listed-incremental", "mode", "mtime")
+TAR_LONG_VALUE += ("new-volume-script", "newer", "newer-mtime", "no-quote-chars", "owner", "owner-map", "pax-option")
+TAR_LONG_VALUE += ("quote-chars", "quoting-style", "record-size", "rmt-command", "rsh-command", "sort")
+TAR_LONG_VALUE += ("sparse-version", "starting-file", "strip-components", "suffix", "tape-length", "to-command")
+TAR_LONG_VALUE += ("transform", "use-compress-program", "volno-file", "warning", "xattrs-exclude", "xattrs-include")
+TAR_LONG_VALUE += ("xform",)
+_TAR_FLAGS = "absolute-names acls anchored append atime-preserve auto-compress backup block-number bzip2 catenate"
+_TAR_FLAGS += " check-device check-links checkpoint clamp-mtime compare compress concatenate confirmation create"
+_TAR_FLAGS += " delay-directory-restore delete dereference diff exclude-backups exclude-caches exclude-caches-all"
+_TAR_FLAGS += " exclude-caches-under exclude-vcs exclude-vcs-ignores extract force-local full-time get gunzip gzip"
+_TAR_FLAGS += " hard-dereference help ignore-case ignore-command-error ignore-failed-read ignore-zeros incremental"
+_TAR_FLAGS += " interactive keep-directory-symlink keep-newer-files keep-old-files list lzip lzma lzop multi-volume"
+_TAR_FLAGS += " no-acls no-anchored no-auto-compress no-check-device no-delay-directory-restore no-ignore-case"
+_TAR_FLAGS += " no-ignore-command-error no-null no-overwrite-dir no-recursion no-same-owner no-same-permissions"
+_TAR_FLAGS += " no-seek no-selinux no-unquote no-verbatim-files-from no-wildcards no-wildcards-match-slash no-xattrs"
+_TAR_FLAGS += " null numeric-owner occurrence old-archive one-file-system one-top-level overwrite overwrite-dir"
+_TAR_FLAGS += " portability posix preserve-order preserve-permissions read-full-records recursion recursive-unlink"
+_TAR_FLAGS += " remove-files restrict same-order same-owner same-permissions seek selinux show-defaults"
+_TAR_FLAGS += " show-omitted-dirs show-snapshot-field-ranges show-stored-names show-transformed-names skip-old-files"
+_TAR_FLAGS += " sparse test-label to-stdout totals touch uncompress ungzip unlink-first unquote update usage utc"
+_TAR_FLAGS += " verbatim-files-from verbose verify version wildcards wildcards-match-slash xattrs xz zstd"
+TAR_OPTS: OptTable = (TAR_SHORT_VALUE, TAR_LONG_VALUE + tuple(_TAR_FLAGS.split()), TAR_LONG_VALUE, True)
 TAR_SUFFIX_RE = re.compile(r"\.(?:tar(?:\.\w+)?|t[gbx]z|tbz2|taz|tz2?|tlz|tzst)$")
+TAR_EXTRACT = {"x", "extract", "get"}
+TAR_WRITE_ARCHIVE = {"c", "r", "u", "A", "create", "append", "update", "catenate", "concatenate", "delete"}
 
 
-def _tar_long(a: str, args: List[str], i: int) -> Tuple[List[Tuple[str, Optional[str]]], int]:
-    name, eq, val = a[2:].partition("=")
-    name = next((x for x in TAR_LONG_NAMES if len(name) >= 3 and x.startswith(name)), name)
-    if eq or name not in TAR_LONG_VALUE or i >= len(args):
-        return [(name, val if eq else None)], i
-    return [(name, args[i])], i + 1
+def _tar_opts(args: List[str]) -> OptItems:
+    """(cờ, giá trị) và ("", toán hạng) của `tar` theo thứ tự (`_getopt` trên bảng TAR_OPTS, kiểu cũ đã nở)."""
+    return _getopt(_old_style(args, TAR_SHORT_VALUE), TAR_OPTS)
 
 
-def _tar_short(a: str, args: List[str], i: int, old: bool) -> Tuple[List[Tuple[str, Optional[str]]], int]:
-    out: List[Tuple[str, Optional[str]]] = []
-    for j, ch in enumerate(a.lstrip("-")):
-        if ch not in TAR_SHORT_VALUE:
-            out.append((ch, None))
-        elif not old and a[j + 2 :]:  # `-Cdocs`, `-xCdocs`: phần còn lại của cụm là giá trị
-            return out + [(ch, a[j + 2 :])], i
-        else:
-            out.append((ch, args[i] if i < len(args) else None))
-            i += 1
-            if not old:
-                break
-    return out, i
-
-
-def _tar_opts(args: List[str]) -> List[Tuple[str, Optional[str]]]:
-    """(cờ, giá trị) của `tar` theo thứ tự: chữ của cờ ngắn/kiểu cũ (`x`, `C`), tên dài đầy đủ (`directory`)."""
-    out: List[Tuple[str, Optional[str]]] = []
-    i = 0
-    while i < len(args):
-        a, i = args[i], i + 1
-        old = i == 1 and bool(re.fullmatch(r"[A-Za-z]+", a))
-        if a.startswith("--") and len(a) > 2:
-            got, i = _tar_long(a, args, i)
-        elif old or (a.startswith("-") and len(a) > 1):
-            got, i = _tar_short(a, args, i, old)
-        else:
-            got = []
-        out += got
-    return out
+def _tar_archives(opts: OptItems) -> List[str]:
+    """Tệp archive mà `tar -c/-r/-u/-A/--delete` ghi (`-f F`, `--file=F`; `-` là stdout) — AUD-SEC-475."""
+    return [v for v in _opt_vals(opts, "f", "file") if v != "-"] if _opt_keys(opts) & TAR_WRITE_ARCHIVE else []
 
 
 def _tar_extract_dirs(args: List[str]) -> List[str]:
     """Mọi thư mục `tar` có thể giải nén vào: `-C` cộng dồn (`-C docs -C autopilot` = `docs/autopilot`), cả thư mục
     `--one-top-level[=D]` (vắng D = tên archive bỏ đuôi); không `-C` = `.`; không giải nén → rỗng (review #405)."""
     opts = _tar_opts(args)
-    if not any(k in ("x", "extract", "get") for k, _ in opts):
+    if not _opt_keys(opts) & TAR_EXTRACT:
         return []
     cur, dirs = ".", []
     for k, v in opts:
         if k in ("C", "directory") and v:
             cur = posixpath.join(cur, v)
             dirs.append(cur)
+        elif not k and not dirs:  # thành viên nêu trước `-C` đầu tiên giải vào thư mục đang đứng (AUD-SEC-471)
+            dirs.append(".")
     archive = posixpath.basename(next((v for k, v in opts if k in ("f", "file") and v), ""))
     tops = [v if v is not None else TAR_SUFFIX_RE.sub("", archive) for k, v in opts if k == "one-top-level"]
     return (dirs or ["."]) + [posixpath.join(cur, t) for t in tops if t]
@@ -9723,10 +10108,8 @@ def _copied_git_dirs(n: List[str], here: Optional[str]) -> Set[str]:
     dir đang chờ; đích là biến/tương đối khi thư mục không biết → '' (mọi đuôi metadata)."""
     if not n or n[0] not in GIT_DIR_COPIERS:
         return set()
-    args = n[1:]
-    t_dir = (_flag_value(args, "-t") or _flag_value(args, "--target-directory")) if n[0] == "cp" else None
-    pos = _positionals(args, COPY_DEST_OPTS if n[0] == "cp" else COPY_VALUE_OPTS[n[0]])
-    srcs, dest = (pos, t_dir) if t_dir else (pos[:-1], pos[-1] if pos else "")
+    pos = _copy_into_positionals(n)  # (nguồn…, đích), `-t D` đã đưa về cuối
+    srcs, dest = pos[:-1], pos[-1] if pos else ""
     out: Set[str] = set()
     for src in srcs:
         p = posixpath.normpath(posixpath.expanduser(src))
@@ -9909,7 +10292,7 @@ def _scan_command(
     )
     if bypass:
         asks.append(f"{bypass}: {' '.join(argv)[:200]}")
-    asks.extend(_write_asks(n, argv, root, cwd))
+    asks.extend(_write_asks(n, argv, root, cwd, env))
     if n[0] in (*DB_CLIENTS, "docker", "podman") and decision != "ask":  # `PGHOST=… psql`: normalize đã bóc phần gán
         pairs = [_assign_split(t) for t in argv[: len(argv) - len(n)] if ENV_ASSIGN_RE.fullmatch(t)]
         assigns = [f"{k}={v}" for k, v in pairs]
@@ -10783,10 +11166,10 @@ def _xargs_fed_dest(down: List[str], inner: List[str]) -> bool:
     if posixpath.basename(inner[0]) not in ("cp", "install", "ln"):
         return True
     mark = _xargs_replace(down[1 : len(down) - len(inner)])
-    target = _flag_values(inner[1:], ("-t", "--target-directory"))
+    target, pos, _ = _copy_opts(posixpath.basename(inner[0]), inner[1:])
     if mark is None:
         return not target
-    return any(mark in d for d in target or _positionals(inner[1:], COPY_DEST_OPTS)[-1:])
+    return any(mark in d for d in target or pos[-1:])
 
 
 def _xargs_evidence(tokens: List[str], cmd: str) -> List[str]:
