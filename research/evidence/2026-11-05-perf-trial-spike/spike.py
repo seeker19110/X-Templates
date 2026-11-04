@@ -1,6 +1,8 @@
-"""Spike T-3551: môi trường đo cho `perf trial` — chạy: python3 spike.py <đường tới scripts/xt.py của repo khung>.
+"""Spike T-3551: môi trường đo cho `perf trial` — chạy: python3 spike.py <đường tới scripts/xt.py> --out <thư mục tạm>.
 
-Ghi mọi lệnh (cwd, exit, giây, đuôi output) vào log.json, số đo chính vào results.json. Không đụng repo khung.
+Mọi thứ ghi vào `--out` (thư mục mới hoặc rỗng, ngoài thư mục này): repo đồ chơi `lab/`, mọi lệnh (cwd, exit, giây, đuôi
+output) vào `log.json`, số đo chính + giây theo bước vào `results.json`. Không đụng repo khung, không đè `results.json` đã
+commit cạnh script (chép tay sau khi xem).
 """
 
 import json
@@ -14,9 +16,15 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import files as F  # noqa: E402
 
-S = Path(__file__).resolve().parent
-LAB = S / "lab"
+HERE = Path(__file__).resolve().parent
+if len(sys.argv) != 4 or sys.argv[2] != "--out":
+    raise SystemExit("dùng: python3 spike.py <scripts/xt.py> --out <thư mục tạm>")
 XT_SRC = Path(sys.argv[1]).resolve()
+S = Path(sys.argv[3]).resolve()
+if S == HERE or HERE in S.parents or (S.exists() and any(S.iterdir())):
+    raise SystemExit(f"--out phải là thư mục mới/rỗng ngoài {HERE}")
+S.mkdir(parents=True, exist_ok=True)
+LAB = S / "lab"
 LOG: list = []
 R: dict = {}
 ENV = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
@@ -417,7 +425,7 @@ def main():
     # 11b. submodule bị sửa: stash -u không thu hồi
     w(proj / "vendor/sub/data.txt", "submodule bị sửa\n")
     sub_files = trial_list(proj)
-    git(
+    st_sub = git(
         "stash-sub",
         proj,
         "stash",
@@ -429,11 +437,11 @@ def main():
         *sub_files,
         check=False,
     )
-    R["stash_submodule"] = {
+    R["stash_submodule"] = {  # kết quả của chính lệnh stash, không LOG[-1] (fp() nối thêm một dòng log)
         "trial_files": sub_files,
-        "exit": LOG[-1]["exit"],
+        "exit": st_sub.returncode,
+        "tail": (st_sub.stdout + st_sub.stderr)[-160:],
         "fp_back": fp(tool, proj) == fp_start,
-        "tail": LOG[-1]["tail"][-160:],
     }
     git("sub-undo", proj, "-C", "vendor/sub", "checkout", "--", "data.txt")
     # 11c. .autopilot không bị ignore: stash không phạm vi cuốn theo sổ máy
@@ -469,9 +477,21 @@ def main():
     R["wt_remove_secs"] = [e["secs"] for e in LOG if e["step"] == "wt-remove"]
 
 
+def step_secs():
+    """Giây theo bước (gộp lệnh cùng tên bước): số lần, tổng giây, exit — số trong nghiên cứu đối chiếu được không cần log."""
+    agg: dict = {}
+    for e in LOG:
+        n, secs, exits = agg.get(e["step"], (0, 0.0, set()))
+        agg[e["step"]] = (n + 1, secs + e["secs"], exits | {e["exit"]})
+    return {k: f"{n}× {secs:.3f} s exit {','.join(map(str, sorted(ex)))}" for k, (n, secs, ex) in agg.items()}
+
+
+R["loadavg_start"] = [round(x, 2) for x in os.getloadavg()]  # máy bận thì số giây không so được với lượt khác
 try:
     main()
 finally:
+    R["loadavg_end"] = [round(x, 2) for x in os.getloadavg()]
+    R["step_secs"] = step_secs()
     (S / "log.json").write_text(json.dumps(LOG, ensure_ascii=False, indent=1), encoding="utf-8")
     (S / "results.json").write_text(json.dumps(R, ensure_ascii=False, indent=1), encoding="utf-8")
     print(json.dumps(R, ensure_ascii=False, indent=1))

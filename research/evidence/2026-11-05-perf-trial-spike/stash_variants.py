@@ -1,12 +1,16 @@
-"""Spike T-3551 phụ: biến thể `git stash push --include-untracked` để thu hồi candidate, ghi exit + trạng thái cây sau."""
+"""Spike T-3551 phụ: biến thể `git stash push --include-untracked` để thu hồi candidate, ghi exit + trạng thái cây sau.
+
+Chạy: python3 stash_variants.py <thư mục tạm> — repo thử dựng trong `<thư mục tạm>/lab-stash`, không trong repo khung.
+"""
 
 import json
 import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
-S = Path(__file__).resolve().parent / "lab-stash"
+S = Path(sys.argv[1]).resolve() / "lab-stash"
 ENV = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
 ENV.update(
     GIT_AUTHOR_NAME="s", GIT_AUTHOR_EMAIL="s@e.invalid", GIT_COMMITTER_NAME="s", GIT_COMMITTER_EMAIL="s@e.invalid"
