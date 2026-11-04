@@ -111,19 +111,77 @@ class StageAgentApprovalCliTest(TmpRepoCase):
         self.assertEqual(rc, 2)
         self.assertIn("chỉ người duyệt", err)
 
-    def test_agent_refuses_changed_submission_human_still_can(self):
+    def test_changed_submission_refused_for_everyone_while_key_on(self):
+        """Review harden F1: khoá bật → bản đã đổi không duyệt được bởi CẢ agent lẫn tiến trình không mang biến agent
+        (`env -u CLAUDECODE …` né được nhánh agent); tắt khoá thì người duyệt như ADR-0058."""
         self.set_key("agent")
         self.stage("init", agent=True)
         sha = self.submit()
         self.commit("mã đổi sau bản trình")
         rc, _, err = self.stage("approve", "--sha", sha, "--note", "ok", agent=True)
         self.assertEqual(rc, 2)
-        self.assertIn("agent không duyệt được", err)
+        self.assertIn("agent không duyệt được bản đã đổi", err)
         self.assertIn("1 file đổi", err)
+        rc, _, err = self.stage("approve", "--sha", sha, "--note", "né biến agent")
+        self.assertEqual(rc, 2)
+        self.assertIn("`stage_approval: agent` đang bật — không duyệt được bản đã đổi", err)
         self.assertEqual(self.led()["status"], "awaiting_approval")
+        self.set_key("human")
         rc, _, err = self.stage("approve", "--sha", sha, "--note", "người duyệt bản cũ")
         self.assertEqual(rc, 0, err)
-        self.assertEqual([e["by"] for e in self.led()["history"] if e["event"] == "approve"], ["chu@example.invalid"])
+        ap = [e for e in self.led()["history"] if e["event"] == "approve"]
+        self.assertEqual([(e["by"], "session" in e) for e in ap], [("chu@example.invalid", False)])
+
+    def test_agent_approves_only_mvp(self):
+        """Review harden F6: chủ dự án cho agent "tuyên bố đạt MVP" — giai đoạn 2 trở đi chỉ người."""
+        self.set_key("agent")
+        self.stage("init", agent=True)
+        sha = self.submit()
+        self.assertEqual(self.stage("approve", "--sha", sha, "--note", "MVP", agent=True)[0], 0)
+        sha = self.submit()
+        rc, _, err = self.stage("approve", "--sha", sha, "--note", "giai đoạn 2", agent=True)
+        self.assertEqual(rc, 2)
+        self.assertIn("agent chỉ tự nghiệm thu MVP (giai đoạn 1) — giai đoạn 2", err)
+        rc, _, err = self.stage("approve", "--sha", sha, "--note", "người duyệt")
+        self.assertEqual(rc, 0, err)
+        self.assertEqual(self.led()["stage"], 3)
+
+    def test_set_head_does_not_grant_key(self):
+        """Review harden F2: `git remote set-head origin <nhánh agent>` không cấp khoá — chỉ đọc `origin/main|master`."""
+        self.set_key("human")
+        self.git("checkout", "-q", "-b", "feat")
+        self.set_key("agent", push=False)
+        self.git("push", "-q", "origin", "feat")
+        self.git("remote", "set-head", "origin", "feat")
+        self.assertEqual(self.git("rev-parse", "--abbrev-ref", "origin/HEAD").strip(), "origin/feat")
+        self.assertFalse(xt.stage_agent_approval(self.repo))
+        proj = str(self.repo)
+        guard._STAGE_AGENT.clear()
+        self.addCleanup(guard._STAGE_AGENT.clear)
+        self.assertFalse(guard.agent_stage_approval(proj))
+
+    def test_stage_approval_is_hard_key(self):
+        """Review harden F3: PR đổi `stage_approval` luôn người merge, như `merge_hard_exceptions`."""
+        self.assertEqual(
+            xt._hard_key_lines("a: 1\nstage_approval: agent\nmerge_hard_exceptions: human\n"),
+            ["stage_approval=agent", "merge_hard_exceptions=human"],
+        )
+        for before, after, changed in (
+            ("stage_approval: human\n", "stage_approval: agent\n", True),
+            ("lint: x\n", "lint: x\nstage_approval: agent\n", True),
+            (
+                "stage_approval: agent\nmerge_hard_exceptions: auto\n",
+                "stage_approval: agent\nmerge_hard_exceptions: auto\n",
+                False,
+            ),
+            ("stage_approval: agent\n", "stage_approval: agent\nstage_approval: agent\n", True),  # khoá lặp
+            ("lint: a\n", "lint: b\n", False),
+        ):
+            with self.subTest(before=before, after=after):
+                reads = iter([(before, False), (after, False)])
+                with unittest.mock.patch.object(xt, "_contents_read", side_effect=lambda *a: next(reads)):
+                    self.assertEqual(xt._hard_key_changed("o/r", "b", "h"), changed)
+        self.assertIn("`stage_approval`", xt.HARD_KEY_REASON)
 
     def test_stage_facts_and_next_step_route(self):
         self.stage("init", agent=True)
@@ -194,20 +252,42 @@ class StageAgentApprovalGuardTest(TmpRepoCase):
         proj = self.project("agent")
         self.assertTrue(guard.agent_stage_approval(str(proj)))
         self.assertTrue(guard.agent_stage_approval(str(proj)))  # cache
-        self.assertNotEqual(self.decide(proj, self.PLAIN), "deny")
-        self.assertNotEqual(
-            self.decide(proj, "cd . && python3 .xtemplates/scripts/xt.py stage approve --sha abc1234 --note 'MVP đạt'"),
-            "deny",
-        )
+        for cmd in (
+            self.PLAIN,
+            "python3 .xtemplates/scripts/xt.py stage approve --sha abc1234 --note 'MVP đạt'",
+            "python scripts/xt.py stage approve --sha=abc1234",
+            f"python3 {proj}/scripts/xt.py stage approve --sha abc1234",
+            "scripts/xt.py stage approve --note ok --sha abc1234",
+        ):
+            with self.subTest(cmd=cmd):
+                self.assertNotEqual(self.decide(proj, cmd), "deny")
         for cmd in (
             "python3 scripts/xt.py stage init --adopt 2 --evidence v1",
             'python3 scripts/xt.py stage "$(echo approve)" --sha 1234567',
             'python3 "$XT" stage approve --sha 1234567',
             "python3 scripts/xt.py stage approve --sha `git rev-parse HEAD`",
             "echo approve | xargs -I{} python3 scripts/xt.py stage {} --sha 1234567",
+            # review harden F1: né biến agent, gán biến, cờ trình thông dịch, xt.py khác, nối lệnh, cờ lạ
+            "env -u CLAUDECODE -u CLAUDE_CODE_SESSION_ID -u AI_AGENT " + self.PLAIN,
+            "env -i PATH=/usr/bin " + self.PLAIN,
+            "unset CLAUDECODE; " + self.PLAIN,
+            "CLAUDE_PROJECT_DIR=/tmp/khac " + self.PLAIN,
+            "PYTHONPATH=/tmp " + self.PLAIN,
+            "python3 -c 'import sys' scripts/xt.py stage approve --sha 1234567",
+            "python3 -m pdb scripts/xt.py stage approve --sha 1234567",
+            "python3 -i scripts/xt.py stage approve --sha 1234567",
+            "python3 /tmp/x/xt.py stage approve --sha 1234567",
+            "cd . && " + self.PLAIN,
+            "python3 scripts/xt.py stage approve --sha 1234567 --adopt",
+            "python3 scripts/xt.py stage approve --sha",
+            "bash -c '" + self.PLAIN + "'",
         ):
             with self.subTest(cmd=cmd):
                 self.assertEqual(self.decide(proj, cmd), "deny")
+        sub = proj / "sub"
+        sub.mkdir()
+        decision = dict(guard.apply_policy(guard.bash_decision(self.PLAIN, str(proj), str(sub)))).get("decision")
+        self.assertEqual(decision, "deny")  # đường tương đối ngoài gốc dự án: không phải xt.py của dự án
 
     def test_key_needs_tree_and_committed(self):
         for committed, tree, push in (("human", "agent", True), ("agent", "human", True), ("agent", None, False)):

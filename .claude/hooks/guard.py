@@ -5926,12 +5926,13 @@ def _committed_phase(xt: str) -> str:
     return _committed_value(xt, _phase_value)
 
 
-def _committed_value(xt: str, pick: Callable[[str], str]) -> str:
-    """Giá trị `pick(text)` của xt.yaml đã commit ở nhánh mặc định của remote (ref đầu tiên đọc được); không đọc được → rỗng."""
-    for ref in DEFAULT_REFS:
+def _committed_value(xt: str, pick: Callable[[str], str], refs: Tuple[str, ...] = DEFAULT_REFS) -> str:
+    """Giá trị `pick(text)` của xt.yaml đã commit ở nhánh mặc định của remote (ref đầu tiên đọc được trong `refs`); không
+    đọc được → rỗng. `--no-replace-objects`: `.git/refs/replace/` agent ghi được không thay được blob (review harden)."""
+    for ref in refs:
         try:
             r = subprocess.run(
-                ["git", "-C", os.path.dirname(xt), "show", f"{ref}:./xt.yaml"],
+                ["git", "--no-replace-objects", "-C", os.path.dirname(xt), "show", f"{ref}:./xt.yaml"],
                 capture_output=True,
                 text=True,
                 timeout=5,
@@ -5982,6 +5983,11 @@ STAGE_APPROVAL_LINE_RE = re.compile(r"^stage_approval:[ \t]*([\"']?)([A-Za-z]*)\
 _STAGE_AGENT: Dict[str, bool] = {}
 
 
+# Ref đọc khoá giai đoạn: KHÔNG `origin/HEAD` — `git remote set-head origin <nhánh agent đẩy>` lật được nó (review harden
+# PLAN-harden-2026-11-05 F2); đổi refspec/URL của remote rồi fetch vẫn là giới hạn đã biết (D-015).
+STAGE_REFS = ("origin/main", "origin/master")
+
+
 def _stage_approval_value(text: str) -> str:
     """Giá trị `stage_approval` (dòng trùng → dòng cuối, như `yaml_scalar` của xt.py); vắng → rỗng."""
     found = STAGE_APPROVAL_LINE_RE.findall(text)
@@ -5996,7 +6002,7 @@ def agent_stage_approval(root: str) -> bool:
             os.environ.get("XT_GUARD_POLICY") != "strict"
             and bool(xt)
             and _stage_approval_value(_read_all(xt)) == "agent"
-            and _committed_value(xt, _stage_approval_value) == "agent"
+            and _committed_value(xt, _stage_approval_value, STAGE_REFS) == "agent"
         )
     return _STAGE_AGENT[root]
 
@@ -6616,23 +6622,41 @@ def _approves_stage(argv: List[str]) -> bool:
     return False
 
 
-def _plain_approve(argv: List[str]) -> bool:
-    """`… xt.py stage approve …` viết rõ chữ: không token mờ (`$(…)`, backtick, biến, glob), không `xargs`/`parallel`,
-    không `init`/`--adopt` sau `stage` — dạng duy nhất ADR-0069 cho qua; mọi dạng khác giữ luật ADR-0058."""
-    if any(_vague(t) for t in argv) or any(posixpath.basename(t) in STDIN_FEEDERS for t in argv):
-        return False
-    n = normalize(argv)
-    at = next((k for k, t in enumerate(n) if posixpath.basename(t) == "xt.py"), len(n))
-    rest = n[at + 1 :]
-    if "stage" not in rest:
-        return False
-    tail = rest[rest.index("stage") + 1 :]
-    return "approve" in tail and "init" not in tail and not any(t.startswith("--adopt") for t in tail)
+PLAIN_APPROVE_PY = ("python3", "python")
+PLAIN_APPROVE_XT = ("scripts/xt.py", ".xtemplates/scripts/xt.py")  # xt.py của dự án (repo khung · dự án đích)
+PLAIN_APPROVE_OPTS = ("--sha", "--note")
 
 
-def _stage_approve_denied(argv: List[str], root: str) -> bool:
-    """Lệnh duyệt giai đoạn bị chặn: mọi dạng (ADR-0058), trừ `stage approve` chữ rõ khi `agent_stage_approval` (ADR-0069)."""
-    return _approves_stage(argv) and not (_plain_approve(argv) and agent_stage_approval(root))
+def _approve_opts(rest: List[str]) -> bool:
+    """Sau `stage approve` chỉ có `--sha`/`--note` kèm giá trị (`--sha X` hay `--sha=X`)."""
+    i = 0
+    while i < len(rest):
+        if "=" in rest[i] and rest[i].split("=", 1)[0] in PLAIN_APPROVE_OPTS:
+            i += 1
+        elif rest[i] in PLAIN_APPROVE_OPTS and i + 1 < len(rest):
+            i += 2
+        else:
+            return False
+    return True
+
+
+def _plain_approve(argv: List[str], root: str, cwd: Optional[str], single: bool) -> bool:
+    """Dạng DUY NHẤT ADR-0069 cho qua: cả lệnh Bash là MỘT lệnh đơn `[python3|python] <xt.py của dự án> stage approve`
+    chỉ với `--sha`/`--note`, không token mờ. Review harden F1 (PLAN-harden-2026-11-05): `env -u CLAUDECODE …`, `unset …;`,
+    gán biến (`CLAUDE_PROJECT_DIR=`, `PYTHONPATH=`), cờ trình thông dịch (`-c`, `-m pdb`, `-i`), xt.py ngoài dự án, nối
+    lệnh hay lệnh lồng đều rơi về luật ADR-0058 (deny). Đường tương đối chỉ khi thư mục chạy là gốc dự án."""
+    if not single or any(_vague(t) for t in argv):
+        return False
+    rest = argv[1:] if argv[:1] and argv[0] in PLAIN_APPROVE_PY else argv
+    here = cwd is not None and os.path.realpath(cwd) == os.path.realpath(root)
+    own = {os.path.join(root, p) for p in PLAIN_APPROVE_XT} | (set(PLAIN_APPROVE_XT) if here else set())
+    return len(rest) >= 3 and rest[0] in own and rest[1:3] == ["stage", "approve"] and _approve_opts(rest[3:])
+
+
+def _stage_approve_denied(argv: List[str], root: str, cwd: Optional[str] = None, single: bool = False) -> bool:
+    """Lệnh duyệt giai đoạn bị chặn: mọi dạng (ADR-0058), trừ dạng chữ rõ của `_plain_approve` khi `agent_stage_approval`
+    (ADR-0069)."""
+    return _approves_stage(argv) and not (_plain_approve(argv, root, cwd, single) and agent_stage_approval(root))
 
 
 def _approves_literal(n: List[str]) -> bool:
@@ -14002,7 +14026,9 @@ def _bash_decision(
     asks: List[str] = interp_write_asks(cmd, tokens, root, cwd, pending_bare)
     asks += _pending_git_write_asks(every, pending_bare)
     asks += [REVIEW_FORGE_WHY] if _review_forge_hit(cmd, tokens, cwd, budget) else []
-    asks += [STAGE_APPROVE_WHY] if any(_stage_approve_denied(c, root) for c in split_commands(tokens)) else []
+    simple = split_commands(tokens)
+    single = whole and len(simple) == 1  # dạng chữ rõ của ADR-0069 chỉ khi cả lệnh là một lệnh đơn (review harden F1)
+    asks += [STAGE_APPROVE_WHY] if any(_stage_approve_denied(c, root, cwd, single) for c in simple) else []
     braces = brace_variants(cmd)
     nested_deny = (
         "Lệnh quá phức tạp để guard quét hết (brace expansion quá nhiều biến thể): chia nhỏ lệnh."

@@ -5904,7 +5904,7 @@ HARD_RISK_LABELS = {"risk:auth", "risk:payment", "risk:pii", "risk:crypto", "ris
 # Harness agent: "session"/"permission" ở đây là phiên/quyền của agent (`.claude/hooks/session-start.sh`), không phải
 # xác thực của ứng dụng — miễn nhóm "auth"; vẫn vào làn chuẩn qua "cổng/CI" (D-020).
 HARD_KEY = "merge_hard_exceptions"
-HARD_KEY_REASON = f"đổi `{HARD_KEY}` trong xt.yaml hoặc hiệu lực ủy quyền production trong PLAN.md (ADR-0020, ADR-0022) — luôn người merge"
+HARD_KEY_REASON = f"đổi `{HARD_KEY}`/`stage_approval` trong xt.yaml hoặc hiệu lực ủy quyền production trong PLAN.md (ADR-0020, ADR-0022, ADR-0069) — luôn người merge"
 TRUNCATED_REASON = (
     "danh sách file của PR bị cắt (quá giới hạn REST) — không xác minh được ủy quyền/khoá, luôn người merge"
 )
@@ -6468,10 +6468,22 @@ def _plan_grants_changed(f: Dict[str, Any], repo: str, base_sha: str, head_sha: 
     return False
 
 
+HARD_GATED_KEYS = (
+    HARD_KEY,
+    "stage_approval",
+)  # khoá chỉ người đổi: ngoại lệ cứng (ADR-0020) và quyền tự duyệt giai đoạn
+
+
 def _hard_key_lines(text: str) -> List[str]:
-    """Mọi lần xuất hiện của khoá `merge_hard_exceptions` (cùng `YAML_KEY_RE`/`yaml_scalar` với `merge_hard_mode`), theo
-    thứ tự — không chỉ giá trị hiệu lực: khoá lặp bị dòng sau che vẫn đổi được kết quả sau merge 3 chiều (review #105)."""
-    return [yaml_scalar(m[2]) for m in map(YAML_KEY_RE.match, text.splitlines()) if m and m[1] == HARD_KEY]
+    """Mọi lần xuất hiện (`khoá=giá trị`) của các khoá `HARD_GATED_KEYS` (cùng `YAML_KEY_RE`/`yaml_scalar` với
+    `merge_hard_mode`), theo thứ tự — không chỉ giá trị hiệu lực: khoá lặp bị dòng sau che vẫn đổi được kết quả sau merge
+    3 chiều (review #105). `stage_approval` (ADR-0069) cùng mức tin cậy với `merge_hard_exceptions` (review harden F3)."""
+    found = (m for m in map(YAML_KEY_RE.match, text.splitlines()) if m and m[1] in HARD_GATED_KEYS)
+    return [f"{m[1]}={yaml_scalar(m[2])}" for m in found]
+
+
+def _hard_key_repeated(lines: List[str]) -> bool:
+    return any(sum(1 for ln in lines if ln.split("=", 1)[0] == k) > 1 for k in HARD_GATED_KEYS)
 
 
 def project_prefix() -> str:
@@ -6494,7 +6506,7 @@ def _hard_key_changed(repo: str, base_sha: str, head_sha: str, prefix: str = "")
         return True
     lines = _hard_key_lines(after)
     # Khoá lặp ở đầu PR: dời từng dòng (danh sách mỗi PR không đổi) vẫn đảo được thứ tự sau merge 3 chiều (review #105).
-    return _hard_key_lines(before) != lines or len(lines) > 1
+    return _hard_key_lines(before) != lines or _hard_key_repeated(lines)
 
 
 def _gated_file(f: Dict[str, Any], prefix: str = "") -> bool:
@@ -11439,7 +11451,8 @@ STAGE_HUMAN_ONLY = "chỉ người duyệt — chạy ở terminal của chủ d
 # (bản trình phải còn nguyên); vắng/khác → chỉ người. `init --adopt` luôn chỉ người.
 STAGE_APPROVAL_KEY = "stage_approval"
 STAGE_AGENT_BY = "agent"
-STAGE_MAIN_REFS = ("origin/HEAD", "origin/main", "origin/master")  # nhánh chính của remote, ref đầu tiên đọc được
+# Nhánh chính của remote, ref đầu tiên đọc được — không `origin/HEAD`: `git remote set-head` lật được (review harden F2).
+STAGE_MAIN_REFS = ("origin/main", "origin/master")
 
 
 class StageError(Exception):
@@ -11779,8 +11792,9 @@ def _stage_reopen(led: Optional[Dict[str, Any]], reason: str) -> Dict[str, Any]:
 def _stage_approve(
     led: Optional[Dict[str, Any]], sha: str, by: str, note: str, agent_base: Optional[Path] = None
 ) -> Dict[str, Any]:
-    """Duyệt bản đã trình. `agent_base` (ADR-0069: agent tự nghiệm thu) → bản trình phải còn nguyên trên cây (vân tay/SHA
-    khớp, không file đổi) — mã đổi sau khi trình thì `stage reopen` rồi trình lại; sự kiện ghi `session`."""
+    """Duyệt bản đã trình. `agent_base` (khoá `stage_approval: agent` bật — ADR-0069) → bản trình phải còn nguyên trên cây
+    (vân tay/SHA khớp, không file đổi) với MỌI người duyệt: né biến môi trường agent không duyệt được bản đã đổi (review
+    harden F1); agent (`by` = `agent`) chỉ duyệt giai đoạn 1 — "tuyên bố đạt MVP" (F6), sự kiện ghi `session`."""
     if led is None or led["status"] != "awaiting_approval":
         raise StageError("không có giai đoạn chờ duyệt — agent trình bằng `xt.py stage submit` trước")
     want = led["submitted"]["sha"]
@@ -11788,14 +11802,19 @@ def _stage_approve(
         raise StageError(f"--sha cần ≥ 7 ký tự của bản đã trình ({want[:12]})")
     if not want.startswith(sha.lower()):
         raise StageError(f"--sha {sha!r} không phải bản đã trình ({want[:12]}) — duyệt đúng bản đã chạy thử")
+    agent = by == STAGE_AGENT_BY
+    if agent and led["stage"] != 1:
+        raise StageError(f"agent chỉ tự nghiệm thu MVP (giai đoạn 1) — giai đoạn {led['stage']} {STAGE_HUMAN_ONLY}")
     extra: Dict[str, Any] = {}
     if agent_base is not None:
         changed = _stage_changed(agent_base, led["submitted"])
         if changed != []:
+            who = "agent" if agent else f"`{STAGE_APPROVAL_KEY}: agent` đang bật —"
             raise StageError(
-                f"agent không duyệt được — {_changed_note(changed, want)}: `stage reopen --reason …`, làm xong,"
-                " kiểm lại cuối rồi `stage submit` lại (ADR-0069)"
+                f"{who} không duyệt được bản đã đổi — {_changed_note(changed, want)}: `stage reopen --reason …`, làm"
+                " xong, kiểm lại cuối rồi `stage submit` lại (ADR-0069)"
             )
+    if agent:
         extra["session"] = session_id()
     _stage_event(led, "approve", sha=want, by=by, note=note, **extra)
     led["submitted"] = None
@@ -11858,14 +11877,15 @@ def _stage_dispatch(
     if cmd == "reopen":
         return lambda led: _stage_reopen(led, args.reason)
     if cmd == "approve":
-        if agent_session():  # ADR-0069: chỉ khi xt.yaml (cây + nhánh chính) khai `stage_approval: agent`
-            if not stage_agent_approval(base):
+        lock = stage_agent_approval(base)  # ADR-0069: xt.yaml (cây + nhánh chính) khai `stage_approval: agent`
+        if agent_session():
+            if not lock:
                 raise StageError(
                     f"`stage approve` {STAGE_HUMAN_ONLY}; agent tự duyệt cần `{STAGE_APPROVAL_KEY}: agent` (ADR-0069)"
                 )
             return lambda led: _stage_approve(led, args.sha, STAGE_AGENT_BY, args.note, base)
         by = _stage_by(base)
-        return lambda led: _stage_approve(led, args.sha, by, args.note)
+        return lambda led: _stage_approve(led, args.sha, by, args.note, base if lock else None)
     if cmd == "new-cycle":
         return lambda led: _stage_new_cycle(led, args.reason)
     return None

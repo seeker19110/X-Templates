@@ -276,7 +276,7 @@ AI agent và giao thức, cơ chế Claude Code. Khung cũ khôi phục được
 
 Định hướng [xưởng phần mềm từ 34 mục stored](research/2026-11-04-software-factory-direction.md) (4/11/2026, chấp nhận qua
 [ADR-0068](docs/adr/0068-software-factory-direction.md), D-353): gói sản phẩm có phiên bản, bằng chứng phát hành có kiểu, lộ trình
-nghiệm thu A–E; chưa lát nào có mã — mỗi lát một PLAN/PR riêng.
+nghiệm thu A–E; lát A đã có mã trên nhánh `claude/amazing-brahmagupta-9jqbg1` (chưa merge), B–E chưa — mỗi lát một PLAN/PR riêng.
 
 ## Đóng góp
 

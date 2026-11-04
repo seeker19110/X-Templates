@@ -3,7 +3,7 @@ title: File harness: PLAN · PROGRESS · BLUEPRINT · evidence · state
 kind: module
 prefix: LOOP-HARNESS
 applies_to: [all]
-updated: 2026-11-04
+updated: 2026-11-05
 ---
 
 # File harness: PLAN · PROGRESS · BLUEPRINT · evidence · state
@@ -85,7 +85,7 @@ OS/devcontainer có egress allowlist (`LOOP-HARNESS-022`) và việc phiên chí
   `pyenv exec`, `asdf exec`, `volta run`, `fnm exec`, `direnv exec`, `bundle exec`, `nix develop -c`, `pnpm exec`)
   không được bóc để trích script; lồng hơn 8 lớp lệnh chạy hộ cũng không; đích `rm -rf` là thay thế lệnh khác `$(pwd)` (`$(pwd -P)/..`,
   `$(dirname $PWD)`, `$(realpath ..)`) là không rõ nên cho qua — D-051 (AUD-SEC-101).
-- **Duyệt giai đoạn** (ADR-0058, AUD-SEC-155; ADR-0069: `stage approve` viết rõ chữ — không token mờ, không `xargs`/`parallel`, không `init`/`--adopt` — được cho qua khi xt.yaml ở cây **và** bản đã commit ở nhánh mặc định khai `stage_approval: agent`, `XT_GUARD_POLICY=strict` không nới): luật chữ (`xt.py … stage … approve`/`init … --adopt`) cộng luật token
+- **Duyệt giai đoạn** (ADR-0058, AUD-SEC-155; ADR-0069: chỉ đúng MỘT lệnh đơn `python3 <xt.py của dự án> stage approve --sha … [--note …]` — không `env`/`unset`/gán biến/cờ trình thông dịch, không nối hay lồng lệnh, không token mờ — được cho qua khi xt.yaml ở cây **và** bản đã commit ở nhánh mặc định khai `stage_approval: agent`, `XT_GUARD_POLICY=strict` không nới): luật chữ (`xt.py … stage … approve`/`init … --adopt`) cộng luật token
   mờ: ở mọi vị trí script (`-m xt`/`-mxt`/`-m scripts.xt`, lồng trong `perf sample --`), bỏ chuyển hướng và fd
   (`2>/dev/null`, `{fd}>f`; đích bị cắt như `> >(cat)` là mờ), lệnh con, cờ/giá trị `--framework` (cả `=` rỗng) hay tuỳ
   chọn `init` mờ (`$(…)`, backtick, biến, glob), chuỗi thay chỗ (`xargs -I`/`-i`/`--replace`, mẫu `{…}`, `:::`) hay đến

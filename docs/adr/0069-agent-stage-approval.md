@@ -6,6 +6,10 @@
 - **Trạng thái triển khai:** đã làm cùng PR: `scripts/xt.py` (`stage_agent_approval`, `stage approve` trong phiên agent,
   `stage_facts.agent_approval`, `next-step` trả `stage-approve`), `.claude/hooks/guard.py` (`agent_stage_approval`,
   `_plain_approve`, `_stage_approve_denied`), `tests/test_stage_agent_approval.py`, mẫu `framework/templates/xt.yaml`.
+  Siết sau review harden 2026-11-05 (PLAN-harden-2026-11-05, D-358): khoá bật thì MỌI `stage approve` đòi bản trình còn
+  nguyên (`env -u CLAUDECODE …` né nhánh agent không còn duyệt được bản đã đổi); guard chỉ nhận một lệnh đơn
+  `python3 <xt.py của dự án> stage approve --sha … [--note …]`; agent chỉ duyệt giai đoạn 1 (MVP); khoá chỉ đọc
+  `origin/main` → `origin/master` (không `origin/HEAD` — `remote set-head`); PR đổi `stage_approval` luôn người merge.
 - **Ngày:** 2026-11-04.
 - **Thay một phần:** ADR-0058 §Quyết định 3 ("chỉ người duyệt") — chỉ cho `stage approve` khi khoá có hiệu lực. **Giữ:**
   sổ `STAGE.json`, `submit`/`reopen`/`new-cycle`, khoá PLAN, hàng `stage` của `release-check`, `init --adopt` chỉ người,
@@ -65,7 +69,9 @@ Chọn **phương án 1** (D-352).
 - Xấu / đánh đổi: "nghiệm thu MVP" trở thành lời tự khai của agent có bằng chứng máy (kiểm lại cuối, smoke, bản trình còn
   nguyên) chứ không phải người xem bản thử — chủ dự án chấp nhận; `release-check` hàng `stage` vẫn chỉ xét giai đoạn ≥ 2,
   nên GO sản xuất có thể không có người nào từng duyệt MVP (lớp đỡ còn lại: chữ ký GO-NO-GO §5, `prod_switch`). Ai có quyền
-  ghi nhánh chính đổi được khoá — cùng mức tin cậy với `delivery_phase`/`merge_hard_exceptions`.
+  ghi nhánh chính đổi được khoá — cùng mức tin cậy với `delivery_phase`/`merge_hard_exceptions` (merge-check coi PR đổi
+  `stage_approval` là ngoại lệ cứng từ review harden 2026-11-05). Giới hạn đã biết (D-015): đổi refspec/URL của remote
+  rồi `fetch` vẫn lật được `origin/main` cục bộ; `python3 -c` gọi `xt.main` sau khi gỡ biến agent (có từ trước ADR-0069).
 - Chưa làm: `stage approve` của agent chưa đòi `loop verify --all` lại lúc duyệt (bản trình còn nguyên nên bằng chứng lúc
   `submit` còn hiệu lực); agent khác Claude có thể không mang biến phiên (ADR-0058 đã ghi) — khi đó `xt.py` coi là người.
 

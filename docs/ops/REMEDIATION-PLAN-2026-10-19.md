@@ -15,7 +15,7 @@
 [PLAN đang thực thi](../autopilot/PLAN.md) (3.8.0, `T-1401…T-1417`), [sổ audit](AUDIT-STATUS.md) và
 [báo cáo delta](../archive/ops/AUDIT-REPORT-2026-10-19-delta.md) vẫn là nơi theo dõi phát hiện đã có. Bản này bổ sung hướng sửa, nâng cấp
 và **kế hoạch triển khai dạng máy đọc** cho đợt kế tiếp (3.9.0 → 3.10.0): khi vòng 3.8.0 phát hành, chạy
-`python3 scripts/xt.py loop init --plan docs/autopilot/PLAN-3.9-automation.md --single-session` (D-067). Không dùng bảng
+`python3 scripts/xt.py loop init --plan docs/archive/autopilot/PLAN-3.9-automation.md --single-session` (D-067). Không dùng bảng
 ở đây làm sổ hoàn thành thứ hai; chỉ cấp ID audit mới cho phần thật sự còn thiếu.
 
 PR tài liệu không sửa mã, quyền, workflow, ruleset, phiên bản hay trạng thái sổ audit. CLI/schema/hook mang nhãn
