@@ -30,37 +30,27 @@ Kết quả quét cục bộ áp dụng cho lịch sử đã tải ở mốc qu�
 
 ## 4. Git guard
 
-Các bước tái hiện dưới đây dùng Git 2.53.0, repo tạm và payload `PreToolUse` giả. Guard trả quyết định rỗng khi cho qua. Vị trí mã trỏ tới mốc quét.
+Lượt xác minh độc lập tái hiện cả năm mục bằng Git 2.53.0, repo tạm và payload `PreToolUse` giả. Quyết định rỗng nghĩa là guard cho qua. Vị trí mã ở mốc quét.
 
-### AUD-SEC-445 🔴 `--separate-git-dir` chuyển cấu hình Git ra ngoài hàng rào
+### AUD-SEC-445 🔴 Git dir tách riêng
 
-- **Bằng chứng đo được.** Trong repo thử, `git init --separate-git-dir=<gitdir>` được cho qua. Git chuyển thư mục quản trị và để lại gitfile `.git`. Ghi `core.hooksPath = /dev/null` vào `<gitdir>/config` ở lượt sau cũng được cho qua. `git config --get core.hooksPath` trả `/dev/null`. Guard vẫn nhận diện đường dẫn theo mẫu `.git/` ở `.claude/hooks/guard.py:342, 8390–8398`.
-- **Tái hiện.** Tạo repo tạm, gửi payload cho `git init --separate-git-dir=<gitdir>` rồi thực hiện trong scratch. Gửi payload tiếp theo cho lệnh ghi cấu hình hook vào `<gitdir>/config` và kiểm tra Git đọc giá trị mới qua gitfile.
-- **Xác minh đối kháng.** Tái hiện được cả hai quyết định của guard trên mốc quét.
+`git init --separate-git-dir=<gitdir>` qua guard, dời metadata và để lại gitfile `.git`. Payload tiếp theo ghi `core.hooksPath = /dev/null` vào `<gitdir>/config` cũng qua. Git đọc lại `/dev/null` bằng `git config --get core.hooksPath`. Mẫu bảo vệ chỉ thấy đuôi `.git/` ở `.claude/hooks/guard.py:342, 8390–8398`.
 
-### AUD-SEC-446 🔴 Repo bare bên ngoài nạp cấu hình thực thi
+### AUD-SEC-446 🔴 Cấu hình thực thi của repo bare
 
-- **Bằng chứng đo được.** `git init --bare <gitdir>`, ghi alias `!` vào `<gitdir>/config` và gọi `git -C <gitdir> <alias>` ở các lượt riêng đều qua guard. Lệnh Git thật chạy alias và tạo tệp đánh dấu trong scratch. Ca đối chiếu thêm với `git diff` trên repo bare có hai commit cũng chạy được chương trình `diff.external` đã ghi. Đường dẫn cấu hình repo bare không khớp mẫu `.git/` ở `.claude/hooks/guard.py:342`.
-- **Tái hiện.** Tạo repo bare tạm rồi ghi một alias shell vô hại dùng để tạo tệp đánh dấu. Gửi lệnh gọi alias qua guard trước khi chạy Git và xác nhận tệp được tạo.
-- **Xác minh đối kháng.** Tái hiện được quyết định cho qua và tác động của alias.
+Ba lượt `git init --bare <gitdir>`, ghi alias `!` vào `<gitdir>/config` và `git -C <gitdir> <alias>` đều qua guard. Alias thật tạo tệp đánh dấu trong scratch. Với repo bare có hai commit, `git diff` cũng chạy được `diff.external` đã ghi. Đường dẫn cấu hình không khớp mẫu `.git/` ở `.claude/hooks/guard.py:342`.
 
-### AUD-SEC-442 🟠 Miễn `--exec-path` theo danh sách đường dẫn tĩnh
+### AUD-SEC-442 🟠 Danh sách miễn `--exec-path` tĩnh
 
-- **Bằng chứng đo được.** `_git_cfg_opts` miễn các giá trị trong `GIT_SYSTEM_EXEC_PATHS`, kể cả `/usr/local/libexec/git-core` khi đó không phải thư mục lệnh con của Git đang chạy (`.claude/hooks/guard.py:431–443`). Dạng cờ với đường dẫn tĩnh được cho qua trong khi dạng biến môi trường `GIT_EXEC_PATH` bị tính `BUDGET`.
-- **Tái hiện.** So `git --exec-path` với đường dẫn trong danh sách miễn, rồi gửi một payload Bash có `git --exec-path=/usr/local/libexec/git-core status` và một payload có `GIT_EXEC_PATH=/usr/lib/git-core git status`. Nguy cơ thực thi phụ thuộc quyền ghi vào thư mục được miễn.
-- **Xác minh đối kháng.** Tái hiện được chênh lệch quyết định của guard.
+`git --exec-path=/usr/local/libexec/git-core status` qua guard dù đường dẫn đó khác kết quả `git --exec-path`. `GIT_EXEC_PATH=/usr/lib/git-core git status` trả `BUDGET`. Nguy cơ thực thi phụ thuộc quyền ghi vào đường dẫn được miễn trong `_git_cfg_opts` ở `.claude/hooks/guard.py:431–443`.
 
-### AUD-SEC-443 🟠 Ghi gitfile qua Edit, Write và trình thông dịch được cho qua
+### AUD-SEC-443 🟠 Ghi gitfile qua Edit, Write và trình thông dịch
 
-- **Bằng chứng đo được.** Luật tên tệp `.git` ở `.claude/hooks/guard.py:8390–8392` nằm ở nhánh Bash nhận đích ghi. Nhánh Edit/Write và nhánh quét chuỗi của trình thông dịch dùng mẫu `.git/` cho các tệp bên trong thư mục (`.claude/hooks/guard.py:600–610, 11758–11779`).
-- **Tái hiện.** Gửi payload Write và Edit cho `sub/.git` với nội dung gitfile `gitdir: <gitdir>`. Gửi tiếp payload Bash có `python3 -c "open('sub/.git', 'w').write(...)"` với chuỗi đích nguyên văn. Cả ba payload được cho qua.
-- **Xác minh đối kháng.** Tái hiện được các đường ghi nêu trên.
+Payload Edit và Write ghi `gitdir: <gitdir>` vào `sub/.git` được cho qua. `python3 -c "open('sub/.git', 'w').write(...)"` cũng qua. Bash xét tên tệp `.git`, còn Edit/Write và trình thông dịch chỉ xét mẫu `.git/` ở `.claude/hooks/guard.py:600–610, 8390–8392, 11758–11779`.
 
-### AUD-SEC-447 🟠 Hard link tới hook giữ tên ngoài vùng bảo vệ
+### AUD-SEC-447 🟠 Hard link tới hook
 
-- **Bằng chứng đo được.** `_git_config_inodes` thu thập inode của cấu hình nhưng thiếu các tệp hook (`.claude/hooks/guard.py:577–597`). Đích ghi qua hard link ở ngoài `.git/hooks/` được cho qua.
-- **Tái hiện.** Trong repo tạm, tạo hook `pre-commit` và dùng `ln .git/hooks/pre-commit hk` ở lượt đầu. Gửi lệnh chuyển hướng ghi `hk` ở lượt sau, rồi thử riêng Edit và Python ghi cùng đường dẫn. Cả ba được cho qua. Hai đường dẫn có cùng thiết bị và inode nên ghi qua `hk` thay nội dung hook.
-- **Xác minh đối kháng.** Tái hiện được đường ghi qua hard link.
+Trong repo tạm, `ln .git/hooks/pre-commit hk` tạo hai đường dẫn cùng thiết bị và inode. Chuyển hướng Bash, Edit và Python ghi `hk` đều qua guard và có thể đổi nội dung hook. `_git_config_inodes` chỉ thu thập inode cấu hình ở `.claude/hooks/guard.py:577–597`.
 
 ## 5. CI và tài liệu
 
@@ -83,6 +73,8 @@ Các bước tái hiện dưới đây dùng Git 2.53.0, repo tạm và payload 
 | AUD-CODE-047 · theo dõi dấu nháy thoát khi đọc scalar YAML | Chủ `dev-task.sh` và `xt.py` | Rà lần tới theo [sổ audit](AUDIT-STATUS.md) |
 
 ## 8. Kiểm lại thay đổi
+
+- `pip-audit 2.10.1 --require-hashes --strict --disable-pip` trên ba lockfile `requirements-*.txt` exit 0, không có lỗ hổng đã biết.
 
 - Git guard có test cho `--exec-path=` rỗng, ghi qua symlink tới gitfile, ghi hook qua hard link ở linked worktree, repo trần được Git dò từ thư mục con, và tạo repo trần rồi ghi cấu hình trong cùng lệnh Bash. Test đối chứng giữ các lệnh đọc và ghi file thường.
 - Chạy đúng bước Bash trong workflow mới với tarball Gitleaks 8.30.1 từ nhà phát hành. SHA-256 khớp, quét 1.405 commit ở các ref cục bộ, 0 phát hiện, exit 0. Hai mẫu thử ở commit PR thứ 31 và ở diff merge đều làm job quét exit 1. SARIF che nội dung mẫu thử.
