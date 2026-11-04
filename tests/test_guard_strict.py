@@ -25,7 +25,12 @@ BT = "`"
 
 
 def decide(cmd: str) -> dict:
-    with mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(ROOT), "XT_GUARD_POLICY": ""}):
+    # Nhánh hiện tại ghim về `feat`: quyết định không phụ thuộc nhánh checkout (CI ở `main` làm `git push` trần ra
+    # PUSH_MAIN — #433 c715bcc8)
+    with (
+        mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(ROOT), "XT_GUARD_POLICY": ""}),
+        mock.patch.object(guard, "_current_branch", return_value="feat"),
+    ):
         return guard.apply_policy(guard.bash_decision(cmd, str(ROOT)))
 
 
@@ -3115,9 +3120,9 @@ class GuardDebt432Test(unittest.TestCase):
         self.assertFalse(guard._exec_login(["exec", "-a"]))
 
     def test_aud_sec_434_read_side_git_config(self):
-        """AUD-SEC-434 🔴 (D-336): lệnh git chạy với `HOME`/`XDG_CONFIG_HOME`/`GIT_CONFIG_GLOBAL|SYSTEM` (khác
-        `/dev/null`)/`GIT_CONFIG_PARAMETERS|COUNT|KEY_n|VALUE_n` gán trong cùng lệnh (đầu lệnh, `export`, `declare -x`,
-        `env`): commit/push… → câu hỏi bỏ hook (`no_verify`); lệnh git khác → BUDGET."""
+        """AUD-SEC-434 🔴 (D-337): lệnh git chạy với biến trỏ TỆP cấu hình — `HOME`/`XDG_CONFIG_HOME`/
+        `GIT_CONFIG_GLOBAL|SYSTEM` (khác `/dev/null`) — gán trong cùng lệnh (đầu lệnh, `export`, `declare -x`, `env`):
+        commit/push… → cờ bỏ hook (`no_verify`); mọi lệnh git → BUDGET (review #433 R1)."""
         hooky = (
             "GIT_CONFIG_GLOBAL=gc git commit -m 'docs: x'",
             "HOME=. git commit -m x",
@@ -3240,6 +3245,128 @@ class GuardReview433Test(unittest.TestCase):
         )
         self.assertEqual(decide("ln -s /etc e && cat e/gitconfig")["decision"], "")
         self.assertEqual(guard._git_config_links([(["ln", "-s"], str(ROOT))], str(ROOT)), set())
+
+
+class GuardDebt433Test(unittest.TestCase):
+    """Nợ review #433 + có từ trước (T-3667): AUD-SEC-438 (ln, `/dev/null` toàn cục), AUD-SEC-439 (`GIT_DIR`/`--git-dir`,
+    gitfile), AUD-SEC-440 (`GIT_TEMPLATE_DIR`/`--template`, `GIT_EXEC_PATH`/`--exec-path`, hard link). Đỏ ở fae8c680."""
+
+    assert_budget = GuardStrictDebtTest.assert_budget
+    assert_hook_bypass = GuardDebt431Test.assert_hook_bypass
+    G = "printf '[core]\\n\\thooksPath = /dev/null\\n'"
+
+    def test_aud_sec_439_git_dir(self):
+        """AUD-SEC-439 🔴: `GIT_DIR`/`GIT_COMMON_DIR`/`--git-dir` trỏ thư mục git khác (cấu hình của nó) → BUDGET mọi lệnh
+        git, lệnh hook giữ cờ; `.git` của chính dự án không tính; ghi tệp gitfile `.git` → HOOK_BYPASS."""
+        self.assert_budget(
+            (
+                "GIT_DIR=../gd GIT_WORK_TREE=. git status",
+                "git --git-dir=x --work-tree=. status",
+                "git --git-dir x status",
+                "GIT_DIR=x git commit -m x",
+                "GIT_COMMON_DIR=../gd git log -1",
+                "export GIT_DIR=/tmp/gd; git status",
+                "for GIT_DIR in x; do git status; done",
+                "GIT_DIR=x sh -c 'git status'",
+            ),
+            (
+                "GIT_DIR=.git git status",
+                "git --git-dir=.git status",
+                f"GIT_DIR={ROOT}/.git git log -1",
+                "GIT_WORK_TREE=. git status",
+            ),
+            "AUD-SEC-434",
+        )
+        with mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(ROOT)}):
+            raw = guard.bash_decision("GIT_DIR=x git push origin feat", str(ROOT))
+        self.assertTrue(raw.get("push_no_verify"), raw)
+        self.assert_hook_bypass(("printf 'gitdir: ../gd\\n' > w/.git", "echo 'gitdir: /tmp/gd' | tee sub/.git"))
+        self.assertEqual(decide("rm -rf /tmp/x/.git")["code"] != "HOOK_BYPASS", True)
+
+    def test_aud_sec_440_template_exec_path_hardlink(self):
+        """AUD-SEC-440 🟠: `GIT_TEMPLATE_DIR`/`--template` (hook mẫu), `GIT_EXEC_PATH`/`--exec-path=` (lệnh con git) →
+        BUDGET; ghi tệp có `st_nlink > 1` trùng inode tệp cấu hình git, hay `ln <gitconfig> L` cứng cùng lệnh → HOOK_BYPASS."""
+        self.assert_budget(
+            (
+                "GIT_TEMPLATE_DIR=/tmp/t git init y",
+                "git init --template=/tmp/t y",
+                "git clone --template /tmp/t https://e.com/r y",
+                "GIT_EXEC_PATH=/tmp/x git push",
+                "git --exec-path=/tmp/x push",
+                "git --exec-path=/tmp/x status",
+            ),
+            ("git --exec-path", "git init y"),
+            "AUD-SEC-434",
+        )
+        self.assert_hook_bypass(
+            (
+                f"ln ~/.gitconfig hard && {self.G} >> hard",
+                f"ln .git/config hc; {self.G} >> hc",
+            )
+        )
+        with tempfile.TemporaryDirectory() as d:
+            home = Path(d)
+            (home / ".gitconfig").write_text("")
+            os.link(home / ".gitconfig", home / "hard")
+            with mock.patch.dict(os.environ, {"HOME": str(home)}):
+                self.assert_hook_bypass((f"{self.G} >> {home / 'hard'}",))
+                self.assertEqual(guard.edit_decision(str(home / "hard"), str(ROOT))[0], "deny")
+            (home / "plain").write_text("")
+            os.link(home / "plain", home / "plain2")
+            with mock.patch.dict(os.environ, {"HOME": str(home)}):
+                self.assertEqual(decide(f"printf x >> {home / 'plain2'}")["decision"], "")
+
+    def test_aud_sec_438_ln_own_target_devnull_global(self):
+        """AUD-SEC-438 🟢: (a) `ln` chỉ bỏ đích của chính nó khỏi tập link — `ln -sf X gc` thay tệp `GIT_CONFIG_GLOBAL`
+        vẫn tính. (c) bị review #434 thu hồi: `HOME`/`XDG_CONFIG_HOME` luôn tính, kể cả cạnh `GIT_CONFIG_GLOBAL=/dev/null`
+        — kỳ vọng đổi từ cho qua về chặn."""
+        self.assert_hook_bypass(("GIT_CONFIG_GLOBAL=gc git log -1; ln -sf /tmp/evil gc",))
+        self.assert_budget(
+            (
+                "GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/tmp/s git status",
+                "GIT_CONFIG_GLOBAL=/dev/null GIT_DIR=x git status",
+                "GIT_CONFIG_GLOBAL=/dev/null HOME=/tmp/h git status",
+                "GIT_CONFIG_GLOBAL=/dev/null XDG_CONFIG_HOME=/tmp/x git log -1",
+            ),
+            (),
+            "AUD-SEC-434",
+        )
+
+
+class GuardReview434Test(unittest.TestCase):
+    """Review #434 🔴: miễn 438c (`GIT_CONFIG_GLOBAL=/dev/null` làm `HOME`/`XDG_CONFIG_HOME` không tính) tin cả khi biến
+    không tới git (`env -u`, `env -i`, `export -n`, `unset`, subshell, gán trần không export) → thu hồi. Base chặn thì
+    head còn chặn; lệnh hook giữ `no_verify`. Đỏ ở c203d2e4."""
+
+    assert_budget = GuardStrictDebtTest.assert_budget
+
+    def test_r434_devnull_does_not_exempt_home(self):
+        self.assert_budget(
+            (
+                "GIT_CONFIG_GLOBAL=/dev/null; HOME=/tmp/h git commit -m x",
+                "GIT_CONFIG_GLOBAL=/dev/null; HOME=/tmp/h git push origin feat",
+                "GIT_CONFIG_GLOBAL=/dev/null HOME=/tmp/h env -u GIT_CONFIG_GLOBAL git commit -m x",
+                "GIT_CONFIG_GLOBAL=/dev/null HOME=/tmp/h env --unset=GIT_CONFIG_GLOBAL git commit -m x",
+                "GIT_CONFIG_GLOBAL=/dev/null HOME=/tmp/h env -uGIT_CONFIG_GLOBAL git commit -m x",
+                "GIT_CONFIG_GLOBAL=/dev/null HOME=/tmp/h nohup env -u GIT_CONFIG_GLOBAL git commit -m x",
+                "GIT_CONFIG_GLOBAL=/dev/null env -i HOME=/tmp/h git status",
+                "GIT_CONFIG_GLOBAL=/dev/null env --ignore-environment HOME=/tmp/h git status",
+                "readonly GIT_CONFIG_GLOBAL=/dev/null; HOME=/tmp/h git status",
+                "export GIT_CONFIG_GLOBAL=/dev/null HOME=/tmp/h; export -n GIT_CONFIG_GLOBAL; git status",
+                "export GIT_CONFIG_GLOBAL=/dev/null HOME=/tmp/h; unset GIT_CONFIG_GLOBAL; git status",
+                "(export GIT_CONFIG_GLOBAL=/dev/null); HOME=/tmp/h git status",
+                "GIT_CONFIG_GLOBAL=/dev/null; XDG_CONFIG_HOME=/tmp/x git commit -m x",
+            ),
+            ("GIT_CONFIG_GLOBAL=/dev/null git status > /dev/null 2>&1",),
+            "AUD-SEC-434",
+        )
+        for cmd in (
+            "GIT_CONFIG_GLOBAL=/dev/null; HOME=/tmp/h git commit -m x",
+            "GIT_CONFIG_GLOBAL=/dev/null; HOME=/tmp/h git push origin feat",
+        ):
+            with self.subTest(cmd=cmd), mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(ROOT)}):
+                raw = guard.bash_decision(cmd, str(ROOT))
+                self.assertTrue(raw.get("no_verify"), raw)
 
 
 class LedgerMatchesGuardTest(unittest.TestCase):

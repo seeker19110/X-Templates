@@ -375,45 +375,92 @@ def _git_config_env_asks(tokens: List[str], commands: List[Tuple[List[str], Opti
     hits = [
         w
         for argv, here in commands
-        if normalize(argv)[:1] != ["ln"]
         for w in write_targets(normalize(argv), argv)
         if w
         and _norm_path(w) != GIT_CONFIG_NULL
-        and {_norm_path(x) for x in [w, *_where(w, root, here)]} & (files | links)
+        # AUD-SEC-438: `ln` không tự khớp đích link của CHÍNH nó, nhưng `ln -sf X gc` thay tệp `GIT_CONFIG_GLOBAL` vẫn tính
+        and {_norm_path(x) for x in [w, *_where(w, root, here)]} & (files | (set() if _is_ln(argv) else links))
     ]
     return [GIT_HOOK_WHY.format(w) for w in hits]
 
 
-# AUD-SEC-434 (D-336): luật PHÍA ĐỌC — biến làm git đọc TỆP cấu hình khác (tệp có thể đã ghi ở lệnh Bash TRƯỚC, guard
-# không thấy): `HOME`, `XDG_CONFIG_HOME`, `GIT_CONFIG_GLOBAL|SYSTEM` (trừ đúng `/dev/null`) — gán đầu lệnh, `env VAR=`,
-# `export`/`declare -x`/gán trần ở lệnh trước trong chuỗi. Giá trị một lần (`GIT_CONFIG_PARAMETERS`,
-# `GIT_CONFIG_COUNT|KEY_n|VALUE_n`) guard đọc được và đã xét bằng luật khoá (`_commit_hooks_path`, `_git_exec_config`,
-# alias — AUD-SEC-352, review #306): tính chúng làm `GIT_CONFIG_PARAMETERS="'user.name'='x'" git push` bị sàn adapter
-# chặn và hỏng alias `GIT_CONFIG_KEY_0=alias.st … git st` (câu hỏi mở cho phiên chính).
-GIT_READ_ENV_RE = re.compile(r"HOME|XDG_CONFIG_HOME|GIT_CONFIG_(?:GLOBAL|SYSTEM)")
+def _is_ln(argv: List[str]) -> bool:
+    return normalize(argv)[:1] == ["ln"]
+
+
+# AUD-SEC-434 (D-337): luật PHÍA ĐỌC — biến làm git đọc TỆP cấu hình/hook/lệnh con khác (tệp có thể đã ghi ở lệnh Bash
+# TRƯỚC, guard không thấy): `HOME`, `XDG_CONFIG_HOME`, `GIT_CONFIG_GLOBAL|SYSTEM` (trừ đúng `/dev/null`); AUD-SEC-439:
+# `GIT_DIR`, `GIT_COMMON_DIR` (cấu hình của thư mục git khác — trừ `.git` của dự án); AUD-SEC-440: `GIT_TEMPLATE_DIR`
+# (hook mẫu), `GIT_EXEC_PATH` (lệnh con git) — gán đầu lệnh, `env VAR=`, `export`/`declare -x`/gán trần trước đó.
+# Giá trị một lần (`GIT_CONFIG_PARAMETERS`, `GIT_CONFIG_COUNT|KEY_n|VALUE_n`) guard đọc được và đã xét bằng luật khoá
+# (`_commit_hooks_path`, `_git_exec_config`, alias — AUD-SEC-352, review #306), D-337.
+GIT_READ_ENV_RE = re.compile(
+    r"HOME|XDG_CONFIG_HOME|GIT_CONFIG_(?:GLOBAL|SYSTEM)|GIT_DIR|GIT_COMMON_DIR|GIT_TEMPLATE_DIR|GIT_EXEC_PATH"
+)
+GIT_DIR_VARS = ("GIT_DIR", "GIT_COMMON_DIR")
 GIT_HOOK_SUBCMDS = frozenset("commit push merge rebase am cherry-pick revert".split())  # lệnh con chạy git hook
 GIT_CFG_ENV_ASK = (
     "git {} với biến cấu hình git ({}) — tệp cấu hình khác có thể bỏ git hook (AUD-SEC-434); cần người xác nhận"
 )
 GIT_CFG_ENV_WHY = (
-    "lệnh git chạy với biến cấu hình git (`HOME`, `XDG_CONFIG_HOME`, `GIT_CONFIG_*`) gán trong cùng lệnh — git đọc tệp"
-    " cấu hình guard không thấy (khoá chạy lệnh, hooksPath — AUD-SEC-434, D-336); viết lại: bỏ gán biến cấu hình git"
-    " (cô lập bằng `GIT_CONFIG_GLOBAL=/dev/null` nếu cần)"
+    "lệnh git chạy với biến/cờ trỏ tệp cấu hình, hook hay lệnh con git khác (`HOME`, `XDG_CONFIG_HOME`,"
+    " `GIT_CONFIG_GLOBAL|SYSTEM`, `GIT_DIR`/`--git-dir`, `GIT_TEMPLATE_DIR`/`--template`, `GIT_EXEC_PATH`/`--exec-path`)"
+    " — git đọc tệp guard không thấy (khoá chạy lệnh, hooksPath — AUD-SEC-434/439/440, D-337); viết lại: bỏ gán biến/cờ"
+    " đó (cô lập bằng `GIT_CONFIG_GLOBAL=/dev/null` nếu cần)"
 )
 
 
-def _git_cfg_vars(env: Dict[str, str]) -> List[str]:
-    """Tên biến cấu hình git trong `env` (AUD-SEC-434); `GIT_CONFIG_GLOBAL|SYSTEM=/dev/null` không tính."""
+def _git_cfg_vars(env: Dict[str, str], root: str = "") -> List[str]:
+    """Tên biến cấu hình git trong `env` (AUD-SEC-434); không tính: `GIT_CONFIG_GLOBAL|SYSTEM=/dev/null`; `GIT_DIR`/
+    `GIT_COMMON_DIR` là `.git` của dự án. `HOME`/`XDG_CONFIG_HOME` LUÔN tính — review #434 thu hồi miễn 438c
+    (`GIT_CONFIG_GLOBAL=/dev/null` có thể không tới git: `env -u`, `env -i`, `export -n`, `unset`, subshell…)."""
+
+    def null(k: str) -> bool:
+        return k in env and env[k] != GIT_CFG_DYN and _norm_path(_dequote(env[k]) or "x") == GIT_CONFIG_NULL
+
+    own = {".git", _norm_path(posixpath.join(root, ".git"))} if root else {".git"}
     return sorted(
         k
         for k, v in env.items()
         if GIT_READ_ENV_RE.fullmatch(k)
-        and not (k in ("GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM") and _norm_path(_dequote(v) or "x") == GIT_CONFIG_NULL)
+        and not (k in ("GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM") and null(k))
+        and not (k in GIT_DIR_VARS and v != GIT_CFG_DYN and _norm_path(_dequote(v) or "x") in own)
     )
 
 
-GIT_CFG_NAMES = ("HOME", "XDG_CONFIG_HOME", "GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM")
-GIT_CFG_NAME_RE = re.compile(r"HOME|XDG_CONFIG_HOME|GIT_CONFIG_GLOBAL|GIT_CONFIG_SYSTEM")  # lọc nhanh trên chữ thô
+# Thư mục lệnh con mặc định của bản git đóng gói (Debian/Ubuntu, Fedora/RHEL, /usr/local, Homebrew): trỏ tới đó là hành
+# vi mặc định của git cài sẵn, không đổi lệnh con chạy (AUD-SEC-440 — test GuardRemoteRefTest giữ cho qua)
+GIT_SYSTEM_EXEC_PATHS = frozenset(
+    {"/usr/lib/git-core", "/usr/libexec/git-core", "/usr/local/libexec/git-core", "/opt/homebrew/libexec/git-core"}
+)
+
+
+def _git_cfg_opts(s: List[str], root: str = "") -> List[str]:
+    """Cờ của lệnh git `s` (đã bỏ tiền tố) trỏ tệp cấu hình/hook/lệnh con khác: `--git-dir` (khác `.git` của dự án —
+    AUD-SEC-439), `--exec-path=X`, `init|clone --template[=]X` (AUD-SEC-440)."""
+    own = {".git", _norm_path(posixpath.join(root, ".git"))} if root else {".git"}
+    out = [o for o, v in _git_globals(s) if o == "--git-dir" and _norm_path(v or "x") not in own]
+    out += [o for o, v in _git_globals(s) if o == "--exec-path" and v and _norm_path(v) not in GIT_SYSTEM_EXEC_PATHS]
+    n = normalize(s)
+    if n[1:2] and n[1] in ("init", "clone") and any(a == "--template" or a.startswith("--template=") for a in n[2:]):
+        out.append("--template")
+    return out
+
+
+GIT_CFG_NAMES = (
+    "HOME",
+    "XDG_CONFIG_HOME",
+    "GIT_CONFIG_GLOBAL",
+    "GIT_CONFIG_SYSTEM",
+    "GIT_DIR",
+    "GIT_COMMON_DIR",
+    "GIT_TEMPLATE_DIR",
+    "GIT_EXEC_PATH",
+)
+GIT_CFG_NAME_RE = re.compile(  # lọc nhanh trên chữ thô
+    r"HOME|XDG_CONFIG_HOME|GIT_CONFIG_GLOBAL|GIT_CONFIG_SYSTEM|GIT_DIR|GIT_COMMON_DIR|GIT_TEMPLATE_DIR|GIT_EXEC_PATH"
+    r"|--git-dir|--exec-path|--template"
+)
 GIT_CFG_VAR_HEADS = frozenset({"read", "mapfile", "readarray", "getopts"})  # nhận TÊN biến làm đối số
 GIT_CFG_DYN = "$?"  # giá trị không biết (đặt bằng `for`/`read`/`printf -v`/`eval`)
 
@@ -443,6 +490,7 @@ def _git_cfg_env_why(cmd: str) -> str:
     `sh -c`/`eval` có git (review #433 R2)."""
     if not GIT_CFG_NAME_RE.search(cmd):
         return ""
+    root = os.environ.get("CLAUDE_PROJECT_DIR", "")  # `GIT_DIR=<gốc>/.git` là repo của chính dự án
     env: Dict[str, str] = {}
     for c in split_commands(tokenize(cmd)):
         c = list(itertools.dropwhile(lambda t: t in SHELL_KEYWORDS, c))  # `do git …`, `then git …`
@@ -451,8 +499,10 @@ def _git_cfg_env_why(cmd: str) -> str:
         if not s or s[0] in DECLARE_CMDS:
             env.update(_assign_values(c))
             continue
-        risky = _git_cfg_vars({**env, **_assign_values(c[: len(c) - len(s)])})
+        risky = _git_cfg_vars({**env, **_assign_values(c[: len(c) - len(s)])}, root)
         if risky and (normalize(c)[:1] == ["git"] or _git_cfg_body_git(s)):
+            return GIT_CFG_ENV_WHY
+        if normalize(c)[:1] == ["git"] and _git_cfg_opts(s, root):
             return GIT_CFG_ENV_WHY
     return ""
 
@@ -464,7 +514,9 @@ def _git_cfg_hook_ask(
     hook — như `--no-verify`: cờ `no_verify`/`push_no_verify` và câu hỏi."""
     if n[:1] != ["git"] or not n[1:2] or n[1] not in GIT_HOOK_SUBCMDS:
         return
-    cfg_vars = _git_cfg_vars({**env, **_assign_values(argv[: len(argv) - len(_strip_prefixes(argv))])})
+    s = _strip_prefixes(argv)
+    root = os.environ.get("CLAUDE_PROJECT_DIR", "")
+    cfg_vars = _git_cfg_vars({**env, **_assign_values(argv[: len(argv) - len(s)])}, root) + _git_cfg_opts(s, root)
     if cfg_vars:
         res["no_verify"] = True
         res["push_no_verify"] = bool(res.get("push_no_verify")) or n[1] == "push"
@@ -501,23 +553,48 @@ def _git_config_links(commands: List[Tuple[List[str], Optional[str]]], root: str
     out: Set[str] = set()
     for argv, here in commands:
         n = normalize(argv)
-        if (
-            n[:1] != ["ln"]
-            or not any(a[:1] == "-" and a[1:2] != "-" and "s" in a for a in n[1:])
-            and "--symbolic" not in n
-        ):
+        if n[:1] != ["ln"]:
             continue
+        symbolic = any(a[:1] == "-" and a[1:2] != "-" and "s" in a for a in n[1:]) or "--symbolic" in n
         pos = _positionals(n[1:], ("-t", "--target-directory", "-S", "--suffix"))
         src, dsts = (pos[0], pos[1:]) if len(pos) > 1 else (pos[0], ["."]) if pos else ("", [])
-        # review #433 R3: NGUỒN là thư mục cha của tệp cấu hình (`/etc`, `$(prefix)/etc`, `~/.config/git`) → `ĐÍCH/<đuôi>`
         if not src:
             continue
-        tails = [t for t in GIT_CFG_TAILS if _global_git_config(posixpath.join(src, t))]
+        # AUD-SEC-440: link CỨNG tới tệp cấu hình (toàn cục hay `.git/config` của repo) cũng ghi chung nội dung
+        is_cfg = _global_git_config(src) or bool(REPO_GIT_CONFIG_RE.search(_norm_path(src)))
+        # review #433 R3: NGUỒN là thư mục cha của tệp cấu hình (`/etc`, `$(prefix)/etc`, `~/.config/git`) → `ĐÍCH/<đuôi>`
+        tails = [t for t in GIT_CFG_TAILS if _global_git_config(posixpath.join(src, t))] if symbolic else []
         cands = dsts + [posixpath.join(x, posixpath.basename(src)) for x in dsts]
-        cands = [posixpath.join(x, t) for x in cands for t in tails] if not _global_git_config(src) else cands
+        cands = cands if is_cfg else [posixpath.join(x, t) for x in cands for t in tails]
         for d in cands:
             out |= {_norm_path(x) for x in [d, *_where(d, root, here)]}
     return out
+
+
+REPO_GIT_CONFIG_RE = re.compile(r"(?:^|/)\.git/(?:config|config\.worktree|worktrees/[^/]+/config\.worktree)$")
+
+
+def _git_config_inodes(root: str) -> Set[Tuple[int, int]]:
+    """(st_dev, st_ino) của mọi tệp cấu hình git có thật: toàn cục/hệ thống và `.git/config` của dự án (AUD-SEC-440)."""
+    xdg = os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config")
+    paths = [os.path.expanduser("~/.gitconfig"), os.path.join(xdg, "git", "config"), "/etc/gitconfig"]
+    paths += ["/usr/local/etc/gitconfig", "/opt/homebrew/etc/gitconfig"]
+    paths += [os.path.join(root, ".git", "config"), os.path.join(root, ".git", "config.worktree")]
+    out: Set[Tuple[int, int]] = set()
+    for p in paths:
+        with contextlib.suppress(OSError, ValueError):
+            st = os.stat(p)
+            out.add((st.st_dev, st.st_ino))
+    return out
+
+
+def _hardlink_git_config(path: str, root: str) -> bool:
+    """`path` có thật, `st_nlink > 1` và cùng inode với một tệp cấu hình git (link cứng tạo ở lệnh trước)."""
+    try:
+        st = os.stat(os.path.expanduser(path))
+    except (OSError, ValueError):
+        return False
+    return st.st_nlink > 1 and (st.st_dev, st.st_ino) in _git_config_inodes(root)
 
 
 def edit_decision(path: str, root: str, tool_input: Optional[Dict[str, object]] = None) -> Tuple[str, str]:
@@ -526,7 +603,12 @@ def edit_decision(path: str, root: str, tool_input: Optional[Dict[str, object]] 
     bypass = _bypass_edit(path, tool_input)
     if bypass:
         return "deny", f"Không ghi công tắc tắt hook (`{bypass}`) vào {rel} — hàng rào của khung (ADR-0018)."
-    if _match_any(rel, GIT_HOOK_PATTERNS) or _global_git_config(path) or _global_git_config(_realpath_safe(path)):
+    if (
+        _match_any(rel, GIT_HOOK_PATTERNS)
+        or _global_git_config(path)
+        or _global_git_config(_realpath_safe(path))
+        or _hardlink_git_config(path, root)
+    ):
         return "deny", GIT_HOOK_WHY.format(rel) + "."
     if kind == "capability":
         return "ask", "Sửa cấu hình " + CAPABILITY_WHY.format(rel) + "."
@@ -8303,8 +8385,11 @@ def _write_asks(n: List[str], argv: List[str], root: str, cwd: Optional[str] = N
         for t in targets
         if t != cfg
         for x in [t, *_where(t, root, cwd), *_real_targets(t, root, cwd)]
-        if _global_git_config(x)
+        if _global_git_config(x) or _hardlink_git_config(x, root)  # AUD-SEC-440: link cứng có từ trước
     ]
+    # AUD-SEC-439: tệp gitfile `.git` (`gitdir: …`) trỏ repo sang thư mục git khác — ghi (không xoá) như `.git/config`
+    if n[:1] and n[0] not in REUSE_DELETERS and n[:2] != ["git", "rm"]:
+        asks += [GIT_HOOK_WHY.format(t) for t in targets if posixpath.basename(_norm_path(t)) == ".git"]
     for target in (x for t in targets for x in _where(t, root, cwd)):
         kind = _target_kind(target, root)
         if _is_fence(target, root):

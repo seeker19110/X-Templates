@@ -21440,6 +21440,229 @@
    "allowed": false
   },
   "note": "review #433: luật phía đọc cấu hình git hở (đã chạy git thật)"
+ },
+ {
+  "id": "d433-439-git-dir-env",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-439",
+   "AUD-SEC-437"
+  ],
+  "input": {
+   "command": "GIT_DIR=../gd GIT_WORK_TREE=. git status"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "nợ review #433 (AUD-SEC-438…440, T-3667, D-337/D-338)"
+ },
+ {
+  "id": "d433-439-git-dir-flag",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-439"
+  ],
+  "input": {
+   "command": "git --git-dir=x --work-tree=. status"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "nợ review #433 (AUD-SEC-438…440, T-3667, D-337/D-338)"
+ },
+ {
+  "id": "d433-439-git-dir-commit",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-439"
+  ],
+  "input": {
+   "command": "GIT_DIR=x git commit -m x"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "nợ review #433 (AUD-SEC-438…440, T-3667, D-337/D-338)"
+ },
+ {
+  "id": "d433-439-gitfile",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-439"
+  ],
+  "input": {
+   "command": "printf 'gitdir: ../gd\\n' > w/.git"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "HOOK_BYPASS"
+  },
+  "note": "nợ review #433 (AUD-SEC-438…440, T-3667, D-337/D-338)"
+ },
+ {
+  "id": "d433-440-template-env",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-440"
+  ],
+  "input": {
+   "command": "GIT_TEMPLATE_DIR=/tmp/t git init y"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "nợ review #433 (AUD-SEC-438…440, T-3667, D-337/D-338)"
+ },
+ {
+  "id": "d433-440-template-flag",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-440"
+  ],
+  "input": {
+   "command": "git init --template=/tmp/t y"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "nợ review #433 (AUD-SEC-438…440, T-3667, D-337/D-338)"
+ },
+ {
+  "id": "d433-440-exec-path",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-440"
+  ],
+  "input": {
+   "command": "git --exec-path=/tmp/x push"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "nợ review #433 (AUD-SEC-438…440, T-3667, D-337/D-338)"
+ },
+ {
+  "id": "d433-440-hardlink-ln",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-440"
+  ],
+  "input": {
+   "command": "ln ~/.gitconfig hard && printf '[core]\\n\\thooksPath = /dev/null\\n' >> hard"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "HOOK_BYPASS"
+  },
+  "note": "nợ review #433 (AUD-SEC-438…440, T-3667, D-337/D-338)"
+ },
+ {
+  "id": "d433-438-ln-replace-gcg",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-438"
+  ],
+  "input": {
+   "command": "GIT_CONFIG_GLOBAL=gc git log -1; ln -sf /tmp/evil gc"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "HOOK_BYPASS"
+  },
+  "note": "nợ review #433 (AUD-SEC-438…440, T-3667, D-337/D-338)"
+ },
+ {
+  "id": "d433-438-home-git-config-global",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-434",
+   "AUD-SEC-438"
+  ],
+  "input": {
+   "command": "HOME=/tmp/h git config --global user.name x"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "nợ review #433 (AUD-SEC-438…440, T-3667, D-337/D-338)"
+ },
+ {
+  "id": "d433-ctl-439-own-git-dir",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-439"
+  ],
+  "input": {
+   "command": "GIT_DIR=.git git status"
+  },
+  "expect": {
+   "allowed": true
+  },
+  "note": "nợ review #433 (AUD-SEC-438…440, T-3667, D-337/D-338)"
+ },
+ {
+  "id": "d433-ctl-438-devnull-home",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-438"
+  ],
+  "input": {
+   "command": "GIT_CONFIG_GLOBAL=/dev/null HOME=/tmp/h git status"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "review #434: miễn 438c thu hồi — `GIT_CONFIG_GLOBAL=/dev/null` có thể không tới git; HOME luôn tính"
+ },
+ {
+  "id": "d433-ctl-440-git-init",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-440"
+  ],
+  "input": {
+   "command": "git init y"
+  },
+  "expect": {
+   "allowed": true
+  },
+  "note": "nợ review #433 (AUD-SEC-438…440, T-3667, D-337/D-338)"
+ },
+ {
+  "id": "r434-441-env-u",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-441"
+  ],
+  "input": {
+   "command": "GIT_CONFIG_GLOBAL=/dev/null HOME=/tmp/h env -u GIT_CONFIG_GLOBAL git commit -m x"
+  },
+  "expect": {
+   "allowed": false
+  },
+  "note": "review #434: GIT_CONFIG_GLOBAL=/dev/null không tới git — HOME vẫn tính (git 2.43 thật)"
+ },
+ {
+  "id": "r434-441-bare",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-441"
+  ],
+  "input": {
+   "command": "GIT_CONFIG_GLOBAL=/dev/null; HOME=/tmp/h git push origin feat"
+  },
+  "expect": {
+   "allowed": false
+  },
+  "note": "review #434: GIT_CONFIG_GLOBAL=/dev/null không tới git — HOME vẫn tính (git 2.43 thật)"
  }
  ]
 }
