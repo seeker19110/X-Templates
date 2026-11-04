@@ -4,9 +4,10 @@
   [`research/2026-11-04-software-factory-direction.md`](../../research/2026-11-04-software-factory-direction.md) §9:
   **1a · 2a hotel-manager · 3a · 4a** (tiền lệ ADR-0064: nháp cùng PR, chấp nhận cùng ngày; **D-348**). Bản nháp cùng ngày
   chỉ khác ở trạng thái và đoạn "Bốn câu hỏi" ở §Quyết định.
-- **Trạng thái triển khai:** chưa bắt đầu — lát A cần PLAN riêng (`docs/autopilot/PLAN-factory-A.md`); nhóm `docs/autopilot`
-  còn ≈ 2 KB dưới trần ADR-0043/0050 (đo 2026-11-04: 350.221/352.345 B) nên phải lưu trữ PLAN đã đóng trước (như T-3651).
-  Không thêm ID, không đổi mức, không đổi schema/CLI trong PR này.
+- **Trạng thái triển khai:** lát A đã làm 2026-11-05 trên nhánh, chưa merge (D-350,
+  [`PLAN-factory-A.md`](../autopilot/PLAN-factory-A.md) T-3673…3677: `report_result`, `<khoá>_report`, `release_artifacts`,
+  `subject`/`promotion`, `schema: 3`; test `tests/test_release_contract.py`); evidence v2 của `loop record` giữ nguyên.
+  Lát B–E chưa bắt đầu. Ghi lúc chấp nhận: không thêm ID, không đổi mức, không đổi schema/CLI trong PR của ADR này.
 - **Ngày:** 2026-11-04.
 - **Nghiên cứu:** research cùng tên (đối chiếu X-Templates `e0ea0a6`/`9c03257` và stored `5d8f8a6` ngày 2026-11-04; nhật ký
   xác minh §10; điều chưa xác minh: trạng thái merge stored#131, stack dự án đích).

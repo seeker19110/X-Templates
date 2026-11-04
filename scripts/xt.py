@@ -12245,26 +12245,139 @@ def _gate_tail(code: int, out: str) -> str:
     return redact(" ".join(keep))[:300]  # lần hai trên một dòng: cờ ở dòng trước, giá trị ở dòng sau (`--password⏎x`)
 
 
-def _release_run(base: Path, blueprint: str, key: str, what: str) -> Dict[str, str]:
-    """Hàng chạy lệnh `key` của xt.yaml (ADR-0042). Chưa khai/no-op: M/L → N/A BLOCKER (người xác nhận không áp hoặc khai
+# ADR-0068 lát A (D-350): adapter đọc report của lệnh phát hành — kết quả có kiểu thay cho chỉ exit code. Nhận dạng theo
+# nội dung: XML gốc `testsuites`/`testsuite` = JUnit; JSON có `runs` = SARIF 2.1.0; JSON `dependencies`/danh sách = pip-audit.
+REPORT_SUFFIX = "_report"  # khoá xt.yaml `<key>_report: <đường report do lệnh `<key>` sinh>` (tuỳ chọn)
+REPORT_CLOCK_SLACK = 2.0  # giây: độ mịn mtime của hệ file — report cũ hơn lúc bắt đầu chạy quá mức này là report cũ
+
+
+def _report(kind: str, status: str, total: int, failed: int, detail: str) -> Dict[str, Any]:
+    return {"kind": kind, "status": status, "total": total, "failed": failed, "detail": detail}
+
+
+def _junit_result(root: Any) -> Dict[str, Any]:
+    """JUnit XML: testcase có `failure`/`error` là hỏng, có `skipped` không tính là đã chạy; 0 testcase chạy = FAIL
+    (cổng rỗng là đỏ — ADR-0011, `LOOP-HARNESS-023`)."""
+    cases = list(root.iter("testcase"))
+    bad = sum(1 for c in cases if c.find("failure") is not None or c.find("error") is not None)
+    skipped = sum(1 for c in cases if c.find("skipped") is not None and c.find("failure") is None)
+    ran = len(cases) - skipped
+    if bad:
+        return _report("junit", "FAIL", ran, bad, f"{bad}/{ran} testcase hỏng")
+    if not ran:
+        return _report("junit", "FAIL", 0, 0, "0 test chạy — cổng rỗng là đỏ")
+    return _report("junit", "PASS", ran, 0, f"{ran} testcase xanh" + (f", {skipped} bỏ qua" if skipped else ""))
+
+
+def _sarif_result(doc: Dict[str, Any]) -> Dict[str, Any]:
+    """SARIF 2.1.0: không run, run thiếu `results` (công cụ chưa xác định kết quả — §3.14.23) hay invocation
+    `executionSuccessful: false` = scan chưa xong (PENDING); kết quả `level: error` = FAIL."""
+    runs = [r for r in doc.get("runs") or [] if isinstance(r, dict)]
+    if not runs:
+        return _report("sarif", "PENDING", 0, 0, "SARIF chưa có run — scan chưa xong")
+    invocations = [i for r in runs for i in r.get("invocations") or [] if isinstance(i, dict)]
+    if any(i.get("executionSuccessful") is False for i in invocations):
+        return _report("sarif", "PENDING", 0, 0, "invocation `executionSuccessful: false` — scan chưa xong")
+    if any(not isinstance(r.get("results"), list) for r in runs):
+        return _report("sarif", "PENDING", 0, 0, "run không có `results` — scan chưa xác định kết quả")
+    found = [x for r in runs for x in r["results"] if isinstance(x, dict)]
+    errors = sum(1 for x in found if x.get("level") == "error")
+    status = "FAIL" if errors else "PASS"
+    return _report("sarif", status, len(found), errors, f"{len(found)} kết quả, {errors} mức error")
+
+
+def _pip_audit_result(deps: List[Any]) -> Dict[str, Any]:
+    """pip-audit JSON (`{"dependencies": [...]}` hay danh sách cũ): gói có `skip_reason` không được quét; vuln = FAIL;
+    không gói nào được quét = scan chưa xong."""
+    audited = [d for d in deps if isinstance(d, dict) and "skip_reason" not in d]
+    vulns = sum(len(d.get("vulns") or []) for d in audited)
+    if not audited:
+        return _report("pip-audit", "PENDING", 0, 0, "0 gói được quét")
+    status = "FAIL" if vulns else "PASS"
+    return _report("pip-audit", status, len(audited), vulns, f"{len(audited)} gói, {vulns} lỗ hổng")
+
+
+def report_result(path: Path) -> Dict[str, Any]:
+    """Kết quả có kiểu của một report (`kind`, `status` PASS|FAIL|PENDING|INCONCLUSIVE, `total`, `failed`, `detail`).
+    XML đọc bằng `xml.etree` của stdlib (expat có chặn bom thực thể từ 2.4.1); dạng lạ/hỏng → INCONCLUSIVE."""
+    import xml.etree.ElementTree as ET  # chỉ khi có report: không tăng thời gian nạp CLI
+
+    try:
+        raw = path.read_bytes()
+    except OSError as exc:
+        return _report("?", "INCONCLUSIVE", 0, 0, f"không đọc được report: {exc}")
+    if raw.lstrip().startswith(b"<"):
+        try:
+            root = ET.fromstring(raw)
+        except ET.ParseError as exc:
+            return _report("?", "INCONCLUSIVE", 0, 0, f"XML hỏng: {exc}")
+        if root.tag in ("testsuites", "testsuite"):
+            return _junit_result(root)
+        return _report("?", "INCONCLUSIVE", 0, 0, f"XML gốc <{root.tag}> không phải JUnit")
+    try:
+        doc = json.loads(raw)
+    except ValueError:
+        return _report("?", "INCONCLUSIVE", 0, 0, "report không phải XML/JSON")
+    if isinstance(doc, dict) and "runs" in doc:
+        return _sarif_result(doc)
+    deps = doc.get("dependencies") if isinstance(doc, dict) else doc
+    if isinstance(deps, list):
+        return _pip_audit_result(deps)
+    return _report("?", "INCONCLUSIVE", 0, 0, "không nhận dạng được report (JUnit XML, SARIF, pip-audit JSON)")
+
+
+def _inside(base: Path, rel: str) -> Optional[Path]:
+    """Đường `rel` trong dự án (sau resolve); ngoài dự án → None."""
+    p = (base / rel).resolve()
+    return p if p.is_relative_to(base.resolve()) else None
+
+
+def _release_report(base: Path, key: str, rel: str, start: float, ev: str) -> Tuple[Dict[str, str], Dict[str, Any]]:
+    """Hàng `key` sau exit 0 khi khai `<key>_report`: report phải có, trong dự án, không cũ hơn lúc chạy, kết quả PASS."""
+    res: Dict[str, Any] = {"key": key, "path": rel, "sha256": None, **_report("?", "MISSING", 0, 0, "")}
+    p = _inside(base, rel)
+    if p is None:
+        res["detail"] = "ngoài dự án"
+        return _release_row(key, "FAIL", f"{ev} nhưng report `{rel}` ngoài dự án"), res
+    if not p.is_file():
+        res["detail"] = "thiếu"
+        return _release_row(key, "FAIL", f"{ev} nhưng report `{rel}` thiếu — lệnh phải sinh report"), res
+    res["sha256"] = hashlib.sha256(p.read_bytes()).hexdigest()
+    if p.stat().st_mtime + REPORT_CLOCK_SLACK < start:
+        res.update(status="STALE", detail="cũ hơn lần chạy")
+        return _release_row(key, "FAIL", f"{ev} nhưng report `{rel}` cũ hơn lần chạy — không do lệnh này sinh"), res
+    res.update(report_result(p))
+    line = f"{ev}; report `{rel}` {res['kind']} {res['status']}: {res['detail']}"
+    return _release_row(key, "PASS" if res["status"] == "PASS" else "FAIL", line), res
+
+
+def _release_run(base: Path, blueprint: str, key: str, what: str) -> Tuple[Dict[str, str], Optional[Dict[str, Any]]]:
+    """Hàng chạy lệnh `key` của xt.yaml (ADR-0042) và kết quả report (ADR-0068 lát A; None khi không khai
+    `<key>_report` hay lệnh không chạy/đỏ). Chưa khai/no-op: M/L → N/A BLOCKER (người xác nhận không áp hoặc khai
     lệnh), S/không rõ → N/A SHOULD. Khai → chạy qua guard (`run_gate_shell`): exit 0 PASS, khác FAIL kèm đuôi log."""
     try:
-        cmd = _xt_keys(base).get(key, "")
+        keys = _xt_keys(base)
     except (OSError, ValueError):  # xt.yaml hỏng: hàng `phase` đã FAIL — một vấn đề một hàng chặn (review #321)
-        return _release_row(key, "N/A", "không đọc được xt.yaml — xem hàng phase", "SHOULD")
+        return _release_row(key, "N/A", "không đọc được xt.yaml — xem hàng phase", "SHOULD"), None
+    cmd = keys.get(key, "")
     if gate_noop(cmd):
         scale = (_blueprint_front(base, blueprint) or ("", ""))[0]
         if scale in ("M", "L"):
-            return _release_row(
-                key, "N/A", f"xt.yaml chưa khai `{key}` ({what}) — khai lệnh, hoặc người ký lý do không áp"
-            )
-        return _release_row(key, "N/A", f"quy mô {scale or 'không rõ'}: `{key}` không bắt buộc ({what})", "SHOULD")
+            why = f"xt.yaml chưa khai `{key}` ({what}) — khai lệnh, hoặc người ký lý do không áp"
+            return _release_row(key, "N/A", why), None
+        return _release_row(
+            key, "N/A", f"quy mô {scale or 'không rõ'}: `{key}` không bắt buộc ({what})", "SHOULD"
+        ), None
     timeout = _record_timeout() or 0
     timeout = timeout if timeout > 0 else 1800  # sai/âm/0 → mặc định (review #217)
+    start = time.time()
     code, out = run_gate_shell(cmd, base, timeout)
     if code:
-        return _release_row(key, "FAIL", f"`{redact(cmd)}` exit {code}: {_gate_tail(code, out)}")
-    return _release_row(key, "PASS", f"`{redact(cmd)}` exit 0")
+        return _release_row(key, "FAIL", f"`{redact(cmd)}` exit {code}: {_gate_tail(code, out)}"), None
+    rep = keys.get(key + REPORT_SUFFIX, "").strip()
+    if not rep:
+        return _release_row(key, "PASS", f"`{redact(cmd)}` exit 0"), None
+    return _release_report(base, key, rep, start, f"`{redact(cmd)}` exit 0")
 
 
 GO_NO_GO_DIRS = ("docs/ops", "docs", ".")  # nơi tìm `GO-NO-GO*.md` (repo khung: docs/ops; mẫu dự án đích: gốc)
@@ -12272,10 +12385,19 @@ GO_NO_GO_DIRS = ("docs/ops", "docs", ".")  # nơi tìm `GO-NO-GO*.md` (repo khun
 GO_SIGN_ROW_RE = re.compile(r"^\|[^|\n]*\|\s*[^|\s][^|\n]*\|[^|\n]*\|\s*\d{4}-\d{2}-\d{2}\s*\|\s*$", re.M)
 
 
+def _go_sign_rows(text: str) -> List[Tuple[str, str]]:
+    """(quyết định, ngày) của các dòng ký có tên + ngày ở §5 (Ký) của GO-NO-GO."""
+    part = re.split(r"^## 5\b.*$", text, maxsplit=1, flags=re.M)
+    if len(part) != 2:
+        return []
+    section = re.split(r"^## ", part[1], maxsplit=1, flags=re.M)[0]
+    cells = [m[0].strip().strip("|").split("|") for m in GO_SIGN_ROW_RE.finditer(section)]
+    return [(c[2].strip(), c[3].strip()) for c in cells]
+
+
 def _go_no_go_signed(text: str) -> bool:
     """§5 (Ký) của GO-NO-GO có ít nhất một dòng ký có tên và ngày."""
-    part = re.split(r"^## 5\b.*$", text, maxsplit=1, flags=re.M)
-    return len(part) == 2 and bool(GO_SIGN_ROW_RE.search(re.split(r"^## ", part[1], maxsplit=1, flags=re.M)[0]))
+    return bool(_go_sign_rows(text))
 
 
 GO_FRONT_RE = re.compile(r"\A---\n.*?\n---\n", re.S)  # frontmatter: không phải tiêu đề
@@ -12291,6 +12413,20 @@ def _go_no_go_names_version(name: str, text: str, version: str) -> bool:
     return bool(title and re.search(rf"(?<![\w.])v?{ver}(?![\w-]|\.\w)", title[0]))
 
 
+def _go_no_go_docs(base: Path, version: str) -> Iterator[Tuple[str, str]]:
+    """(đường tương đối, nội dung) của mọi `GO-NO-GO*.md` của `v<version>` ở `GO_NO_GO_DIRS`; lỗi đọc → OSError có tên
+    file (có thể giấu bản ký — bên gọi coi là FAIL)."""
+    for d in GO_NO_GO_DIRS:
+        for p in sorted((base / d).glob("GO-NO-GO*.md")):
+            rel = p.relative_to(base).as_posix()
+            try:
+                text = p.read_text(encoding="utf-8")
+            except (OSError, ValueError) as exc:
+                raise OSError(f"không đọc được {rel}: {exc}") from exc
+            if _go_no_go_names_version(p.name, text, version):
+                yield rel, text
+
+
 def _release_go_no_go(base: Path) -> Dict[str, str]:
     """GO-NO-GO khớp `VERSION` (AUD-HAR-197, 3.29.0 phát hành không có file): tìm `GO-NO-GO*.md` của `v<VERSION>`
     (`_go_no_go_names_version`) ở `GO_NO_GO_DIRS`; có bản đã ký §5 → PASS; thiếu/chưa ký → N/A BLOCKER (việc của người: lập từ `release-check --json`,
@@ -12302,17 +12438,13 @@ def _release_go_no_go(base: Path) -> Dict[str, str]:
     except (OSError, ValueError) as exc:
         return _release_row("go_no_go", "FAIL", f"không đọc được VERSION: {exc}")
     found: List[str] = []
-    for d in GO_NO_GO_DIRS:
-        for p in sorted((base / d).glob("GO-NO-GO*.md")):
-            rel = p.relative_to(base).as_posix()
-            try:
-                text = p.read_text(encoding="utf-8")
-            except (OSError, ValueError) as exc:
-                return _release_row("go_no_go", "FAIL", f"không đọc được {rel}: {exc}")
-            if _go_no_go_names_version(p.name, text, version):
-                if _go_no_go_signed(text):
-                    return _release_row("go_no_go", "PASS", f"{rel}: GO-NO-GO v{version} đã ký §5")
-                found.append(rel)
+    try:
+        for rel, text in _go_no_go_docs(base, version):
+            if _go_no_go_signed(text):
+                return _release_row("go_no_go", "PASS", f"{rel}: GO-NO-GO v{version} đã ký §5")
+            found.append(rel)
+    except OSError as exc:
+        return _release_row("go_no_go", "FAIL", str(exc))
     if found:
         return _release_row(
             "go_no_go", "N/A", f"{', '.join(found)}: §5 chưa có chữ ký (tên + ngày) — người ký", "BLOCKER"
@@ -12348,6 +12480,107 @@ def _release_unchecked_must(base: Path, blueprint: str, mode: str) -> Dict[str, 
     return _release_row("unchecked_must", "WARN", ev, "SHOULD")
 
 
+# ADR-0068 lát A (D-350): artifact ứng viên và quyết định promotion. Khoá tuỳ chọn; vắng = hành vi trước lát A.
+ARTIFACTS_KEY = "release_artifacts"  # đường file cách nhau bởi khoảng trắng; sidecar `<file>.sha256` (sha256sum) nếu có
+APPROVAL_DAYS_KEY = "release_approval_days"  # chữ ký GO-NO-GO còn hiệu lực bao nhiêu ngày (mặc định 30)
+APPROVAL_DAYS = 30
+RELEASE_SCHEMA = 3  # schema của `release-check --json`: 3 = thêm subject/artifacts/results/promotion, giữ trường cũ
+
+
+def _artifact(base: Path, rel: str) -> Dict[str, Any]:
+    a: Dict[str, Any] = {"path": rel, "sha256": None, "expected": None, "problem": ""}
+    p = _inside(base, rel)
+    if p is None or not p.is_file():
+        a["problem"] = "ngoài dự án" if p is None else "thiếu file"
+        return a
+    a["sha256"] = hashlib.sha256(p.read_bytes()).hexdigest()
+    side = p.with_name(p.name + ".sha256")
+    if side.is_file():
+        a["expected"] = (side.read_text(encoding="utf-8", errors="replace").split() or [""])[0].lower()
+        a["problem"] = "" if a["expected"] == a["sha256"] else "digest lệch sidecar"
+    return a
+
+
+def _release_artifacts(base: Path) -> Tuple[Optional[Dict[str, str]], List[Dict[str, Any]]]:
+    """Hàng `artifacts` (chỉ khi khai `release_artifacts`, BLOCKER) và danh sách artifact kèm sha256."""
+    try:
+        paths = _xt_keys(base).get(ARTIFACTS_KEY, "").split()
+    except (OSError, ValueError):  # xt.yaml hỏng: hàng `phase` đã FAIL
+        return None, []
+    if not paths:
+        return None, []
+    arts = [_artifact(base, rel) for rel in paths]
+    bad = [f"{a['path']}: {a['problem']}" for a in arts if a["problem"]]
+    if bad:
+        return _release_row("artifacts", "FAIL", f"{len(bad)}/{len(arts)} artifact lỗi — " + "; ".join(bad)), arts
+    return _release_row("artifacts", "PASS", f"{len(arts)} artifact, digest khớp sidecar (nếu có)"), arts
+
+
+def _release_subject(base: Path, arts: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Ứng viên được chứng nhận: HEAD, vân tay cây, digest gộp của artifact (None khi không khai hay có artifact lỗi)."""
+    ok = bool(arts) and not any(a["problem"] for a in arts)
+    lines = "".join(f"{a['path']}\0{a['sha256']}\n" for a in sorted(arts, key=lambda a: str(a["path"])))
+    digest = hashlib.sha256(lines.encode()).hexdigest() if ok else None
+    return {"head": _git_head(base), "tree": tree_fingerprint(base), "digest": digest}
+
+
+def _signed_go_no_go(base: Path) -> Optional[Tuple[str, str]]:
+    """GO-NO-GO đã ký §5 của `VERSION` (cùng luật hàng `go_no_go`); không có/không đọc được → None."""
+    try:
+        version = (base / "VERSION").read_text(encoding="utf-8").strip()
+        return next(((r, t) for r, t in _go_no_go_docs(base, version) if _go_no_go_signed(t)), None)
+    except (OSError, ValueError):
+        return None
+
+
+def _approval_days(base: Path) -> int:
+    try:
+        n = int(_xt_keys(base).get(APPROVAL_DAYS_KEY, ""))
+    except (OSError, ValueError):
+        return APPROVAL_DAYS
+    return n if n > 0 else APPROVAL_DAYS
+
+
+def _approval_problem(base: Path, rel: str, text: str, digest: Optional[str]) -> str:
+    """Lý do chữ ký §5 của `rel` chưa đủ cho promotion; rỗng = đủ. Quyết định có chữ NO-GO (kể cả ô mẫu "GO / NO-GO"
+    chưa chọn) → `rejected:`; ngày ký cũ hơn hạn, ở tương lai, hay có digest mà văn bản không nhắc → chờ người."""
+    rows = _go_sign_rows(text)
+    no = [d for d, _ in rows if re.search(r"NO-GO", d, re.I)]
+    if no:
+        return f"rejected:{rel}: quyết định ký §5 ghi `{no[0]}` (NO-GO)"
+    today = _dt.datetime.now(_dt.timezone.utc).date()
+    try:
+        dates = [_dt.date.fromisoformat(d) for _, d in rows]
+    except ValueError:
+        return f"{rel}: ngày ký không hợp lệ ({', '.join(d for _, d in rows)})"
+    days = _approval_days(base)
+    if max(dates) > today:
+        return f"{rel}: ngày ký {max(dates)} ở tương lai"
+    if (today - min(dates)).days > days:
+        return f"{rel}: chữ ký {min(dates)} hết hạn ({days} ngày — `{APPROVAL_DAYS_KEY}`)"
+    if digest and digest[:12] not in text:
+        return f"{rel}: không nhắc digest ứng viên `{digest[:12]}` — chữ ký chưa gắn subject"
+    return ""
+
+
+def _release_promotion(base: Path, fails: List[str], human: List[str], digest: Optional[str]) -> Dict[str, Any]:
+    """`blocked` (hàng BLOCKER FAIL) · `rejected` (ký NO-GO) · `pending_human` (còn việc người, chữ ký thiếu/hết hạn/
+    chưa gắn subject) · `approved`. Máy không nâng `pending_human` (ADR-0068 câu 3): "đã duyệt" vẫn là chữ ký người."""
+    if fails:
+        return {"state": "blocked", "reasons": fails}
+    doc = _signed_go_no_go(base)
+    problem = _approval_problem(base, *doc, digest) if doc else ""
+    if problem.startswith("rejected:"):
+        return {"state": "rejected", "reasons": [problem.removeprefix("rejected:")]}
+    if human:
+        return {"state": "pending_human", "reasons": human}
+    if doc is None:
+        return {"state": "pending_human", "reasons": ["chưa có GO-NO-GO đã ký §5 cho VERSION — người ký"]}
+    if problem:
+        return {"state": "pending_human", "reasons": [problem]}
+    return {"state": "approved", "reasons": [doc[0]]}
+
+
 def release_check(base: Path, blueprint: str, status: str, unchecked_must: str = "warn") -> Dict[str, Any]:
     """Cổng G7 máy đọc (ADR-0029): gom `blueprint-status --strict --run`, `audit check --strict`, kiểm lại cuối của autopilot
     và cây git thành bảng PASS/FAIL/N-A có bằng chứng — cùng nguồn cho GO-NO-GO.md (phần máy) và JSON. GO chỉ khi không
@@ -12355,6 +12588,7 @@ def release_check(base: Path, blueprint: str, status: str, unchecked_must: str =
     phải là harden (`phase`) và không còn nợ review — file ngoài tài liệu đổi sau SHA quét của sổ audit (`review_debt`)."""
     # `attack`/`perf` chạy TRƯỚC `tree`: báo cáo công cụ ghi vào cây phải hiện ở hàng `tree` (review #217)
     runs = {key: _release_run(base, blueprint, key, what) for key, what in RELEASE_RUN_KEYS}
+    art_row, arts = _release_artifacts(base)
     rows = [
         _release_blueprint(base, blueprint),
         _release_audit(base, status),
@@ -12364,13 +12598,16 @@ def release_check(base: Path, blueprint: str, status: str, unchecked_must: str =
         _release_phase(base),
         _release_stage(base),
         _release_review_debt(base, status),
-        *runs.values(),
+        *(row for row, _ in runs.values()),
+        *([art_row] if art_row else []),
         _release_unchecked_must(base, blueprint, unchecked_must),
         _release_go_no_go(base),
     ]
     fails = [r["id"] for r in rows if r["result"] == "FAIL" and r["level"] == "BLOCKER"]
     human = [r["id"] for r in rows if r["result"] == "N/A" and r["level"] == "BLOCKER"]
+    subject = _release_subject(base, arts)
     return {
+        "schema": RELEASE_SCHEMA,
         "head": _git_head(base),
         "at": now_iso(),
         "rows": rows,
@@ -12378,6 +12615,10 @@ def release_check(base: Path, blueprint: str, status: str, unchecked_must: str =
         "human": human,
         "go": not fails,
         "verdict": "NO-GO" if fails else "GO (chờ người)" if human else "GO",
+        "subject": subject,
+        "artifacts": arts,
+        "results": [res for _, res in runs.values() if res],
+        "promotion": _release_promotion(base, fails, human, subject["digest"]),
     }
 
 
@@ -12393,6 +12634,8 @@ def cmd_release_check(args: argparse.Namespace) -> int:
             print(f"{mark} {r['level']:<7} {r['id']:<12} {r['result']:<4} {r['evidence']}")
         if out["human"]:
             print("Chờ người: " + ", ".join(out["human"]) + " — máy không thay được chữ ký (GO-NO-GO.md §5)")
+        promo = out["promotion"]
+        print(f"promotion: {promo['state']} — " + "; ".join(promo["reasons"]))
     return 0 if out["go"] else 1
 
 
