@@ -3,7 +3,7 @@ title: Rủi ro & giả định: sổ rủi ro, spike, kế hoạch B
 kind: module
 prefix: PM-RISK
 applies_to: [all]
-updated: 2026-11-02
+updated: 2026-11-04
 ---
 
 # Rủi ro & giả định: sổ rủi ro, spike, kế hoạch B
@@ -42,7 +42,7 @@ updated: 2026-11-02
 - [ ] `PM-RISK-003` **MUST** Rủi ro xếp đầu (xác suất × ảnh hưởng cao nhất) có spike hoặc biện pháp bắt đầu trong lát dọc đầu tiên. → Kiểm: `PLAN.md` có task tham chiếu `RK-NNN` đứng đầu trong nhóm task đầu.
 - [ ] `PM-RISK-004` **MUST@L** Mỗi spike có: câu hỏi một dòng, hộp thời gian, tiêu chí trả lời, kết quả ghi lại (ADR/spec/`PROGRESS.md`); code spike không merge vào nhánh chính. → Kiểm: issue/ghi chú spike đủ 4 mục; `git log main --grep="spike"` không có commit merge nhánh `spike/`.
 - [ ] `PM-RISK-005` **MUST@L** Rủi ro mức cao có kế hoạch B ghi rõ: trigger cụ thể, hành động, ai quyết, chi phí ước lượng. → Kiểm: cột "Kế hoạch B" không rỗng cho mọi dòng mức cao.
-- [ ] `PM-RISK-006` **MUST** Mỗi phụ thuộc bên thứ ba quan trọng (SaaS, API, thư viện lõi, model AI) có dòng thẩm định: license (OSI hay không), ngày EOL/phiên bản hỗ trợ, telemetry mặc định, cách xuất dữ liệu/thoát. → Kiểm: bảng "Phụ thuộc" trong `docs/RISKS.md`; license tự động ở [`../16-compliance-privacy/licensing-and-ip.md`](../16-compliance-privacy/licensing-and-ip.md); EOL tra `https://endoflife.date/api/<product>.json`.
+- [ ] `PM-RISK-006` **MUST** Mỗi phụ thuộc bên thứ ba quan trọng (SaaS, API, thư viện lõi, model AI) có dòng thẩm định: license (OSI hay không), ngày EOL/phiên bản hỗ trợ, telemetry mặc định, cách xuất dữ liệu/thoát. → Kiểm: bảng "Phụ thuộc" trong `docs/RISKS.md`; license tự động ở [`../16-compliance-privacy/licensing-and-ip.md`](../16-compliance-privacy/licensing-and-ip.md); EOL tra `https://endoflife.date/api/<product>.json`. Phụ thuộc hosted có thể sunset trong vài tuần (stored 05, 06 §7p: Flowise, Tambo Cloud): flow low-code → cột "cách thoát" = file flow trong `flows/` ([`PRF-AGENTIC-022`](../02-profiles/agentic-system.md)).
 - [ ] `PM-RISK-007` **MUST** Danh sách luật áp dụng (số hiệu đầy đủ + ngày hiệu lực + URL + "kiểm tra văn bản sửa đổi") lập ở G2; dự án có dữ liệu cá nhân có DPIA theo [`../templates/DPIA.md`](../templates/DPIA.md). → Kiểm: mục "Khung pháp lý" trong `PROJECT.md`; `docs/DPIA.md` tồn tại khi `PM-REQ-009` = có.
 - [ ] `PM-RISK-008` **MUST@L** Sổ rủi ro được rà tại mỗi cổng G1–G7 (ngày rà cập nhật); rủi ro đã xảy ra chuyển thành sự cố và tạo ≥1 hàng rào mới. → Kiểm: cột "ngày rà" ≥ ngày cổng gần nhất; post-mortem liên kết `RK-NNN`.
 - [ ] `PM-RISK-009` **SHOULD** Rủi ro bảo mật không ghi lặp trong sổ này mà trỏ tới threat model; sổ chỉ giữ dòng tổng "xem THREAT-MODEL #id". → Kiểm: dòng rủi ro bảo mật có link `docs/THREAT-MODEL.md`.

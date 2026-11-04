@@ -4,7 +4,7 @@ kind: profile
 slug: data-ml
 prefix: PRF-DATA
 modules: [04-standards/*, 05-architecture/*, 08-backend/*, 09-database/*, 10-workflow/*, 11-autonomous-loop/*, 12-security/*, 13-ai-engineering/*, 14-testing-quality/*, 15-operations/*, 16-compliance-privacy/*, 17-product-project/*, 18-cross-cutting/*]
-updated: 2026-10-14
+updated: 2026-11-04
 ---
 
 # Hồ sơ: Data pipeline / ML system
@@ -71,7 +71,7 @@ Phiên bản xác minh **2026-10-13** (PyPI/endoflife.date) — **xác minh lạ
 - [ ] `PRF-DATA-010` **MUST** Feature tính bằng **một** đường code cho cả train và serve (feature store hoặc module dùng chung) để tránh train/serve skew. → Kiểm: test so sánh giá trị feature offline vs online cho cùng khoá → bằng nhau trong sai số.
 - [ ] `PRF-DATA-011` **MUST** Backfill/xử lý lại an toàn: theo partition, có giới hạn phạm vi, có `--dry-run`, không khoá bảng production. → Kiểm: lệnh backfill có tham số phạm vi bắt buộc và dry-run in kế hoạch; test dry-run không ghi.
 - [ ] `PRF-DATA-012` **MUST** Notebook không phải code production: logic chuyển vào package có test; notebook commit không chứa output. → Kiểm: hook `nbstripout` trong pre-commit; coverage đo trên package, không trên notebook.
-- [ ] `PRF-DATA-013` **MUST** Mô hình/artifact tải về hoặc phát hành dùng định dạng an toàn (safetensors/ONNX), không `pickle` từ nguồn không tin; quét artifact trước khi nạp. → Kiểm: lint cấm `torch.load` không `weights_only=True`/`pickle.load` trên file ngoài; scanner model trong CI. · Nguồn: OWASP LLM 2026 LLM04 Supply Chain
+- [ ] `PRF-DATA-013` **MUST** Mô hình/artifact tải về hoặc phát hành dùng định dạng an toàn (safetensors/ONNX), không `pickle` từ nguồn không tin; quét artifact trước khi nạp. Nạp trực tiếp chỉ safetensors/GGUF/ONNX; pickle (`.bin/.pt/.pth/.pkl/.ckpt`) chỉ sau scanner có tên (modelscan hoặc picklescan) và hook allowlist (fickling `always_check_safety()` hoặc `torch.load(weights_only=True)`). → Kiểm: lint cấm `torch.load` không `weights_only=True`/`pickle.load` trên file ngoài; scanner model trong CI. · Nguồn: OWASP LLM 2026 LLM04 Supply Chain Kiểm thêm: CI `modelscan -p <thư mục model>` (hoặc `picklescan`) trên mọi artifact tải về, exit≠0 = đỏ; mỗi `torch.load(`/`pickle.load(`/`joblib.load(` có `weights_only=True` hoặc sau fickling. (chưa xác minh — theo stored 12 §4c)
 - [ ] `PRF-DATA-014` **SHOULD** DAG có retry + timeout từng task, cảnh báo SLA miss; không cron thủ công ngoài orchestrator. → Kiểm: mọi task khai `retries`, `timeout`; alert SLA cấu hình trong repo.
 - [ ] `PRF-DATA-015` **SHOULD** Chỉ số chất lượng dữ liệu (freshness, completeness, tỷ lệ fail validation) phát ra như metric và có SLO. → Kiểm: dashboard + SLO ở [`../15-operations/slo-and-alerting.md`](../15-operations/slo-and-alerting.md).
 - [ ] `PRF-DATA-016` **SHOULD** Chi phí mỗi lần chạy pipeline/huấn luyện (compute, GPU giờ, lưu trữ) được ghi và có ngân sách. → Kiểm: tag chi phí theo job; báo cáo tháng (phương pháp → [`../15-operations/cost-management.md`](../15-operations/cost-management.md)).
@@ -79,6 +79,7 @@ Phiên bản xác minh **2026-10-13** (PyPI/endoflife.date) — **xác minh lạ
 - [ ] `PRF-DATA-018` **SHOULD** Môi trường huấn luyện đóng gói (container ghim CUDA/driver/thư viện) và chạy được trên CI runner nhỏ với dữ liệu mẫu. → Kiểm: job CI `train --smoke` trên 1% dữ liệu xanh.
 - [ ] `PRF-DATA-019` **MUST@L** Mô hình trong lĩnh vực rủi ro cao (y tế, tín dụng, tuyển dụng, dịch vụ công) có hồ sơ quản trị: mục đích, dữ liệu, đánh giá thiên lệch, giám sát người. → Kiểm: tài liệu theo [`../16-compliance-privacy/ai-regulation.md`](../16-compliance-privacy/ai-regulation.md) được review ký. · Nguồn: EU AI Act Annex III (áp dụng 2027-12-02 theo Digital Omnibus — xem research AI agent 2026-10-13)
 - [ ] `PRF-DATA-020` **MAY** Dữ liệu tổng hợp (synthetic) cho test/dev; DVC pipelines; lakehouse (Iceberg/Delta) khi khối lượng lớn. → Kiểm: ADR ghi lựa chọn.
+- [ ] `PRF-DATA-021` **SHOULD** Model do dự án phát hành được ký bằng OpenSSF model-signing (`model_signing sign`, keyless Sigstore) và bên nạp xác minh chữ ký trước khi load (bổ trợ `PRF-DATA-013`). → Kiểm: bước release sinh bundle chữ ký; CI chạy `model_signing verify` với identity mong đợi, sửa 1 byte weight → đỏ. · Nguồn: (chưa xác minh — theo `seeker19110/stored` 12 §4c)
 
 ## Cổng chất lượng tương đương
 
