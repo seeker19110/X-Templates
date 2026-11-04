@@ -22099,6 +22099,358 @@
  "expect": {
   "allowed": true
  }
+},
+{
+ "id": "t3672-459-cd-dotdot-missing",
+ "origin": "adversarial-reviewer",
+ "refs": ["AUD-SEC-459"],
+ "input": {
+  "command": "cd /khong-co/..; echo x > .autopilot/state.json"
+ },
+ "expect": {
+  "allowed": false,
+  "code": "EVIDENCE_HANDWRITE"
+ }
+},
+{
+ "id": "t3672-459-negated-cd",
+ "origin": "adversarial-reviewer",
+ "refs": ["AUD-SEC-459"],
+ "input": {
+  "command": "! cd /khong-co && echo x > .autopilot/state.json"
+ },
+ "expect": {
+  "allowed": false,
+  "code": "EVIDENCE_HANDWRITE"
+ }
+},
+{
+ "id": "t3672-459-cd-removed-dir",
+ "origin": "adversarial-reviewer",
+ "refs": ["AUD-SEC-459"],
+ "input": {
+  "command": "rm -rf w; cd w; echo x > .autopilot/state.json",
+  "files": {
+   "w/.keep": ""
+  }
+ },
+ "expect": {
+  "allowed": false,
+  "code": "EVIDENCE_HANDWRITE"
+ }
+},
+{
+ "id": "t3672-ctl-459-cd-or-exit",
+ "origin": "control",
+ "refs": ["AUD-SEC-459"],
+ "input": {
+  "command": "cd /khong-co || exit 1; printf x > config"
+ },
+ "expect": {
+  "allowed": true
+ }
+},
+{
+ "id": "t3672-ctl-463-mkdir-cd-tar",
+ "origin": "control",
+ "refs": ["AUD-SEC-463"],
+ "input": {
+  "command": "mkdir -p out; cd out; tar -xf ../a.tar"
+ },
+ "expect": {
+  "allowed": true
+ }
+},
+{
+ "id": "t3672-ctl-463-mkdir-cd-config",
+ "origin": "control",
+ "refs": ["AUD-SEC-463"],
+ "input": {
+  "command": "mkdir -p /tmp/w; cd /tmp/w; printf x > config"
+ },
+ "expect": {
+  "allowed": true
+ }
+},
+{
+ "id": "t3672-460-cd-in-pipe",
+ "origin": "adversarial-reviewer",
+ "refs": ["AUD-SEC-460"],
+ "input": {
+  "command": "cd /tmp | true; echo x > .autopilot/state.json"
+ },
+ "expect": {
+  "allowed": false,
+  "code": "EVIDENCE_HANDWRITE"
+ }
+},
+{
+ "id": "t3672-460-cd-list-in-background",
+ "origin": "adversarial-reviewer",
+ "refs": ["AUD-SEC-460"],
+ "input": {
+  "command": "cd /tmp && true & echo x > .autopilot/state.json"
+ },
+ "expect": {
+  "allowed": false,
+  "code": "EVIDENCE_HANDWRITE"
+ }
+},
+{
+ "id": "t3672-ctl-460-cd-then-pipe",
+ "origin": "control",
+ "refs": ["AUD-SEC-460"],
+ "input": {
+  "command": "cd src && echo x | cat > a.txt",
+  "files": {
+   "src/.keep": ""
+  }
+ },
+ "expect": {
+  "allowed": true
+ }
+},
+{
+ "id": "t3672-461-gc-recent-objects-hook",
+ "origin": "adversarial-reviewer",
+ "refs": ["AUD-SEC-461"],
+ "input": {
+  "command": "git config gc.recentObjectsHook 'sh -c x'"
+ },
+ "expect": {
+  "allowed": false,
+  "code": "HOOK_BYPASS"
+ }
+},
+{
+ "id": "t3672-461-rename-section-gc",
+ "origin": "adversarial-reviewer",
+ "refs": ["AUD-SEC-461"],
+ "input": {
+  "command": "git config --rename-section x gc"
+ },
+ "expect": {
+  "allowed": false,
+  "code": "HOOK_BYPASS"
+ }
+},
+{
+ "id": "t3672-461-interactive-difffilter",
+ "origin": "adversarial-reviewer",
+ "refs": ["AUD-SEC-461"],
+ "input": {
+  "command": "git -c interactive.diffFilter='sh -c x' add -p"
+ },
+ "expect": {
+  "allowed": false,
+  "code": "HOOK_BYPASS"
+ }
+},
+{
+ "id": "t3672-ctl-461-gc-auto",
+ "origin": "control",
+ "refs": ["AUD-SEC-461"],
+ "input": {
+  "command": "git config gc.auto 0"
+ },
+ "expect": {
+  "allowed": true
+ }
+},
+{
+ "id": "t3672-462-tar-cluster-C",
+ "origin": "adversarial-reviewer",
+ "refs": ["AUD-SEC-462"],
+ "input": {
+  "command": "cd gd && tar -xC . -f a.tar",
+  "files": {
+   "gd/HEAD": "ref: refs/heads/main\n",
+   "gd/objects/.keep": ""
+  }
+ },
+ "expect": {
+  "allowed": false,
+  "code": "HOOK_BYPASS"
+ }
+},
+{
+ "id": "t3672-462-pax-read",
+ "origin": "adversarial-reviewer",
+ "refs": ["AUD-SEC-462"],
+ "input": {
+  "command": "cd gd && pax -r < a.pax",
+  "files": {
+   "gd/HEAD": "ref: refs/heads/main\n",
+   "gd/objects/.keep": ""
+  }
+ },
+ "expect": {
+  "allowed": false,
+  "code": "HOOK_BYPASS"
+ }
+},
+{
+ "id": "t3672-462-7z-output",
+ "origin": "adversarial-reviewer",
+ "refs": ["AUD-SEC-462"],
+ "input": {
+  "command": "7z x a.7z -ogd",
+  "files": {
+   "gd/HEAD": "ref: refs/heads/main\n",
+   "gd/objects/.keep": ""
+  }
+ },
+ "expect": {
+  "allowed": false,
+  "code": "HOOK_BYPASS"
+ }
+},
+{
+ "id": "t3672-ctl-462-tar-to-stdout",
+ "origin": "control",
+ "refs": ["AUD-SEC-462"],
+ "input": {
+  "command": "cd gd && tar -xOf a.tar",
+  "files": {
+   "gd/HEAD": "ref: refs/heads/main\n",
+   "gd/objects/.keep": ""
+  }
+ },
+ "expect": {
+  "allowed": true
+ }
+},
+{
+ "id": "t3672-464-alias-set-then-called",
+ "origin": "adversarial-reviewer",
+ "refs": ["AUD-SEC-464"],
+ "input": {
+  "command": "git config alias.u 'config --unset core.hooksPath' && git u"
+ },
+ "expect": {
+  "allowed": false,
+  "code": "HOOK_BYPASS"
+ }
+},
+{
+ "id": "t3672-ctl-464-alias-status",
+ "origin": "control",
+ "refs": ["AUD-SEC-464"],
+ "input": {
+  "command": "git config alias.st status && git st"
+ },
+ "expect": {
+  "allowed": true
+ }
+},
+{
+ "id": "t3672-465-copy-git-dir",
+ "origin": "adversarial-reviewer",
+ "refs": ["AUD-SEC-465"],
+ "input": {
+  "command": "cp -r .git d && printf x > d/config"
+ },
+ "expect": {
+  "allowed": false,
+  "code": "HOOK_BYPASS"
+ }
+},
+{
+ "id": "t3672-ctl-465-copy-plain-dir",
+ "origin": "control",
+ "refs": ["AUD-SEC-465"],
+ "input": {
+  "command": "cp -r src d && printf x > d/config",
+  "files": {
+   "src/.keep": ""
+  }
+ },
+ "expect": {
+  "allowed": true
+ }
+},
+{
+ "id": "t3672-449-scp-into-bare",
+ "origin": "adversarial-reviewer",
+ "refs": ["AUD-SEC-449"],
+ "input": {
+  "command": "scp f gd/",
+  "files": {
+   "gd/HEAD": "ref: refs/heads/main\n",
+   "gd/objects/.keep": ""
+  }
+ },
+ "expect": {
+  "allowed": false,
+  "code": "HOOK_BYPASS"
+ }
+},
+{
+ "id": "t3672-466-oldpwd-prefix-cd-back",
+ "origin": "adversarial-reviewer",
+ "refs": ["AUD-SEC-466"],
+ "input": {
+  "command": "cd src && cd lib && OLDPWD=/x cd - && echo x > .autopilot/state.json",
+  "files": {
+   "src/lib/.keep": ""
+  }
+ },
+ "expect": {
+  "allowed": false,
+  "code": "EVIDENCE_HANDWRITE"
+ }
+},
+{
+ "id": "t3672-466-cd-dashdash-dash",
+ "origin": "adversarial-reviewer",
+ "refs": ["AUD-SEC-466"],
+ "input": {
+  "command": "cd src; cd -- -; echo x > .autopilot/state.json",
+  "files": {
+   "src/.keep": ""
+  }
+ },
+ "expect": {
+  "allowed": false,
+  "code": "EVIDENCE_HANDWRITE"
+ }
+},
+{
+ "id": "t3672-ctl-466-cd-back-status",
+ "origin": "control",
+ "refs": ["AUD-SEC-466"],
+ "input": {
+  "command": "cd src && cd - && git status",
+  "files": {
+   "src/.keep": ""
+  }
+ },
+ "expect": {
+  "allowed": true
+ }
+},
+{
+ "id": "t3672-467-bare-case-fold",
+ "origin": "adversarial-reviewer",
+ "refs": ["AUD-SEC-467"],
+ "input": {
+  "command": "git init --bare /tmp/xt467Fq && printf x > /tmp/xt467fq/config"
+ },
+ "expect": {
+  "allowed": false,
+  "code": "HOOK_BYPASS"
+ }
+},
+{
+ "id": "t3672-ctl-467-other-dir",
+ "origin": "control",
+ "refs": ["AUD-SEC-467"],
+ "input": {
+  "command": "git init --bare /tmp/xt467F && printf x > /tmp/xt467G/config"
+ },
+ "expect": {
+  "allowed": true
+ }
 }
  ]
 }

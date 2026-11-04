@@ -189,12 +189,13 @@ class ReviewDebt435Test(unittest.TestCase):
             f.write("[core]\n\tsshCommand = touch /tmp/pwn\n")
 
     def test_449_cd_back_resolves_to_known_dir(self):
-        """`cd -` về thư mục trước khi đã biết chắc; không biết → giữ None như cũ (D-106)."""
+        """`cd -`/`cd -- -` là thư mục không biết (None, D-106) — AUD-SEC-466 (T-3672) bỏ việc tự theo dõi OLDPWD của
+        T-3670: bash đổi OLDPWD qua `OLDPWD=X cd -`, `PWD=X`, `false && cd -`; phía đọc thử mọi thư mục đã biết."""
         a, b = str(self.bare), str(self.tmp)
         cmds = guard._commands_with_cwd(guard.tokenize(f"cd {a}; cd {b}; cd - && git ls-remote"), str(self.root))
-        self.assertEqual([h for _, h in cmds], [a, b, a, a])
+        self.assertEqual([h for _, h in cmds], [a, b, None, None])
         cmds = guard._commands_with_cwd(guard.tokenize(f"cd {a}; cd -- -; pwd"), str(self.root))
-        self.assertEqual([h for _, h in cmds], [a, str(self.root), str(self.root)])
+        self.assertEqual([h for _, h in cmds], [a, None, None])  # không phải `<cwd>/-`
         for cmd in (
             f"cd {a}; cd {self.tmp / 'nope'}; cd -; pwd",  # cd hỏng giữ OLDPWD cũ → không đoán
             f"cd {a} | cat; cd -; pwd",  # cd trong ống chạy ở shell con
@@ -471,15 +472,19 @@ class Preexisting3671Test(unittest.TestCase):
     def test_457_failed_cd_then_semicolon_is_unknown_dir(self):
         root = str(self.root)
 
-        def dirs(cmd, failed=True):
-            return [h for _, h in guard._commands_with_cwd(guard.tokenize(cmd), root, failed)]
+        # T-3672 thay nhánh `cd` hỏng (None) bằng tập ứng viên: thư mục cũ thay cho "không biết"
+        def dirs(cmd):
+            return [list(c) for _, c in guard._commands_with_cwds(guard.tokenize(cmd), root)]
 
-        self.assertEqual(dirs("cd /khong-co; echo x > a"), ["/khong-co", None])
-        self.assertEqual(dirs("cd /khong-co; echo x > a", False), ["/khong-co", "/khong-co"])  # nhánh cd thành công
-        self.assertEqual(dirs("cd /khong-co && echo x > a"), ["/khong-co", "/khong-co"])
-        self.assertEqual(dirs("cd /khong-co && (echo a; echo b)"), ["/khong-co", "/khong-co", None])
-        self.assertEqual(dirs(f"cd {self.tmp}; echo x > a"), [str(self.tmp), str(self.tmp)])
-        self.assertEqual(dirs("(cd /khong-co); echo x > a"), ["/khong-co", root])
+        def first(cmd):  # nhánh cd thành công
+            return [h for _, h in guard._commands_with_cwd(guard.tokenize(cmd), root)]
+
+        self.assertEqual(dirs("cd /khong-co; echo x > a"), [["/khong-co"], ["/khong-co", root]])
+        self.assertEqual(first("cd /khong-co; echo x > a"), ["/khong-co", "/khong-co"])
+        self.assertEqual(dirs("cd /khong-co && echo x > a"), [["/khong-co"], ["/khong-co"]])
+        self.assertEqual(dirs("cd /khong-co && (echo a; echo b)"), [["/khong-co"]] * 3)
+        self.assertEqual(dirs(f"cd {self.tmp}; echo x > a"), [[str(self.tmp)], [str(self.tmp)]])
+        self.assertEqual(dirs("(cd /khong-co); echo x > a"), [["/khong-co"], [root]])
         for cmd in (
             "cd /khong-co; echo x > .autopilot/state.json",
             "cd /khong-co\necho x > .autopilot/state.json",
@@ -534,6 +539,290 @@ class Preexisting3671Test(unittest.TestCase):
             "unzip a.zip",
         ):
             self.assert_code(cmd, "NONE")
+
+
+class CwdCandidates3672Test(unittest.TestCase):
+    """T-3672 (review #438): thư mục chạy là TẬP ỨNG VIÊN như bash — `cd` có thể hỏng thì lệnh sau chạy ở thư mục cũ
+    lẫn đích; `cd` trong ống/nền không dời thư mục; khoá git chạy lệnh; cờ giải nén. Mỗi ca chặn đỏ ở a27cf57."""
+
+    git_init = GitMetadataTest.git_init
+    policy = GitMetadataTest.policy
+    assert_code = GitMetadataTest.assert_code
+
+    def setUp(self):
+        GitMetadataTest.setUp(self)
+        (self.root / "src").mkdir()
+        self.gone = self.root / "w"  # có lúc kiểm, trong dự án (xoá đệ quy ngoài dự án bị chặn riêng)
+        self.gone.mkdir()
+
+    def cands(self, cmd):
+        return [list(c) for _, c in guard._commands_with_cwds(guard.tokenize(cmd), str(self.root))]
+
+    def test_459_cd_may_fail_keeps_old_dir(self):
+        d, ev = self.gone, "echo x > .autopilot/state.json"
+        for cmd in (
+            f"cd /khong-co/..; {ev}",  # bash kiểm `/khong-co` trước `..`: hỏng, PWD giữ nguyên
+            f"cd khong-co/..; {ev}",
+            f"! cd /khong-co && {ev}",  # `!` đảo: vế sau chạy khi `cd` hỏng
+            f"if ! cd /khong-co; then {ev}; fi",
+            f"rm -rf {d}; cd {d}; {ev}",  # đích có lúc kiểm, bị xoá trước `cd`
+            f"rmdir {d}; cd {d}; {ev}",
+            f"mv {d} {self.tmp}/e; cd {d}; {ev}",
+            f"unlink {d}; cd {d}; {ev}",
+            f"find {d} -delete; cd {d}; {ev}",
+            f"rm -rf w; cd {d}; {ev}",
+            f"rm -rf ./w/ && cd w; {ev}",
+            f"rm -f $X; cd {d}; {ev}",
+            f"cd /khong-co && cd {d}; {ev}",
+            f"cd /khong-co || true; {ev}",
+            f"cd /khong-co && true || {ev}",
+            'cd /khong-co; python3 -c \'open(".autopilot/state.json","w")\'',
+            'cd /khong-co | true; cd /khong-co; true | python3 -c \'open(".autopilot/state.json","w")\'',
+        ):
+            self.assert_code(cmd, "EVIDENCE_HANDWRITE")
+        for cmd in (
+            "shopt -s cdable_vars; cd khong-co; printf x > config",  # `cd` hỏng → `cd "$khong_co"`: không biết
+            "cd /khong-co; cd .git; printf x > config",
+        ):
+            self.assert_code(cmd, "HOOK_BYPASS")
+        root, tmp = str(self.root), str(self.tmp)
+        self.assertEqual(self.cands("cd /khong-co; echo")[1], ["/khong-co", root])
+        self.assertEqual(self.cands("cd /khong-co && echo")[1], ["/khong-co"])
+        self.assertEqual(self.cands("cd /khong-co || exit 1; echo")[2], ["/khong-co"])
+        self.assertEqual(self.cands("cd /khong-co || return; echo")[2], ["/khong-co"])
+        self.assertEqual(self.cands(f"cd {tmp}; echo")[1], [tmp])  # có lúc kiểm, không bị xoá: chắc
+        self.assertEqual(
+            self.cands("cd /khong-co && (echo a; echo b); echo c")[1:], [["/khong-co"]] * 2 + [["/khong-co", root]]
+        )
+        self.assertEqual(
+            self.cands("{ cd /khong-co && echo a\n}; echo b")[1:],
+            [["/khong-co"], ["/khong-co", root], ["/khong-co", root]],
+        )
+        self.assertEqual(self.cands("cd $X; echo")[1], [None])
+        self.assertEqual(self.cands(f"cd {tmp}; cd /khong-co; cd -; echo")[3], [None])
+        self.assertEqual(self.cands(f"cd {tmp}; cd {root}/src; cd -; echo")[3], [None])  # AUD-SEC-466
+        self.assertEqual(self.cands("case x in a) cd src;; esac; echo")[-1], [None])  # `)` lẻ: không biết như cũ
+        # chặn oan của nhánh `cd` hỏng T-3671 (AUD-SEC-463) — đích được tạo trước trong lệnh, hay `|| exit`
+        for cmd in (
+            "mkdir -p out; cd out; tar -xf ../a.tar",
+            f"mkdir -p {self.tmp}/w; cd {self.tmp}/w; printf x > config",
+            "mkdir -p dist; cd dist; unzip ../a.zip",
+            "cd /khong-co || exit 1; printf x > config",
+            "cd /khong-co && echo x > .autopilot/state.json",
+            "git status",
+            "cd src && git commit -m x",
+            "mkdir build; cd build; cmake ..; make",
+            f"cd {d}; echo x > .autopilot/state.json",
+            f"rm -rf {d}/x; cd {d}; echo x > .autopilot/state.json",  # xoá thư mục con, không phải đích
+            f"cd {d} || true; echo x > .autopilot/state.json",
+            "cd /khong-co; git status",
+        ):
+            self.assert_code(cmd, "NONE")
+
+    def test_460_cd_in_pipe_or_background_does_not_move(self):
+        tmp, ev = self.tmp, "echo x > .autopilot/state.json"
+        for cmd in (
+            f"cd {tmp} | true; {ev}",
+            f"cd {tmp} |& true; {ev}",
+            f"true | cd {tmp}; {ev}",
+            f"cd {tmp} & {ev}",
+            f"cd {tmp} &\n{ev}",
+            f"cd {tmp} && true & {ev}",
+            f"{{ cd {tmp}; }} | cat; {ev}",
+            f"true | {{ true; cd {tmp}; }}; {ev}",
+            f"(cd {tmp}) | cat; {ev}",
+            f"true; {{ cd {tmp}; }} & {ev}",
+            f'cd {tmp} | true; python3 -c \'open(".autopilot/state.json","w")\'',
+        ):
+            self.assert_code(cmd, "EVIDENCE_HANDWRITE")
+        root = str(self.root)
+        self.assertEqual(self.cands(f"cd {tmp} | true; echo")[2], [root])
+        self.assertEqual(self.cands(f"cd {tmp} && echo a | cat; echo")[3], [str(tmp)])
+        for cmd in (
+            f"cd {tmp} && echo x | cat > .autopilot/state.json",  # `&&` thấp hơn `|`: ống chạy sau `cd`
+            f"cd {tmp}; {ev} | cat",
+            f"cd {tmp} && {ev} &",
+            f"{{ cd {tmp}; }}; {ev}",
+            f"cd {tmp} | true; echo x > a.txt",
+        ):
+            self.assert_code(cmd, "NONE")
+
+    def test_461_git_exec_keys(self):
+        for cmd in (
+            "git config gc.recentObjectsHook 'sh -c x'",
+            "git config interactive.diffFilter 'sh -c x'",
+            "git config imap.tunnel 'sh -c x'",
+            "git config instaweb.httpd 'sh -c x'",
+            "git -c interactive.diffFilter='sh -c x' add -p",
+            "git config --rename-section x gc",
+            "git config rename-section x GC",
+        ):
+            self.assert_code(cmd, "HOOK_BYPASS")
+        for cmd in (
+            "git config gc.auto 0",
+            "git config --rename-section x pack",
+            "git config --get imap.tunnel",
+        ):
+            self.assert_code(cmd, "NONE")
+
+    def test_462_extract_flags_and_implicit_dest(self):
+        bare, src = self.bare, self.root / "src"
+        for cmd in (
+            f"tar -xC {bare} -f a.tar",
+            f"cd {bare} && tar -xC . -f a.tar",
+            f"cd {bare} && tar -xfO a.tar",  # `O` là giá trị của `f` (tên archive), không phải ra stdout
+            f"cd {bare} && tar -x -f -O",
+            f"cd {bare} && tar xfC a.tar .",  # kiểu cũ: giá trị theo thứ tự chữ
+            f"cd {bare} && unzip -P -d a.zip",  # `-d` là mật khẩu
+            f"cd {bare} && unzip -Pc a.zip",
+            f"cd {bare} && 7z x a.7z",
+            f"7z x a.7z -o{bare}",
+            f"cd {bare} && cpio -i < a.cpio",
+            f"cd {bare} && cpio -idv < a.cpio",
+            f"cd {bare} && jar xf a.jar",
+            f"cd {bare} && pax -r < a.pax",
+            f"cd {bare} && pax -rv -f a.pax",
+            f"pax -r -w x {bare}",
+            "cd .git && 7z x a.7z",
+            "cd .git && cpio -i < a.cpio",
+        ):
+            self.assert_code(cmd, "HOOK_BYPASS")
+        for cmd in (
+            f"cd {bare} && tar -xOf a.tar",
+            f"cd {bare} && tar -x --to-stdout -f a.tar",
+            f"cd {bare} && tar xfO a.tar",  # kiểu cũ: `f` ăn `a.tar`, `O` là ra stdout
+            f"cd {bare} && tar -x --to-command cat -f a.tar",
+            f"cd {bare} && tar -xf a.tar -C {src}",
+            f"cd {bare} && tar -xC {src} -f a.tar",
+            f"cd {bare} && unzip -l a.zip",
+            f"cd {bare} && unzip -qd {src} a.zip",
+            f"cd {bare} && 7z l a.7z",
+            f"cd {bare} && 7z x a.7z -o{src}",
+            f"cd {bare} && cpio -it < a.cpio",
+            f"cd {bare} && jar tf a.jar",
+            f"cd {bare} && pax < a.pax",
+            f"cd {bare} && pax -w -f /tmp/a.pax .",
+            "tar -xf a.tar",
+            "pax -r < a.pax",
+            "7z x a.7z",
+            f"cd {bare} && ar t a.a",
+            "ar x a.a",
+            f"cd {bare} && python3 -m tarfile -l a.tar",
+        ):
+            self.assert_code(cmd, "NONE")
+
+    def test_462_more_extractors(self):
+        bare = self.bare
+        for cmd in (
+            f"cd {bare} && cpio -idm < a.cpio",
+            f"cd {bare} && python3 -m tarfile -e a.tar",
+            f"python3 -m tarfile -e a.tar {bare}",
+            f"python3 -m zipfile -e a.zip {bare}",
+            f"cd {bare} && ar x a.a",
+            f"cd {bare} && ar -xv a.a",
+            f"ar x a.a --output {bare}",
+            f"cd {bare} && bsdtar -xf a.tar",
+            f"bsdtar -xC {bare} -f a.tar",
+            "cd .git/hooks && 7z x a.7z",
+        ):
+            self.assert_code(cmd, "HOOK_BYPASS")
+
+    def test_466_cd_back_is_unknown_dir(self):
+        """Hồi quy của T-3670 (9c03257 chặn, a27cf57 qua): OLDPWD đổi theo cách guard không theo dõi."""
+        a, b, root = self.tmp / "a", self.tmp / "b", self.root
+        a.mkdir()
+        b.mkdir()
+        (root / "docs" / "autopilot").mkdir(parents=True)
+        for cmd, code in (
+            (f"cd {a} && cd {b} && OLDPWD={root} cd - && echo x > .autopilot/state.json", "EVIDENCE_HANDWRITE"),
+            (f"cd {a}; PWD={root}; cd {b}; cd -; echo '{{}}' > docs/autopilot/STAGE.json", "EVIDENCE_HANDWRITE"),
+            (f"cd {a}; false && cd {b}; cd -; echo x > .autopilot/state.json", "EVIDENCE_HANDWRITE"),
+            (f"cd {a}; cd {b}; cd -- -; echo x > .autopilot/state.json", "EVIDENCE_HANDWRITE"),
+        ):
+            self.assert_code(cmd, code)
+        self.assert_code(f"cd {a} && cd {b} && cd - && git status", "NONE")
+
+    def test_467_pending_bare_physical_path(self):
+        """Hồi quy của T-3670: đường khác chữ cùng thư mục vật lý (symlink rồi `..`, hoa/thường)."""
+        t = self.tmp
+        (t / "deep" / "sub").mkdir(parents=True)
+        (t / "lnk").symlink_to(t / "deep" / "sub")
+        for cmd in (
+            f"git init --bare {t}/deep/F && printf x > {t}/lnk/../F/config",
+            f"git -C {t}/lnk init --bare ../F && printf x > {t}/deep/F/config",
+            f"git init --bare {t}/Fq && printf x > {t}/fq/config",
+            f"git init --bare {t}/deep/F && printf x > {t}/nope/../deep/F/hooks/pre-commit",
+            f"mkdir -p {t}/lnk/../G/objects && printf x > {t}/deep/G/config",
+            f"git -C {t}/lnk init --bare ../H; printf x > {t}/deep/H/config",
+            f"git init --bare {t}/nope/../X && printf x > {t}/X/config",  # `..` sau phần chưa có: không chắc
+        ):
+            self.assert_code(cmd, "HOOK_BYPASS")
+        for cmd in (
+            f"git init --bare {t}/deep/F && printf x > {t}/other/config",
+            f"git init --bare {t}/deep/F && cat {t}/lnk/../F/config",
+            f"git init --bare {t}/deep/F && printf x > {t}/deep/notes",
+        ):
+            self.assert_code(cmd, "NONE")
+
+    def test_review438_paths_and_files(self):
+        t, bare = self.tmp, self.bare
+        (t / "deep" / "sub").mkdir(parents=True)
+        (t / "lnk").symlink_to(t / "deep" / "sub")
+        with (bare / "config").open("a") as f:
+            f.write("[core]\n\tsshCommand = touch /tmp/pwn\n")
+        at_git = self.policy("git config --file .git/config user.name T")["code"]
+        for cmd, code in (
+            (f"cp f {t}/lnk/../../bare/", "HOOK_BYPASS"),  # `_git_dir_target` theo realpath
+            (f'git -C "$X" -C {bare} ls-remote origin', "HOOK_BYPASS"),  # `-C` tuyệt đối đặt lại thư mục
+            (f"git config --file {bare}/config --file .git/config user.name T", at_git),  # `--file` cuối thắng
+        ):
+            self.assert_code(cmd, code)
+        self.assertEqual(guard._git_dir(["git", "-C", "$X", "-C", "/abs", "status"], None), "/abs")
+        self.assertEqual(guard._git_config_file(["git", "config", "-f", "a", "--file=b", "x.y", "1"]), "b")
+        self.assertEqual(guard._git_config_file(["git", "config", "-f"]), "")
+        self.assert_code(f"cp f {t}/lnk/../sub/", "NONE")
+
+    def test_464_alias_defined_in_same_command(self):
+        for cmd in (
+            "git config alias.u 'config --unset core.hooksPath' && git u",
+            "git config alias.r 'config --remove-section core' && git r",
+            "git config --global alias.u 'config --unset core.hooksPath'; git u",
+            "git config alias.u 'config --unset core.hooksPath' && git config alias.v u && git v",
+            "git config alias.s '!sh -c x' && git s",
+        ):
+            self.assert_code(cmd, "HOOK_BYPASS")
+        for cmd in (
+            "git config alias.st status && git st",
+            "git config alias.u 'config --unset core.hooksPath'",  # đặt mà không gọi: thân là lệnh git thường
+            "git u; git config alias.u 'config --unset user.name'",
+        ):
+            self.assertNotEqual(self.policy(cmd)["code"], "HOOK_BYPASS", cmd)
+
+    def test_465_git_dir_built_by_copy(self):
+        bare, d = self.bare, self.tmp / "cp"
+        for cmd in (
+            "cp -r .git d && printf x > d/config",
+            f"cp -a {bare} {d} && printf x > {d}/config",
+            f"cp -a {bare} {d}; printf x > {d}/bare/hooks/pre-commit",
+            "rsync -a .git/ d/ && printf x > d/hooks/pre-commit",
+            f"scp -r {bare} {d} && printf x >> {d}/config",
+            f"cp -r -t {d} {bare} && printf x > {d}/bare/config",
+            'cp -r .git "$D" && printf x > /tmp/elsewhere/config',  # đích là biến: mọi đuôi metadata
+        ):
+            self.assert_code(cmd, "HOOK_BYPASS")
+        for cmd in (
+            "cp -r src d && printf x > d/config",  # nguồn không phải Git dir
+            "cp -r .git d && printf x > d/notes",
+            f"cp -a {bare} {d} && cat {d}/config",
+        ):
+            self.assert_code(cmd, "NONE")
+
+    def test_449_scp_into_git_dir(self):
+        bare = self.bare
+        for cmd in (f"scp f {bare}/", f"scp -P 22 f {bare}/hooks/pre-commit", "scp f .git/hooks/pre-commit"):
+            self.assert_code(cmd, "HOOK_BYPASS")
+        for cmd in (f"scp f host:{bare}/", "scp host:f src/", "scp -i k f src/"):
+            self.assertNotEqual(self.policy(cmd)["decision"], "deny", cmd)  # gửi ra máy khác: hỏi-cho-qua như cũ
 
 
 if __name__ == "__main__":
