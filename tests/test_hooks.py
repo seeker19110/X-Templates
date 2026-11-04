@@ -1376,7 +1376,9 @@ class GuardMatrixTest(unittest.TestCase):
         self.assertEqual(dec_in(f"git -C {feat_repo} push", main_repo), "")
         self.assertEqual(dec_in('cd "$D" && git push', feat_repo, root=main_repo), "ask")
         self.assertEqual(dec_in('git -C "$D" push', feat_repo, root=main_repo), "ask")
-        self.assertEqual(dec_in("cd - && git push", main_repo, root=feat_repo), "")
+        # D-347: `cd -` (không biết) không thuộc tiền tố chính xác → hợp {thư mục đầu, không biết}: thư mục đầu ở main
+        self.assertEqual(dec_in("cd - && git push", main_repo, root=feat_repo), "ask")
+        self.assertEqual(dec_in("cd - && git push", feat_repo, root=feat_repo), "")
         self.assertEqual(self.g.bash_decision("git push", main_repo)["decision"], "ask")  # không có cwd → gốc dự án
         # Không truyền thư mục → guard đọc nhánh ở thư mục tiến trình; chạy ở thư mục không phải repo để kết quả không
         # phụ thuộc môi trường (CI push lên `main` checkout đúng nhánh `main` → từng đỏ mãi trên main, xanh trên PR).
