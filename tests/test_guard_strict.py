@@ -1261,7 +1261,8 @@ class GuardReview2HelpersTest(unittest.TestCase):
             ("unzip", ["-", "a.zip"], ["."]),
             ("python3", ["-m", "zipfile", "-e", "a.zip", "out"], ["out"]),
             ("python3", ["-mtarfile", "--ext", "a.tar"], ["."]),
-            ("python3", ["-I", "-m", "tarfile", "-v", "-e", "a.tar", "-v", "out"], ["out"]),
+            # T-3673: `out` sau `-v` là đối số thừa (Python 3.13 báo lỗi) — chiều chặt: cả `.` lẫn `out`
+            ("python3", ["-I", "-m", "tarfile", "-v", "-e", "a.tar", "-v", "out"], [".", "out"]),
             ("python3", ["-m", "zipfile", "-l", "a.zip"], []),
             ("python3", ["-m", "json.tool", "a.json"], []),
             ("python3", ["x.py"], []),
