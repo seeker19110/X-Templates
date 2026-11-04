@@ -151,6 +151,22 @@ class GitMetadataTest(unittest.TestCase):
         self.assert_code(f"git -C {self.bare} --bare diff HEAD^ HEAD", "HOOK_BYPASS")
         self.assert_code(f"git --bare -C {self.bare} diff HEAD^ HEAD", "NONE")
 
+    def test_bare_git_objects_as_executable_file(self):
+        """Review #435 R1 🔴: git nhận Git dir khi `objects` chỉ cần `access(X_OK)` — tệp thường có bit chạy cũng qua."""
+        fake = self.tmp / "fake"
+        (fake / "refs").mkdir(parents=True)
+        (fake / "HEAD").write_text("ref: refs/heads/main\n")
+        (fake / "objects").write_text("")
+        (fake / "objects").chmod(0o755)
+        bare = subprocess.run(
+            ["git", "-C", str(fake), "rev-parse", "--is-bare-repository"], capture_output=True, text=True
+        )
+        self.assertEqual(bare.stdout.strip(), "true")
+        self.assert_code(f"printf '[core]\\n\\tsshCommand = touch /tmp/pwn\\n' > {fake / 'config'}", "HOOK_BYPASS")
+        self.assert_code(f"printf 'exit 0' > {fake / 'hooks' / 'pre-push'}", "HOOK_BYPASS")
+        (fake / "config").write_text("[diff]\n\texternal = /tmp/driver\n")
+        self.assert_code(f"git -C {fake} diff HEAD^ HEAD", "HOOK_BYPASS")
+
     def test_bare_git_alternate_object_store(self):
         store = self.tmp / "store"
         (self.bare / "objects").rename(store)

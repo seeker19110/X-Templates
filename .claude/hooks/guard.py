@@ -588,9 +588,11 @@ GIT_METADATA_TAIL_RE = re.compile(
 
 
 def _git_metadata_dir(path: str) -> bool:
-    """Nhận Git dir trần, tách riêng và worktree bằng cấu trúc metadata thay vì tên thư mục `.git`."""
+    """Nhận Git dir trần, tách riêng và worktree bằng cấu trúc metadata thay vì tên thư mục `.git`. `objects` chỉ cần tồn
+    tại ở mọi dạng — git chỉ kiểm `access(objects, X_OK)`, tệp thường có bit chạy cũng qua (review #435 R1); nhận rộng
+    hơn git chỉ làm guard canh thêm tệp `config`/`hooks` cạnh `HEAD` (hướng an toàn)."""
     return os.path.lexists(os.path.join(path, "HEAD")) and (
-        os.path.isdir(os.path.join(path, "objects")) or os.path.isfile(os.path.join(path, "commondir"))
+        os.path.lexists(os.path.join(path, "objects")) or os.path.isfile(os.path.join(path, "commondir"))
     )
 
 
