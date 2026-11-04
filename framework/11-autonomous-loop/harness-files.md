@@ -3,7 +3,7 @@ title: File harness: PLAN · PROGRESS · BLUEPRINT · evidence · state
 kind: module
 prefix: LOOP-HARNESS
 applies_to: [all]
-updated: 2026-11-03
+updated: 2026-11-04
 ---
 
 # File harness: PLAN · PROGRESS · BLUEPRINT · evidence · state
@@ -309,6 +309,7 @@ Nguồn: catalog `seeker19110/stored` 10 §4b (agentmemory), §4c (engram), 03 �
 | `.framework-dropins`/file sinh để lại trong repo đích | Hook crash, CI đỏ khó hiểu | Script cài có bước dọn; validate repo |
 | Harness dựa vào plugin bật bằng `enabledPlugins` | Phiên Claude Code on the web không cài plugin repo bật (kể cả `extraKnownMarketplaces`), không có `/plugin` — hook/skill của plugin vắng mà không báo | Vendor phần cần vào `.claude/` của repo có lock ([`SEC-SUPPLY-016`](../12-security/supply-chain.md)); `.claude/settings.json` của repo (hook, permission) chỉ được đọc ở phiên cloud **một repo**; phiên nhiều repo chỉ đọc `enabledPlugins` (plugin khai ở đó vẫn không nạp), thread trong Projects không đọc — guard vắng mà không báo (`LOOP-HARNESS-031`; docs *Cloud environments*, *Claude Projects*, xác minh 2026-10-30) |
 | Coi hook guard là sandbox | Tiến trình con, script tạm, `curl` ra mạng đi ngoài tầm hook | Sandbox OS hoặc devcontainer/VM có egress allowlist; thử `curl` ngoài allowlist phải bị chặn (`LOOP-HARNESS-022`) |
+| Không dựng được sandbox thì chạy tiếp ở chế độ mở | Chạy trần trên host, secret và mạng lộ hết | Fail-closed: từ chối chạy (vd `sandbox.failIfUnavailable: true`); thao tác "floor" không mode auto-approve nào hạ được (docs Claude Code *Settings*, *Permission modes*, tra 2026-11-04); ghi mức enforcement và provenance quyết định (auto/user/denied + lý do) vào audit từng tool-call (chưa xác minh) |
 
 ## Cổng tự động
 

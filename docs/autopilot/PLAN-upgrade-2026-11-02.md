@@ -86,6 +86,11 @@
 - [x] `T-3635` AUD-DOC-159; 🟢 nợ review: sửa nhóm tài liệu rẻ, còn lại `chấp nhận` (chủ + hạn, lý do từng dòng); 🔴/🟠 lát A–E `đã sửa` (sau: T-3667; files: docs/, CHANGELOG.md) — Gate: `python3 scripts/xt.py audit check docs/ops/AUDIT-STATUS.md --strict`
 - [ ] `T-3636` `loop verify --all` xanh, `release-check` chỉ còn hàng chờ người (`prod_switch`, chữ ký GO-NO-GO) (sau: T-3635; topo: audit) — Gate: `python3 scripts/xt.py audit check docs/ops/AUDIT-STATUS.md --strict && python3 scripts/xt.py blueprint-status BLUEPRINT.md --strict`
 
+### Lát 8 — đợt stored XT-H-027…116 và nợ guard #435 (thêm 2026-11-04, D-341)
+- [ ] `T-3670` Nợ review #435 AUD-SEC-449/450/452 (guard: `cd -`, `pending_bare` qua shell lồng, đích thư mục Git dir, monorepo repo cha) + 🟢 AUD-SEC-451/AUD-CI-031 (sổ, D thay D-123) (sau: T-3635; topo: review; files: .claude/hooks/guard.py, tests/, docs/ops/AUDIT-STATUS.md) — Gate: `python3 -m unittest -q tests.test_guard_git_metadata.ReviewDebt435Test`
+- [ ] `T-3671` Sáu lỗ guard có từ trước do T-3670 tìm (AUD-SEC-453…458: `git init --bare` trong shell lồng, Git dir giả, `config --edit`, `--remove-section core`, `cd` tới thư mục không có, giải nén không `-C`) (sau: T-3670; topo: review; files: .claude/hooks/guard.py, tests/) — Gate: `python3 -m unittest -q tests.test_guard_git_metadata.Preexisting3671Test`
+- [ ] `T-3669` Công cụ cho đợt stored (D-341): `xt.py ci-check` báo lỗi khi `with:` của action agent chứa `${{ github.event.` (issue/comment/review/PR title/body); bước `actionlint` + `zizmor --min-severity=medium` (ghim SHA, không `--format sarif` ở bước chặn) trong job `gate` của `templates/ci.yml` (`WF-CI-016`); `release-check` NO-GO khi workflow phát hành artefact (`gh release upload|create`, `action-gh-release`, `npm publish`, `docker push`, `docker/build-push-action`, `goreleaser`) thiếu provenance/SBOM (`actions/attest`, `attest-build-provenance`, `--provenance`, slsa-generator) kèm khoá ngoại lệ `xt.yaml` có lý do (`SEC-SUPPLY-033`); `docs/ops/autopilot-baseline.json` cho `LOOP-DESIGN-026` (sau: T-3671; topo: review; files: scripts/xt.py, framework/templates/ci.yml, tests/) — Gate: `python3 -m unittest -q tests.test_ci.StoredToolingT3669Test`
+
 ## Không làm trong PLAN này (ghi để không quên)
 | Việc | Lý do | Nhà kế tiếp |
 |---|---|---|
