@@ -3,6 +3,8 @@
 > Danh sách repo đã cài khung (`.xtemplates/`) mà Routine hằng tuần của repo này đọc `docs/xtemplates-feedback/` để gộp
 > phản hồi (ADR-0010, `framework/11-autonomous-loop/framework-feedback.md`). Một dòng một repo, dạng `- owner/repo — ghi chú`.
 > Repo không còn dùng khung: xoá dòng. Repo private vẫn đọc được nếu phiên có quyền; báo cáo chỉ trích nội dung đã qua `redact`.
+> Bản máy đọc (core/gói/owner/release/ngoại lệ — ADR-0068 lát E): [`registry.json`](registry.json), kiểm bằng
+> `python3 scripts/xt.py registry`; đổi phiên bản ở đây thì sửa cả hai (`tests/test_registry.py` đối chiếu).
 
 ## Danh sách
 

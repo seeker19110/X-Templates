@@ -71,6 +71,7 @@ khoá `(method, path)`; `Ctx` có `base` (gốc dự án), `framework` (thư m�
 | `GET /api/adrs` | — | `adrs: [{number, title, status, path}]` | — | T-1961 |
 | `GET /api/prs` | — | `available: true`, `prs: [{number, title, head_sha, lane, action, reasons}]`; không có `gh`/chưa đăng nhập/hết giờ → `available: false`, `reason` | — (luôn 200) | T-1971 |
 | `GET /api/pr-stats` | `days` (1–90, mặc định 7) | như `pr stats --json`, thêm `available` | 400 `days` sai | T-1971 |
+| `GET /api/registry` | — | như `registry --json` + `available`, `path`, mỗi sản phẩm thêm owner/type/risk/environments/slo/release/exceptions; chưa có hoặc sai → `available: false`, `reason`, `errors` (≤ 50) | — (luôn 200) | T-3691 |
 
 Đọc file mới mỗi request (hoặc cache theo `mtime`); không ghi gì ngoài `POST /api/blueprint`. `GET /api/prs` chỉ gọi REST
 `GET` qua `_gh_api`, không ghi sổ review, không gọi merge.
