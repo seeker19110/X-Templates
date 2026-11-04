@@ -20,7 +20,7 @@ vòng phản hồi từ dự án đích. Điều chưa có: (1) một **gói s�
 cài; (2) **kết quả cổng có kiểu** — `_release_run` chỉ đọc exit code, `zero_tests_red` chỉ nhận `Ran 0 tests`, không hàng
 nào đọc report/artifact/checksum; (3) **receipt triển khai** — khung ghi quyết định (`prod_switch`, GO-NO-GO §5, `stage
 approve`) nhưng không đọc bản nào thực sự chạy ở đâu; ADR-0058 đã tách "GO của máy, nghiệm thu của người, quyền deploy, đã
-deploy" thành bốn việc và chỉ làm hai việc đầu. stored (đợt 2026-11-04, 34 chuyên mục) ghép các mục thành chuỗi "nhu cầu →
+deploy" thành bốn việc và chỉ làm hai việc đầu (ADR-0069 cho agent làm việc thứ hai khi dự án chọn, không đổi hai việc sau). stored (đợt 2026-11-04, 34 chuyên mục) ghép các mục thành chuỗi "nhu cầu →
 quyết định → hợp đồng → thay đổi → kiểm chứng → bản phát hành → số đo thực địa" và tự ghi rằng các cổng đó là đề xuất, chưa
 chạy ở đâu.
 

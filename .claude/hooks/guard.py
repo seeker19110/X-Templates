@@ -5590,6 +5590,11 @@ def _phase_value(text: str) -> str:
 
 def _committed_phase(xt: str) -> str:
     """`delivery_phase` của xt.yaml đã commit ở nhánh mặc định của remote (ref đầu tiên đọc được); không đọc được → rỗng."""
+    return _committed_value(xt, _phase_value)
+
+
+def _committed_value(xt: str, pick: Callable[[str], str]) -> str:
+    """Giá trị `pick(text)` của xt.yaml đã commit ở nhánh mặc định của remote (ref đầu tiên đọc được); không đọc được → rỗng."""
     for ref in DEFAULT_REFS:
         try:
             r = subprocess.run(
@@ -5602,7 +5607,7 @@ def _committed_phase(xt: str) -> str:
         except (OSError, subprocess.SubprocessError):
             return ""
         if r.returncode == 0:
-            return _phase_value(r.stdout)
+            return pick(r.stdout)
     return ""
 
 
@@ -5635,6 +5640,32 @@ def build_phase(root: str) -> bool:
             and _committed_phase(xt) == "build"
         )
     return _BUILD_PHASE[root]
+
+
+# ADR-0069 (chủ dự án 2026-11-04, D-342): xt.yaml `stage_approval: agent` → agent được `xt.py stage approve` (tự nghiệm thu
+# giai đoạn); như `delivery_phase`, chỉ có hiệu lực khi CẢ cây làm việc LẪN bản đã commit ở nhánh mặc định khai — phiên
+# không tự cấp quyền cho mình. `init --adopt`, dạng mờ (`$(…)`, biến, glob, stdin) vẫn chặn; `XT_GUARD_POLICY=strict` không nới.
+STAGE_APPROVAL_LINE_RE = re.compile(r"^stage_approval:[ \t]*([\"']?)([A-Za-z]*)\1[ \t]*(?:#.*)?$", re.M)
+_STAGE_AGENT: Dict[str, bool] = {}
+
+
+def _stage_approval_value(text: str) -> str:
+    """Giá trị `stage_approval` (dòng trùng → dòng cuối, như `yaml_scalar` của xt.py); vắng → rỗng."""
+    found = STAGE_APPROVAL_LINE_RE.findall(text)
+    return str(found[-1][1]) if found else ""
+
+
+def agent_stage_approval(root: str) -> bool:
+    """Agent được duyệt giai đoạn (ADR-0069); tính một lần mỗi tiến trình."""
+    if root not in _STAGE_AGENT:
+        xt = _xt_yaml_for(root)
+        _STAGE_AGENT[root] = (
+            os.environ.get("XT_GUARD_POLICY") != "strict"
+            and bool(xt)
+            and _stage_approval_value(_read_all(xt)) == "agent"
+            and _committed_value(xt, _stage_approval_value) == "agent"
+        )
+    return _STAGE_AGENT[root]
 
 
 def _temp_roots() -> List[str]:
@@ -6108,7 +6139,9 @@ REVIEW_FORGE_WHY = (
 # Sổ giai đoạn sản phẩm (ADR-0058) — chỉ `xt.py stage …` ghi; duyệt/công nhận giai đoạn là việc của người.
 STAGE_LEDGER = "docs/autopilot/STAGE.json"
 STAGE_APPROVE_WHY = (
-    "duyệt giai đoạn sản phẩm (`xt.py stage approve`/`init --adopt`) — chỉ người, ngoài phiên agent (ADR-0058)"
+    "duyệt giai đoạn sản phẩm (`xt.py stage approve`/`init --adopt`) — chỉ người, ngoài phiên agent (ADR-0058);"
+    " `stage approve` dạng chữ rõ được khi xt.yaml ở cây VÀ bản đã commit ở nhánh chính khai `stage_approval: agent`"
+    " (ADR-0069)"
 )
 
 
@@ -6221,6 +6254,25 @@ def _approves_stage(argv: List[str]) -> bool:
             return True
         py = py or bool(PYTHON_RE.fullmatch(posixpath.basename(t)))
     return False
+
+
+def _plain_approve(argv: List[str]) -> bool:
+    """`… xt.py stage approve …` viết rõ chữ: không token mờ (`$(…)`, backtick, biến, glob), không `xargs`/`parallel`,
+    không `init`/`--adopt` sau `stage` — dạng duy nhất ADR-0069 cho qua; mọi dạng khác giữ luật ADR-0058."""
+    if any(_vague(t) for t in argv) or any(posixpath.basename(t) in STDIN_FEEDERS for t in argv):
+        return False
+    n = normalize(argv)
+    at = next((k for k, t in enumerate(n) if posixpath.basename(t) == "xt.py"), len(n))
+    rest = n[at + 1 :]
+    if "stage" not in rest:
+        return False
+    tail = rest[rest.index("stage") + 1 :]
+    return "approve" in tail and "init" not in tail and not any(t.startswith("--adopt") for t in tail)
+
+
+def _stage_approve_denied(argv: List[str], root: str) -> bool:
+    """Lệnh duyệt giai đoạn bị chặn: mọi dạng (ADR-0058), trừ `stage approve` chữ rõ khi `agent_stage_approval` (ADR-0069)."""
+    return _approves_stage(argv) and not (_plain_approve(argv) and agent_stage_approval(root))
 
 
 def _approves_literal(n: List[str]) -> bool:
@@ -12865,7 +12917,7 @@ def _bash_decision(
     asks: List[str] = interp_write_asks(cmd, tokens, root, cwd, pending_bare)
     asks += _pending_git_write_asks(commands) if pending_bare else []
     asks += [REVIEW_FORGE_WHY] if _review_forge_hit(cmd, tokens, cwd, budget) else []
-    asks += [STAGE_APPROVE_WHY] if any(_approves_stage(c) for c in split_commands(tokens)) else []
+    asks += [STAGE_APPROVE_WHY] if any(_stage_approve_denied(c, root) for c in split_commands(tokens)) else []
     braces = brace_variants(cmd)
     nested_deny = (
         "Lệnh quá phức tạp để guard quét hết (brace expansion quá nhiều biến thể): chia nhỏ lệnh."
@@ -12963,7 +13015,7 @@ REASON_CODES: Tuple[Tuple[str, str], ...] = (
     ("bỏ qua hook của dự án", "HOOK_BYPASS"),
     ("ghi file bí mật qua Bash", "SECRET_WRITE"),
     ("bằng chứng review", "REVIEW_FORGE"),
-    ("duyệt giai đoạn sản phẩm", "STAGE_APPROVE"),  # chỉ người duyệt giai đoạn (ADR-0058)
+    ("duyệt giai đoạn sản phẩm", "STAGE_APPROVE"),  # chỉ người duyệt giai đoạn (ADR-0058; agent khi ADR-0069)
     ("tay bằng chứng", "EVIDENCE_HANDWRITE"),  # ghi/xoá tay `.autopilot/` = bằng chứng giả (ADR-0026)
     ("lệnh đã mã hoá/nén", "OPAQUE_EXEC"),  # `… | base64 -d | sh` từ nguồn guard không giải được
     (BASH_ENV_MARK, "OPAQUE_EXEC"),  # `BASH_ENV=f bash -c true`: bash nạp file guard không đọc (AUD-SEC-250)
