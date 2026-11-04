@@ -3,7 +3,7 @@ title: Quan sát: log · metric · trace, OpenTelemetry, dashboard
 kind: module
 prefix: OPS-OBS
 applies_to: [web-app, api-service, ai-agent, agentic-system, data-ml, monorepo, blockchain, static-site, mobile-app, desktop-app, embedded-iot]
-updated: 2026-11-03
+updated: 2026-11-04
 ---
 
 # Quan sát: log · metric · trace, OpenTelemetry, dashboard
@@ -43,7 +43,7 @@ updated: 2026-11-03
 - [ ] `OPS-OBS-005` **MUST@L** Trace cho luồng chính (request → DB → gọi ngoài → queue) với span theo semconv (`db.*`, `http.client.*`, `messaging.*`); lỗi gắn `error.type` + status span. → Kiểm: trace mẫu trong backend có ≥ 3 tầng span; test span DB có `db.system`. · Nguồn: OTel trace semconv
 - [ ] `OPS-OBS-006` **MUST** Health endpoints: `/healthz` (liveness, không gọi phụ thuộc) và `/readyz` (readiness, kiểm phụ thuộc chính có timeout); không lộ chi tiết nội bộ ra public. → Kiểm: test hai endpoint; readiness trả 503 khi DB down; endpoint sau auth hoặc chỉ nội bộ. · Nguồn: Kubernetes probes docs (chưa fetch lại 2026-10-13)
 - [ ] `OPS-OBS-007` **MUST@L** Dashboard tối thiểu mỗi dịch vụ: RED (rate/error/p50-p95-p99), USE, phiên bản đang chạy, deploy marker; lưu dưới dạng code (JSON/Jsonnet/Terraform) trong repo. → Kiểm: file dashboard commit; CI validate JSON; ảnh dashboard trong GO/NO-GO. · Nguồn: P10; P5
-- [ ] `OPS-OBS-008` **MUST** PII/secret (danh mục: `BASE-ERR-007`, nhà) được che ở SDK/Collector trước khi rời tiến trình (processor redact/attributes); nội dung prompt/completion không vào trace mặc định (content capture off; chỉ opt-in — chi tiết: `AI-OBS-004`). → Kiểm: cấu hình Collector `redaction`/`attributes` processor; test span chứa email → che. · Nguồn: [`../12-security/logging-audit-and-incident.md`](../12-security/logging-audit-and-incident.md); OTel GenAI (content opt-in)
+- [ ] `OPS-OBS-008` **MUST** PII/secret (danh mục: `BASE-ERR-007`, nhà) được che ở SDK/Collector trước khi rời tiến trình (processor redact/attributes); nội dung prompt/completion không vào trace mặc định (content capture off; chỉ opt-in — chi tiết: `AI-OBS-004`). → Kiểm: cấu hình Collector `redaction`/`attributes` processor; test span chứa email → che; canary email/token đi qua resource/body/attributes theo từng signal tới exporter test, đọc dữ liệu thực nhận (không chỉ cấu hình); `ignored_keys` bỏ qua che và `allowed_values` chỉ áp sau `allowed_keys` → rà từng khoá ngoại lệ; series vắng không tính là khoẻ (alert drill; SLO: `OPS-SLO-001`). · Nguồn: [`../12-security/logging-audit-and-incident.md`](../12-security/logging-audit-and-incident.md); OTel GenAI (content opt-in)
 - [ ] `OPS-OBS-009` **MUST@L** Theo dõi lỗi có grouping + thông báo lỗi mới (Sentry hoặc tương đương) với source map/symbol, release tag, che PII. → Kiểm: lỗi thử nghiệm xuất hiện với stack đúng dòng; `send_default_pii=false`. · Nguồn: Sentry docs (chưa xác minh phiên bản)
 - [ ] `OPS-OBS-010` **MUST@L** Retention và chi phí quan sát có ngân sách: log hot ≤ 30 ngày (trừ bảo mật/audit), sampling trace tail-based, giới hạn cardinality; chi phí observability theo dõi như một dòng ngân sách. → Kiểm: cấu hình retention trong IaC; dashboard chi phí/ingest GB/ngày; alert ingest tăng > 50% tuần. · Nguồn: [`cost-management.md`](cost-management.md)
 - [ ] `OPS-OBS-011` **MUST@L** Synthetic/uptime check từ ngoài cho luồng chính (trang chủ, login, API health) mỗi ≤ 5 phút từ ≥ 2 vị trí; là nguồn SLI availability bên ngoài. → Kiểm: cấu hình checker (Blackbox exporter/Uptime Kuma/dịch vụ); alert khi 2 lần liên tiếp fail. · Nguồn: Google SRE Workbook (SLI từ góc nhìn người dùng)
@@ -87,6 +87,7 @@ updated: 2026-11-03
 
 ## Nguồn
 
+- OTel Collector `redactionprocessor` README (`ignored_keys` xử lý trước và không bị chặn; `allowed_values` áp lên giá trị của khoá cho phép): <https://github.com/open-telemetry/opentelemetry-collector-contrib/blob/main/processor/redactionprocessor/README.md> — xác minh 2026-11-04.
 - OpenTelemetry Specification v1.61.0: <https://github.com/open-telemetry/opentelemetry-specification/releases/latest> — tag xác minh 2026-10-13 (trang không hiện năm); OTel Logs Data Model (Stable): <https://opentelemetry.io/docs/specs/otel/logs/data-model/> — xác minh 2026-10-13; HTTP metrics (`http.server.request.duration` Stable): <https://opentelemetry.io/docs/specs/semconv/http/http-metrics/> — xác minh 2026-10-13; Versioning and stability: <https://opentelemetry.io/docs/specs/otel/versioning-and-stability/> — xác minh 2026-10-13.
 - SDK: `@opentelemetry/api` 1.9.1, `@opentelemetry/sdk-node` 0.223.0 (npm), `opentelemetry-sdk` 1.45.1 (PyPI) — xác minh 2026-10-13.
 - W3C Trace Context Level 1 (Recommendation 2021-11-23): <https://www.w3.org/TR/trace-context/> — xác minh 2026-10-13.

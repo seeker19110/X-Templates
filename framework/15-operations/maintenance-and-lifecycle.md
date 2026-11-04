@@ -3,7 +3,7 @@ title: Bảo trì: cập nhật phụ thuộc, EOL, nâng cấp major, nợ kỹ
 kind: module
 prefix: OPS-MAINT
 applies_to: [all]
-updated: 2026-11-02
+updated: 2026-11-04
 ---
 
 # Bảo trì: cập nhật phụ thuộc, EOL, nâng cấp major, nợ kỹ thuật
@@ -42,7 +42,7 @@ updated: 2026-11-02
 - [ ] `OPS-MAINT-005` **MUST** Nâng major có kế hoạch: PR riêng, changelog/migration guide đọc và tóm tắt trong PR, codemod chính thức nếu có, toàn bộ test + E2E xanh, deploy qua canary/flag, đường lùi ghi rõ. → Kiểm: template PR `major-upgrade` với các mục bắt buộc; label `major`; không gộp major với tính năng. · Nguồn: P8; [`deployment-strategies.md`](deployment-strategies.md)
 - [ ] `OPS-MAINT-006` **MUST@L** Nợ kỹ thuật ghi ở một nơi với chủ sở hữu, lý do, hạn/điều kiện trả, chi phí trì hoãn; `PROGRESS.md` mục "Nợ kỹ thuật" không ghi "(không có)" khi còn việc treo. → Kiểm: `docs/TECH-DEBT.md` hoặc issue label; script so "Nợ kỹ thuật: (không có)" với số issue `tech-debt` mở > 0 = đỏ. · Nguồn: research khung cũ §3b (PROGRESS ghi "không có" trong khi còn nợ); P1
 - [ ] `OPS-MAINT-007` **MUST@L** Lockfile/lock của skill, MCP, action, image được làm mới có kiểm soát (`lockFileMaintenance` hoặc PR tuần) và qua cùng cổng như code. → Kiểm: PR lock refresh định kỳ; CI xanh. · Nguồn: [`../12-security/supply-chain.md`](../12-security/supply-chain.md)
-- [ ] `OPS-MAINT-008` **MUST@L** Dependency không bảo trì (archive, không release > 18 tháng, CVE không vá > 90 ngày) được phát hiện bằng máy và có kế hoạch thay thế/vendor. → Kiểm: Scorecard `Maintained` hoặc script đọc ngày release gần nhất; danh sách + ticket. · Nguồn: OpenSSF Scorecard; evidence-and-sources §1.7
+- [ ] `OPS-MAINT-008` **MUST@L** Dependency không bảo trì (archive, không release > 18 tháng, CVE không vá > 90 ngày) được phát hiện bằng máy và có kế hoạch thay thế/vendor. Tín hiệu "còn sống" lấy từ commit cuối **chạm mã nguồn** của nhánh mặc định (loại bot/workflow/README/metadata), không `pushed_at`; bắt đổi tên/chuyển org, đọc banner README, bảng hỗ trợ `SECURITY.md`, CI còn chạy test; sao và tỉ lệ trailer chỉ là bằng chứng phụ khi lịch sử bị squash/gộp. → Kiểm: Scorecard `Maintained` hoặc script đọc ngày release gần nhất và `gh api repos/{o}/{r}/commits/{default_branch}` (`commit.committer.date`) / `git log -1 -- <glob mã nguồn>`; `full_name` trả về ≠ tên trong manifest → cảnh báo; `pushed_at` lệch commit mã cuối > 90 ngày → cảnh báo trong báo cáo chọn phụ thuộc; danh sách + ticket. · Nguồn: OpenSSF Scorecard; evidence-and-sources §1.7
 - [ ] `OPS-MAINT-009` **MUST@L** Ngân sách bảo trì cố định (≥ 10% thời gian sprint/tháng, đội tự chốt) và review bảo trì hàng tháng: PR bot, EOL, nợ, flag quá hạn, runbook/ADR/SLO cũ, finding quá SLA. → Kiểm: biên bản review tháng `docs/ops/maintenance-reviews/`; ngân sách ghi trong PROJECT/PROGRESS. · Nguồn: P12; lifecycle G8
 - [ ] `OPS-MAINT-010` **MUST@L** Tài liệu vận hành có ngày xem lại: runbook, SLO, threat model, ADR trạng thái, bảng liên hệ — quá 12 tháng không xem lại = cảnh báo; SHA/nhánh ghi trong PROGRESS/STATUS phải còn tồn tại và là tổ tiên của HEAD. → Kiểm: script đọc frontmatter `updated`/`review_by`; CI kiểm SHA trong PROGRESS là ancestor của HEAD. · Nguồn: catalog stored 21 §8 điểm 9 (docs tươi bằng máy); P5
 - [ ] `OPS-MAINT-011` **MUST@L** Tool tự động sửa CI/cập nhật phụ thuộc (agent) không được: skip/disable test, hạ ngưỡng, rewrite history, re-run quá trần; chuỗi đỏ cùng chữ ký ≥ 3 → BLOCKED. → Kiểm: hook/policy từ [`../11-autonomous-loop/self-healing-ci.md`](../11-autonomous-loop/self-healing-ci.md); log BLOCKED. · Nguồn: catalog stored 21 §9; `SEC-SUPPLY-011`
@@ -86,6 +86,7 @@ updated: 2026-11-02
 
 ## Nguồn
 
+- Tín hiệu bảo trì đọc sai (`pushed_at` ≠ commit mã cuối, đổi org, archive không báo): (chưa xác minh — theo stored 16 §2g, 19 §3c, 22 §9f).
 - GitHub Docs — Dependabot options reference (`groups`, `open-pull-requests-limit` mặc định 5, `ignore`/`update-types`): <https://docs.github.com/en/code-security/dependabot/working-with-dependabot/dependabot-options-reference> — xác minh 2026-10-13.
 - endoflife.date API (Python 3.10 EOL 2026-10-01, 3.9 EOL 2025-10-31; Node 18 EOL 2025-04-30, 20 EOL 2026-04-30, 22 EOL 2027-04-30, 24 EOL 2028-04-30; Terraform/OpenTofu/PostgreSQL/Kubernetes cycles): <https://endoflife.date/api/python.json>, <https://endoflife.date/api/nodejs.json> — xác minh 2026-10-13.
 - Renovate AGPL-3.0: <https://github.com/renovatebot/renovate/blob/main/license> — xác minh 2026-10-13; phiên bản 44.151.5 theo catalog `seeker19110/stored` 13 §4c (2026-10-12).

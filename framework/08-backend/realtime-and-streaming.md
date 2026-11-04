@@ -3,7 +3,7 @@ title: Realtime: WebSocket, SSE, pub/sub, streaming
 kind: module
 prefix: BE-RT
 applies_to: [web-app, api-service, ai-agent, agentic-system, data-ml, monorepo, blockchain]
-updated: 2026-10-14
+updated: 2026-11-04
 ---
 
 # Realtime: WebSocket, SSE, pub/sub, streaming
@@ -53,7 +53,7 @@ Mặc định: SSE + pub/sub + sự kiện có ID. WebSocket chỉ sau khi ghi A
 - [ ] `BE-RT-010` **MUST@L** Giới hạn số kết nối đồng thời theo người dùng/IP (vd ≤ 5–10/user) và tổng theo instance; vượt → từ chối handshake (429/503). → Kiểm: test mở 20 kết nối cùng user → kết nối thứ N+1 bị từ chối. · Nguồn: RFC 6585 §4
 - [ ] `BE-RT-011` **MUST@L** Token hết hạn trong lúc kết nối sống: server kiểm lại định kỳ hoặc client gửi token mới qua thông điệp xác thực lại; thu hồi phiên → đóng kết nối trong ≤ 1 phút. → Kiểm: test revoke phiên → kết nối đóng; test token hết hạn → yêu cầu re-auth. · Nguồn: OWASP Session Management Cheat Sheet
 - [ ] `BE-RT-012` **MUST@L** Metric: kết nối đang mở, tốc độ thông điệp vào/ra, kích thước hàng đợi gửi, số đóng theo mã, độ trễ publish→deliver; cảnh báo theo SLO. → Kiểm: dashboard + rule; xem [`../15-operations/observability.md`](../15-operations/observability.md).
-- [ ] `BE-RT-013` **MUST@L** Streaming LLM/tác vụ dài: huỷ phía client (`AbortController`/đóng kết nối) lan truyền thành huỷ gọi model/job để không đốt tiền; sự kiện cuối có marker `done` và lỗi có cấu trúc. → Kiểm: test đóng kết nối giữa stream → gọi model bị huỷ (mock đếm); xem [`../13-ai-engineering/llm-app-foundations.md`](../13-ai-engineering/llm-app-foundations.md).
+- [ ] `BE-RT-013` **MUST@L** Streaming LLM/tác vụ dài: huỷ phía client (`AbortController`/đóng kết nối) lan truyền thành huỷ gọi model/job để không đốt tiền; sự kiện cuối có marker `done` và lỗi có cấu trúc. Voice/streaming agent: gắn session/turn ID qua STT→model/tool→TTS, đo completion, ngắt lời (barge-in) và reconnect theo cùng turn; phát lại audio/transport không chạy lại tool — tác vụ ghi có receipt/idempotency (`BE-RT-006`). → Kiểm: test đóng kết nối giữa stream → gọi model bị huỷ (mock đếm); fixture ngắt lời giữa TTS và mất mạng sau tool commit → chỉ 1 side effect; báo latency từng tầng cạnh WER/MOS; xem [`../13-ai-engineering/llm-app-foundations.md`](../13-ai-engineering/llm-app-foundations.md).
 - [ ] `BE-RT-014` **SHOULD** Thông điệp có `type` + `version` + `id`; client bỏ qua type lạ; thay đổi tương thích ngược theo [`api-design.md`](api-design.md). → Kiểm: test client nhận type lạ → không crash.
 - [ ] `BE-RT-015` **SHOULD** Nén WebSocket (`permessage-deflate`) chỉ bật có chủ đích với `no_context_takeover`/`max_window_bits` để giới hạn RAM mỗi kết nối. → Kiểm: cấu hình thư viện; đo RSS với 10k kết nối. · Nguồn: RFC 7692 §7.1
 - [ ] `BE-RT-016` **SHOULD** SSE qua HTTP/2 (hoặc giới hạn 1 EventSource/tab + SharedWorker) để tránh trần kết nối HTTP/1.1 mỗi origin của trình duyệt. → Kiểm: server/CDN bật HTTP/2; tài liệu client. · Nguồn: WHATWG HTML Server-sent events (ghi chú giới hạn kết nối)
