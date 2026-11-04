@@ -3,7 +3,7 @@ title: Tài liệu cho AI agent: AGENTS.md, CLAUDE.md, llms.txt, runtime.yaml, S
 kind: module
 prefix: XC-DOCAI
 applies_to: [all]
-updated: 2026-10-31
+updated: 2026-11-04
 ---
 
 # Tài liệu cho AI agent: AGENTS.md, CLAUDE.md, llms.txt, runtime.yaml, SCOPE.md
@@ -65,6 +65,9 @@ updated: 2026-10-31
 - [ ] `XC-DOCAI-023` **SHOULD** Skill/automation **do model sinh** (từ bản ghi thao tác hoặc mô tả) có bước xác nhận hoặc `--dry-run` trước mọi bước gửi, xoá, ghi ra ngoài và trần số mục mỗi lần chạy; người đọc lại `SKILL.md` trước khi cài, không cài thẳng từ công cụ sinh. → Kiểm: review PR thêm skill — mọi bước có tác dụng phụ kèm xác nhận và trần.
 - [ ] `XC-DOCAI-024` **SHOULD** Công cụ dev có cả biến thể **CLI + skill** và MCP thì coding agent dùng CLI + skill mặc định (không nạp schema tool và cây trang vào mỗi lượt); MCP khi cần phiên bền hoặc client chỉ nói MCP — ghi lựa chọn và lý do. → Kiểm: `AGENTS.md`/ADR liệt kê công cụ và biến thể đã chọn. · Nguồn: README `microsoft/playwright-mcp` mục "Playwright CLI vs Playwright MCP" (2026-10-31)
 - [ ] `XC-DOCAI-025` **SHOULD** Repo có ≥ 5 skill có **test kích hoạt tất định** trong Gate: bộ prompt mẫu → skill mong đợi đứng đầu theo so khớp từ vựng với `description` (không gọi model), và hai `description` gần trùng bị báo; thay đổi `description` bị loại vì test này ghi vào sổ cạnh `.out-of-scope/`. → Kiểm: test chạy trong `gate-fast`, ngưỡng tỉ lệ đứng đầu ghi trong test. · Nguồn: `addyosmani/agent-skills` `evals/README.md` (tầng 2 trigger & routing, `run-evals.js --min-rank1 95`) — đọc 2026-10-31
+- [ ] `XC-DOCAI-026` **SHOULD** Plugin/marketplace tự viết hoặc vendor trong repo qua cổng **cấu trúc** ở mỗi PR: `claude plugin validate --strict <dir>` (đọc `plugin.json`/`marketplace.json`; path bắt đầu `./`, không thoát plugin root); repo có `CLAUDE.md`/`AGENTS.md`/skills/hooks chạy thêm linter đa harness (vd `agnix` ghim phiên bản) để bắt frontmatter sai làm skill "vô hình". Eval hành vi định kỳ: [`LOOP-DESIGN-025`](../11-autonomous-loop/loop-design.md). → Kiểm: job CI đỏ khi validate/linter báo lỗi; fixture plugin có path `../x` → đỏ, plugin mẫu → xanh. · Nguồn: stored 20 §3v (chưa xác minh — theo stored)
+- [ ] `XC-DOCAI-027` **MAY** Repo mục đích **học** (khoá học, bài tập, tự học): `AGENTS.md` có mục "Vai của agent" giới hạn agent làm trợ giảng — giải thích, gợi ý, review; không viết lời giải vào file bài tập, không chạy lệnh thay người học trừ khi yêu cầu rõ trong lượt đó; "đã học xong" đo bằng test/snapshot của bài, không bằng "đã đọc" (cạnh `XC-DOCAI-004`). → Kiểm: `AGENTS.md` có heading "Vai của agent" và câu cấm viết lời giải; mỗi thư mục bài có test/snapshot; PROGRESS ghi tiến độ bằng tên test xanh. · Nguồn: stored 08 §4 (CS336; chưa xác minh — theo stored)
+- [ ] `XC-DOCAI-028` **SHOULD** Dự án **phát hành** installer cài skill/agent/hook vào repo người dùng (`npx <pkg> init`, `install.py`): (1) manifest sở hữu trong repo đích (phiên bản + sha256 từng mục đã cài); (2) chạy lại cùng phiên bản là no-op; (3) từ chối ghi đè/xoá mục người dùng đã sửa (hash khác manifest) hoặc không có trong manifest — báo danh sách, exit ≠ 0 trừ khi `--force`; (4) ghi vào thư mục tạm cùng filesystem rồi `rename` nguyên tử. Luật anh em: [`PRF-AGENT-022`](../02-profiles/ai-agent.md); `install.py` của khung là mẫu (copy-if-absent, giữ `modified`); cổng xuất xứ: `XC-DOCAI-019`. → Kiểm: test trên repo tạm — cài 2 lần: lần 2 exit 0, cây không đổi; sửa file đã cài rồi cài lại → exit ≠ 0, file giữ nguyên; thư mục trùng tên ngoài manifest → từ chối; lỗi trước `rename` → không còn thư mục đích dở dang. · Nguồn: stored 15 §4 (GX Core; chưa xác minh — theo stored)
 
 ## Bẫy thường gặp
 
