@@ -101,7 +101,7 @@ updated: 2026-11-04
 
 ## Nguồn
 
-- goose Provider locker, sqlc verify (gọi cloud/query-set API): (chưa xác minh — theo stored 34 §3–4).
+- goose Provider locker, sqlc verify (gọi cloud/query-set API): <https://pkg.go.dev/github.com/pressly/goose/v3>, <https://docs.sqlc.dev/en/latest/howto/verify.html> — tra 2026-11-04.
 - PostgreSQL 18: CREATE INDEX (CONCURRENTLY, invalid) <https://www.postgresql.org/docs/current/sql-createindex.html>; ALTER TABLE Notes (NOT VALID/VALIDATE, SET NOT NULL skip scan, ALTER TYPE rewrite, default không rewrite) <https://www.postgresql.org/docs/current/sql-altertable.html>; `lock_timeout`/`statement_timeout` <https://www.postgresql.org/docs/current/runtime-config-client.html>; §14.4 Populating <https://www.postgresql.org/docs/current/populate.html> — xác minh 2026-10-13.
 - MySQL 8.4 Online DDL (`ALGORITHM=INSTANT/INPLACE/COPY`, `LOCK=NONE`): <https://dev.mysql.com/doc/refman/8.4/en/innodb-online-ddl-operations.html> — xác minh 2026-10-13.
 - Supabase — Database migrations (`migration new`, `db diff`, `db reset`, `db push`; không có rollback): <https://supabase.com/docs/guides/deployment/database-migrations> — xác minh 2026-10-13.
