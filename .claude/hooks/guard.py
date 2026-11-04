@@ -392,10 +392,12 @@ def _is_ln(argv: List[str]) -> bool:
 # TRƯỚC, guard không thấy): `HOME`, `XDG_CONFIG_HOME`, `GIT_CONFIG_GLOBAL|SYSTEM` (trừ đúng `/dev/null`); AUD-SEC-439:
 # `GIT_DIR`, `GIT_COMMON_DIR` (cấu hình của thư mục git khác — trừ `.git` của dự án); AUD-SEC-440: `GIT_TEMPLATE_DIR`
 # (hook mẫu), `GIT_EXEC_PATH` (lệnh con git) — gán đầu lệnh, `env VAR=`, `export`/`declare -x`/gán trần trước đó.
+# AUD-SEC-446: `GIT_OBJECT_DIRECTORY` làm Git nhận repo trần ngay cả khi không có thư mục `objects` tại chỗ.
 # Giá trị một lần (`GIT_CONFIG_PARAMETERS`, `GIT_CONFIG_COUNT|KEY_n|VALUE_n`) guard đọc được và đã xét bằng luật khoá
 # (`_commit_hooks_path`, `_git_exec_config`, alias — AUD-SEC-352, review #306), D-337.
 GIT_READ_ENV_RE = re.compile(
     r"HOME|XDG_CONFIG_HOME|GIT_CONFIG_(?:GLOBAL|SYSTEM)|GIT_DIR|GIT_COMMON_DIR|GIT_TEMPLATE_DIR|GIT_EXEC_PATH"
+    r"|GIT_OBJECT_DIRECTORY"
 )
 GIT_DIR_VARS = ("GIT_DIR", "GIT_COMMON_DIR")
 GIT_HOOK_SUBCMDS = frozenset("commit push merge rebase am cherry-pick revert".split())  # lệnh con chạy git hook
@@ -404,7 +406,8 @@ GIT_CFG_ENV_ASK = (
 )
 GIT_CFG_ENV_WHY = (
     "lệnh git chạy với biến/cờ trỏ tệp cấu hình, hook hay lệnh con git khác (`HOME`, `XDG_CONFIG_HOME`,"
-    " `GIT_CONFIG_GLOBAL|SYSTEM`, `GIT_DIR`/`--git-dir`, `GIT_TEMPLATE_DIR`/`--template`, `GIT_EXEC_PATH`/`--exec-path`)"
+    " `GIT_CONFIG_GLOBAL|SYSTEM`, `GIT_DIR`/`--git-dir`, `GIT_TEMPLATE_DIR`/`--template`, `GIT_EXEC_PATH`/`--exec-path`,"
+    " `GIT_OBJECT_DIRECTORY`)"
     " — git đọc tệp guard không thấy (khoá chạy lệnh, hooksPath — AUD-SEC-434/439/440, D-337); viết lại: bỏ gán biến/cờ"
     " đó (cô lập bằng `GIT_CONFIG_GLOBAL=/dev/null` nếu cần)"
 )
@@ -435,9 +438,10 @@ def _git_cfg_vars(env: Dict[str, str], root: str, cwd: Optional[str]) -> List[st
 def _git_cfg_opts(s: List[str], root: str, cwd: Optional[str]) -> List[str]:
     """Cờ của lệnh git `s` (đã bỏ tiền tố) trỏ tệp cấu hình/hook/lệnh con khác: `--git-dir` (khác `.git` của dự án —
     AUD-SEC-439), `--exec-path=X`, `init|clone --template[=]X` (AUD-SEC-440)."""
-    out = [o for o, v in _git_globals(s) if o == "--git-dir" and not _own_git_dir(v, root, cwd)]
-    # AUD-SEC-442: đường dẫn cài đặt của hệ khác có thể là thư mục tự tạo trên máy này.
-    out += [o for o, v in _git_globals(s) if o == "--exec-path" and v]
+    opts = _git_globals(s)
+    out = [o for o, v in opts if o == "--git-dir" and not _own_git_dir(v, root, cwd)]
+    # AUD-SEC-442: một override, kể cả rỗng, có thể đổi chương trình Git tìm thấy.
+    out += ["--exec-path" for o, _ in opts if o == "--exec-path="]
     n = normalize(s)
     if n[1:2] and n[1] in ("init", "clone") and any(a == "--template" or a.startswith("--template=") for a in n[2:]):
         out.append("--template")
@@ -453,10 +457,11 @@ GIT_CFG_NAMES = (
     "GIT_COMMON_DIR",
     "GIT_TEMPLATE_DIR",
     "GIT_EXEC_PATH",
+    "GIT_OBJECT_DIRECTORY",
 )
 GIT_CFG_NAME_RE = re.compile(  # lọc nhanh trên chữ thô
     r"HOME|XDG_CONFIG_HOME|GIT_CONFIG_GLOBAL|GIT_CONFIG_SYSTEM|GIT_DIR|GIT_COMMON_DIR|GIT_TEMPLATE_DIR|GIT_EXEC_PATH"
-    r"|--git-dir|--exec-path|--template"
+    r"|GIT_OBJECT_DIRECTORY|--git-dir|--exec-path|--template"
 )
 GIT_CFG_VAR_HEADS = frozenset({"read", "mapfile", "readarray", "getopts"})  # nhận TÊN biến làm đối số
 GIT_CFG_DYN = "$?"  # giá trị không biết (đặt bằng `for`/`read`/`printf -v`/`eval`)
@@ -595,15 +600,28 @@ def _repo_git_metadata(path: str, root: str) -> bool:
     return any(_git_metadata_dir(absolute[: m.start()] or "/") for m in GIT_METADATA_TAIL_RE.finditer(absolute))
 
 
+def _git_dir_pointer(path: str, prefix: bytes = b"") -> str:
+    """Đọc gitfile hoặc commondir của worktree, không mở tệp đặc biệt hay đọc quá 4 KiB."""
+    with contextlib.suppress(OSError, ValueError):
+        if os.path.isfile(path):
+            with open(path, "rb") as file:
+                raw = file.read(4097).rstrip(b"\r\n")
+            if raw.startswith(prefix) and len(prefix) < len(raw) <= 4096:
+                return os.path.join(os.path.dirname(path), os.fsdecode(raw[len(prefix) :]))
+    return ""
+
+
 def _git_config_inodes(root: str) -> Set[Tuple[int, int]]:
     """Inode của cấu hình git toàn cục/hệ thống và cấu hình, hook của dự án (AUD-SEC-440/447)."""
     xdg = os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config")
     paths = [os.path.expanduser("~/.gitconfig"), os.path.join(xdg, "git", "config"), "/etc/gitconfig"]
     paths += ["/usr/local/etc/gitconfig", "/opt/homebrew/etc/gitconfig"]
-    paths += [os.path.join(root, ".git", "config"), os.path.join(root, ".git", "config.worktree")]
-    with contextlib.suppress(OSError, ValueError):
-        with os.scandir(os.path.join(root, ".git", "hooks")) as hooks:
-            paths.extend(hook.path for hook in hooks)
+    dotgit = os.path.join(root, ".git")
+    gitdir = _git_dir_pointer(dotgit, b"gitdir: ") or dotgit
+    common = _git_dir_pointer(os.path.join(gitdir, "commondir")) or gitdir
+    paths += [os.path.join(common, "config"), os.path.join(gitdir, "config.worktree")]
+    with contextlib.suppress(OSError, ValueError), os.scandir(os.path.join(common, "hooks")) as hooks:
+        paths.extend(hook.path for hook in hooks)
     out: Set[Tuple[int, int]] = set()
     for p in paths:
         with contextlib.suppress(OSError, ValueError):
@@ -633,6 +651,11 @@ def _git_hook_target(path: str, root: str) -> bool:
     )
 
 
+def _gitfile_target(path: str, root: str) -> bool:
+    path = os.path.expanduser(path)
+    return posixpath.basename(_norm_path(path)) == ".git" or posixpath.basename(rel_path(path, root)) == ".git"
+
+
 def edit_decision(path: str, root: str, tool_input: Optional[Dict[str, object]] = None) -> Tuple[str, str]:
     rel = rel_path(path, root)
     kind = path_kind(rel, root)
@@ -640,7 +663,7 @@ def edit_decision(path: str, root: str, tool_input: Optional[Dict[str, object]] 
     if bypass:
         return "deny", f"Không ghi công tắc tắt hook (`{bypass}`) vào {rel} — hàng rào của khung (ADR-0018)."
     if (
-        posixpath.basename(_norm_path(path)) == ".git"
+        _gitfile_target(path, root)
         or _global_git_config(path)
         or _global_git_config(_realpath_safe(path))
         or _git_hook_target(path, root)
@@ -5028,7 +5051,8 @@ def _git_globals(s: List[str]) -> List[Tuple[str, str]]:
         opt, eq, val = a.partition("=") if a.startswith("--") else (a[:2], "", a[2:])
         if opt in GIT_OPTS_WITH_VALUE and not eq and not val and i < len(s):
             val, i = s[i], i + 1
-        out.append((opt, val))
+        # `--exec-path` in giá trị rồi thoát. `--exec-path=` đặt lại đường dẫn, kể cả với giá trị rỗng.
+        out.append((opt + eq if opt == "--exec-path" else opt, val))
     return out
 
 
@@ -8421,7 +8445,7 @@ def _write_asks(n: List[str], argv: List[str], root: str, cwd: Optional[str] = N
     ]
     # AUD-SEC-439: tệp gitfile `.git` (`gitdir: …`) trỏ repo sang thư mục git khác — ghi (không xoá) như `.git/config`
     if not n or n[0] not in REUSE_DELETERS and n[:2] != ["git", "rm"]:
-        asks += [GIT_HOOK_WHY.format(t) for t in targets if posixpath.basename(_norm_path(t)) == ".git"]
+        asks += [GIT_HOOK_WHY.format(t) for t in targets if any(_gitfile_target(x, root) for x in _where(t, root, cwd))]
     for target in (x for t in targets for x in _where(t, root, cwd)):
         kind = _target_kind(target, root)
         if _is_fence(target, root):
@@ -9311,14 +9335,39 @@ def _pending_git_write_asks(commands: List[Tuple[List[str], Optional[str]]]) -> 
     ]
 
 
-def _bare_git_config_ask(n: List[str], argv: List[str], cwd: Optional[str]) -> str:
+def _discover_bare_git_dir(path: str, ceilings: str, across: Tuple[str, ...]) -> str:
+    """Tìm Git dir trần ở thư mục đang đứng hoặc cha, dừng ở worktree, ceiling hay ranh giới hệ tệp như Git."""
+    stop = {_realpath_safe(item) for item in ceilings.split(os.pathsep) if os.path.isabs(item)}
+    cross = any(value.lower() not in ("", "false", "no", "off", "0") for value in across)
+    directory = _realpath_safe(path)
+    while True:
+        dot_git = os.path.join(directory, ".git")
+        if os.path.isfile(dot_git) or _git_metadata_dir(dot_git):
+            return ""
+        if _git_metadata_dir(directory):
+            return directory
+        parent = os.path.dirname(directory)
+        if parent == directory or parent in stop or not cross and os.path.ismount(directory):
+            return ""
+        directory = parent
+
+
+def _bare_git_config_ask(n: List[str], argv: List[str], cwd: Optional[str], env: Dict[str, str]) -> str:
     """AUD-SEC-446: chặn khóa chạy lệnh có sẵn trong config repo trần; `git config` vẫn đọc được để chẩn đoán."""
     if n[:1] != ["git"] or not n[1:2] or n[1] in ("init", "clone", "config"):
         return ""
     directory = _git_dir(argv, cwd)
-    if not directory or not _git_metadata_dir(directory):
+    command = _strip_prefixes(argv)
+    prefix = argv[: len(argv) - len(command)]
+    inline = _assign_values(prefix)
+    # Chỉ gán tiền tố trực tiếp chắc chắn tới git; gán trần hoặc `env -u` có thể không đặt ceiling như guard thấy.
+    ceilings = inline.get("GIT_CEILING_DIRECTORIES", "") if all(ENV_ASSIGN_RE.fullmatch(t) for t in prefix) else ""
+    across = "GIT_DISCOVERY_ACROSS_FILESYSTEM"
+    values = os.environ.get(across, ""), env.get(across, ""), inline.get(across, "")
+    bare = _discover_bare_git_dir(directory, ceilings, values) if directory else ""
+    if not bare:
         return ""
-    config = os.path.join(directory, "config")
+    config = os.path.join(bare, "config")
     if not os.path.isfile(config):
         return ""
     try:
@@ -9363,7 +9412,7 @@ def _scan_command(
     bypass = (
         hook_bypass(argv, n, _track_exports(res, argv, n), env)
         or _git_metadata_creation_ask(n)
-        or _bare_git_config_ask(n, argv, cwd)
+        or _bare_git_config_ask(n, argv, cwd, env)
     )
     if bypass:
         asks.append(f"{bypass}: {' '.join(argv)[:200]}")
@@ -11862,7 +11911,7 @@ def _interp_literal_ask(
         kind = "evidence" if _ledger_tail(lit, script) else kind
         fence = _is_fence(target, root)
         git_hook = (
-            posixpath.basename(_norm_path(target)) == ".git"
+            _gitfile_target(target, root)
             or _global_git_config(target)
             or _git_hook_target(target, root)
             or pending_bare

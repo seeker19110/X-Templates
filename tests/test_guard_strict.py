@@ -3337,6 +3337,8 @@ class GuardDebt433Test(unittest.TestCase):
             (
                 "git --exec-path=/usr/local/libexec/git-core commit -m x",
                 "git --exec-path=/usr/lib/git-core status",
+                "git --exec-path= mergetool --tool-help",
+                "git --exec-path='' mergetool --tool-help",
                 "GIT_EXEC_PATH=/usr/lib/git-core git status",
             ),
             ("git --exec-path", "git status"),
@@ -3347,6 +3349,13 @@ class GuardDebt433Test(unittest.TestCase):
         self.assertEqual(guard.edit_decision("sub/.git", str(ROOT))[0], "deny")
         self.assert_hook_bypass(("> sub/.git", "python3 -c \"open('sub/.git', 'w').write('gitdir: ../gd')\""))
         self.assertEqual(decide("python3 -c \"print(open('sub/.git').read())\"")["decision"], "")
+        with tempfile.TemporaryDirectory() as d:
+            link = Path(d) / "link"
+            link.symlink_to("sub/.git")
+            self.assertEqual(guard.edit_decision(link.name, d)[0], "deny")
+            for command in ("printf x >> link", "python3 -c \"open('link', 'w')\""):
+                out = guard.apply_policy(guard.bash_decision(command, d))
+                self.assertEqual((out["decision"], out["code"]), ("deny", "HOOK_BYPASS"), out)
 
     def test_aud_sec_444_own_git_dir(self):
         with mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": "/other"}):
@@ -3380,6 +3389,48 @@ class GuardDebt433Test(unittest.TestCase):
                         self.assertEqual((out["decision"], out["code"]), ("deny", "HOOK_BYPASS"), out)
             out = guard.apply_policy(guard.bash_decision("ln .git/hooks/pre-commit hk; printf x > hk", d))
             self.assertEqual(out["decision"], "deny", out)
+
+    def test_aud_sec_447_linked_worktree_hook(self):
+        with tempfile.TemporaryDirectory() as d:
+            repo, linked = Path(d) / "repo", Path(d) / "linked"
+            subprocess.run(["git", "init", "-q", str(repo)], check=True, capture_output=True)
+            subprocess.run(
+                [
+                    "git",
+                    "-C",
+                    str(repo),
+                    "-c",
+                    "user.name=T",
+                    "-c",
+                    "user.email=t@example.invalid",
+                    "commit",
+                    "--allow-empty",
+                    "-qm",
+                    "fixture",
+                ],
+                check=True,
+                capture_output=True,
+            )
+            subprocess.run(
+                ["git", "-C", str(repo), "worktree", "add", "-q", "--detach", str(linked)],
+                check=True,
+                capture_output=True,
+            )
+            hook = repo / ".git/hooks/pre-commit"
+            hook.write_text("#!/bin/sh\n")
+            os.link(hook, linked / "hard")
+            out = guard.apply_policy(guard.bash_decision("printf x >> hard", str(linked)))
+            self.assertEqual((out["decision"], out["code"]), ("deny", "HOOK_BYPASS"), out)
+            self.assertEqual(guard.edit_decision("hard", str(linked))[0], "deny")
+
+    def test_aud_sec_447_git_dir_pointer_invalid(self):
+        with tempfile.TemporaryDirectory() as d:
+            pointer = Path(d) / ".git"
+            for invalid in (b"wrong", b"gitdir: \n", b"gitdir: " + b"x" * 4096):
+                pointer.write_bytes(invalid)
+                self.assertEqual(guard._git_dir_pointer(str(pointer), b"gitdir: "), "")
+            with mock.patch("builtins.open", side_effect=PermissionError):
+                self.assertEqual(guard._git_dir_pointer(str(pointer)), "")
 
 
 class GuardReview434Test(unittest.TestCase):

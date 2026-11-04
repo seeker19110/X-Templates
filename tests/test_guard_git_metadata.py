@@ -78,6 +78,21 @@ class GitMetadataTest(unittest.TestCase):
             f.write("[diff]\n\texternal = /tmp/driver\n")
         self.assert_code(f"git -C {self.bare} diff HEAD^ HEAD", "HOOK_BYPASS")
         self.assert_code(f"cd {self.bare} && git diff HEAD^ HEAD", "HOOK_BYPASS")
+        objects = self.bare / "objects"
+        self.assert_code(f"git -C {objects} diff --ext-diff HEAD^ HEAD -- :/", "HOOK_BYPASS")
+        self.assert_code(f"git -C {self.tmp} rev-parse HEAD", "NONE")
+        self.assert_code(f"GIT_CEILING_DIRECTORIES={self.bare} git -C {objects} rev-parse HEAD", "NONE")
+        self.assert_code(f"GIT_CEILING_DIRECTORIES={self.bare}; git -C {objects} rev-parse HEAD", "HOOK_BYPASS")
+        self.assert_code(
+            f"GIT_CEILING_DIRECTORIES={self.bare} env -u GIT_CEILING_DIRECTORIES git -C {objects} rev-parse HEAD",
+            "HOOK_BYPASS",
+        )
+        with patch.object(guard.os.path, "ismount", side_effect=lambda path: path == str(objects)):
+            self.assert_code(f"git -C {objects} rev-parse HEAD", "NONE")
+            self.assert_code(f"GIT_DISCOVERY_ACROSS_FILESYSTEM=true git -C {objects} rev-parse HEAD", "HOOK_BYPASS")
+        nested = objects / "nested"
+        self.git_init(nested)
+        self.assert_code(f"git -C {nested} rev-parse HEAD", "NONE")
         self.assert_code(f"git -C {self.bare} config --get diff.external", "NONE")
         config.write_text(f"[include]\n\tpath = {config}\n")
         self.assertIn("include.path", self.policy(f"git -C {self.bare} rev-parse HEAD")["reason"])
@@ -103,6 +118,14 @@ class GitMetadataTest(unittest.TestCase):
         self.assert_code(
             f'''git init --bare {future} && python3 -c "print(open('{future / "config"}').read())"''', "NONE"
         )
+
+    def test_bare_git_alternate_object_store(self):
+        store = self.tmp / "store"
+        (self.bare / "objects").rename(store)
+        with (self.bare / "config").open("a") as f:
+            f.write("[diff]\n\texternal = /tmp/driver\n")
+        self.assert_code(f"GIT_OBJECT_DIRECTORY={store} git -C {self.bare} diff HEAD^ HEAD", "BUDGET")
+        self.assert_code(f"export GIT_OBJECT_DIRECTORY={store}; git -C {self.bare} diff HEAD^ HEAD", "BUDGET")
 
 
 if __name__ == "__main__":
