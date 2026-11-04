@@ -114,3 +114,10 @@
 - Chọn: Hợp mọi đích (bảo thủ): từ lệnh cd/pushd/popd/eval-chứa-cd ĐẦU TIÊN trở đi (trừ chuỗi chỉ gồm cd đích nguyên văn nối bằng && từ đầu lệnh, không khối điều khiển/hàm/ống), mọi lệnh sau xét trên HỢP {thư mục đầu} ∪ {mọi đích cd nguyên văn đã giải theo chữ và theo realpath}; có đích không biết (biến, cd -, .. lặp trong vòng, eval) → None (D-106); mọi phép xét đích ghi/repo trần/Git dir giả/pending xét đủ mọi ứng viên; bỏ miễn || exit|return; alias đặt cùng lệnh lưu trong ScanBudget cho shell lồng/eval
 - Lý do (tiêu chí chất lượng cuối): (1) hợp mọi đích là xấp xỉ trên đúng (sound) cho mọi luồng điều khiển: bash chỉ có thể đứng ở thư mục đầu hoặc một đích đã cd tới — không cần mô phỏng if/while/hàm/ống/exit; (3) một luật thay cho vá 7 ca, test được; (4) giữ gỡ chặn oan AUD-SEC-463 vì ứng viên là thư mục biết, không phải None; đánh đổi: thêm chặn oan khi đích cd là thư mục canh — chấp nhận theo tiêu chí (1) > (4); thay D-346
 - Đường lùi: Khôi phục _CwdWalk theo D-346
+
+### D-348 · 2026-11-04T14:31:31+00:00 · T-3673 (AUD-SEC-475): tệp archive do tar -c/zip/ar/jar/cpio -o/pax -w/7z a/python -m zipfile -c tạo ra vào write_targets kéo theo luật ADR-0066 — tạo archive rồi nhắc lại ở lệnh khác cùng lệnh Bash bị BUDGET (tar -czf a.tgz src && tar -tzf a.tgz) — giữ hay miễn?
+
+- Phương án: (1) Giữ chặt (A): như mọi tệp tự ghi theo ADR-0066; lý do chặn có câu viết lại (tách lệnh) · (2) Chỉ xét archive ở _write_asks (B) · (3) Giữ A + miễn khi lệnh sau chỉ đọc archive (C)
+- Chọn: Giữ chặt (A): như mọi tệp tự ghi theo ADR-0066; lý do chặn có câu viết lại (tách lệnh)
+- Lý do (tiêu chí chất lượng cuối): (1) archive vừa tạo có thể được chạy như script (tar -cf x p && sh x) — miễn theo kiểu lệnh đọc là bề mặt lách mới; (3) nhất quán ADR-0066, không thêm miễn trừ (ADR-0065); (4) chi phí: agent tách lệnh, đo trên lệnh/CI repo này không dùng dạng đó
+- Đường lùi: Phương án C với test cho từng lệnh chỉ đọc
