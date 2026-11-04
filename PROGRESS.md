@@ -4,12 +4,12 @@
 
 ## Đang làm
 - 2026-11-04 **PLAN-upgrade-2026-11-02** (D-304): T-3662 và T-3635 đã được đánh dấu xong. Audit sau #434 phát hiện sổ strict đỏ lại vì sáu mục nợ review. Kết quả sửa Git guard và quét bí mật CI ở [báo cáo delta](docs/ops/AUDIT-REPORT-2026-11-04-delta.md) (D-340). Còn T-3636 (`loop verify --all`, `release-check`) và perf trial T-3551/3552/3557 (PLAN-harden-2026-10-27-loops, D-258) trước mốc **3.30.0**.
-- Nhánh `claude/amazing-brahmagupta-9jqbg1` (PR #437 chờ, chưa merge): đã làm ADR-0069 (agent tự nghiệm thu, D-347), ADR-0070 (lưu trữ `docs/archive/`, D-349); ADR-0068 lát A (`PLAN-factory-A.md`) đi sau T-3636 + perf trial (research §7).
+- Nhánh `claude/amazing-brahmagupta-9jqbg1` (PR #437 chờ, chưa merge): đã làm ADR-0069 (D-347), ADR-0070 (D-349), ADR-0068 lát A (D-350, `PLAN-factory-A.md` T-3673…3677 xong + sửa review; nợ AUD-HAR-219, AUD-TEST-061, AUD-SEC-469). Chủ dự án 2026-11-05: không mở PR/merge. Lát B (gói Web/API stack hotel-manager: Node 24 + pnpm + TS + Postgres) cần PLAN riêng; C/D/E sau B.
 - Phép đo `LOOP-ORCH-020` tích luỹ từ PLAN-upgrade; tăng số agent chỉ khi có số (ADR-0061). Phản hồi dự án đích: 10 nhóm `cong-cu` chờ phân loại ([TARGETS](docs/ops/TARGETS.md)).
 - Hoãn tới harden: T-1690/T-1691 (quét lại SEC-091…099). Rà `seeker19110/stored`: chờ chủ repo (HAR-036/041, SEC-026, CI-006/7/9, SEC-043; hạn xét: 2026-12-31).
 
 ## Tiếp theo
-0. PLAN-3.14-app (`v3.14.0`): PR nâng dự án đích chờ chủ dự án: hotel-manager #117, X-Company #65 (hạn xét: 2026-11-30). `unchecked_must` 0/64.
+0. PLAN-3.14-app (`v3.14.0`): PR nâng dự án đích đã merge (hotel-manager #117, X-Company #65 — kiểm 2026-11-05). `unchecked_must` 0/64.
 1. PLAN-3.13: chờ người (hạn xét: 2026-12-31) T-1834 (gỡ `merge-gate` ở ruleset hotel-manager/X-Company rồi xoá stub); **Ruleset sống X-Templates**: không `merge-gate`, `strict: true` (D-144); còn tắt resolve thread + bật "Allow auto-merge" (RUNBOOK-PR-STEWARD §1); `XT_STEWARD_TOKEN` (T-2402 lớp đỡ tạm); App reviewer.
 2. Sau PLAN-3.12: ca đối kháng cho `autonomy-bench`; guard chưa quét nội dung script gọi qua `bash x.sh`/`python3 x.py` (ghi vào LOOP-STOP-027 khi làm); `project-commands.sh` được `source` hai lần mỗi task.
 3. Chờ chủ repo (hạn xét: 2026-12-31): token/app reviewer (T-1508); xoá `/scratch.log` ở gốc container; `x-hotel-manager` dọn/tạo mới; Dependabot security updates (proxy chặn API); Routine tuần `feedback aggregate` + quyền repo đích (T-2410). Event policy `pull_request_target` (repo public, rule mặc định tắt từ 2026-12-02; `pr-review.yml`).
