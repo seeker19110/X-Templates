@@ -21754,6 +21754,40 @@
    "allowed": false,
    "code": "HOOK_BYPASS"
   }
+ },
+{
+ "id": "r435-448-objects-file-bare-config",
+ "origin": "adversarial-reviewer",
+ "refs": [
+  "AUD-SEC-448"
+ ],
+ "input": {
+  "command": "printf '[core]\\n\\tsshCommand = touch /tmp/pwn\\n' > gd/config",
+  "files": {
+   "gd/HEAD": "ref: refs/heads/main\n",
+   "gd/objects": ""
+  }
+ },
+ "expect": {
+  "allowed": false,
+  "code": "HOOK_BYPASS"
  }
+},
+{
+ "id": "r435-ctl-448-head-only-dir",
+ "origin": "control",
+ "refs": [
+  "AUD-SEC-448"
+ ],
+ "input": {
+  "command": "printf x > gd/config",
+  "files": {
+   "gd/HEAD": "ref: refs/heads/main\n"
+  }
+ },
+ "expect": {
+  "allowed": true
+ }
+}
  ]
 }
