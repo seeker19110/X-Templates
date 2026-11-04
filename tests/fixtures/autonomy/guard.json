@@ -22535,6 +22535,21 @@
 {"id": "r439-ctl-489-unzip-list-counter", "origin": "control", "refs": ["AUD-SEC-489"], "input": {"command": "cd .claude/hooks && unzip -ll --l /tmp/a.zip", "files": {".claude/hooks/.keep": ""}}, "expect": {"allowed": true}},
 {"id": "r439-ctl-490-absolute-cd-in-loop", "origin": "control", "refs": ["AUD-SEC-490"], "input": {"command": "for d in a b; do cd /tmp; printf x > notes; done"}, "expect": {"allowed": true}},
 {"id": "r439-ctl-490-trap-without-cd", "origin": "control", "refs": ["AUD-SEC-490"], "input": {"command": "trap 'rm -f /tmp/x' EXIT; cd sub; ls", "files": {"sub/.keep": ""}}, "expect": {"allowed": true}},
-{"id": "r439-ctl-491-cd-symlink-free", "origin": "control", "refs": ["AUD-SEC-491"], "input": {"command": "cd sub && cd ../src && printf x > notes", "files": {"sub/.keep": "", "src/.keep": ""}}, "expect": {"allowed": true}}
+{"id": "r439-ctl-491-cd-symlink-free", "origin": "control", "refs": ["AUD-SEC-491"], "input": {"command": "cd sub && cd ../src && printf x > notes", "files": {"sub/.keep": "", "src/.keep": ""}}, "expect": {"allowed": true}},
+{"id": "d439-492-tape-git-hook", "origin": "audit", "refs": ["AUD-SEC-492"], "input": {"command": "TAPE=.git/hooks/pre-commit tar -c /tmp/p"}, "expect": {"allowed": false, "code": "HOOK_BYPASS"}},
+{"id": "d439-492-tape-fence-export", "origin": "audit", "refs": ["AUD-SEC-492"], "input": {"command": "export TAPE=.claude/hooks/guard.py; tar -c src", "files": {".claude/hooks/guard.py": "", "src/.keep": ""}}, "expect": {"allowed": false, "code": "HOOK_BYPASS"}},
+{"id": "d439-493-source-stdin-here-string-cd", "origin": "audit", "refs": ["AUD-SEC-493"], "input": {"command": ". /dev/stdin <<< 'cd sub'; printf x > ../.autopilot/x", "files": {"sub/.keep": "", ".autopilot/.keep": ""}}, "expect": {"allowed": false, "code": "EVIDENCE_HANDWRITE"}},
+{"id": "d439-493-source-stdin-heredoc-cd", "origin": "audit", "refs": ["AUD-SEC-493"], "input": {"command": "source /dev/stdin <<'EOF'\ncd .git/hooks\nEOF\nprintf x > pre-commit"}, "expect": {"allowed": false, "code": "HOOK_BYPASS"}},
+{"id": "d439-493-trap-body-then-signal", "origin": "audit", "refs": ["AUD-SEC-493"], "input": {"command": "trap 'cd sub' DEBUG; printf x > ../.autopilot/x", "files": {"sub/.keep": "", ".autopilot/.keep": ""}}, "expect": {"allowed": false, "code": "EVIDENCE_HANDWRITE"}},
+{"id": "d439-494-tar-options-into-pending-bare", "origin": "audit", "refs": ["AUD-SEC-494"], "input": {"command": "git init --bare X && TAR_OPTIONS=-CX tar -xf /tmp/a.tar"}, "expect": {"allowed": false, "code": "HOOK_BYPASS"}},
+{"id": "d439-494-cd-pending-bare-extract", "origin": "audit", "refs": ["AUD-SEC-494"], "input": {"command": "git init --bare X && cd X && tar -xf /tmp/a.tar"}, "expect": {"allowed": false, "code": "HOOK_BYPASS"}},
+{"id": "d439-494-tar-options-into-fake-git-dir", "origin": "audit", "refs": ["AUD-SEC-494"], "input": {"command": "mkdir -p X/objects && TAR_OPTIONS=-CX tar -xf /tmp/a.tar"}, "expect": {"allowed": false, "code": "HOOK_BYPASS"}},
+{"id": "d439-ctl-492-tar-file-plain", "origin": "control", "refs": ["AUD-SEC-492"], "input": {"command": "tar -cf out.tar src", "files": {"src/.keep": ""}}, "expect": {"allowed": true}},
+{"id": "d439-ctl-492-tape-plain-archive", "origin": "control", "refs": ["AUD-SEC-492"], "input": {"command": "TAPE=out.tar tar -c src", "files": {"src/.keep": ""}}, "expect": {"allowed": true}},
+{"id": "d439-ctl-492-file-overrides-tape", "origin": "control", "refs": ["AUD-SEC-492"], "input": {"command": "TAPE=.claude/hooks/guard.py tar -cf out.tar src", "files": {".claude/hooks/guard.py": "", "src/.keep": ""}}, "expect": {"allowed": true}},
+{"id": "d439-ctl-493-source-existing-file", "origin": "control", "refs": ["AUD-SEC-493"], "input": {"command": ". ./env.sh && printf x > pre-commit", "files": {"env.sh": "export A=1\n"}}, "expect": {"allowed": true}},
+{"id": "d439-ctl-493-source-here-string-no-cd", "origin": "control", "refs": ["AUD-SEC-493"], "input": {"command": ". /dev/stdin <<< 'cd sub'; printf x > out.txt", "files": {"sub/.keep": ""}}, "expect": {"allowed": true}},
+{"id": "d439-ctl-494-tar-options-plain-dir", "origin": "control", "refs": ["AUD-SEC-494"], "input": {"command": "TAR_OPTIONS=-Cbuild tar -xf /tmp/a.tar", "files": {"build/.keep": ""}}, "expect": {"allowed": true}},
+{"id": "d439-ctl-494-cd-plain-dir-extract", "origin": "control", "refs": ["AUD-SEC-494"], "input": {"command": "cd build && tar -xf /tmp/a.tar", "files": {"build/.keep": ""}}, "expect": {"allowed": true}}
  ]
 }

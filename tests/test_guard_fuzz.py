@@ -168,6 +168,8 @@ CWD_RELATIVE: Dict[str, str] = {
     "t405-336-tar-cumulative": "-C docs -C autopilot tương đối → /tmp/docs/autopilot (AUD-SEC-336)",
     "t405-336-tar-one-top-level": "docs/autopilot tương đối → /tmp/docs/autopilot (AUD-SEC-336)",
     "t405-336-rsync-exclude": "docs/autopilot tương đối → /tmp/docs/autopilot (AUD-SEC-336)",
+    "d439-493-source-stdin-here-string-cd": "cd sub tương đối → /tmp/sub, ../.autopilot = /tmp/.autopilot (AUD-SEC-493)",
+    "d439-493-trap-body-then-signal": "cd sub tương đối → /tmp/sub, ../.autopilot = /tmp/.autopilot (AUD-SEC-493)",
     "t405-339-copytree-dest": "docs/autopilot tương đối trong script (AUD-SEC-339)",
     "guard-audit1020c-cd-autopilot-script": "cd .autopilot → /tmp/.autopilot",
     "guard-audit1020c-tilde-plus-evidence": "~+ là $PWD = /tmp sau cd",
