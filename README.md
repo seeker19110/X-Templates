@@ -267,6 +267,7 @@ python3 -m unittest discover -s tests    # chỉ test (cổng test còn đòi co
 - [ADR-0065](docs/adr/0065-guard-allowlist-dynamic-expansion.md) (D-322): guard xét mở rộng động theo danh sách trắng — từ lệnh dựng lúc chạy, tách/gán theo tên động (`IFS`), heredoc đọc lại, dữ liệu thành mã (`mapfile -C`, `${x@P}`) → `BUDGET`; không suy cấu trúc lệnh để miễn.
 - [ADR-0066](docs/adr/0066-guard-written-file-reuse.md) (D-327): tệp do chính lệnh ghi mà tên được nhắc lại ở chỗ khác của lệnh (trừ lệnh chỉ đọc trong danh sách trắng) → `BUDGET` — không liệt kê trình chạy (AUD-SEC-406).
 - [ADR-0067](docs/adr/0067-guard-static-limit-layered-defense.md) (D-331/D-332): tên tệp/mô-đun dựng lúc chạy trong lệnh tự ghi tệp — giới hạn phân tích tĩnh, chấp nhận có hạn 2027-01-21 (thay một phần ADR-0065); dạng nguyên văn vẫn phải chặn.
+- [ADR-0071](docs/adr/0071-perf-trial.md) (D-356): `perf trial` — máy quản lý trọn một lần thử tối ưu: đo xen kẽ base/`start_head`/candidate ở worktree ghim dựng lại, cấu hình và công cụ chấm từ commit gốc, held-out lúc finish, falsifier ghi trước, giữ/thu hồi tự động, sổ bền `.autopilot/`; lát 3 của ADR-0052, triển khai T-3680…T-3687.
 
 Nghiên cứu nền ngày 2026-10-13 ở [`research/`](research/): phân tích khung cũ, trích xuất catalog `seeker19110/stored`,
 AI agent và giao thức, cơ chế Claude Code. Khung cũ khôi phục được bằng `git archive 1b80fe4`.
