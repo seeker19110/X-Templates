@@ -85,7 +85,7 @@ OS/devcontainer có egress allowlist (`LOOP-HARNESS-022`) và việc phiên chí
   `pyenv exec`, `asdf exec`, `volta run`, `fnm exec`, `direnv exec`, `bundle exec`, `nix develop -c`, `pnpm exec`)
   không được bóc để trích script; lồng hơn 8 lớp lệnh chạy hộ cũng không; đích `rm -rf` là thay thế lệnh khác `$(pwd)` (`$(pwd -P)/..`,
   `$(dirname $PWD)`, `$(realpath ..)`) là không rõ nên cho qua — D-051 (AUD-SEC-101).
-- **Duyệt giai đoạn** (ADR-0058, AUD-SEC-155): luật chữ (`xt.py … stage … approve`/`init … --adopt`) cộng luật token
+- **Duyệt giai đoạn** (ADR-0058, AUD-SEC-155; ADR-0069: `stage approve` viết rõ chữ — không token mờ, không `xargs`/`parallel`, không `init`/`--adopt` — được cho qua khi xt.yaml ở cây **và** bản đã commit ở nhánh mặc định khai `stage_approval: agent`, `XT_GUARD_POLICY=strict` không nới): luật chữ (`xt.py … stage … approve`/`init … --adopt`) cộng luật token
   mờ: ở mọi vị trí script (`-m xt`/`-mxt`/`-m scripts.xt`, lồng trong `perf sample --`), bỏ chuyển hướng và fd
   (`2>/dev/null`, `{fd}>f`; đích bị cắt như `> >(cat)` là mờ), lệnh con, cờ/giá trị `--framework` (cả `=` rỗng) hay tuỳ
   chọn `init` mờ (`$(…)`, backtick, biến, glob), chuỗi thay chỗ (`xargs -I`/`-i`/`--replace`, mẫu `{…}`, `:::`) hay đến
@@ -224,6 +224,7 @@ YAML phẳng `khoá: lệnh`; `""` = không có, thiếu khoá = tự dò từ m
 | `migration_check` · `rollback` · `acceptance` | `release-check` (cổng production, ADR-0062 §6) | Migration tiến + lùi trên bản sao dữ liệu/staging · diễn tập quay về bản trước (tag/artifact cũ + migration lùi) · kiểm thử nghiệm thu tự động theo tiêu chí chấp nhận — đỏ = NO-GO, chặn `prod_switch`; chưa khai ở M/L → người ký lý do |
 | `preview` | `xt.py stage submit` (ghi, không chạy) | Cách chạy thử bản trình người duyệt giai đoạn (ADR-0058) — chỉ ghi vào sổ và in ở `stage status` |
 | `preview_smoke` | `xt.py stage submit` (chạy qua guard) | Gate bản trình (D-247): exit ≠ 0, để lại thay đổi trong cây hay HEAD đổi trong lúc chạy → không trình; trống → sổ ghi "không có smoke" |
+| `stage_approval` | `xt.py stage approve` · `loop next-step` · guard — đọc ở **cây và bản đã commit ở nhánh chính** | `agent` = agent tự nghiệm thu giai đoạn (ADR-0069): duyệt bản trình còn nguyên, `next-step` trả `stage-approve`; vắng/`human` = chỉ người, ngoài phiên agent (ADR-0058). `init --adopt` luôn chỉ người |
 | `claude_min_version` · `ai_attribution` | `doctor` · guard | Cảnh báo Claude Code thấp hơn (`LOOP-HARNESS-026`) · `forbid` chặn commit/PR ghi tên model hay URL phiên AI (`LOOP-HARNESS-027`) |
 | `harness_permissions` | `install.py` | `own` = dự án giữ mô hình quyền riêng: không thêm `allow: Bash`/`deny` của khung, lệnh hook của khung ghi dạng tương đối `bash .claude/hooks/x.sh` như dự án (dhcb — chủ repo 2026-10-22); guard vẫn chạy trong hook. Vắng = gộp quyền theo ADR-0018 |
 

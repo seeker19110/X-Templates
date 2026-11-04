@@ -8076,6 +8076,7 @@ def stage_facts(base: Path) -> Optional[Dict[str, Any]]:
         "status": led["status"],
         "sha": sha,
         "changed": _stage_changed(base, sub) if sha else [],
+        "agent_approval": stage_agent_approval(base),  # ADR-0069: `next-step` chỉ agent tự duyệt thay vì chờ người
     }
 
 
@@ -8114,6 +8115,10 @@ def _stale_submission(f: Dict[str, Any], loop: StepPart) -> StepPart:
     }
 
 
+STAGE_HUMAN_APPROVE = "người duyệt MVP (`stage approve`)"  # `missing` của next-step khi chỉ người duyệt (ADR-0058)
+STAGE_AGENT_APPROVE = "`stage approve` (agent, ADR-0069)"  # … khi xt.yaml khai `stage_approval: agent`
+
+
 def _awaiting_mvp(f: Dict[str, Any], harden: bool) -> bool:
     """Build ở giai đoạn 1 đã trình, chờ người duyệt (ADR-0058)."""
     sf = f.get("stage") or {}
@@ -8129,18 +8134,29 @@ def _step_stage(sf: Optional[Dict[str, Any]], pending: str = "") -> StepPart:
         return {"action": "blocked", "reason": f"sổ giai đoạn: {sf['error']}", "missing": ["sổ giai đoạn hợp lệ"]}
     if sf["stage"] != 1:
         return None
+    agent, sha12 = bool(sf.get("agent_approval")), str(sf["sha"])[:12]
     if sf["status"] == "awaiting_approval":
+        if agent:  # ADR-0069: agent tự nghiệm thu — đối chiếu tiêu chí MVP của PLAN với bản trình rồi tự quyết
+            return {
+                "action": "stage-approve",
+                "reason": f"MVP ({sf['cycle']}) đã trình bản {sha12}{pending}; xt.yaml khai `{STAGE_APPROVAL_KEY}: agent`"
+                f" (ADR-0069) → agent tự nghiệm thu: đối chiếu tiêu chí MVP của PLAN với bản trình, đạt → `stage approve"
+                f" --sha {sha12} --note <tiêu chí đã đạt>`, commit + push sổ; không đạt → `stage reopen --reason …` rồi"
+                " làm tiếp giai đoạn 1",
+                "missing": [STAGE_AGENT_APPROVE],
+            }
         return {
             "action": "wait-approval",
-            "reason": f"MVP ({sf['cycle']}) đã trình bản {str(sf['sha'])[:12]}, chờ người `stage approve`{pending} — dừng;"
+            "reason": f"MVP ({sf['cycle']}) đã trình bản {sha12}, chờ người `stage approve`{pending} — dừng;"
             " người yêu cầu sửa → `stage reopen` rồi làm tiếp giai đoạn 1",
-            "missing": ["người duyệt MVP (`stage approve`)"],
+            "missing": [STAGE_HUMAN_APPROVE],
         }
+    then = "rồi `stage approve` (agent, ADR-0069)" if agent else "báo người duyệt, dừng"
     return {
         "action": "stage-submit",
         "reason": f"giai đoạn 1 (MVP, {sf['cycle']}) hết việc máy làm được{pending} — `stage submit --evidence <cách chạy"
-        " thử + tiêu chí>`, commit + push sổ, báo người duyệt, dừng; không sang giai đoạn sau (ADR-0058)",
-        "missing": ["`stage submit`", "người duyệt MVP (`stage approve`)"],
+        f" thử + tiêu chí>`, commit + push sổ, {then}; không sang giai đoạn sau (ADR-0058)",
+        "missing": ["`stage submit`", STAGE_AGENT_APPROVE if agent else STAGE_HUMAN_APPROVE],
     }
 
 
@@ -8151,16 +8167,18 @@ def _harden_stage_lock(sf: Optional[Dict[str, Any]]) -> StepPart:
         return None
     if "error" in sf:
         return {**(_step_stage(sf) or {}), "work": []}
+    agent = bool(sf.get("agent_approval"))  # ADR-0069
+    who = "agent" if agent else "người"
     route = (
-        "chờ người `stage approve` bản đã trình"
+        f"{'agent' if agent else 'chờ người'} `stage approve` bản đã trình"
         if sf.get("status") == "awaiting_approval"
-        else ("build `loop next-step` tới `stage-submit`, người `stage approve`")
+        else (f"build `loop next-step` tới `stage-submit` rồi {who} `stage approve`")
     )
     return {
         "action": "blocked",
-        "reason": f"giai đoạn 1 (MVP, {sf['cycle']}) chưa được người duyệt — `/complete` khoá (ADR-0058, D-246): {route}"
+        "reason": f"giai đoạn 1 (MVP, {sf['cycle']}) chưa được {who} duyệt — `/complete` khoá (ADR-0058, D-246): {route}"
         " rồi mới harden",
-        "missing": ["người duyệt MVP (`stage approve`)"],
+        "missing": [STAGE_AGENT_APPROVE if agent else STAGE_HUMAN_APPROVE],
         "work": [],  # không gom việc harden ở MVP: `work[].line` là thứ `/complete` dán vào PLAN-harden (review #338)
     }
 
@@ -11412,6 +11430,11 @@ PLAN_STAGE_RE = re.compile(r"^\s*>?\s*Giai đoạn sản phẩm:\s*([1-3])\s*\((
 STAGE_AGENT_ENV = ("CLAUDECODE", "CLAUDE_CODE_SESSION_ID", "AI_AGENT")  # biến môi trường mà phiên agent mang
 STAGE_DIFF_UNKNOWN = "(nội dung khác bản trình)"  # vân tay lệch mà diff theo SHA không chỉ ra file (hay SHA mất)
 STAGE_HUMAN_ONLY = "chỉ người duyệt — chạy ở terminal của chủ dự án, ngoài phiên agent (ADR-0058)"
+# ADR-0069 (chủ dự án 2026-11-04, D-342): xt.yaml `stage_approval: agent` → agent tự nghiệm thu giai đoạn bằng `stage approve`
+# (bản trình phải còn nguyên); vắng/khác → chỉ người. `init --adopt` luôn chỉ người.
+STAGE_APPROVAL_KEY = "stage_approval"
+STAGE_AGENT_BY = "agent"
+STAGE_MAIN_REFS = ("origin/HEAD", "origin/main", "origin/master")  # nhánh chính của remote, ref đầu tiên đọc được
 
 
 class StageError(Exception):
@@ -11423,6 +11446,22 @@ def agent_session() -> bool:
     giới cách ly (D-015): guard chặn thêm lệnh duyệt và ghi tay sổ. Biến có mặt là đủ — đặt rỗng (`CLAUDECODE= …`)
     vẫn là phiên agent (AUD-SEC-155)."""
     return any(k in os.environ for k in STAGE_AGENT_ENV)
+
+
+def stage_agent_approval(base: Path) -> bool:
+    """`stage_approval: agent` có hiệu lực khi CẢ xt.yaml ở cây làm việc LẪN bản đã commit ở nhánh chính của remote
+    (`STAGE_MAIN_REFS`, ref đầu tiên đọc được) đều khai — như `delivery_phase` của guard: phiên không tự cấp quyền duyệt
+    cho mình (ADR-0069). Không đọc được xt.yaml hay không có remote → chỉ người (ADR-0058)."""
+    try:
+        if _xt_keys(base).get(STAGE_APPROVAL_KEY) != STAGE_AGENT_BY:
+            return False
+    except (OSError, ValueError):
+        return False
+    for ref in STAGE_MAIN_REFS:
+        text = _committed_xt_text(base, ref)
+        if text is not None:
+            return _yaml_keys(text).get(STAGE_APPROVAL_KEY) == STAGE_AGENT_BY
+    return False
 
 
 def _stage_first(ev: Dict[str, Any], r: Dict[str, Any]) -> str:
@@ -11732,7 +11771,11 @@ def _stage_reopen(led: Optional[Dict[str, Any]], reason: str) -> Dict[str, Any]:
     return led
 
 
-def _stage_approve(led: Optional[Dict[str, Any]], sha: str, by: str, note: str) -> Dict[str, Any]:
+def _stage_approve(
+    led: Optional[Dict[str, Any]], sha: str, by: str, note: str, agent_base: Optional[Path] = None
+) -> Dict[str, Any]:
+    """Duyệt bản đã trình. `agent_base` (ADR-0069: agent tự nghiệm thu) → bản trình phải còn nguyên trên cây (vân tay/SHA
+    khớp, không file đổi) — mã đổi sau khi trình thì `stage reopen` rồi trình lại; sự kiện ghi `session`."""
     if led is None or led["status"] != "awaiting_approval":
         raise StageError("không có giai đoạn chờ duyệt — agent trình bằng `xt.py stage submit` trước")
     want = led["submitted"]["sha"]
@@ -11740,7 +11783,16 @@ def _stage_approve(led: Optional[Dict[str, Any]], sha: str, by: str, note: str) 
         raise StageError(f"--sha cần ≥ 7 ký tự của bản đã trình ({want[:12]})")
     if not want.startswith(sha.lower()):
         raise StageError(f"--sha {sha!r} không phải bản đã trình ({want[:12]}) — duyệt đúng bản đã chạy thử")
-    _stage_event(led, "approve", sha=want, by=by, note=note)
+    extra: Dict[str, Any] = {}
+    if agent_base is not None:
+        changed = _stage_changed(agent_base, led["submitted"])
+        if changed != []:
+            raise StageError(
+                f"agent không duyệt được — {_changed_note(changed, want)}: `stage reopen --reason …`, làm xong,"
+                " kiểm lại cuối rồi `stage submit` lại (ADR-0069)"
+            )
+        extra["session"] = session_id()
+    _stage_event(led, "approve", sha=want, by=by, note=note, **extra)
     led["submitted"] = None
     if led["stage"] == 3:
         led["status"] = "completed"
@@ -11769,11 +11821,12 @@ def _stage_print(led: Optional[Dict[str, Any]], as_json: bool) -> None:
     print(f"{led['cycle']} · giai đoạn {led['stage']} ({name}) · {led['status']}")
     if led["status"] == "awaiting_approval":
         sub = led["submitted"]
-        print(f"  chờ người duyệt bản {sub['sha'][:12]}: {sub.get('evidence', '?')}")
+        print(f"  chờ duyệt bản {sub['sha'][:12]}: {sub.get('evidence', '?')}")
         print(f"  chạy thử: {sub.get('preview') or '(xt.yaml chưa khai `preview`)'} · máy: {sub.get('verified', '?')}")
         print(f"  smoke: {sub.get('smoke') or '(bản trình trước D-247)'}")
         print(
-            f"  người: `python3 <xt.py> stage approve --sha {sub['sha'][:12]} --note …` ở terminal riêng; sửa: `stage reopen`"
+            f"  duyệt: `python3 <xt.py> stage approve --sha {sub['sha'][:12]} --note …` — người ở terminal riêng"
+            f" (ADR-0058), hoặc agent khi xt.yaml đã commit khai `{STAGE_APPROVAL_KEY}: agent` (ADR-0069); sửa: `stage reopen`"
         )
     elif led["status"] == "active" and led["stage"] < 3:
         locked = "3" if led["stage"] == 2 else "2–3"
@@ -11800,8 +11853,12 @@ def _stage_dispatch(
     if cmd == "reopen":
         return lambda led: _stage_reopen(led, args.reason)
     if cmd == "approve":
-        if agent_session():
-            raise StageError(f"`stage approve` {STAGE_HUMAN_ONLY}")
+        if agent_session():  # ADR-0069: chỉ khi xt.yaml (cây + nhánh chính) khai `stage_approval: agent`
+            if not stage_agent_approval(base):
+                raise StageError(
+                    f"`stage approve` {STAGE_HUMAN_ONLY}; agent tự duyệt cần `{STAGE_APPROVAL_KEY}: agent` (ADR-0069)"
+                )
+            return lambda led: _stage_approve(led, args.sha, STAGE_AGENT_BY, args.note, base)
         by = _stage_by(base)
         return lambda led: _stage_approve(led, args.sha, by, args.note)
     if cmd == "new-cycle":
