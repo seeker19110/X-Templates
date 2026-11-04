@@ -612,14 +612,15 @@ def _git_dir_pointer(path: str, prefix: bytes = b"") -> str:
 
 
 def _git_config_inodes(root: str) -> Set[Tuple[int, int]]:
-    """Inode của cấu hình git toàn cục/hệ thống và cấu hình, hook của dự án (AUD-SEC-440/447)."""
+    """Inode của cấu hình Git và gitfile, commondir, hook của dự án (AUD-SEC-440/443/447)."""
     xdg = os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config")
     paths = [os.path.expanduser("~/.gitconfig"), os.path.join(xdg, "git", "config"), "/etc/gitconfig"]
     paths += ["/usr/local/etc/gitconfig", "/opt/homebrew/etc/gitconfig"]
     dotgit = os.path.join(root, ".git")
     gitdir = _git_dir_pointer(dotgit, b"gitdir: ") or dotgit
-    common = _git_dir_pointer(os.path.join(gitdir, "commondir")) or gitdir
-    paths += [os.path.join(common, "config"), os.path.join(gitdir, "config.worktree")]
+    common_file = os.path.join(gitdir, "commondir")
+    common = _git_dir_pointer(common_file) or gitdir
+    paths += [dotgit, common_file, os.path.join(common, "config"), os.path.join(gitdir, "config.worktree")]
     with contextlib.suppress(OSError, ValueError), os.scandir(os.path.join(common, "hooks")) as hooks:
         paths.extend(hook.path for hook in hooks)
     out: Set[Tuple[int, int]] = set()
@@ -631,7 +632,7 @@ def _git_config_inodes(root: str) -> Set[Tuple[int, int]]:
 
 
 def _hardlink_git_config(path: str, root: str) -> bool:
-    """`path` có thật, `st_nlink > 1` và cùng inode với cấu hình hoặc hook git (link cứng tạo ở lệnh trước)."""
+    """`path` có thật, `st_nlink > 1` và cùng inode với tệp Git được bảo vệ."""
     try:
         st = os.stat(os.path.expanduser(path))
     except (OSError, ValueError):
@@ -9352,6 +9353,17 @@ def _discover_bare_git_dir(path: str, ceilings: str, across: Tuple[str, ...]) ->
         directory = parent
 
 
+def _explicit_bare_cwd(command: List[str], cwd: Optional[str]) -> Optional[str]:
+    """`git --bare` lấy Git dir tại đúng vị trí cờ, sau các `-C` đứng trước nó."""
+    leading = ["git"]
+    for flag, value in _git_globals(command):
+        if flag == "--bare":
+            return _git_dir(leading, cwd) or ""
+        if flag == "-C":
+            leading.extend((flag, value))
+    return None
+
+
 def _bare_git_config_ask(n: List[str], argv: List[str], cwd: Optional[str], env: Dict[str, str]) -> str:
     """AUD-SEC-446: chặn khóa chạy lệnh có sẵn trong config repo trần; `git config` vẫn đọc được để chẩn đoán."""
     if n[:1] != ["git"] or not n[1:2] or n[1] in ("init", "clone", "config"):
@@ -9364,10 +9376,19 @@ def _bare_git_config_ask(n: List[str], argv: List[str], cwd: Optional[str], env:
     ceilings = inline.get("GIT_CEILING_DIRECTORIES", "") if all(ENV_ASSIGN_RE.fullmatch(t) for t in prefix) else ""
     across = "GIT_DISCOVERY_ACROSS_FILESYSTEM"
     values = os.environ.get(across, ""), env.get(across, ""), inline.get(across, "")
-    bare = _discover_bare_git_dir(directory, ceilings, values) if directory else ""
+    bare = _explicit_bare_cwd(command, cwd)
+    if bare is None:
+        bare = _discover_bare_git_dir(directory, ceilings, values) if directory else ""
     if not bare:
         return ""
-    config = os.path.join(bare, "config")
+    common = _git_dir_pointer(os.path.join(bare, "commondir")) or bare
+    return _git_config_read_ask(os.path.join(common, "config")) or _git_config_read_ask(
+        os.path.join(bare, "config.worktree")
+    )
+
+
+def _git_config_read_ask(config: str) -> str:
+    """Đọc riêng tệp config, không theo include; xét cả config.worktree nếu tệp có mặt (AUD-SEC-446)."""
     if not os.path.isfile(config):
         return ""
     try:

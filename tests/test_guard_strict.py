@@ -3422,6 +3422,14 @@ class GuardDebt433Test(unittest.TestCase):
             out = guard.apply_policy(guard.bash_decision("printf x >> hard", str(linked)))
             self.assertEqual((out["decision"], out["code"]), ("deny", "HOOK_BYPASS"), out)
             self.assertEqual(guard.edit_decision("hard", str(linked))[0], "deny")
+            for source, alias in (
+                (linked / ".git", "gitfile-link"),
+                (repo / ".git/worktrees/linked/commondir", "commondir-link"),
+            ):
+                os.link(source, linked / alias)
+                out = guard.apply_policy(guard.bash_decision(f"printf x >> {alias}", str(linked)))
+                self.assertEqual((out["decision"], out["code"]), ("deny", "HOOK_BYPASS"), out)
+                self.assertEqual(guard.edit_decision(alias, str(linked))[0], "deny")
 
     def test_aud_sec_447_git_dir_pointer_invalid(self):
         with tempfile.TemporaryDirectory() as d:

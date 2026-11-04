@@ -119,6 +119,38 @@ class GitMetadataTest(unittest.TestCase):
             f'''git init --bare {future} && python3 -c "print(open('{future / "config"}').read())"''', "NONE"
         )
 
+    def test_bare_git_rejects_preexisting_worktree_config(self):
+        future = self.tmp / "future"
+        future.mkdir()
+        config = future / "config.worktree"
+        config.write_text("[core]\n\tpager = cat\n")
+        self.git_init(future, "--bare")
+        subprocess.run(["git", "-C", str(future), "config", "extensions.worktreeConfig", "true"], check=True)
+        self.assert_code(f"git -C {future} rev-parse --is-bare-repository", "NONE")
+        config.write_text("[diff]\n\texternal = /tmp/driver\n")
+        effective = subprocess.check_output(["git", "-C", str(future), "config", "--get", "diff.external"], text=True)
+        self.assertEqual(effective.strip(), "/tmp/driver")
+        self.assert_code(f"git -C {future} diff HEAD^ HEAD", "HOOK_BYPASS")
+
+    def test_bare_git_rejects_preexisting_common_config(self):
+        gitdir = self.tmp / "metadata"
+        gitdir.mkdir()
+        (gitdir / "HEAD").write_text("ref: refs/heads/main\n")
+        (gitdir / "commondir").write_text("../bare\n")
+        with (self.bare / "config").open("a") as f:
+            f.write("[diff]\n\texternal = /tmp/driver\n")
+        effective = subprocess.check_output(["git", "-C", str(gitdir), "config", "--get", "diff.external"], text=True)
+        self.assertEqual(effective.strip(), "/tmp/driver")
+        self.assert_code(f"git -C {gitdir} diff HEAD^ HEAD", "HOOK_BYPASS")
+
+    def test_bare_flag_uses_cwd_at_flag_position(self):
+        self.git_init(self.bare)
+        with (self.bare / "config").open("a") as config:
+            config.write("[diff]\n\texternal = /tmp/driver\n")
+        self.assert_code(f"git -C {self.bare} diff HEAD^ HEAD", "NONE")
+        self.assert_code(f"git -C {self.bare} --bare diff HEAD^ HEAD", "HOOK_BYPASS")
+        self.assert_code(f"git --bare -C {self.bare} diff HEAD^ HEAD", "NONE")
+
     def test_bare_git_alternate_object_store(self):
         store = self.tmp / "store"
         (self.bare / "objects").rename(store)

@@ -74,8 +74,8 @@ Trong repo tạm, `ln .git/hooks/pre-commit hk` tạo hai đường dẫn cùng 
 
 ## 8. Kiểm lại thay đổi
 
+- Review #435 tái hiện thêm hard link tới gitfile và cấu hình repo trần từ `commondir/config` hoặc `config.worktree`. Bổ sung test hồi quy cho cả hai, cùng ca `--bare` đổi Git dir theo vị trí `-C`.
 - `pip-audit 2.10.1 --require-hashes --strict --disable-pip` trên ba lockfile `requirements-*.txt` exit 0, không có lỗ hổng đã biết.
-
 - Git guard có test cho `--exec-path=` rỗng, ghi qua symlink tới gitfile, ghi hook qua hard link ở linked worktree, repo trần được Git dò từ thư mục con, và tạo repo trần rồi ghi cấu hình trong cùng lệnh Bash. Test đối chứng giữ các lệnh đọc và ghi file thường.
 - Chạy đúng bước Bash trong workflow mới với tarball Gitleaks 8.30.1 từ nhà phát hành. SHA-256 khớp, quét 1.405 commit ở các ref cục bộ, 0 phát hiện, exit 0. Hai mẫu thử ở commit PR thứ 31 và ở diff merge đều làm job quét exit 1. SARIF che nội dung mẫu thử.
 - `python3 -m unittest -q tests.test_ci tests.test_ci_template` exit 0 (73 test). `zizmor --offline --persona regular --min-severity high` exit 0 cho workflow đổi.
