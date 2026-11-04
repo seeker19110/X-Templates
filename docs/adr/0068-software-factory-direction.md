@@ -1,10 +1,12 @@
 # ADR-0068: Định hướng xưởng phần mềm — lõi hiện có + gói sản phẩm có phiên bản + hợp đồng bằng chứng phát hành có kiểu
 
-- **Trạng thái:** **Đề xuất** 2026-11-04 — chờ chủ dự án trả lời bốn câu hỏi ở
-  [`research/2026-11-04-software-factory-direction.md`](../../research/2026-11-04-software-factory-direction.md) §9 (tiền lệ
-  ADR-0064: nháp cùng PR, chấp nhận khi có câu trả lời; khi chốt ghi **D-NNN** bằng `xt.py loop decide` và đổi dòng này).
-  Chưa chấp nhận = không lát nào ở §Quyết định được lập PLAN.
-- **Trạng thái triển khai:** chưa bắt đầu. Không thêm ID, không đổi mức, không đổi schema/CLI trong PR này.
+- **Trạng thái:** **Đã chấp nhận 2026-11-04** — chủ dự án trả lời bốn câu hỏi ở
+  [`research/2026-11-04-software-factory-direction.md`](../../research/2026-11-04-software-factory-direction.md) §9:
+  **1a · 2a hotel-manager · 3a · 4a** (tiền lệ ADR-0064: nháp cùng PR, chấp nhận cùng ngày; **D-343**). Bản nháp cùng ngày
+  chỉ khác ở trạng thái và đoạn "Bốn câu hỏi" ở §Quyết định.
+- **Trạng thái triển khai:** chưa bắt đầu — lát A cần PLAN riêng (`docs/autopilot/PLAN-factory-A.md`); nhóm `docs/autopilot`
+  còn ≈ 2 KB dưới trần ADR-0043/0050 (đo 2026-11-04: 350.221/352.345 B) nên phải lưu trữ PLAN đã đóng trước (như T-3651).
+  Không thêm ID, không đổi mức, không đổi schema/CLI trong PR này.
 - **Ngày:** 2026-11-04.
 - **Nghiên cứu:** research cùng tên (đối chiếu X-Templates `e0ea0a6`/`9c03257` và stored `5d8f8a6` ngày 2026-11-04; nhật ký
   xác minh §10; điều chưa xác minh: trạng thái merge stored#131, stack dự án đích).
@@ -60,8 +62,17 @@ Chọn **phương án 3**, năm lát theo research §7, thứ tự A → B → C
 - **E — Registry nhiều sản phẩm** mở rộng `TARGETS.md` (core/gói/version/owner/release/ngoại lệ còn hạn) + trang đọc ở
   `xt.py app`; vòng học qua `feedback aggregate` với cùng ngưỡng ADR-0010.
 
-Bốn câu hỏi chủ dự án chốt (đề xuất và phương án thay thế ở research §9): nơi lưu gói; stack + repo thử; schema bằng chứng và
-tương thích; tuyến thứ hai + host.
+Bốn câu hỏi chủ dự án đã chốt 2026-11-04 (D-343; phương án thay thế ở research §9):
+
+1. **Nơi lưu gói (1a):** gói đầu tiên trong repo khung tại `framework/templates/packs/<stack>/`, phiên bản theo `VERSION`;
+   chuyển repo riêng khi có ≥ 2 gói hoặc owner khác chủ khung. Gói không kéo dependency vào CLI stdlib.
+2. **Stack và repo thử (2a):** stack của dự án đích **hotel-manager** — lát B (repo sạch) và lát C (brownfield) dùng chung
+   một gói; stack cụ thể xác minh khi đọc repo lúc lập PLAN lát B (chưa đọc được trong phiên này); owner gói: chủ dự án.
+3. **Schema bằng chứng (3a):** evidence v3 chỉ **thêm trường**, v2 vẫn hợp lệ; `release-check --json` thêm `promotion` và
+   `subject`, giữ `go`/`verdict`/`human` và exit code ít nhất một bản minor; "đã duyệt" vẫn là `stage approve` (người, hoặc
+   agent theo ADR-0069)/GO-NO-GO §5 — máy không tự nâng `pending_human` thành `approved`.
+4. **Tuyến thứ hai và host (4a):** API/worker cùng stack với gói đầu, AI/data chờ dự án đích có nhu cầu và dữ liệu hợp lệ;
+   host Codex và Gemini CLI trước (thứ tự ADR-0064), công bố "hỗ trợ" chỉ khi đạt `checks-run` với fixture payload thật.
 
 ### Hệ quả
 
