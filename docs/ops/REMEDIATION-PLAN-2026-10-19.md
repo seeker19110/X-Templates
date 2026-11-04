@@ -1,7 +1,7 @@
 # Kế hoạch khắc phục và nâng cấp tự động hóa X-Templates
 
 > Ngày: 2026-10-19 · Bản 2 (thay bản nháp #160) · Trạng thái: đề xuất đã tái hiện, kèm kế hoạch máy đọc
-> [`PLAN-3.9-automation.md`](../autopilot/PLAN-3.9-automation.md) · Quyết định tự duyệt: D-066…D-070
+> [`PLAN-3.9-automation.md`](../archive/autopilot/PLAN-3.9-automation.md) · Quyết định tự duyệt: D-066…D-070
 > ([`DECISIONS.md`](../autopilot/DECISIONS.md)).
 > Mục tiêu: tăng tối đa tỷ lệ việc máy tự hoàn tất (chọn task, thu bằng chứng, review, sửa CI, merge, nâng cấp) mà
 > mọi kết luận "đạt" vẫn là bằng chứng máy kiểm được, không phải lời khai (P1).
@@ -13,7 +13,7 @@
 `T-1402…T-1408`) đã merge vào `main` (`f71d323`, 2026-10-19) và sửa các lỗ guard cấp bách; bản này chỉ nối tiếp.
 
 [PLAN đang thực thi](../autopilot/PLAN.md) (3.8.0, `T-1401…T-1417`), [sổ audit](AUDIT-STATUS.md) và
-[báo cáo delta](AUDIT-REPORT-2026-10-19-delta.md) vẫn là nơi theo dõi phát hiện đã có. Bản này bổ sung hướng sửa, nâng cấp
+[báo cáo delta](../archive/ops/AUDIT-REPORT-2026-10-19-delta.md) vẫn là nơi theo dõi phát hiện đã có. Bản này bổ sung hướng sửa, nâng cấp
 và **kế hoạch triển khai dạng máy đọc** cho đợt kế tiếp (3.9.0 → 3.10.0): khi vòng 3.8.0 phát hành, chạy
 `python3 scripts/xt.py loop init --plan docs/autopilot/PLAN-3.9-automation.md --single-session` (D-067). Không dùng bảng
 ở đây làm sổ hoàn thành thứ hai; chỉ cấp ID audit mới cho phần thật sự còn thiếu.
@@ -256,7 +256,7 @@ với steward, số lần merge tay chưa đo — `T-1521` đo trước khi bậ
 
 ## 7. Thứ tự triển khai và điểm kiểm soát
 
-Kế hoạch máy đọc: [`PLAN-3.9-automation.md`](../autopilot/PLAN-3.9-automation.md) (T-1501…T-1522, Gate từng task, 4 con
+Kế hoạch máy đọc: [`PLAN-3.9-automation.md`](../archive/autopilot/PLAN-3.9-automation.md) (T-1501…T-1522, Gate từng task, 4 con
 số, điểm dừng; `sau:` là dependency trong file, `cần:` là điều kiện ngoài file). Tóm tắt:
 
 | Đợt | Task | Phụ thuộc | Điều kiện sang đợt tiếp |

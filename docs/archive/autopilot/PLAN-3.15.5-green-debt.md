@@ -1,7 +1,7 @@
 # PLAN-3.15.5-green-debt.md — Khung X-Templates · dọn 🟢 rẻ của sổ audit (guard, quyền đọc, cổng) → bản 3.15.5
 
 > Lập ngày 2026-10-22. Chủ repo gọi `/autopilot` không kèm yêu cầu: không PR mở, vòng lặp tắt, PROGRESS không còn task
-> máy làm được (mọi task hoãn đều chờ người). Phiên chính chọn các 🟢 `mở` của [`AUDIT-STATUS.md`](../ops/AUDIT-STATUS.md)
+> máy làm được (mọi task hoãn đều chờ người). Phiên chính chọn các 🟢 `mở` của [`AUDIT-STATUS.md`](../../ops/AUDIT-STATUS.md)
 > có đường tái hiện máy kiểm được và bản vá nhỏ, không cần quyết chính sách của chủ repo (D-138, ADR-0008).
 >
 > **Cú pháp bắt buộc cho máy:** mỗi task một dòng `- [ ] \`T-NNNN\` <việc> — Gate: \`<lệnh>\``.

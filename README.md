@@ -267,14 +267,15 @@ python3 -m unittest discover -s tests    # chỉ test (cổng test còn đòi co
 - [ADR-0065](docs/adr/0065-guard-allowlist-dynamic-expansion.md) (D-322): guard xét mở rộng động theo danh sách trắng — từ lệnh dựng lúc chạy, tách/gán theo tên động (`IFS`), heredoc đọc lại, dữ liệu thành mã (`mapfile -C`, `${x@P}`) → `BUDGET`; không suy cấu trúc lệnh để miễn.
 - [ADR-0066](docs/adr/0066-guard-written-file-reuse.md) (D-327): tệp do chính lệnh ghi mà tên được nhắc lại ở chỗ khác của lệnh (trừ lệnh chỉ đọc trong danh sách trắng) → `BUDGET` — không liệt kê trình chạy (AUD-SEC-406).
 - [ADR-0067](docs/adr/0067-guard-static-limit-layered-defense.md) (D-331/D-332): tên tệp/mô-đun dựng lúc chạy trong lệnh tự ghi tệp — giới hạn phân tích tĩnh, chấp nhận có hạn 2027-01-21 (thay một phần ADR-0065); dạng nguyên văn vẫn phải chặn.
-- [ADR-0068](docs/adr/0068-software-factory-direction.md) (D-343): định hướng xưởng phần mềm — lõi hiện có + gói sản phẩm có phiên bản (`framework/templates/packs/<stack>/`, stack hotel-manager) + hợp đồng bằng chứng/phát hành có kiểu (evidence v3 thêm trường, `release-check` thêm `promotion`) + registry file; năm lát A–E, mỗi lát một PLAN/PR riêng.
-- [ADR-0069](docs/adr/0069-agent-stage-approval.md) (D-342): agent tự nghiệm thu giai đoạn sản phẩm khi `xt.yaml` (cây và bản đã commit ở nhánh chính) khai `stage_approval: agent` — duyệt bản trình còn nguyên, `next-step` trả `stage-approve`; `init --adopt`, dạng mờ vẫn chỉ người (thay một phần ADR-0058).
+- [ADR-0068](docs/adr/0068-software-factory-direction.md) (D-348): định hướng xưởng phần mềm — lõi hiện có + gói sản phẩm có phiên bản (`framework/templates/packs/<stack>/`, stack hotel-manager) + hợp đồng bằng chứng/phát hành có kiểu (evidence v3 thêm trường, `release-check` thêm `promotion`) + registry file; năm lát A–E, mỗi lát một PLAN/PR riêng.
+- [ADR-0069](docs/adr/0069-agent-stage-approval.md) (D-347): agent tự nghiệm thu giai đoạn sản phẩm khi `xt.yaml` (cây và bản đã commit ở nhánh chính) khai `stage_approval: agent` — duyệt bản trình còn nguyên, `next-step` trả `stage-approve`; `init --adopt`, dạng mờ vẫn chỉ người (thay một phần ADR-0058).
+- [ADR-0070](docs/adr/0070-archive-repo-history.md) (D-349): lịch sử của chính repo khung (PLAN đã đóng, báo cáo audit, GO-NO-GO và ghi chép đo cũ) vào [`docs/archive/`](docs/archive/README.md) — `framework/` giữ nguyên (ID "Ngừng dùng", Nguồn + ngày); số task không tái sử dụng (`xt.py` quét cả kho); `.ignore` để tìm kiếm mặc định bỏ qua kho.
 
 Nghiên cứu nền ngày 2026-10-13 ở [`research/`](research/): phân tích khung cũ, trích xuất catalog `seeker19110/stored`,
 AI agent và giao thức, cơ chế Claude Code. Khung cũ khôi phục được bằng `git archive 1b80fe4`.
 
 Định hướng [xưởng phần mềm từ 34 mục stored](research/2026-11-04-software-factory-direction.md) (4/11/2026, chấp nhận qua
-[ADR-0068](docs/adr/0068-software-factory-direction.md), D-343): gói sản phẩm có phiên bản, bằng chứng phát hành có kiểu, lộ trình
+[ADR-0068](docs/adr/0068-software-factory-direction.md), D-348): gói sản phẩm có phiên bản, bằng chứng phát hành có kiểu, lộ trình
 nghiệm thu A–E; chưa lát nào có mã — mỗi lát một PLAN/PR riêng.
 
 ## Đóng góp
@@ -282,6 +283,6 @@ nghiệm thu A–E; chưa lát nào có mã — mỗi lát một PLAN/PR riêng.
 Xem [`CONTRIBUTING.md`](CONTRIBUTING.md) và [`framework/00-method/conventions.md`](framework/00-method/conventions.md).
 Bản đề xuất [khắc phục và nâng cấp tự động hóa ngày 2026-10-19](docs/ops/REMEDIATION-PLAN-2026-10-19.md)
 gồm tái hiện, nghiên cứu nguồn sống, thang tự chủ theo loại PR, tiêu chí nghiệm thu và kế hoạch máy đọc
-[`PLAN-3.9-automation.md`](docs/autopilot/PLAN-3.9-automation.md) cho đợt sau 3.8.0.
+[`PLAN-3.9-automation.md`](docs/archive/autopilot/PLAN-3.9-automation.md) cho đợt sau 3.8.0.
 Vận hành: [runbook `pr-steward`](docs/ops/RUNBOOK-PR-STEWARD.md) · [phụ thuộc và license](docs/ops/DEPENDENCIES.md).
 Báo lỗ hổng: [`SECURITY.md`](SECURITY.md). Giấy phép: [MIT](LICENSE).

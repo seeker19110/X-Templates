@@ -4,7 +4,7 @@
 > `d388802` (nhánh `docs/audit-workflow-optimization-20261021`): [audit tại `ec4c7d2`](../ops/AUDIT-REPORT-2026-10-21.md)
 > và [kế hoạch tối ưu](../ops/OPTIMIZATION-PLAN-2026-10-21.md). Phiên chính tái hiện độc lập từng phát hiện (mỗi phát hiện
 > một agent tái hiện + hai agent bác bỏ) rồi tự duyệt PLAN (D-130, ADR-0008). Kết quả xác minh: sổ
-> [`AUDIT-STATUS.md`](../ops/AUDIT-STATUS.md) và báo cáo, mục "Xác minh lại 2026-10-21".
+> [`AUDIT-STATUS.md`](../../ops/AUDIT-STATUS.md) và báo cáo, mục "Xác minh lại 2026-10-21".
 >
 > **Cú pháp bắt buộc cho máy:** mỗi task một dòng `- [ ] \`T-NNNN\` <việc> — Gate: \`<lệnh>\``.
 

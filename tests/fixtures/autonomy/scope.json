@@ -348,13 +348,14 @@
    ]
   },
   {
-   "reason": "Ghi qua hard link tới hook của repo hoặc linked worktree cần hai đường dẫn chung inode. Fixture `files` của autonomy-bench chỉ tạo file thường. Kiểm bằng tests.test_guard_strict.GuardDebt433Test, các ca test_aud_sec_447_hook_links và test_aud_sec_447_linked_worktree_hook.",
+   "reason": "Ghi qua hard link tới hook của repo hoặc linked worktree cần hai đường dẫn chung inode. Fixture `files` của autonomy-bench chỉ tạo file thường. Kiểm bằng tests.test_guard_strict.GuardDebt433Test, các ca test_aud_sec_447_hook_links và test_aud_sec_447_linked_worktree_hook. AUD-SEC-450 (link cứng tới hook/config của repo cha khi dự án nằm trong monorepo) cùng lý do: kiểm bằng tests.test_guard_git_metadata.ReviewDebt435Test.",
    "ids": [
-    "AUD-SEC-447"
+    "AUD-SEC-447",
+    "AUD-SEC-450"
    ]
   },
   {
-   "reason": "Dữ kiện sai trong nội dung tài liệu khung (mục checklist), không phải hành vi của guard, PR hay CI mà bench mô phỏng. Kiểm bằng tests.test_content_facts (khoá 3 dữ kiện 🔴) và xt.py checks/check-links cho các sửa 🟠/🟢 review #436.",
+   "reason": "Nội dung tài liệu khung (mục checklist, mẫu GO-NO-GO, CHANGELOG) sai dữ kiện hoặc lệch luật nhà/định dạng — không phải hành vi của guard, PR hay CI mà bench mô phỏng. Kiểm bằng tests.test_content_facts (khoá 3 dữ kiện 🔴) và xt.py checks/check-links cho các sửa 🟠/🟢 review #436.",
    "ids": [
     "AUD-DOC-245",
     "AUD-DOC-246",

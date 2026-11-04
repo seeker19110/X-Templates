@@ -1,6 +1,6 @@
 # AUDIT-REPORT — Khung X-Templates · 2026-10-27 (delta 2, lát 1)
 
-> Commit quét: `6acc57380efc98736928fad9e7de26da7fb4916d` (`main`, sau #291, #293–#301) · Chế độ: **delta** từ `95fa52a` (ARCH, SEC, CODE, TEST, PERF, A11Y, CI, DOC, XFEAT, HAR, CFG) · Quy trình: [`framework/00-method/audit.md`](../../framework/00-method/audit.md)
+> Commit quét: `6acc57380efc98736928fad9e7de26da7fb4916d` (`main`, sau #291, #293–#301) · Chế độ: **delta** từ `95fa52a` (ARCH, SEC, CODE, TEST, PERF, A11Y, CI, DOC, XFEAT, HAR, CFG) · Quy trình: [`framework/00-method/audit.md`](../../../framework/00-method/audit.md)
 > Người quét: phiên chính + 3 subagent `reviewer` read-only (SEC/CFG/DEP/CI · ARCH/CODE/TEST/PERF/XFEAT · DOC/HAR/A11Y), task T-3556 của PLAN-harden-2026-10-27-loops · Xác minh đối kháng: `reviewer-alt` (effort max) cho 5 🟠 của người tìm, `reviewer` thứ hai cho 2 🟠 do người xác minh tìm thêm
 > `python3 scripts/xt.py audit check docs/ops/AUDIT-STATUS.md` → exit 0 · `--strict` đỏ tới khi 5 🟠 sửa (D-214)
 

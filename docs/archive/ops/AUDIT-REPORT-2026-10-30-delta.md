@@ -1,6 +1,6 @@
 # AUDIT-REPORT — delta sau 3.29.0, 2026-10-30
 
-> Phạm vi: `6799550..28c2089` (#316–#349: ADR-0058 giai đoạn sản phẩm, `LOOP-HARNESS-029`, ADR-0059 review 2 lần/sửa 1 lần/ghi nợ, `is_release_pr`). Ưu tiên `.claude/hooks/guard.py` (AUD-HAR-142). Quét ở nhánh `d130722` (nội dung trùng `28c2089`). Sổ: [AUDIT-STATUS.md](AUDIT-STATUS.md).
+> Phạm vi: `6799550..28c2089` (#316–#349: ADR-0058 giai đoạn sản phẩm, `LOOP-HARNESS-029`, ADR-0059 review 2 lần/sửa 1 lần/ghi nợ, `is_release_pr`). Ưu tiên `.claude/hooks/guard.py` (AUD-HAR-142). Quét ở nhánh `d130722` (nội dung trùng `28c2089`). Sổ: [AUDIT-STATUS.md](../../ops/AUDIT-STATUS.md).
 
 ## Tóm tắt
 

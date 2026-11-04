@@ -52,7 +52,7 @@ guard mới. Nhóm 5 PERF, 7 DEP, 11 CFG không quét lại (giữ kết quả t
 | AUD-XFEAT-015 | 🟠 | Pha build: review blocking chỉ có ở sổ cục bộ vẫn được `merge-check` trả `merge` | `-k merge_check_local` | b14f855 |
 
 Lệnh test đầy đủ: `python3 -m unittest discover -s tests -k <mẫu>`. Bằng chứng và cách tái hiện chi tiết: từng dòng trong
-[`AUDIT-STATUS.md`](AUDIT-STATUS.md).
+[`AUDIT-STATUS.md`](../../ops/AUDIT-STATUS.md).
 
 ## 5. Kế hoạch sửa đã làm
 

@@ -25,7 +25,7 @@ Giới hạn tổng worker theo CPU quota/RAM, tính cả song song lồng trong
 4. **An toàn installer và cấu hình:** Git root, symlink, runtime và phần tài liệu quyền còn lệch theo audit.
 5. **Hiệu năng/bảo trì:** benchmark phương án gom job, worker/cache và tách mô-đun dần khi có ADR. Thêm abstraction chỉ khi giảm phần lặp mà vẫn dễ truy vết.
 
-Mỗi đợt một PR nhỏ, có Gate máy; giữ các điều kiện chất lượng theo [quy trình hiện hành](../../AGENTS.md), không hạ ngưỡng/tắt assertion để nhận tối ưu.
+Mỗi đợt một PR nhỏ, có Gate máy; giữ các điều kiện chất lượng theo [quy trình hiện hành](../../../AGENTS.md), không hạ ngưỡng/tắt assertion để nhận tối ưu.
 
 ## Tiêu chí nhận tối ưu
 

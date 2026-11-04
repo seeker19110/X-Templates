@@ -1,6 +1,6 @@
 # PLAN-3.16.0-ceiling.md — Khung X-Templates · chặng "tháng tới" sau phân tích trần 2026-10-23 → bản 3.16.0
 
-> Lập ngày 2026-10-23 theo [`research/2026-10-23-ceiling-analysis.md`](../../research/2026-10-23-ceiling-analysis.md) §5–§7
+> Lập ngày 2026-10-23 theo [`research/2026-10-23-ceiling-analysis.md`](../../../research/2026-10-23-ceiling-analysis.md) §5–§7
 > (chủ repo: "theo khuyến nghị đi"). Phiên chính tự duyệt (D-142, ADR-0008). Mục tiêu: **không thêm bề mặt** — cắt lãng phí
 > CI tự gây bằng cấu hình, chuyển chất lượng từ hình thức sang nội dung ở chỗ rẻ, và đo thật; mọi số kỳ vọng đo lại bằng
 > `pr stats` sau 1 tuần (2026-10-30).

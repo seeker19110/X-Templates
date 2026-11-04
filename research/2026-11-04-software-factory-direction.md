@@ -7,7 +7,7 @@ updated: 2026-11-04
 # Đề xuất định hướng xưởng phát triển phần mềm
 
 > **Trạng thái: định hướng đã được chủ dự án chấp nhận 2026-11-04** qua [ADR-0068](../docs/adr/0068-software-factory-direction.md)
-> (trả lời §9: 1a · 2a hotel-manager · 3a · 4a — D-343; tiền lệ ADR-0064: nháp cùng PR, chấp nhận cùng ngày). PR này chỉ thêm
+> (trả lời §9: 1a · 2a hotel-manager · 3a · 4a — D-348; tiền lệ ADR-0064: nháp cùng PR, chấp nhận cùng ngày). PR này chỉ thêm
 > nghiên cứu, ADR và liên kết chỉ mục; chưa thêm
 > ID, đổi mức yêu cầu, cấu hình mặc định, hành vi CLI, schema hay dependency. Các đường chạy và tiêu chí dưới đây là mục tiêu
 > triển khai ở các PR riêng, chưa là kết quả đã kiểm chứng.
@@ -160,7 +160,7 @@ Baseline đã có ở repo khung (không cần công cụ mới để bắt đ�
 
 ## 9. Đề xuất trả lời bốn câu hỏi mở (bản 2)
 
-Theo AGENTS.md §4, mỗi câu dưới đây có ≥ 2 phương án và một đề xuất theo tiêu chí chất lượng cuối (đúng/an toàn → đường lùi → bền/đơn giản → trải nghiệm → tốc độ). Đây là **đề xuất của phiên khung**; chủ dự án đã chốt 2026-11-04 đúng bốn đề xuất (1a · 2a hotel-manager · 3a · 4a — D-343, ADR-0068).
+Theo AGENTS.md §4, mỗi câu dưới đây có ≥ 2 phương án và một đề xuất theo tiêu chí chất lượng cuối (đúng/an toàn → đường lùi → bền/đơn giản → trải nghiệm → tốc độ). Đây là **đề xuất của phiên khung**; chủ dự án đã chốt 2026-11-04 đúng bốn đề xuất (1a · 2a hotel-manager · 3a · 4a — D-348, ADR-0068).
 
 **Câu 1 — Phương án lõi + gói + adapter, và nơi lưu gói.**
 Phương án: (a) gói nằm trong repo khung tại `framework/templates/packs/<stack>/`, phiên bản theo `VERSION` của khung; (b) mỗi gói một repo riêng, khung chỉ giữ registry + hợp đồng; (c) không có gói, chỉ thêm ID/mẫu như hiện nay.

@@ -698,6 +698,14 @@ class HardenWorkTest(StateCase):
             ],
         )
         self.assertEqual(xt.harden_work(self.base, self.st(), "S.md"), items)  # cùng đầu vào → cùng ID
+        archived = self.base / xt.PLAN_ARCHIVE_DIR / "PLAN-cu.md"  # ADR-0070: PLAN đã dời vào kho vẫn giữ số đã cấp
+        archived.parent.mkdir(parents=True)
+        archived.write_text("- [x] `T-040` cũ (nguồn: audit:AUD-A-001) — Gate: `true`\n", encoding="utf-8")
+        again = xt.harden_work(self.base, self.st(), "S.md")
+        self.assertEqual(
+            [(w["id"], w["planned"]) for w in again][:3], [("T-040", True), ("T-041", False), ("T-042", False)]
+        )
+        archived.unlink()
         line = items[1]["line"]
         self.assertTrue(
             line.startswith("- [ ] `T-003` Sửa AUD-B-002 🔴: b [sau: T-001; files: x] exec deep Gate: rm"), line

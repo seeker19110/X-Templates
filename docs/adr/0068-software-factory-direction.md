@@ -2,7 +2,7 @@
 
 - **Trạng thái:** **Đã chấp nhận 2026-11-04** — chủ dự án trả lời bốn câu hỏi ở
   [`research/2026-11-04-software-factory-direction.md`](../../research/2026-11-04-software-factory-direction.md) §9:
-  **1a · 2a hotel-manager · 3a · 4a** (tiền lệ ADR-0064: nháp cùng PR, chấp nhận cùng ngày; **D-343**). Bản nháp cùng ngày
+  **1a · 2a hotel-manager · 3a · 4a** (tiền lệ ADR-0064: nháp cùng PR, chấp nhận cùng ngày; **D-348**). Bản nháp cùng ngày
   chỉ khác ở trạng thái và đoạn "Bốn câu hỏi" ở §Quyết định.
 - **Trạng thái triển khai:** chưa bắt đầu — lát A cần PLAN riêng (`docs/autopilot/PLAN-factory-A.md`); nhóm `docs/autopilot`
   còn ≈ 2 KB dưới trần ADR-0043/0050 (đo 2026-11-04: 350.221/352.345 B) nên phải lưu trữ PLAN đã đóng trước (như T-3651).
@@ -62,7 +62,7 @@ Chọn **phương án 3**, năm lát theo research §7, thứ tự A → B → C
 - **E — Registry nhiều sản phẩm** mở rộng `TARGETS.md` (core/gói/version/owner/release/ngoại lệ còn hạn) + trang đọc ở
   `xt.py app`; vòng học qua `feedback aggregate` với cùng ngưỡng ADR-0010.
 
-Bốn câu hỏi chủ dự án đã chốt 2026-11-04 (D-343; phương án thay thế ở research §9):
+Bốn câu hỏi chủ dự án đã chốt 2026-11-04 (D-348; phương án thay thế ở research §9):
 
 1. **Nơi lưu gói (1a):** gói đầu tiên trong repo khung tại `framework/templates/packs/<stack>/`, phiên bản theo `VERSION`;
    chuyển repo riêng khi có ≥ 2 gói hoặc owner khác chủ khung. Gói không kéo dependency vào CLI stdlib.

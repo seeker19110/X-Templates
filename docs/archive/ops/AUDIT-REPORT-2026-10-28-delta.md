@@ -1,6 +1,6 @@
 # AUDIT-REPORT — Khung X-Templates · 2026-10-28 (delta)
 
-> Commit quét: `fcf83b3f830c74067030d27ab01b56f4c2f10db5` (`main`, sau #303–#306) · Chế độ: **delta** từ `6acc573` (ARCH, SEC, CODE, TEST, DOC, XFEAT, HAR) · Quy trình: [`framework/00-method/audit.md`](../../framework/00-method/audit.md)
+> Commit quét: `fcf83b3f830c74067030d27ab01b56f4c2f10db5` (`main`, sau #303–#306) · Chế độ: **delta** từ `6acc573` (ARCH, SEC, CODE, TEST, DOC, XFEAT, HAR) · Quy trình: [`framework/00-method/audit.md`](../../../framework/00-method/audit.md)
 > Người quét: phiên chính, task T-3556 của PLAN-harden-2026-10-27-loops · Mỗi PR #303–#306 được `reviewer-alt` (effort max) rà ở head (#306 qua `rethink`, D-216) · Xác minh đối kháng: `reviewer` thứ hai tái hiện độc lập các lỗi guard có từ trước
 > `python3 scripts/xt.py audit check docs/ops/AUDIT-STATUS.md` → exit 0 · `--strict` đỏ tới khi AUD-SEC-125 🔴 và AUD-SEC-121 🟠 sửa (T-3564, D-217)
 

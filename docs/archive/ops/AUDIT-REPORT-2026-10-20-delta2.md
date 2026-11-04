@@ -52,7 +52,7 @@ chú thích zizmor ở `pr-steward.yml`. Nhóm 5 PERF, 7 DEP, 11 CFG không bị
 | AUD-SEC-097 | 🟠 | `~+`/`~-` không được giải → ghi tay `.autopilot/` lọt | `-k guard_tilde_plus_minus` |
 
 Lệnh test đầy đủ: `python3 -m unittest discover -s tests -k <mẫu>`. Bằng chứng và đường tái hiện: từng dòng trong
-[`AUDIT-STATUS.md`](AUDIT-STATUS.md).
+[`AUDIT-STATUS.md`](../../ops/AUDIT-STATUS.md).
 
 Mức sau xác minh đối kháng: SEC-093 người quét đề 🔴 → 🟠 (guard là phân tích tĩnh — D-015 — nhưng các dạng cờ này là
 cách viết thường gặp, không phải né cố ý); SEC-092 🟠 → 🟢 (hook `onFailure: block`: hết giờ là chặn, không vượt rào);
@@ -60,7 +60,7 @@ SEC-095/096 🟠 → 🟢 (phải cố ý dựng thứ tự lệnh / đường d
 
 ## 5. Kế hoạch sửa
 
-Lát B của [`PLAN-3.11-audit-delta.md`](../autopilot/PLAN-3.11-audit-delta.md): mỗi bug test tái hiện đỏ trước rồi sửa;
+Lát B của [`PLAN-3.11-audit-delta.md`](../../autopilot/PLAN-3.11-audit-delta.md): mỗi bug test tái hiện đỏ trước rồi sửa;
 🟢 rẻ cùng file (SEC-092/098, CODE-019, XFEAT-018, TEST-016/017, DOC-072…075, giới hạn SEC-095/096, XFEAT-019, HAR-100)
 sửa hoặc ghi giới hạn trong cùng đợt; sau đó quét lại theo diff bản sửa (T-1690) và `release-check` (T-1691).
 

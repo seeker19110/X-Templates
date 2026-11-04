@@ -34,15 +34,20 @@ class ContentFactsTest(unittest.TestCase):
         line = item("13-ai-engineering/llm-app-foundations.md", "AI-APP-021")
         self.assertNotIn("tắt mặc định", line)
         self.assertNotIn("dùng cá nhân thì", line)
-        self.assertIn(
-            "legal-and-compliance", line + (ROOT / "framework/13-ai-engineering/llm-app-foundations.md").read_text()
-        )
+        self.assertIn("legal-and-compliance", line)  # nguồn ngay trên dòng mục, không lấy từ chỗ khác của file
 
     def test_infra_failure_keeps_denominator(self):
-        """Loại ca lỗi hạ tầng khỏi cả tử lẫn mẫu số làm pass rate tăng giả khi đổi model (SWE-bench giữ mẫu số)."""
+        """Loại ca lỗi hạ tầng khỏi cả tử lẫn mẫu số làm pass rate tăng giả khi đổi model (SWE-bench giữ mẫu số).
+        Bắt theo ý, không theo một câu: mọi mệnh đề nhắc `infra_failure` + loại/không tính + mẫu số mà không có
+        điều kiện "xác nhận" đều sai."""
         line = item("13-ai-engineering/evaluation.md", "AI-EVAL-022")
-        self.assertNotIn("ra khỏi tử số lẫn mẫu số", line)
-        self.assertIn("mẫu số", line)
+        self.assertIn("vẫn nằm trong mẫu số", line)
+        for clause in re.split(r"[;.]", line):
+            flat = clause.replace("`", "")
+            if re.search(r"(loại|ra|bỏ|trừ)( [^,;]{0,30})? khỏi[^,;]{0,25}mẫu số", flat) or re.search(
+                r"không (được )?tính( [^,;]{0,30})? vào[^,;]{0,25}mẫu số", flat
+            ):
+                self.assertRegex(clause, r"xác nhận", clause)
 
 
 if __name__ == "__main__":

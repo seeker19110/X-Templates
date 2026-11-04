@@ -7698,10 +7698,15 @@ def _harden_sources(base: Path, st: Dict[str, Any], status: str) -> List[Dict[st
     return out
 
 
+PLAN_ARCHIVE_DIR = "docs/archive/autopilot"  # ADR-0070 (D-349): PLAN đã đóng dời khỏi docs/autopilot, số task vẫn giữ
+
+
 def _plan_paths(base: Path, st: Dict[str, Any]) -> List[Path]:
-    """PLAN của vòng trước, rồi `docs/autopilot/PLAN*.md` — cùng phạm vi cho cấp ID và nhận lại task đã dán (dán vào
-    PLAN-harden mới rồi gom lại trước `loop init` vẫn nhận ra — review #326)."""
+    """PLAN của vòng trước, rồi `docs/autopilot/PLAN*.md`, rồi PLAN đã dời vào kho (`PLAN_ARCHIVE_DIR`) — cùng phạm vi cho
+    cấp ID (không tái sử dụng `T-NNN` của PLAN đã đóng, ADR-0070) và nhận lại task đã dán (dán vào PLAN-harden mới rồi gom
+    lại trước `loop init` vẫn nhận ra — review #326)."""
     paths = [base / str(st.get("plan") or "")] + sorted((base / "docs" / "autopilot").glob("PLAN*.md"))
+    paths += sorted((base / PLAN_ARCHIVE_DIR).glob("PLAN*.md"))
     return [p for p in dict.fromkeys(p.resolve() for p in paths) if p.is_file()]
 
 
@@ -11430,7 +11435,7 @@ PLAN_STAGE_RE = re.compile(r"^\s*>?\s*Giai đoạn sản phẩm:\s*([1-3])\s*\((
 STAGE_AGENT_ENV = ("CLAUDECODE", "CLAUDE_CODE_SESSION_ID", "AI_AGENT")  # biến môi trường mà phiên agent mang
 STAGE_DIFF_UNKNOWN = "(nội dung khác bản trình)"  # vân tay lệch mà diff theo SHA không chỉ ra file (hay SHA mất)
 STAGE_HUMAN_ONLY = "chỉ người duyệt — chạy ở terminal của chủ dự án, ngoài phiên agent (ADR-0058)"
-# ADR-0069 (chủ dự án 2026-11-04, D-342): xt.yaml `stage_approval: agent` → agent tự nghiệm thu giai đoạn bằng `stage approve`
+# ADR-0069 (chủ dự án 2026-11-04, D-347): xt.yaml `stage_approval: agent` → agent tự nghiệm thu giai đoạn bằng `stage approve`
 # (bản trình phải còn nguyên); vắng/khác → chỉ người. `init --adopt` luôn chỉ người.
 STAGE_APPROVAL_KEY = "stage_approval"
 STAGE_AGENT_BY = "agent"
@@ -14975,7 +14980,7 @@ def _mutant_outcome(cmd: List[str], root: Path, timeout: float) -> str:
 def cmd_mutate_guard(args: argparse.Namespace) -> int:
     """`mutate-guard`: đột biến chính sách của guard, mỗi mutant một tiến trình con chạy bộ test guard. Exit 0 khi mọi
     mutant bị giết; 1 khi còn mutant sống (test chưa khoá hành vi đó); 2 khi không có chỗ đột biến hoặc bộ test đỏ ngay
-    khi chưa đột biến. Chỉ stdlib (thay mutmut — spike 2026-10-26 không chấm được, `docs/ops/MUTATION-2026-10-26.md`)."""
+    khi chưa đột biến. Chỉ stdlib (thay mutmut — spike 2026-10-26 không chấm được, `docs/archive/ops/MUTATION-2026-10-26.md`)."""
     base = project_dir()
     guard = Path(args.guard) if args.guard else base / ".claude" / "hooks" / "guard.py"
     funcs, tests = [f for f in args.functions.split(",") if f], [t for t in args.tests.split(",") if t]

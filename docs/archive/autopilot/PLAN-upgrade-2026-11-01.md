@@ -1,8 +1,8 @@
 # PLAN-upgrade-2026-11-01.md — Khung X-Templates · nâng cấp: Adaptive Agent (ADR-0061), stored e3fdcb0..e8b3831, sửa batch audit delta 2026-11-01
 
 > Lập ngày 2026-11-01 theo `/complete` (pha harden) sau audit delta 2026-11-01 (báo cáo `docs/ops/AUDIT-REPORT-2026-11-01-delta.md`
-> viết ở T-3608) và hai research note [`2026-11-01-adaptive-agent-topology.md`](../../research/2026-11-01-adaptive-agent-topology.md),
-> [`2026-11-01-stored-delta-upgrade.md`](../../research/2026-11-01-stored-delta-upgrade.md).
+> viết ở T-3608) và hai research note [`2026-11-01-adaptive-agent-topology.md`](../../../research/2026-11-01-adaptive-agent-topology.md),
+> [`2026-11-01-stored-delta-upgrade.md`](../../../research/2026-11-01-stored-delta-upgrade.md).
 > Duyệt: D-292 (phiên chính tự duyệt, `xt.py loop decide`).
 >
 > **Cú pháp bắt buộc cho máy:** mỗi task một dòng `- [ ] \`T-NNNN\` <việc> — Gate: \`<lệnh>\``. `topo:` theo ADR-0061 (thiếu = `self`).

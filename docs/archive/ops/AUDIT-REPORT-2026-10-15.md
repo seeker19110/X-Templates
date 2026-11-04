@@ -1,6 +1,6 @@
 # AUDIT-REPORT — Khung X-Templates · 2026-10-15
 
-> Commit quét: `5627657ecd3d81c7c5e35e7b05c75c40366374d9` (`main`, sau #30–#35) · Chế độ: **delta** từ `6490f7b` (9 nhóm có file đổi) · Quy trình: [`framework/00-method/audit.md`](../../framework/00-method/audit.md)
+> Commit quét: `5627657ecd3d81c7c5e35e7b05c75c40366374d9` (`main`, sau #30–#35) · Chế độ: **delta** từ `6490f7b` (9 nhóm có file đổi) · Quy trình: [`framework/00-method/audit.md`](../../../framework/00-method/audit.md)
 > Người quét: phiên chính + 3 subagent `reviewer` read-only (SEC/DEP/CI · ARCH/CODE/TEST/XFEAT · DOC/HAR + 56 bằng chứng blueprint) · Xác minh đối kháng: subagent `reviewer` thứ tư (tái hiện từ đầu 5 phát hiện 🟠)
 > `python3 scripts/xs.py audit check docs/ops/AUDIT-STATUS.md` → exit 0; `--strict` → exit 1 (4 🟠 mở — đúng kỳ vọng trước khi sửa)
 

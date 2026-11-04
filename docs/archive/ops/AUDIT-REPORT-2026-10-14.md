@@ -1,6 +1,6 @@
 # AUDIT-REPORT — Khung X-stored · 2026-10-14
 
-> Commit quét: `0511c1e8afe2e18a6c8d85161c9ce6cfaa089dcf` (`main`) · Phạm vi: toàn bộ 13 nhóm (lần đầu) · Quy trình: [`framework/00-method/audit.md`](../../framework/00-method/audit.md)
+> Commit quét: `0511c1e8afe2e18a6c8d85161c9ce6cfaa089dcf` (`main`) · Phạm vi: toàn bộ 13 nhóm (lần đầu) · Quy trình: [`framework/00-method/audit.md`](../../../framework/00-method/audit.md)
 > Người quét: phiên chính + 2 subagent read-only (bảo mật harness; thống nhất tài liệu) · Xác minh đối kháng: subagent `reviewer` thứ ba
 > `python3 scripts/xs.py audit check docs/ops/AUDIT-STATUS.md` → exit 0 (schema đúng); `--strict` → exit 1 (còn 🔴/🟠 mở — đúng kỳ vọng trước khi sửa)
 

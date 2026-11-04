@@ -1,6 +1,6 @@
 # PLAN-harden-2026-10-31.md — Khung X-Templates · sửa 🟠 audit delta `6799550..78fb359` trước 3.30.0
 
-> Lập ngày 2026-10-31 theo `/complete` (pha harden), sau [`AUDIT-REPORT-2026-10-31-delta.md`](../ops/AUDIT-REPORT-2026-10-31-delta.md).
+> Lập ngày 2026-10-31 theo `/complete` (pha harden), sau [`AUDIT-REPORT-2026-10-31-delta.md`](../archive/ops/AUDIT-REPORT-2026-10-31-delta.md).
 > Duyệt: D-268 (phiên chính tự duyệt, `xt.py loop decide`).
 >
 > **Cú pháp bắt buộc cho máy:** mỗi task một dòng `- [ ] \`T-NNNN\` <việc> — Gate: \`<lệnh>\``.

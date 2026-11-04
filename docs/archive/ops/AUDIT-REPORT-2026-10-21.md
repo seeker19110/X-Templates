@@ -14,7 +14,7 @@ Khung có nền tảng kiểm soát chất lượng tốt: dependency khóa hash
 | 🟠 khi bật reviewer | **Review thiếu diff — phát hiện đề xuất, chưa cấp ID** | `.github/workflows/pr-review.yml` cắt ở 400.000 byte: fixture 435.194 byte → exit 0, thay đổi auth cuối diff biến mất. Schema chỉ có clean/blocking, vẫn có đường ghi kết quả cho toàn HEAD. Chưa chạy bot hay chứng minh bot trả clean; workflow mặc định cần `XT_REVIEWER_ENABLED`. | Diff thiếu phải inconclusive hoặc chia đủ file/hunk, kiểm completeness và SHA trước khi xác nhận clean. |
 | Khoảng trống hợp đồng CI | **Sàn khai riêng — phát hiện đề xuất, chưa cấp ID** | Fixture scale M/harden có 1 unittest: `coverage`/`format_check` riêng đều exit 1; `require lint test`, `gate-par`, `doctor`, `ci-check` đều exit 0. Template yêu cầu coverage nằm trong `test`, doctor chỉ kiểm khai lệnh; `loop verify` có chạy sàn. Không kết luận bypass toàn pipeline/G7. | Thống nhất thực thi sàn; trước khi sửa, coverage phải nằm trong `test`, format check trong lint. |
 
-Các mức đề nghị và hai phát hiện chưa cấp ID chưa được cập nhật vào [ledger](AUDIT-STATUS.md). PR này không tuyên bố audit strict đã hoàn tất.
+Các mức đề nghị và hai phát hiện chưa cấp ID chưa được cập nhật vào [ledger](../../ops/AUDIT-STATUS.md). PR này không tuyên bố audit strict đã hoàn tất.
 
 Vị trí nguồn tại SHA quét:
 

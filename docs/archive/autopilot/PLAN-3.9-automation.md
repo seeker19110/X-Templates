@@ -1,7 +1,7 @@
 # PLAN-3.9-automation.md — Khung X-Templates · tăng tự động hóa, giữ bằng chứng (3.9.0 → 3.10.0)
 
-> Lập ngày 2026-10-19 (Gate siết theo review khác model: tách `-k` theo ý, `sau:` tuần tự cho task cùng sửa `xt.py`) từ [`docs/ops/REMEDIATION-PLAN-2026-10-19.md`](../ops/REMEDIATION-PLAN-2026-10-19.md) (REC/AUTO, §7).
-> Chạy **sau khi** PLAN 3.8.0 ([`PLAN.md`](PLAN.md), T-1401…T-1417) phát hành: `python3 scripts/xt.py loop init --plan
+> Lập ngày 2026-10-19 (Gate siết theo review khác model: tách `-k` theo ý, `sau:` tuần tự cho task cùng sửa `xt.py`) từ [`docs/ops/REMEDIATION-PLAN-2026-10-19.md`](../../ops/REMEDIATION-PLAN-2026-10-19.md) (REC/AUTO, §7).
+> Chạy **sau khi** PLAN 3.8.0 ([`PLAN.md`](../../autopilot/PLAN.md), T-1401…T-1417) phát hành: `python3 scripts/xt.py loop init --plan
 > docs/autopilot/PLAN-3.9-automation.md --single-session --max-iterations 176 --hours 24` (D-067). Duyệt kế hoạch: phiên
 > chính tự duyệt theo tiêu chí chất lượng cuối (ADR-0008) và ghi D-NNN trước task đầu; reviewer khác model rà phần Gate
 > (`LOOP-ORCH-018`) trước `loop decide`.

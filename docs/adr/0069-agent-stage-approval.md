@@ -1,7 +1,8 @@
 # ADR-0069: Agent tự nghiệm thu giai đoạn sản phẩm khi `xt.yaml` khai `stage_approval: agent`
 
 - **Trạng thái:** Đã chấp nhận 2026-11-04 (chủ dự án: "cho phép Agent quyết định khi nào đã đạt và tuyên bố đạt MVP";
-  phiên chính chốt cách làm theo tiêu chí chất lượng cuối, ADR-0008 — **D-342**).
+  phiên chính chốt cách làm theo tiêu chí chất lượng cuối, ADR-0008 — **D-347**; ghi lúc đầu là D-342, đánh số lại khi gộp
+  `main` vì #438 đã dùng D-342).
 - **Trạng thái triển khai:** đã làm cùng PR: `scripts/xt.py` (`stage_agent_approval`, `stage approve` trong phiên agent,
   `stage_facts.agent_approval`, `next-step` trả `stage-approve`), `.claude/hooks/guard.py` (`agent_stage_approval`,
   `_plain_approve`, `_stage_approve_denied`), `tests/test_stage_agent_approval.py`, mẫu `framework/templates/xt.yaml`.
@@ -40,7 +41,7 @@ cấp quyền cho mình?
 
 ## Quyết định
 
-Chọn **phương án 1** (D-342).
+Chọn **phương án 1** (D-347).
 
 - **`xt.yaml`**: `stage_approval: agent` — agent được `stage approve`; vắng/khác → chỉ người (ADR-0058). Có hiệu lực khi
   **cả** xt.yaml ở cây làm việc **lẫn** bản đã commit ở nhánh chính của remote (`origin/HEAD` → `origin/main` →
