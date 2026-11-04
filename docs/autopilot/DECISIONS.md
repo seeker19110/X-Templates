@@ -121,3 +121,10 @@
 - Chọn: Giữ chặt (A): như mọi tệp tự ghi theo ADR-0066; lý do chặn có câu viết lại (tách lệnh)
 - Lý do (tiêu chí chất lượng cuối): (1) archive vừa tạo có thể được chạy như script (tar -cf x p && sh x) — miễn theo kiểu lệnh đọc là bề mặt lách mới; (3) nhất quán ADR-0066, không thêm miễn trừ (ADR-0065); (4) chi phí: agent tách lệnh, đo trên lệnh/CI repo này không dùng dạng đó
 - Đường lùi: Phương án C với test cho từng lệnh chỉ đọc
+
+### D-351 · 2026-11-04T18:39:44+00:00 · Review #439 🔴 AUD-SEC-490: cd tương đối trong thân vòng lặp/hàm chỉ giải từ tập lúc gặp, không giải lại từ đích cd đứng sau (cuối thân vòng, nơi gọi hàm) — D-347 khai 'đúng cho mọi luồng điều khiển' là sai; sửa thế nào?
+
+- Phương án: (1) Đích cd tương đối (kể cả ..) trong thân vòng lặp/hàm/trap → thêm None (thư mục không biết, D-106); đích tuyệt đối giữ như cũ · (2) Lặp điểm bất động trên mọi lệnh cd của thân vòng/hàm cho tới khi tập ổn định, quá CWD_UNION_MAX thì None
+- Chọn: Đích cd tương đối (kể cả ..) trong thân vòng lặp/hàm/trap → thêm None (thư mục không biết, D-106); đích tuyệt đối giữ như cũ
+- Lý do (tiêu chí chất lượng cuối): (1) cả hai đều sound; (3) phương án 1 là một luật, không cần mô phỏng thêm, test được, khép cả nơi gọi hàm lẫn trap; (4) chặn oan thêm chỉ khi cd tương đối nguyên văn trong vòng/hàm rồi ghi đích nhạy cảm/chạy git — dạng hiếm (corpus review 10 815 lệnh không đổi quyết định nào ở head); (1) > (4). Đính chính D-347: câu 'đúng cho mọi luồng điều khiển' chỉ đúng khi đích cd trong vòng/hàm là tuyệt đối.
+- Đường lùi: Lặp điểm bất động (phương án 2) nếu đo thấy chặn oan trên lệnh thật

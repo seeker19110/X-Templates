@@ -602,6 +602,36 @@ def _git_metadata_dir(path: str) -> bool:
     )
 
 
+GIT_HEADREF_RE = re.compile(rb"ref:\s*refs/|[0-9a-fA-F]{40}")  # `validate_headref`: ref tượng trưng hay mã băm
+
+
+def _git_dir_accepted(path: str) -> bool:
+    """AUD-SEC-487: `path` chắc là Git dir mà git DỪNG DÒ ở đó (`is_git_directory`, đo git 2.53): HEAD hợp lệ (symlink
+    tới `refs/…`, tệp thường `ref: refs/…` hay mã băm hex), `objects` và `refs` vào được. Hẹp hơn git (commondir, tệp
+    đặc biệt → False) — chỉ dùng để MIỄN; nhận diện rộng là `_git_metadata_dir`."""
+    with contextlib.suppress(OSError):
+        heads = _git_headref_ok(os.path.join(path, "HEAD"))
+        return heads and all(os.access(os.path.join(path, d), os.X_OK) for d in ("objects", "refs"))
+    return False
+
+
+def _git_headref_ok(head: str) -> bool:
+    """`validate_headref` của git: symlink tới `refs/…`, hay tệp thường bắt đầu bằng `ref: refs/…`/mã băm hex. Tệp đặc
+    biệt (FIFO…) không mở — guard không treo; coi là không hợp lệ."""
+    if os.path.islink(head):
+        return os.readlink(head).startswith("refs/")
+    if not os.path.isfile(head):
+        return False
+    with open(head, "rb") as file:
+        return bool(GIT_HEADREF_RE.match(file.read(255)))
+
+
+def _stops_git_discovery(dot_git: str) -> bool:
+    """`.git` làm git dừng dò lên trên/không xét thư mục chứa nó như repo trần: gitfile (kể cả hỏng — git báo lỗi) hay
+    Git dir hợp lệ (`_git_dir_accepted`)."""
+    return os.path.isfile(dot_git) or _git_dir_accepted(dot_git)
+
+
 def _repo_git_metadata(path: str, root: str, keyed: bool = False) -> bool:
     """AUD-SEC-445/446: đích ghi nằm trong Git dir có thật, kể cả dir trần bên ngoài dự án. `keyed`: đích là tệp của
     `git config --file` — bỏ qua đuôi tệp cấu hình (luật khoá của git config xét, như `git -C <dir> config` — AUD-SEC-452);
@@ -4482,9 +4512,10 @@ def _enterable_dir(path: Optional[str]) -> bool:
 
 
 def _is_cd_back(n: List[str]) -> bool:
-    """`cd -` (cả `cd -- -`, cờ `-P`/`-L` đứng trước): bash `cd "$OLDPWD"` — thư mục KHÔNG BIẾT (AUD-SEC-466: OLDPWD
-    đổi qua gán tiền tố `OLDPWD=X cd -`, `PWD=X` trước `cd`, `false && cd -`… guard không theo dõi chắc được)."""
-    return n[:1] == ["cd"] and _cd_operands(n[1:])[0] == ["-"]
+    """`cd -`/`pushd -` (cả `cd -- -`, `pushd -- -`, cờ `-P`/`-L` đứng trước — bash 5.3): `cd "$OLDPWD"` — thư mục
+    KHÔNG BIẾT (AUD-SEC-466: OLDPWD đổi qua gán tiền tố `OLDPWD=X cd -`, `PWD=X` trước `cd`, `false && cd -`… guard
+    không theo dõi chắc được); tiền tố `cd … &&` cũng vậy (AUD-SEC-488)."""
+    return n[:1] in (["cd"], ["pushd"]) and _cd_operands(n[1:])[0] == ["-"]
 
 
 Cands = Tuple[Optional[str], ...]  # thư mục ứng viên của một lệnh (T-3672); None = không biết (D-106)
@@ -4544,23 +4575,31 @@ class _CwdFlags:
         self.cdable = self.cdable or any("cdable_vars" in t for t in argv)
 
 
-def _exact_prefix(cmds: SimpleCmds, start: Optional[str], flags: _CwdFlags) -> Tuple[int, List[Optional[str]]]:
-    """Tiền tố chính xác (D-347): `cd`/`pushd <đích nguyên văn>` nối bằng `&&` ngay từ đầu lệnh — (số lệnh của tiền
-    tố, thư mục còn lại nếu một `cd` của nó hỏng). `cd` chắc thành công khi đích vào được lúc kiểm (`isdir` trên đường
-    THÔ như bash: `cd /khong-co/..` hỏng); `-P` (đường vật lý) không thuộc tiền tố."""
-    here, fallback, m = start, [], 0
+def _exact_prefix(
+    cmds: SimpleCmds, start: Optional[str], flags: _CwdFlags
+) -> Tuple[List[List[Optional[str]]], List[Optional[str]]]:
+    """Tiền tố chính xác (D-347): `cd`/`pushd <đích nguyên văn>` nối bằng `&&` ngay từ đầu lệnh — (tập thư mục sau
+    từng `cd` của tiền tố, thư mục còn lại nếu một `cd` của nó hỏng). Mỗi tập giữ đích theo chữ và realpath của đường
+    thô như `_cd_step` (AUD-SEC-491: bash rơi về đường vật lý khi đường logic không có, kernel giải `..` của đích ghi
+    theo thư mục vật lý); `cd -`/`cd -- -` không thuộc tiền tố (AUD-SEC-488). `cd` chắc thành công khi đích vào được
+    lúc kiểm (`isdir` trên đường THÔ như bash: `cd /khong-co/..` hỏng); `-P` (đường vật lý) không thuộc tiền tố."""
+    heres: List[Optional[str]] = [start]
+    steps: List[List[Optional[str]]] = []
+    fallback: List[Optional[str]] = []
     for argv, after in cmds:
-        n = argv if argv[:1] in (["cd"], ["pushd"]) and _joins(after, ("&&",)) and not _cd_physical(argv) else []
-        t = _cd_target(n, here, flags.cdpath) if n else None
-        if t is None:
+        ok = argv[:1] in (["cd"], ["pushd"]) and _joins(after, ("&&",)) and not _cd_physical(argv)
+        n = argv if ok and not _is_cd_back(argv) else []
+        targets = [_cd_target(n, h, flags.cdpath) for h in heres] if n else [None]
+        if None in targets:
             break
-        raw = posixpath.join(here or "/", posixpath.expanduser(_cd_operands(n[1:])[0][0]))
-        if not _enterable_dir(raw):
+        raws = [posixpath.join(h or "/", posixpath.expanduser(_cd_operands(n[1:])[0][0])) for h in heres]
+        if not all(map(_enterable_dir, raws)):
             if flags.cdable:  # `cd` hỏng thử `cd "$T"`: không biết
                 break
-            fallback.append(here)
-        here, m = t, m + 1
-    return m, fallback
+            fallback += heres
+        heres = list(dict.fromkeys([*targets, *map(_realpath_safe, raws)]))
+        steps.append(heres)
+    return steps, fallback
 
 
 def _cd_step(n: List[str], c: Optional[str], flags: _CwdFlags) -> List[Optional[str]]:
@@ -4579,11 +4618,13 @@ def _cd_moves(
 ) -> Optional[Tuple[Optional[str], List[Optional[str]]]]:
     """(thư mục của nhánh mọi `cd` thành công, mọi thư mục mới) sau lệnh `n` chạy ở MỘT trong `cur` (D-347); lệnh
     không đổi thư mục → None. `repeat` (vòng lặp, thân hàm): đích tương đối giải lại từ đích mới tới bao đóng — quá
-    `CWD_UNION_MAX` thì thêm None; `eval` có `cd`/`eval` → mọi thư mục của thân cộng None."""
-    if n[:1] == ["eval"]:
+    `CWD_UNION_MAX` thì thêm None — và cộng None (D-351, AUD-SEC-490: thân chạy lại sau `cd` ĐỨNG SAU nó — cuối thân
+    vòng, nơi gọi hàm — guard không giải lại từ đó); `eval`/`trap` (thân trap chạy lúc tín hiệu/`DEBUG`, trong shell
+    này) có `cd`/`eval` → mọi thư mục của thân cộng None."""
+    if n[:1] in (["eval"], ["trap"]):
         if not CD_WORD_IN_EVAL_RE.search(" ".join(n[1:])):  # đường nhanh: thân không nhắc lệnh đổi thư mục
             return None
-        body = tokenize(" ".join(n[1:]))
+        body = tokenize(" ".join(a for a in n[1:] if a != "--"))  # `eval -- cd x`, `trap -- 'cd x' DEBUG`
         if not any(normalize(c)[:1] in (["eval"], *([h] for h in CD_MOVE_HEADS)) for c in split_commands(body)):
             return None
         return None, [*(d for c in cur for _, cs in _commands_with_cwds(body, c) for d in cs), None]
@@ -4598,7 +4639,8 @@ def _cd_moves(
         if len(out) > CWD_UNION_MAX:
             out.append(None)
             break
-    return _cd_step(n, primary, flags)[0], out
+    relative = repeat and None in _cd_step(n, None, flags)  # đích không tuyệt đối nguyên văn (cả `..`)
+    return _cd_step(n, primary, flags)[0], [*out, *([None] if relative else [])]
 
 
 def _commands_with_cwds(tokens: List[str], start: Optional[str]) -> List[Tuple[List[str], Cands]]:
@@ -4631,7 +4673,8 @@ class _CwdUnion:
 
     def __init__(self, start: Optional[str], cmds: SimpleCmds, lead: List[str]) -> None:
         self.flags = _CwdFlags()
-        self.m, self.fallback = _exact_prefix(cmds, start, self.flags) if not lead else (0, [])
+        self.steps, self.fallback = _exact_prefix(cmds, start, self.flags) if not lead else ([], [])
+        self.m = len(self.steps)
         self.cur: List[Optional[str]] = [start]
         self.start, self.primary, self.chain = start, start, self.m > 0
         self.stack: List[Tuple[Optional[str], bool, bool, bool, int]] = []
@@ -4672,8 +4715,8 @@ class _CwdUnion:
         self.traps |= {i} if n[:1] == ["trap"] else set()
         repeat = bool(self.loops) or self.func is not None
         if i < self.m:
-            self.primary = _cd_target(n, self.primary, self.flags.cdpath)
-            self.cur = [self.primary]
+            self.cur = list(self.steps[i])
+            self.primary = self.cur[0]
         elif (moved := _cd_moves(n, self.cur, self.primary, self.flags, repeat)) is not None:
             sub = {"|", "|&"} & {*before, *after[:1]} or after[:1] == ["&"]  # ống/nền: shell con
             self.primary = self.primary if sub else moved[0]
@@ -9110,6 +9153,17 @@ PY_UNPACK_RE = re.compile(r"python[\d.]*")
 # (`-l --l`, `-l- -l`, `--- -l` đều giải nén); `-d -P -O -I` ăn giá trị (phần còn lại của cụm, không thì token kế);
 # chữ cờ chỉ đọc (cùng nhóm thì cộng/trừ chung); tuỳ chọn sau tên zip là mẫu tên tệp, trừ `-d` — AUD-SEC-473.
 UNZIP_READ = {"l": "v", "v": "v", "t": "t", "c": "c", "p": "c", "z": "z", "Z": "Z"}
+# AUD-SEC-489: `tflag`/`cflag` (`-t`, `-c`/`-p`) là bật/tắt — phủ định một lần tắt hẳn (`-tt --t` giải nén); `vflag`
+# (`-l`/`-v`) và `zflag` mới là bộ đếm trừ theo số `-` (đo trên UnZip 6.00 Debian)
+UNZIP_SWITCH = frozenset("tc")
+
+
+def _unzip_flag(counts: Dict[str, int], key: str, neg: int) -> None:
+    """Áp một chữ cờ chỉ đọc nhóm `key` có `neg` dấu `-` phủ định đứng trước vào `counts` theo ngữ nghĩa UnZip 6.00."""
+    if key in UNZIP_SWITCH:
+        counts[key] = 0 if neg else 1
+    else:
+        counts[key] = max(counts.get(key, 0) - neg, 0) if neg else counts.get(key, 0) + 1
 
 
 def _unzip_parse(args: List[str]) -> Tuple[List[str], bool]:
@@ -9131,8 +9185,7 @@ def _unzip_parse(args: List[str]) -> Tuple[List[str], bool]:
                 dirs += [val] if c == "d" and val is not None else []
                 neg = 0
                 break
-            key = UNZIP_READ.get(c, "")
-            counts[key] = max(counts.get(key, 0) - neg, 0) if neg else counts.get(key, 0) + 1
+            _unzip_flag(counts, UNZIP_READ.get(c, ""), neg)
             neg = 0
     return dirs, any(v for k, v in counts.items() if k)
 
@@ -10150,8 +10203,9 @@ def _fake_git_dirs(commands: List[Tuple[List[str], Optional[str]]]) -> Set[str]:
                 unknown = re.search(r"[$`*?\[]", d) or (here is None and not d.startswith("/"))
                 full = posixpath.join(here or "/", d)
                 # T-3674: thư mục đã có `.git` (gốc dự án) — git dò thấy `.git` trước, không nhận chính nó là Git dir;
-                # chỉ `GIT_DIR`/`--git-dir` tường minh mới nhận (đã chặn riêng: `_git_cfg_env_why`, `hook_bypass`)
-                if unknown or not os.path.lexists(posixpath.join(full, ".git")):  # đường thô: kernel giải `..`
+                # chỉ `GIT_DIR`/`--git-dir` tường minh mới nhận (đã chặn riêng: `_git_cfg_env_why`, `hook_bypass`).
+                # AUD-SEC-487: chỉ `.git` làm git dừng dò (gitfile, Git dir hợp lệ) — `.git` rỗng/hỏng git bỏ qua
+                if unknown or not _stops_git_discovery(posixpath.join(full, ".git")):  # đường thô: kernel giải `..`
                     out.add("" if unknown else full)
     return out
 
@@ -10236,8 +10290,7 @@ def _discover_bare_git_dir(path: str, ceilings: str, across: Tuple[str, ...]) ->
     cross = any(value.lower() not in ("", "false", "no", "off", "0") for value in across)
     directory = _realpath_safe(path)
     while True:
-        dot_git = os.path.join(directory, ".git")
-        if os.path.isfile(dot_git) or _git_metadata_dir(dot_git):
+        if _stops_git_discovery(os.path.join(directory, ".git")):  # AUD-SEC-487: `.git` hỏng git bỏ qua
             return ""
         if _git_metadata_dir(directory):
             return directory

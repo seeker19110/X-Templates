@@ -1302,5 +1302,153 @@ class CwdUnion3674Test(unittest.TestCase):
         self.assertEqual(self.cands("git status"), [[root]])
 
 
+class Review439Test(unittest.TestCase):
+    """Review #439 (D-351): năm 🔴 AUD-SEC-487…491 — mỗi ca chặn đỏ ở 212a392 (git 2.53, bash 5.3, UnZip 6.00 Debian
+    xác nhận hành vi)."""
+
+    git_init = GitMetadataTest.git_init
+    policy = GitMetadataTest.policy
+    assert_code = GitMetadataTest.assert_code
+    assert_codes = OptionParse3673Test.assert_codes
+    cands = CwdUnion3674Test.cands
+
+    def setUp(self):
+        CwdUnion3674Test.setUp(self)
+        for d in (".claude/hooks", ".claude/agents", ".git/info"):
+            (self.root / d).mkdir(parents=True, exist_ok=True)
+        (self.root / ".claude" / "hooks" / "guard.py").write_text("")
+
+    def fake_repo_cmds(self, d):
+        return (
+            f"mkdir -p {d}/objects {d}/refs; printf 'ref: refs/heads/main\\n' > {d}/HEAD; printf x > {d}/config",
+            f"mkdir -p {d}/objects {d}/refs; printf 'ref: refs/heads/main\\n' > {d}/HEAD; printf x > {d}/hooks/pre-push",
+            f"mkdir -p {d}/objects && touch {d}/HEAD {d}/config",
+            f"mkdir -p {self.root}/{d}/objects; printf m > {self.root}/{d}/HEAD; printf x > {self.root}/{d}/config",
+        )
+
+    def test_487_invalid_dotgit_does_not_exempt_fake_git_dir(self):
+        """git chỉ dừng dò ở `.git` là gitfile hay Git dir hợp lệ (HEAD hợp lệ, `objects`/`refs` vào được)."""
+        r = self.root
+        (r / "x" / ".git").mkdir(parents=True)  # `.git` rỗng
+        (r / "y" / ".git" / "objects").mkdir(parents=True)  # thiếu `refs`
+        (r / "y" / ".git" / "HEAD").write_text("ref: refs/heads/main\n")
+        for name, head in (("z", ""), ("v", "Ref: refs/x")):  # HEAD hỏng
+            for sub in ("objects", "refs"):
+                (r / name / ".git" / sub).mkdir(parents=True, exist_ok=True)
+            (r / name / ".git" / "HEAD").write_text(head)
+        (r / "s" / ".git" / "objects").mkdir(parents=True)
+        (r / "s" / ".git" / "refs").mkdir()
+        (r / "s" / ".git" / "HEAD").symlink_to("other")  # symlink không trỏ `refs/…`
+        for d in ("x", "y", "z", "v", "s"):
+            self.assert_codes("HOOK_BYPASS", *self.fake_repo_cmds(d))
+
+    def test_487_valid_dotgit_still_exempt(self):
+        r = self.root
+        self.git_init(r / "w")
+        (r / "g").mkdir()
+        (r / "g" / ".git").write_text("gitdir: /khong-co\n")  # gitfile (kể cả hỏng): git dừng dò
+        for name, head in (("h", "0123456789abcdef0123456789abcdef01234567\n"), ("t", "ref:\trefs/heads/x")):
+            for sub in ("objects", "refs"):
+                (r / name / ".git" / sub).mkdir(parents=True)
+            (r / name / ".git" / "HEAD").write_text(head)
+        (r / "l" / ".git" / "objects").mkdir(parents=True)
+        (r / "l" / ".git" / "refs").mkdir()
+        (r / "l" / ".git" / "HEAD").symlink_to("refs/heads/main")
+        for d in ("w", "g", "h", "t", "l"):
+            self.assert_codes("NONE", *self.fake_repo_cmds(d)[:3])
+        self.assert_code("mkdir -p objects refs && touch HEAD config", "NONE")  # gốc dự án
+
+    def test_487_discover_skips_invalid_dotgit(self):
+        """`.git` không hợp lệ cạnh repo trần: git dùng chính thư mục làm Git dir — guard phải thấy repo trần đó."""
+        d = self.tmp / "d"
+        self.git_init(d, "--bare")
+        (d / ".git" / "objects").mkdir(parents=True)
+        (d / ".git" / "HEAD").write_text("")
+        self.assertEqual(guard._discover_bare_git_dir(str(d), "", ()), str(d))
+        (d / ".git" / "refs").mkdir()
+        (d / ".git" / "HEAD").write_text("ref: refs/heads/main\n")
+        self.assertEqual(guard._discover_bare_git_dir(str(d), "", ()), "")
+        fifo = self.tmp / "f"
+        (fifo / ".git" / "objects").mkdir(parents=True)
+        (fifo / ".git" / "refs").mkdir()
+        os.mkfifo(fifo / ".git" / "HEAD")  # tệp đặc biệt: không mở (không treo), không miễn
+        self.assertFalse(guard._git_dir_accepted(str(fifo / ".git")))
+        link = self.tmp / "k"
+        for sub in ("objects", "refs"):
+            (link / ".git" / sub).mkdir(parents=True)
+        (link / ".git" / "HEAD").symlink_to("refs/heads/main")
+        self.assertTrue(guard._git_dir_accepted(str(link / ".git")))
+        with patch.object(guard.os, "readlink", side_effect=OSError("x")):  # đọc lỗi: không miễn
+            self.assertFalse(guard._git_dir_accepted(str(link / ".git")))
+
+    def test_488_cd_back_after_dashdash_is_unknown(self):
+        self.assert_codes(
+            "HOOK_BYPASS",
+            "cd -- - && printf x > hooks/pre-commit",
+            "cd -L -- - && printf x > hooks/pre-commit",
+            "cd -- - && cp /tmp/x pre-commit",
+            "cd -- - && tar -xf /tmp/a.tar",
+            "pushd -- - && printf x > hooks/pre-commit",
+            "cd sub; pushd -- -; printf x > hooks/pre-commit",
+        )
+        self.assertIn(None, self.cands("cd -- - && echo")[1])
+        self.assert_codes("NONE", "cd -- sub && ls", "cd sub && ls", "cd -- sub && printf x > notes")
+
+    def test_489_unzip_test_and_pipe_flags_are_switches(self):
+        self.assert_codes(
+            "HOOK_BYPASS",
+            "cd .claude/hooks && unzip -tt --t /tmp/a.zip",
+            "cd .claude/hooks && unzip -cc --c /tmp/a.zip",
+            "cd .claude/hooks && unzip -pp --p /tmp/a.zip",
+            "cd .claude/hooks && unzip -cp --c /tmp/a.zip",
+            "cd .claude/hooks && UNZIP=-tt unzip --t /tmp/a.zip",
+            "cd .git && unzip -tt --t /tmp/a.zip",
+        )
+        self.assert_code("cd .autopilot && unzip -tt --t /tmp/a.zip", "EVIDENCE_HANDWRITE")
+        self.assertEqual(guard._unzip_parse(["-tt", "--t", "a.zip"]), ([], False))
+        self.assertEqual(guard._unzip_parse(["-t", "-t", "a.zip"]), ([], True))
+        self.assertEqual(guard._unzip_parse(["-ll", "--l", "a.zip"]), ([], True))  # vflag là bộ đếm: còn 1
+        self.assert_codes(
+            "NONE", "cd .claude/hooks && unzip -t /tmp/a.zip", "cd .claude/hooks && unzip -ll --l /tmp/a.zip"
+        )
+
+    def test_490_relative_cd_in_loop_or_function_is_unknown(self):
+        r = self.root
+        self.assert_codes(
+            "HOOK_BYPASS",
+            f"f() {{ cd ..; printf x > hooks/guard.py; }}; cd {r}/.claude/agents && f",
+            f"for i in 1 2; do cd ..; printf x > hooks/guard.py; cd {r}/.claude/agents; done",
+            f"while true; do cd ..; printf x > settings.json; cd {r}/.claude/agents; done",
+            "cd .claude/agents; trap 'cd ..' DEBUG; printf x > hooks/guard.py",
+            "cd .claude/agents; trap -- 'cd ..' DEBUG; printf x > hooks/guard.py",
+        )
+        self.assert_code("eval -- cd sub; printf x > ../.autopilot/x", "EVIDENCE_HANDWRITE")
+        self.assertIn(None, self.cands("for i in 1; do cd ..; done; echo")[-1])
+        self.assertIn(None, self.cands("f() { cd sub; }; echo")[-1])
+        self.assertIn(None, self.cands("trap 'cd ..' DEBUG; echo")[-1])
+        # đích tuyệt đối nguyên văn: giữ như cũ, không thêm None
+        self.assertNotIn(None, self.cands(f"for i in 1; do cd {r}/sub; done; echo")[-1])
+        self.assert_codes(
+            "NONE",
+            "for d in a b; do cd /tmp; printf x > notes; done",
+            f"for i in 1 2; do cd {r}/sub; printf x > notes; done",
+            "f() { cd /tmp && ls; }; f",
+            "trap 'rm -f /tmp/x' EXIT; cd sub; ls",
+        )
+
+    def test_491_cd_prefix_keeps_physical_candidate(self):
+        r = self.root
+        self.assert_codes(
+            "EVIDENCE_HANDWRITE",
+            "cd sub/up && printf x > ../.autopilot/x",
+            "cd sub/up/../.autopilot && printf x > state.json",
+            "cd sub/up/../docs/autopilot && printf x > STAGE.json",
+            "cd sub/up && cd ../.autopilot && printf x > state.json",
+        )
+        self.assertEqual(self.cands("cd sub/up && echo")[1], [f"{r}/sub/up", f"{r}/sub2"])
+        self.assertEqual(self.cands("cd sub && echo")[1], [f"{r}/sub"])
+        self.assert_codes("NONE", "cd sub/up && ls", "cd sub/up && printf x > notes", "cd src && git commit -m x")
+
+
 if __name__ == "__main__":
     unittest.main()

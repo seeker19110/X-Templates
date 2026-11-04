@@ -259,11 +259,19 @@ CWD_RELATIVE: Dict[str, str] = {
         for k, v, ref in (
             ("479-lastpipe-cd", "sub, ../.autopilot", "AUD-SEC-479"),
             ("480-or-exit-in-pipe", ".autopilot", "AUD-SEC-480"),
-            ("482-dotdot-in-loop", "sub/deep, .autopilot", "AUD-SEC-482"),
+            # 482-dotdot-in-loop: gỡ — `cd ..` trong vòng lặp nay thêm thư mục không biết (D-351), chặn ở mọi thư mục
             ("482-false-and-cd", "sub, .autopilot", "AUD-SEC-482"),
             ("483-cd-physical", "sub/.., .autopilot", "AUD-SEC-483"),
             ("484-eval-cd", "sub, ../.autopilot", "AUD-SEC-484"),
             ("486-dir-removed-by-other-tool", "w, .autopilot", "AUD-SEC-486"),
+        )
+    },
+    # Review #439 (D-351): đích tương đối của ca → dưới /tmp sau `cd /tmp &&`
+    **{
+        f"r439-{k}": f"{v} tương đối → /tmp/{v} sau cd /tmp ({ref})"
+        for k, v, ref in (
+            ("489-unzip-negated-test-switch", ".claude/hooks", "AUD-SEC-489"),
+            ("489-unzip-env-pipe-switch", ".claude/hooks", "AUD-SEC-489"),
         )
     },
 }
