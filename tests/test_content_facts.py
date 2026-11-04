@@ -43,7 +43,10 @@ class ContentFactsTest(unittest.TestCase):
         line = item("13-ai-engineering/evaluation.md", "AI-EVAL-022")
         self.assertIn("vẫn nằm trong mẫu số", line)
         for clause in re.split(r"[;.]", line):
-            if re.search(r"(loại|không tính|ra khỏi|bỏ khỏi)[^,;`]{0,25}mẫu số", clause):
+            flat = clause.replace("`", "")
+            if re.search(r"(loại|ra|bỏ|trừ)( [^,;]{0,30})? khỏi[^,;]{0,25}mẫu số", flat) or re.search(
+                r"không (được )?tính( [^,;]{0,30})? vào[^,;]{0,25}mẫu số", flat
+            ):
                 self.assertRegex(clause, r"xác nhận", clause)
 
 
