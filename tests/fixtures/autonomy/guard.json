@@ -21635,6 +21635,34 @@
    "allowed": true
   },
   "note": "nợ review #433 (AUD-SEC-438…440, T-3667, D-337/D-338)"
+ },
+ {
+  "id": "r434-441-env-u",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-441"
+  ],
+  "input": {
+   "command": "GIT_CONFIG_GLOBAL=/dev/null HOME=/tmp/h env -u GIT_CONFIG_GLOBAL git commit -m x"
+  },
+  "expect": {
+   "allowed": false
+  },
+  "note": "review #434: GIT_CONFIG_GLOBAL=/dev/null không tới git — HOME vẫn tính (git 2.43 thật)"
+ },
+ {
+  "id": "r434-441-bare",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-441"
+  ],
+  "input": {
+   "command": "GIT_CONFIG_GLOBAL=/dev/null; HOME=/tmp/h git push origin feat"
+  },
+  "expect": {
+   "allowed": false
+  },
+  "note": "review #434: GIT_CONFIG_GLOBAL=/dev/null không tới git — HOME vẫn tính (git 2.43 thật)"
  }
  ]
 }
