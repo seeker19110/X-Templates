@@ -9307,7 +9307,7 @@ def _cpio_archive(args: List[str]) -> List[str]:
 
 def _seven_zip(args: List[str]) -> Tuple[List[str], List[str]]:
     """(thư mục giải nén, archive ghi) của 7z: lệnh và khoá chuyển không phân biệt hoa thường (chưa đo: máy không có 7z
-    — https://7-zip.opensource.jp/chm/cmdline/syntax.htm); `x|e` giải vào `-o<D>` (vắng = `.`), `a|u|d|rn` ghi archive."""
+    — theo tài liệu 7-Zip, mục cmdline/syntax.htm); `x|e` giải vào `-o<D>` (vắng = `.`), `a|u|d|rn` ghi archive."""
     pos = _positionals(args)
     cmd = pos[0].lower() if pos else ""
     dirs = [a[2:] for a in args if a[:2].lower() == "-o"] or ["."]
