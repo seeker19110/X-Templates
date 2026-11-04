@@ -271,6 +271,9 @@ python3 -m unittest discover -s tests    # chỉ test (cổng test còn đòi co
 Nghiên cứu nền ngày 2026-10-13 ở [`research/`](research/): phân tích khung cũ, trích xuất catalog `seeker19110/stored`,
 AI agent và giao thức, cơ chế Claude Code. Khung cũ khôi phục được bằng `git archive 1b80fe4`.
 
+Đề xuất [định hướng xưởng phần mềm từ 34 mục stored](research/2026-11-04-software-factory-direction.md) (4/11/2026):
+gói sản phẩm có phiên bản, bằng chứng phát hành và lộ trình nghiệm thu; đang đề xuất, chưa đổi hành vi của khung.
+
 ## Đóng góp
 
 Xem [`CONTRIBUTING.md`](CONTRIBUTING.md) và [`framework/00-method/conventions.md`](framework/00-method/conventions.md).
