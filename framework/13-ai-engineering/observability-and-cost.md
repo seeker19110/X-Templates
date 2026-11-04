@@ -3,7 +3,7 @@ title: Quan sát & chi phí: trace OTel GenAI, token, gateway, failover
 kind: module
 prefix: AI-OBS
 applies_to: [ai-agent, agentic-system, data-ml, api-service, web-app]
-updated: 2026-11-02
+updated: 2026-11-04
 ---
 
 # Quan sát & chi phí: trace OTel GenAI, token, gateway, failover
@@ -67,7 +67,7 @@ instrumentation đang dùng trong ADR và kiểm lại khi nâng.
 - [ ] `AI-OBS-010` **SHOULD** Dashboard: token/chi phí theo tenant, tính năng, model; p50/p95 độ trễ; tỉ lệ lỗi theo mã; tỉ lệ cache hit; tỉ lệ guardrail chặn. · Nguồn: [`../15-operations/observability.md`](../15-operations/observability.md)
 - [ ] `AI-OBS-011` **SHOULD** SLO riêng cho tính năng AI (vd p95 thời gian tới token đầu, tỉ lệ lỗi) với alert theo [`../15-operations/slo-and-alerting.md`](../15-operations/slo-and-alerting.md).
 - [ ] `AI-OBS-012` **SHOULD** Lấy mẫu production (đã che PII) vào dataset eval online; điểm giảm so tuần trước → cảnh báo. · Nguồn: [`evaluation.md`](evaluation.md)
-- [ ] `AI-OBS-013` **SHOULD** Pin phiên bản instrumentation OTel GenAI trong ADR (semconv chưa có release tag); kiểm thuộc tính đổi tên khi nâng. · Nguồn: OTel GenAI semconv repo
+- [ ] `AI-OBS-013` **SHOULD** (**MUST@L** khi có agent/tool) Chọn **một** quy ước trace agent — OTel GenAI `gen_ai.*` hoặc OpenInference — ghi tên + phiên bản/commit SHA 40 ký tự của `semantic-conventions-genai` (còn Development, chưa có release tag) trong ADR, không trộn hai quy ước trong một service; kiểm thuộc tính đổi tên khi nâng. Test CI với exporter in-memory chạy luồng agent mẫu (fake model + 1 tool): span `invoke_agent` có `gen_ai.operation.name`, `gen_ai.agent.name`/id, `gen_ai.provider.name`; span `execute_tool` có `gen_ai.tool.name`, `gen_ai.tool.call.id`, là con của `invoke_agent` cùng `trace_id` (OpenInference: `openinference.span.kind`=AGENT/TOOL, `tool.name`), chạy lại ở PR bump framework agent/instrumentation. CI chạy `weaver registry live-check` với registry đúng SHA đó trên span OTLP từ test tích hợp (model giả được); sai tên/kiểu thuộc tính → đỏ. Thư viện bên thứ ba (OpenInference, OpenLIT) mặc định ghi nội dung prompt/output: tắt tường minh trong config và có test xác nhận (`AI-OBS-004`, `OPS-OBS-017`). → Kiểm: ADR có SHA; test instrumentation agent trong CI, PR bump đỏ khi thiếu thuộc tính bắt buộc; bước weaver trỏ đúng SHA; span ở cấu hình mặc định không chứa `gen_ai.input.messages`/`gen_ai.output.messages` hay thuộc tính nội dung riêng của thư viện; `rg -l 'openinference|gen_ai\.' src` chỉ một quy ước khớp ADR. · Nguồn: OTel GenAI semconv repo, (chưa xác minh — theo stored 02 §4d, 07 §Nâng trần 2/11; `weaver live-check` chưa tra lại)
 - [ ] `AI-OBS-014` **SHOULD** Báo cáo chi phí hàng tháng theo tính năng với đề xuất hạ tier/cache/batch; đo trước–sau khi áp. · Nguồn: [`../15-operations/cost-management.md`](../15-operations/cost-management.md)
 - [ ] `AI-OBS-015` **SHOULD** Rate limit theo tenant ở gateway, tách khỏi rate limit của nhà cung cấp; cảnh báo khi một tenant chiếm > X% tổng token.
 - [ ] `AI-OBS-016` **MAY** Dùng nền tảng trace LLM chuyên biệt (`langfuse`) khi cần dataset/eval/annotation gắn trace; nếu đã có OTel backend, xuất song song qua OTLP.
