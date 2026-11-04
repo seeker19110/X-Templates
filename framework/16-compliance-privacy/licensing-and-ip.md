@@ -3,7 +3,7 @@ title: License mã nguồn mở, IP, dữ liệu huấn luyện, thương hiệu
 kind: module
 prefix: CMP-LIC
 applies_to: [all]
-updated: 2026-11-03
+updated: 2026-11-04
 ---
 
 # License mã nguồn mở, IP, dữ liệu huấn luyện, thương hiệu, điều khoản dịch vụ
@@ -83,7 +83,7 @@ updated: 2026-11-03
 - **Đổi license gói giữa chừng** (Redis, Elastic, Terraform đã từng) → lockfile cũ ok, nâng phiên bản là vi phạm.
 - **Font "free for personal use"** trong sản phẩm thương mại; **font hệ điều hành commit vào repo** (Segoe UI ghi "Microsoft supplied font" — chỉ dùng theo điều khoản sản phẩm đi kèm, không phân phối lại) → dùng font OFL.
 - **License của mã ≠ license của weights:** README ghi Apache-2.0 nhưng weights từng kích thước/revision theo license riêng (trần doanh thu, cấm lãnh thổ/đầu ra); cùng họ model, bản v2 đổi MIT → AGPL-3.0. Đọc model card đúng repo + revision (`CMP-LIC-020`).
-- **Action CI "miễn phí" nhưng theo EULA độc quyền:** `gitleaks-action` (khác gitleaks CLI MIT) buộc repo thuộc Organization Account có `GITLEAKS_LICENSE` và cấm dùng như một phần dịch vụ; repo cá nhân không cần. Mẫu `framework/templates/secret-scan.yml` cài sang dự án đích dùng action này → dự án thuộc tổ chức cấp license hoặc chạy CLI (MIT) ghim phiên bản + SHA256 ([`../12-security/supply-chain.md`](../12-security/supply-chain.md) `SEC-SUPPLY-005`). Đọc LICENSE của chính action, không chỉ của công cụ bên dưới (xác minh 2026-10-21: research §4.2).
+- **Action CI "miễn phí" nhưng theo EULA độc quyền:** `gitleaks-action` (khác gitleaks CLI MIT) buộc repo thuộc Organization Account có `GITLEAKS_LICENSE` và cấm dùng như một phần dịch vụ; repo cá nhân không cần. Mẫu [`secret-scan.yml`](../templates/secret-scan.yml) dùng CLI (MIT) ghim phiên bản và SHA256 ([`../12-security/supply-chain.md`](../12-security/supply-chain.md) `SEC-SUPPLY-005`). Đọc LICENSE của chính action, không chỉ của công cụ bên dưới (xác minh 2026-10-21: research §4.2).
 - **Đọc LICENSE ở gốc repo skill rồi vendor cả thư mục con:** `anthropics/skills` có 15 skill Apache-2.0, 4 skill tài liệu (`docx`, `pdf`, `pptx`, `xlsx`) "© Anthropic, All rights reserved" và một skill không có file license — kiểm LICENSE **từng thư mục skill** khi vendor.
 
 ## Cổng tự động

@@ -3,7 +3,7 @@ title: Chuỗi cung ứng: ghim, SBOM, chữ ký, SLSA, Scorecard, Dependabot
 kind: module
 prefix: SEC-SUPPLY
 applies_to: [all]
-updated: 2026-11-03
+updated: 2026-11-04
 ---
 
 # Chuỗi cung ứng: ghim, SBOM, chữ ký, SLSA, Scorecard, Dependabot
@@ -88,7 +88,7 @@ updated: 2026-11-03
 8. **SBOM sinh một lần rồi quên.** SBOM có giá trị khi được quét lại khi có CVE mới. Tránh: lưu SBOM theo phiên bản + quét tuần.
 9. **Trivy/scanner tải từ `install.sh` không checksum** → chính công cụ bảo mật là vector tấn công. Tránh: `SEC-SUPPLY-005`.
 10. **Ký nhưng không verify.** `cosign sign` xong mà deploy không `cosign verify` → chữ ký chỉ để trang trí. Tránh: `SEC-SUPPLY-013` phần admission.
-11. **Coi action quét mã là "mã nguồn mở" vì công cụ bên dưới MIT.** `gitleaks-action` theo **EULA độc quyền**, không phải MIT như gitleaks CLI: repo thuộc Organization Account phải có secret `GITLEAKS_LICENSE`, cấm dùng như một phần dịch vụ; gitleaks CLI đã "feature complete" (chỉ vá bảo mật). Mẫu `framework/templates/secret-scan.yml` dùng action này — dự án đích thuộc tổ chức cấp license hoặc thay bằng CLI (MIT) tải binary ghim phiên bản + SHA256 (`SEC-SUPPLY-005`). Chi tiết license: [`../16-compliance-privacy/licensing-and-ip.md`](../16-compliance-privacy/licensing-and-ip.md) (xác minh 2026-10-21: research §4.2).
+11. **Coi action quét mã là "mã nguồn mở" vì công cụ bên dưới MIT.** `gitleaks-action` theo **EULA độc quyền** và đòi `GITLEAKS_LICENSE` cho Organization Account. Mẫu [`secret-scan.yml`](../templates/secret-scan.yml) tải CLI (MIT) ghim phiên bản và SHA256 (`SEC-SUPPLY-005`). Chi tiết giấy phép ở [`licensing-and-ip.md`](../16-compliance-privacy/licensing-and-ip.md).
 12. **Coi plugin từ marketplace chính thức là bản đứng yên.** `anthropics/claude-plugins-official` có bot **bump SHA plugin bên thứ ba hằng đêm** sau `claude plugin validate` + scan chính sách tự động: "đã qua kiểm duyệt" không có nghĩa là không đổi giữa hai phiên. Repo cần hành vi ổn định ghim phiên bản hoặc vendor (`SEC-SUPPLY-016`).
 
 ## Cổng tự động

@@ -141,6 +141,8 @@ KNOWN_RED: Dict[str, str] = {}  # biến thể AUD-SEC-202 cũ nay bị chặn b
 # án — guard cho chạy là đúng, nên bất biến deny đơn điệu không áp cho biến thể có bộ bọc `cd-tmp` của các ca này.
 # Ca chặn vì đích tuyệt đối/`~`/mạng (`rm -rf ~`, push main, merge…) vẫn bị đòi deny sau `cd /tmp`.
 CWD_RELATIVE: Dict[str, str] = {
+    "r434-446-bare-ancestor-external-diff": "bare/objects tương đối trỏ ra ngoài repo của fixture sau cd /tmp (AUD-SEC-446)",
+    "r435-448-objects-file-bare-config": "gd/config tương đối → /tmp/gd/config không có Git dir sau cd /tmp (AUD-SEC-448)",
     "t3633-248-cp-T": "docs/autopilot tương đối → /tmp/docs/autopilot (AUD-SEC-248)",
     "t3633-248-tar-C": "docs tương đối → /tmp/docs (AUD-SEC-248)",
     "t3633-248-glob": "docs/autopilot/* tương đối (AUD-SEC-248)",

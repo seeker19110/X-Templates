@@ -21663,6 +21663,131 @@
    "allowed": false
   },
   "note": "review #434: GIT_CONFIG_GLOBAL=/dev/null không tới git — HOME vẫn tính (git 2.43 thật)"
+ },
+ {
+  "id": "r434-442-git-exec-path-override",
+  "origin": "adversarial-reviewer",
+  "refs": ["AUD-SEC-442"],
+  "input": {
+   "command": "git --exec-path=/usr/local/libexec/git-core status"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  }
+ },
+ {
+  "id": "r434-ctl-442-git-exec-path-query",
+  "origin": "control",
+  "refs": ["AUD-SEC-442"],
+  "input": {
+   "command": "git --exec-path"
+  },
+  "expect": {
+   "allowed": true
+  }
+ },
+ {
+  "id": "r434-443-write-gitfile",
+  "origin": "adversarial-reviewer",
+  "refs": ["AUD-SEC-443"],
+  "input": {
+   "tool": "edit",
+   "path": "sub/.git",
+   "tool_input": {
+    "content": "gitdir: /tmp/gd\n"
+   }
+  },
+  "expect": {
+   "allowed": false
+  }
+ },
+ {
+  "id": "r434-443-python-gitfile",
+  "origin": "adversarial-reviewer",
+  "refs": ["AUD-SEC-443"],
+  "input": {
+   "command": "python3 -c \"open('sub/.git','w').write('gitdir: /tmp/gd')\""
+  },
+  "expect": {
+   "allowed": false,
+   "code": "HOOK_BYPASS"
+  }
+ },
+ {
+  "id": "r434-445-git-init-separate-git-dir",
+  "origin": "adversarial-reviewer",
+  "refs": ["AUD-SEC-445"],
+  "input": {
+   "command": "git init --separate-git-dir=/tmp/gd"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "HOOK_BYPASS"
+  }
+ },
+ {
+  "id": "r434-446-bare-init-and-config-write",
+  "origin": "adversarial-reviewer",
+  "refs": ["AUD-SEC-446"],
+  "input": {
+   "command": "git init --bare bare && printf '[alias]\\n\\tx = !echo bypass\\n' >> bare/config"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "HOOK_BYPASS"
+  }
+ },
+ {
+  "id": "r434-446-bare-ancestor-external-diff",
+  "origin": "adversarial-reviewer",
+  "refs": ["AUD-SEC-446"],
+  "input": {
+   "command": "git -C bare/objects diff --ext-diff HEAD^ HEAD -- :/",
+   "files": {
+    "bare/HEAD": "ref: refs/heads/main\n",
+    "bare/objects/.keep": "",
+    "bare/config": "[core]\n\tbare = true\n[diff]\n\texternal = /tmp/xt-driver\n"
+   }
+  },
+  "expect": {
+   "allowed": false,
+   "code": "HOOK_BYPASS"
+  }
+ },
+{
+ "id": "r435-448-objects-file-bare-config",
+ "origin": "adversarial-reviewer",
+ "refs": [
+  "AUD-SEC-448"
+ ],
+ "input": {
+  "command": "printf '[core]\\n\\tsshCommand = touch /tmp/pwn\\n' > gd/config",
+  "files": {
+   "gd/HEAD": "ref: refs/heads/main\n",
+   "gd/objects": ""
+  }
+ },
+ "expect": {
+  "allowed": false,
+  "code": "HOOK_BYPASS"
  }
+},
+{
+ "id": "r435-ctl-448-head-only-dir",
+ "origin": "control",
+ "refs": [
+  "AUD-SEC-448"
+ ],
+ "input": {
+  "command": "printf x > gd/config",
+  "files": {
+   "gd/HEAD": "ref: refs/heads/main\n"
+  }
+ },
+ "expect": {
+  "allowed": true
+ }
+}
  ]
 }

@@ -340,6 +340,18 @@
    "ids": [
     "AUD-SEC-375"
    ]
+  },
+  {
+   "reason": "Phạm vi commit và diff merge của job Gitleaks chạy trên GitHub, cần workflow và lịch sử Git thật. Kiểm bằng tests.test_ci.SecretScanTest và ca PR thử 31 commit trong báo cáo audit 2026-11-04.",
+   "ids": [
+    "AUD-CI-030"
+   ]
+  },
+  {
+   "reason": "Ghi qua hard link tới hook của repo hoặc linked worktree cần hai đường dẫn chung inode. Fixture `files` của autonomy-bench chỉ tạo file thường. Kiểm bằng tests.test_guard_strict.GuardDebt433Test, các ca test_aud_sec_447_hook_links và test_aud_sec_447_linked_worktree_hook.",
+   "ids": [
+    "AUD-SEC-447"
+   ]
   }
  ]
 }

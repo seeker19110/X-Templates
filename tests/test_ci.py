@@ -385,6 +385,21 @@ class PullRequestTargetTest(unittest.TestCase):
                 self.assertFalse(uses_pull_request_target(path.read_text(encoding="utf-8")))
 
 
+class SecretScanTest(unittest.TestCase):
+    def test_scans_git_history_with_verified_cli_in_both_workflows(self):
+        """AUD-CI-030: không phụ thuộc trang đầu của API commit PR, quét cả HEAD tách rời và diff của merge."""
+        path = WORKFLOWS / "secret-scan.yml"
+        template = ROOT / "framework" / "templates" / path.name
+        workflow = path.read_text(encoding="utf-8")
+        body = ci_jobs(workflow)["gitleaks"]
+        self.assertEqual(body, ci_jobs(template.read_text(encoding="utf-8"))["gitleaks"])
+        self.assertNotIn("pull-requests:", workflow)
+        self.assertIn("fetch-depth: 0", body)
+        self.assertIn("--log-opts='--all --diff-merges=first-parent HEAD'", body)
+        self.assertRegex(body, r"(?m)^\s+sha256=[0-9a-f]{64}$")
+        self.assertLess(body.index("sha256sum --check --strict"), body.index('tar -xzf "$archive"'))
+
+
 def step_run(body: str, step_id: str) -> str:
     """Script `run: |` của bước có `id: <step_id>` (bỏ thụt lề 10 của khối)."""
     m = re.search(

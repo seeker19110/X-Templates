@@ -7447,7 +7447,6 @@ class GuardRemoteRefTest(unittest.TestCase):
             "git --attr-source=HEAD log",
             "git --shallow-file x log",
             "git --exec-path",
-            "git --exec-path=/usr/lib/git-core status",
             "git --html-path",
             "git --man-path",
             "git --info-path",
