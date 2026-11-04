@@ -775,7 +775,7 @@ class HardenWorkTest(StateCase):
             ),
             encoding="utf-8",
         )
-        want = {"cycle": "C-001", "stage": 1, "status": "active", "sha": None, "changed": []}
+        want = {"cycle": "C-001", "stage": 1, "status": "active", "sha": None, "changed": [], "agent_approval": False}
         self.assertEqual(xt.stage_facts(self.base), want)
         led.write_text("{", encoding="utf-8")
         self.assertIn("không đọc được", xt.stage_facts(self.base)["error"])
