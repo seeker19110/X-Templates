@@ -289,6 +289,12 @@ class ReviewDebt435Test(unittest.TestCase):
                 self.assertEqual(guard._bare_git_created(argv, str(self.root)), "")
         self.assertEqual(guard._bare_git_created(["git", "init", "--bare", "y"], None), "")
         self.assertIsNone(guard._bare_git_created(["git", "status"], str(self.root)))
+        # `--` kết thúc tuỳ chọn: thư mục sau `--` vẫn là chỗ tạo repo trần
+        made = guard._bare_git_created(["git", "init", "--bare", "--", "y"], str(self.root))
+        self.assertEqual(os.path.normpath(made or ""), os.path.join(str(self.root), "y"))
+        self.assert_code(
+            f"git init --bare -- {self.tmp / 'z'} && printf x > {self.tmp / 'z' / 'config'}", "HOOK_BYPASS"
+        )
 
     def test_452_own_git_dir_trailing_slash(self):
         for cmd in (
