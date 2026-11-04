@@ -3,7 +3,7 @@ title: Tài liệu sống: ADR, runbook, docs-as-code, tươi bằng máy
 kind: module
 prefix: WF-DOC
 applies_to: [all]
-updated: 2026-10-18
+updated: 2026-11-04
 ---
 
 # Tài liệu sống: ADR, runbook, docs-as-code, tươi bằng máy
@@ -43,7 +43,7 @@ updated: 2026-10-18
 ## Checklist
 
 - [ ] `WF-DOC-001` **MUST** Tài liệu ở dạng text trong repo (Markdown/AsciiDoc), thay đổi hành vi đi cùng PR với cập nhật tài liệu liên quan; không có "sẽ cập nhật docs sau". → Kiểm: PR template mục "Docs cập nhật/không cần (lý do)"; `pr-policy` cảnh báo khi đổi public API/CLI/config mà không chạm `docs/`. · Nguồn: Write the Docs — Docs as Code
-- [ ] `WF-DOC-002` **MUST** Link check nội bộ + ngoại trong CI: mọi link tương đối trỏ file có thật; link ngoài không 404 (cache, retry, allowlist domain chặn bot). → Kiểm: `lychee` hoặc `scripts/check-links.py` exit 0. · Nguồn: P5
+- [ ] `WF-DOC-002` **MUST** Link check nội bộ + ngoại trong CI: mọi link tương đối trỏ file có thật; link ngoài không 404 (cache, retry, allowlist domain chặn bot), kể cả anchor `#heading`. → Kiểm: `lychee --offline --include-fragments --cache` hoặc `scripts/check-links.py` exit 0. · Nguồn: P5
 - [ ] `WF-DOC-003` **MUST@L** Mọi đường dẫn/tên file/lệnh được nhắc trong tài liệu phải tồn tại/chạy được (docs-consistency); đổi tên file → CI bắt nơi còn nhắc tên cũ. → Kiểm: script quét backtick path ↔ filesystem; allowlist cho file sinh tại đích. · Nguồn: khung cũ `scripts/check-docs-consistency.sh`
 - [ ] `WF-DOC-004` **MAY** Ngừng dùng 2026-10-14 — gộp vào [`LOOP-HARNESS-004`](../11-autonomous-loop/harness-files.md)/[`005`](../11-autonomous-loop/harness-files.md): định dạng (4 mục, ≤ 8 KB) và độ tươi `PROGRESS.md` (SHA là tổ tiên HEAD và của nhánh chính). Điều kiện cũ "nhánh nêu tên còn trên remote" bỏ vì xung đột với squash-merge xoá nhánh.
 - [ ] `WF-DOC-005` **MUST@L** Quyết định kiến trúc/công nghệ lớn có ADR (đánh số tăng, status, context, options, decision, consequences); không sửa ADR cũ, đổi ý = ADR mới `supersedes`. → Kiểm: `docs/adr/` có template + ADR; lint số liên tục + frontmatter; xem [`../05-architecture/decision-records.md`](../05-architecture/decision-records.md). · Nguồn: adr.github.io
@@ -52,7 +52,7 @@ updated: 2026-10-18
 - [ ] `WF-DOC-008` **MUST@M** Runbook vận hành (`docs/ops/RUNBOOK.md` theo [`../templates/RUNBOOK.md`](../templates/RUNBOOK.md)) cho: deploy, rollback, khôi phục backup, xoay secret, sự cố thường gặp — mỗi mục có lệnh thật và ngày diễn tập gần nhất ≤ 6 tháng. → Kiểm: lint runbook có trường `last_drilled`; cảnh báo quá hạn. · Nguồn: lifecycle G8, [`../15-operations/incident-response.md`](../15-operations/incident-response.md)
 - [ ] `WF-DOC-009` **MUST@L** Lỗi lặp/sự cố → mục trong `TRAPS.md` (bẫy, dấu hiệu, cách tránh, link PR/post-mortem) và/hoặc hàng rào máy; post-mortem theo [`../templates/POST-MORTEM.md`](../templates/POST-MORTEM.md). → Kiểm: mỗi post-mortem có ≥ 1 hành động là hàng rào (test/lint/hook/checklist) có link PR. · Nguồn: P12, catalog 23 §4.3 (`/hoc` thang mức bền)
 - [ ] `WF-DOC-010` **MUST@L** Markdown lint (heading, link, code fence có ngôn ngữ, không trailing space) và kiểm chính tả/thuật ngữ cho tài liệu người dùng. → Kiểm: `markdownlint-cli2` exit 0; `cspell`/`typos` với từ điển dự án.
-- [ ] `WF-DOC-011` **MUST@L** Tài liệu người dùng/API có phiên bản theo release (docs vX.Y), changelog người dùng, và quy trình review nội dung bởi người không viết code. → Kiểm: site docs có version switcher; PR docs có reviewer khác tác giả.
+- [ ] `WF-DOC-011` **MUST@L** Tài liệu người dùng/API có phiên bản theo release (docs vX.Y), changelog người dùng, và quy trình review nội dung bởi người không viết code. Công cụ truy xuất docs theo phiên bản dependency giữ `requested_version` (từ lockfile) và `served_version`/tag/commit thực của response + URL + thời điểm; HTTP 200 không chứng minh khớp (server có thể fallback sang docs bản khác) — lệch hoặc không rõ thì báo mismatch, tra docs/source đã ghim, ví dụ quan trọng typecheck với dependency thật. → Kiểm: site docs có version switcher; PR docs có reviewer khác tác giả; fixture provider trả 200 nhưng served ≠ requested không được ghi là đã xác minh.
 - [ ] `WF-DOC-012` **SHOULD** Đính chính giữ dấu vết: nội dung sai sửa kèm "đính chính ngày …", không xoá lịch sử; số liệu/phiên bản kèm ngày xác minh. → Kiểm: grep "đính chính" tồn tại khi có sửa số liệu; lint phiên bản thiếu ngày trong `docs/` (regex `v\d+\.\d+` không kèm `20\d\d-`). · Nguồn: `evidence-and-sources.md` §1 luật 4, 12
 - [ ] `WF-DOC-013` **SHOULD** Diagram dạng text (Mermaid/D2/PlantUML) trong repo, render trong CI; C4 mức 1–2 cho kiến trúc, cập nhật cùng ADR. → Kiểm: file `.mmd`/`.d2` render không lỗi; không PNG không có nguồn text.
 - [ ] `WF-DOC-014` **MAY** Ngừng dùng 2026-10-14 — gộp vào [`XC-DOCAI-002`](../18-cross-cutting/docs-for-ai-agents.md) (bridge chỉ trỏ về `AGENTS.md`) và [`XC-DOCAI-003`](../18-cross-cutting/docs-for-ai-agents.md) (lệnh trong `xt.yaml` khớp điểm vào thật).

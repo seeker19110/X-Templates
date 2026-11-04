@@ -3,7 +3,7 @@ title: Tiếp cận (a11y) theo WCAG 2.2 AA và nền tảng mobile
 kind: module
 prefix: UX-A11Y
 applies_to: [web-app, mobile-app, desktop-app, static-site, game, monorepo]
-updated: 2026-10-19
+updated: 2026-11-04
 ---
 
 # Tiếp cận (a11y) theo WCAG 2.2 AA và nền tảng mobile
@@ -52,7 +52,7 @@ updated: 2026-10-19
 - [ ] `UX-A11Y-014` **MUST@L** Dialog modal: focus vào trong khi mở, Tab quay vòng trong dialog, Esc đóng, focus trả về phần tử mở; `role="dialog"` + `aria-modal="true"` + tên tiếp cận. → Kiểm: E2E theo pattern APG; dùng `<dialog>` hoặc component headless. · Nguồn: WAI-ARIA APG Dialog (Modal)
 - [ ] `UX-A11Y-015` **MUST@L** Nội dung tự chuyển động/nhấp nháy > 5 giây có nút tạm dừng/dừng/ẩn; không nhấp nháy quá 3 lần/giây. → Kiểm: review carousel/auto-play có nút Pause; E2E bấm Pause dừng được. · Nguồn: WCAG 2.2 SC 2.2.2, 2.3.1
 - [ ] `UX-A11Y-016` **MUST@L** Không chặn zoom (`user-scalable=no`, `maximum-scale=1`). → Kiểm: grep meta viewport; axe rule `meta-viewport`. · Nguồn: WCAG 2.2 SC 1.4.4
-- [ ] `UX-A11Y-017` **MUST@L** Luồng chính được kiểm tay bằng trình đọc màn hình (VoiceOver/TalkBack/NVDA) mỗi release, có biên bản. → Kiểm: file `docs/a11y/manual-<release>.md` liệt kê luồng, thiết bị, kết quả. · Nguồn: WCAG 2.2 (phần máy không quét được)
+- [ ] `UX-A11Y-017` **MUST@L** Luồng chính được kiểm tay bằng trình đọc màn hình (VoiceOver/TalkBack/NVDA) mỗi release, có biên bản. Kết quả `incomplete` của axe cũng được người duyệt riêng và ghi vào biên bản. → Kiểm: file `docs/a11y/manual-<release>.md` liệt kê luồng, thiết bị, kết quả, và mục `incomplete` đã duyệt. · Nguồn: WCAG 2.2 (phần máy không quét được)
 - [ ] `UX-A11Y-018` **MUST@L** Mobile native: mọi điều khiển có nhãn (`accessibilityLabel`/`contentDescription`), hỗ trợ Dynamic Type/font scale tới 200% không cắt chữ, tôn trọng Reduce Motion. → Kiểm: Xcode Accessibility Inspector audit + Android Accessibility Scanner 0 lỗi; test UI với font scale lớn nhất. · Nguồn: Apple HIG Accessibility; Android Accessibility
 - [ ] `UX-A11Y-019` **SHOULD** Thông báo động (lỗi, thành công, cập nhật) đi qua live region: `role="status"`/`aria-live="polite"` cho thường, `role="alert"` cho khẩn; không chuyển focus bằng alert. → Kiểm: E2E kiểm `[role=status]` chứa thông điệp sau hành động. · Nguồn: WAI-ARIA APG Alert; WAI tutorial Forms
 - [ ] `UX-A11Y-020` **SHOULD** Có liên kết "Bỏ qua tới nội dung chính" là phần tử focus đầu tiên. → Kiểm: E2E Tab lần đầu → phần tử có text "Bỏ qua". · Nguồn: WCAG 2.2 SC 2.4.1

@@ -3,7 +3,7 @@ title: Chiến lược kiểm thử: tháp, mức bao phủ, cổng, trách nhi�
 kind: module
 prefix: QA-STRAT
 applies_to: [all]
-updated: 2026-10-17
+updated: 2026-11-04
 ---
 
 # Chiến lược kiểm thử: tháp, mức bao phủ, cổng, trách nhiệm
@@ -76,7 +76,7 @@ Hiệu năng, bảo mật, độ tin cậy **không phải tầng của tháp**:
 
 ## Checklist
 
-- [ ] `QA-STRAT-001` **MUST** Một lệnh chạy toàn bộ test khai trong `xt.yaml` (hoặc `package.json`/`Makefile`) và CI gọi đúng lệnh đó. → Kiểm: `scripts/dev-task.sh test` exit 0; job CI dùng cùng lệnh (grep trong workflow). · Nguồn: P9
+- [ ] `QA-STRAT-001` **MUST** Một lệnh chạy toàn bộ test khai trong `xt.yaml` (hoặc `package.json`/`Makefile`) và CI gọi đúng lệnh đó. Cổng test/scan do dự án chọn khai adapter + format/version report, target/config, trạng thái hoàn tất và số test/thực thể đã chạy (khi định dạng hỗ trợ): thiếu report, 0 test của suite bắt buộc, chỉ-report (`--fail-on`/threshold chưa đặt), hoặc unknown/infrastructure-error (vd analysis bất đồng bộ chưa xong) không là pass; gắn SHA/run ID; parser chưa hỗ trợ thì báo "chưa kết luận", không đoán theo tên công cụ. → Kiểm: `scripts/dev-task.sh test` exit 0; job CI dùng cùng lệnh (grep trong workflow); fixture âm (report rỗng, thiếu target) làm adapter đỏ. · Nguồn: P9; stored 29 §4–5, 30 §3–4, 31 §2.2 (chưa xác minh)
 - [ ] `QA-STRAT-002` **MUST** CI chạy test trên mọi PR và là required check; merge bị chặn khi đỏ. → Kiểm: ruleset/branch protection liệt kê job test; không `continue-on-error`. · Nguồn: catalog 23 §2.5
 - [ ] `QA-STRAT-003` **MUST@L** `PROJECT.md` ghi chiến lược (tầng nào, cổng nào, ngưỡng) theo bảng Quyết định. → Kiểm: mục "Kiểm thử" trong `PROJECT.md` liệt kê ≥ 2 tầng và ngưỡng.
 - [ ] `QA-STRAT-004` **MUST@L** Mỗi tính năng MVP có ≥ 1 test chấp nhận tự động ánh xạ tiêu chí Given/When/Then trong spec. → Kiểm: tên test/tag chứa ID tính năng; script đối chiếu spec ↔ test không ID nào thiếu. · Nguồn: [`../17-product-project/specification.md`](../17-product-project/specification.md)
