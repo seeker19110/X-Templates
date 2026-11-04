@@ -267,12 +267,14 @@ python3 -m unittest discover -s tests    # chỉ test (cổng test còn đòi co
 - [ADR-0065](docs/adr/0065-guard-allowlist-dynamic-expansion.md) (D-322): guard xét mở rộng động theo danh sách trắng — từ lệnh dựng lúc chạy, tách/gán theo tên động (`IFS`), heredoc đọc lại, dữ liệu thành mã (`mapfile -C`, `${x@P}`) → `BUDGET`; không suy cấu trúc lệnh để miễn.
 - [ADR-0066](docs/adr/0066-guard-written-file-reuse.md) (D-327): tệp do chính lệnh ghi mà tên được nhắc lại ở chỗ khác của lệnh (trừ lệnh chỉ đọc trong danh sách trắng) → `BUDGET` — không liệt kê trình chạy (AUD-SEC-406).
 - [ADR-0067](docs/adr/0067-guard-static-limit-layered-defense.md) (D-331/D-332): tên tệp/mô-đun dựng lúc chạy trong lệnh tự ghi tệp — giới hạn phân tích tĩnh, chấp nhận có hạn 2027-01-21 (thay một phần ADR-0065); dạng nguyên văn vẫn phải chặn.
+- [ADR-0068](docs/adr/0068-software-factory-direction.md) (**Đề xuất**, chờ chủ dự án): định hướng xưởng phần mềm — lõi hiện có + gói sản phẩm có phiên bản + hợp đồng bằng chứng/phát hành có kiểu + registry file; năm lát A–E, không đổi ID/schema/CLI tới khi chấp nhận.
 
 Nghiên cứu nền ngày 2026-10-13 ở [`research/`](research/): phân tích khung cũ, trích xuất catalog `seeker19110/stored`,
 AI agent và giao thức, cơ chế Claude Code. Khung cũ khôi phục được bằng `git archive 1b80fe4`.
 
-Đề xuất [định hướng xưởng phần mềm từ 34 mục stored](research/2026-11-04-software-factory-direction.md) (4/11/2026):
-gói sản phẩm có phiên bản, bằng chứng phát hành và lộ trình nghiệm thu; đang đề xuất, chưa đổi hành vi của khung.
+Đề xuất [định hướng xưởng phần mềm từ 34 mục stored](research/2026-11-04-software-factory-direction.md) (4/11/2026, bản nháp
+[ADR-0068](docs/adr/0068-software-factory-direction.md)): gói sản phẩm có phiên bản, bằng chứng phát hành có kiểu, lộ trình
+nghiệm thu A–E và đề xuất trả lời bốn câu hỏi mở; đang đề xuất, chưa đổi hành vi của khung.
 
 ## Đóng góp
 
