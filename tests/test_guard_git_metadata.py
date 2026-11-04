@@ -332,5 +332,186 @@ class ReviewDebt435Test(unittest.TestCase):
             self.assert_code(cmd, "HOOK_BYPASS")
 
 
+class Preexisting3671Test(unittest.TestCase):
+    """T-3671: sáu lỗ có từ trước T-3670 phát hiện (AUD-SEC-453…458) — mỗi ca đỏ ở 5657a14."""
+
+    git_init = GitMetadataTest.git_init
+    policy = GitMetadataTest.policy
+    assert_code = GitMetadataTest.assert_code
+
+    def setUp(self):
+        GitMetadataTest.setUp(self)
+        (self.root / "src").mkdir()
+        self.fut = self.tmp / "fut"
+
+    def test_453_bare_created_in_nested_shell_reported_outward(self):
+        fut = self.fut
+        for cmd in (
+            f"sh -c 'git init --bare {fut}' && printf x > {fut}/config",
+            "sh -c 'git init --bare fut' && printf x > fut/config",
+            f'bash -c "git init --bare {fut}"; printf x > {fut}/hooks/pre-commit',
+            f"sh -c 'git clone --mirror {self.root} {fut}' && printf x >> {fut}/config",
+            f"sh -c 'git init --bare {fut}' && sh -c 'printf x > {fut}/config'",
+            f"bash -c \"sh -c 'git init --bare {fut}'\" && printf x > {fut}/config",
+        ):
+            self.assert_code(cmd, "HOOK_BYPASS")
+        for cmd in (
+            f"sh -c 'git init --bare {fut}' && printf x > src/notes",
+            f"sh -c 'git init --bare {fut}' && cat {fut}/config",
+            f"sh -c 'git init {fut}' && git status",
+        ):
+            self.assert_code(cmd, "NONE")
+
+    def test_454_fake_git_dir_built_in_same_command(self):
+        d = self.tmp / "d"
+        for cmd in (
+            "mkdir -p d/objects && echo 'ref: refs/heads/main' > d/HEAD && printf '[core]\\n\\tsshCommand = x\\n' > d/config",
+            f"mkdir -p {d}/objects && printf x > {d}/hooks/pre-commit",
+            "echo 'ref: refs/heads/main' > d/HEAD && printf x > d/config",
+            "printf x > d/config && echo 'ref: refs/heads/main' > d/HEAD",  # thứ tự đảo vẫn thành Git dir
+            "mkdir -p d/objects/pack; printf x >> d/config.worktree",
+            "echo x | tee d/HEAD d/config",
+            "mkdir -p d/objects && sh -c 'printf x > d/config'",
+        ):
+            self.assert_code(cmd, "HOOK_BYPASS")
+        for cmd in (
+            "mkdir -p d/objects && printf x > other/config",
+            "echo x > d/HEAD.txt && printf x > d/config",
+            "mkdir -p d/objects && printf x > d/notes",
+            "mkdir -p build/objects && touch build/out.o",
+        ):
+            self.assert_code(cmd, "NONE")
+
+    def test_455_config_edit_any_repo(self):
+        bare = self.bare
+        for cmd in (
+            f"git -C {bare} config --edit",
+            f"git -C {bare} config -e",
+            f"git -C {bare} config --ed",
+            f"cd {bare} && git config --edit",
+            f"GIT_EDITOR=true git -C {bare} config edit",
+            "git config --edit",
+            "git config -e",
+            "git config --global --edit",
+            "git config --local -e",
+        ):
+            self.assert_code(cmd, "HOOK_BYPASS")
+        for cmd in (
+            f"git -C {bare} config user.name T",
+            f"git -C {bare} config --get core.bare",
+            "git config --get core.editor",
+            "git config -l",
+            "git config core.editor vim",
+        ):
+            self.assert_code(cmd, "NONE")
+
+    def test_456_config_section_ops_on_protected_keys(self):
+        bare = self.bare
+        for cmd in (
+            "git config --remove-section core",
+            "git config --remove-sec core",
+            "git config --remove-section Core",
+            "git config --global --remove-section core",
+            f"git -C {bare} config --remove-section core",
+            f"git config --file {bare}/config --remove-section core",
+            f"cd {bare} && git config --remove-section core",
+            "git config remove-section core",
+            "git config --remove-section include",
+            "git config --remove-section 'includeIf.gitdir:/x/'",
+            "git config --remove-section alias",
+            'git config --remove-section "$S"',
+            "git config --rename-section core x",
+            "git config rename-section core x",
+            "git config --rename-section x core",
+            "git config --rename-section x alias",
+            "git config --rename-section x filter.lfs",  # khoá chạy lệnh theo mẫu `*.clean`/`*.smudge`
+            "git config --rename-section x credential",
+            "git config --unset include.path",
+            "git config --unset-all includeIf.gitdir:/x/.path",
+            # luật cũ (đã chặn ở base) giữ nguyên
+            "git config --unset core.hooksPath",
+            "git config --unset-all core.hooksPath",
+            "git config --replace-all core.hooksPath /dev/null",
+            "git config --replace-all core.sshCommand x",
+        ):
+            self.assert_code(cmd, "HOOK_BYPASS")
+        for cmd in (
+            "git config --remove-section user",
+            "git config --remove-section submodule.lib",
+            "git config --global --remove-section user",
+            "git config --rename-section user author",
+            "git config --unset user.email",
+            "git config --unset core.fsmonitor",  # gỡ khoá chạy lệnh không bỏ hook
+        ):
+            self.assert_code(cmd, "NONE")
+
+    def test_457_failed_cd_then_semicolon_is_unknown_dir(self):
+        root = str(self.root)
+
+        def dirs(cmd, failed=True):
+            return [h for _, h in guard._commands_with_cwd(guard.tokenize(cmd), root, failed)]
+
+        self.assertEqual(dirs("cd /khong-co; echo x > a"), ["/khong-co", None])
+        self.assertEqual(dirs("cd /khong-co; echo x > a", False), ["/khong-co", "/khong-co"])  # nhánh cd thành công
+        self.assertEqual(dirs("cd /khong-co && echo x > a"), ["/khong-co", "/khong-co"])
+        self.assertEqual(dirs("cd /khong-co && (echo a; echo b)"), ["/khong-co", "/khong-co", None])
+        self.assertEqual(dirs(f"cd {self.tmp}; echo x > a"), [str(self.tmp), str(self.tmp)])
+        self.assertEqual(dirs("(cd /khong-co); echo x > a"), ["/khong-co", root])
+        for cmd in (
+            "cd /khong-co; echo x > .autopilot/state.json",
+            "cd /khong-co\necho x > .autopilot/state.json",
+            "cd khong-co; echo x > .autopilot/state.json",
+            "cd /khong-co || echo x > .autopilot/state.json",
+            "cd /khong-co && true; echo x > .autopilot/state.json",
+            "pushd /khong-co; echo x > .autopilot/state.json",
+            "mkdir .autopilot; cd .autopilot; echo x > state.json",  # nhánh cd thành công vẫn xét (thư mục tạo trước)
+        ):
+            self.assert_code(cmd, "EVIDENCE_HANDWRITE")
+        self.assert_code("cd /khong-co; printf x > .git/hooks/pre-commit", "HOOK_BYPASS")
+        self.assert_code("cd /khong-co; echo x > .env", "SECRET_WRITE")  # luật cũ (tên `.env` ở mọi nơi)
+        at_root = self.policy("echo x > xt.yaml")
+        self.assertNotEqual(at_root["code"], "NONE")
+        self.assert_code("cd /khong-co; echo x > xt.yaml", at_root["code"])
+        for cmd in (
+            "cd /khong-co && echo x > .autopilot/state.json",  # cd hỏng thì vế sau không chạy
+            f"cd {self.tmp}; echo x > .autopilot/state.json",
+            "(cd /khong-co); echo x > a.txt",
+            "cd src; echo x > a.txt",
+            "cd /khong-co; git status",
+            "cd /khong-co; git log -1",
+            "cd src; git diff",
+            "git status; git log -1; git diff",
+            "git commit -m x",
+            "git push origin feature",
+        ):
+            self.assert_code(cmd, "NONE")
+
+    def test_458_extract_into_current_git_dir(self):
+        bare = self.bare
+        for cmd in (
+            f"cd {bare} && tar -xf a.tar",
+            f"cd {bare}; tar xf a.tar",
+            f"cd {bare} && gtar -xzf a.tgz",
+            f"cd {bare} && unzip a.zip",
+            "cd .git && tar -xf a.tar",
+            "cd .git/hooks && tar -xf a.tar",
+            "cd .git && unzip -o a.zip",
+        ):
+            self.assert_code(cmd, "HOOK_BYPASS")
+        for cmd in (
+            "tar -xf a.tar",
+            "cd src && tar -xf a.tar",
+            f"cd {self.tmp} && tar -xf a.tar",
+            f"cd {bare} && tar -tf a.tar",
+            f"cd {bare} && tar -cf /tmp/a.tar .",
+            f"cd {bare} && tar -xOf a.tar",
+            f"cd {bare} && tar -xf a.tar -C {self.root / 'src'}",
+            f"cd {bare} && unzip -l a.zip",
+            f"cd {bare} && unzip a.zip -d {self.root / 'src'}",
+            "unzip a.zip",
+        ):
+            self.assert_code(cmd, "NONE")
+
+
 if __name__ == "__main__":
     unittest.main()

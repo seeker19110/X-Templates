@@ -148,6 +148,7 @@ CWD_RELATIVE: Dict[str, str] = {
     "r435-449-cp-into-bare": "gd/ tương đối → /tmp/gd không có Git dir sau cd /tmp (AUD-SEC-449)",
     "r435-449-tar-into-bare": "-C gd tương đối → /tmp/gd không có Git dir sau cd /tmp (AUD-SEC-449)",
     "r435-449-rsync-into-bare": "gd/ tương đối → /tmp/gd không có Git dir sau cd /tmp (AUD-SEC-449)",
+    "t3671-458-tar-into-current-git-dir": "cd gd tương đối → /tmp/gd không có Git dir sau cd /tmp (AUD-SEC-458)",
     "t3633-248-cp-T": "docs/autopilot tương đối → /tmp/docs/autopilot (AUD-SEC-248)",
     "t3633-248-tar-C": "docs tương đối → /tmp/docs (AUD-SEC-248)",
     "t3633-248-glob": "docs/autopilot/* tương đối (AUD-SEC-248)",

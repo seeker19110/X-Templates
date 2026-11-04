@@ -21938,6 +21938,167 @@
  "expect": {
   "allowed": true
  }
+},
+{
+ "id": "t3671-453-nested-init-bare-config",
+ "origin": "adversarial-reviewer",
+ "refs": ["AUD-SEC-453"],
+ "input": {
+  "command": "sh -c 'git init --bare fut' && printf x > fut/config"
+ },
+ "expect": {
+  "allowed": false,
+  "code": "HOOK_BYPASS"
+ }
+},
+{
+ "id": "t3671-ctl-453-nested-init-bare-notes",
+ "origin": "control",
+ "refs": ["AUD-SEC-453"],
+ "input": {
+  "command": "sh -c 'git init --bare fut' && printf x > src/notes",
+  "files": {
+   "src/.keep": ""
+  }
+ },
+ "expect": {
+  "allowed": true
+ }
+},
+{
+ "id": "t3671-454-fake-git-dir-config",
+ "origin": "adversarial-reviewer",
+ "refs": ["AUD-SEC-454"],
+ "input": {
+  "command": "mkdir -p d/objects && echo 'ref: refs/heads/main' > d/HEAD && printf '[core]\\n\\tsshCommand = x\\n' > d/config"
+ },
+ "expect": {
+  "allowed": false,
+  "code": "HOOK_BYPASS"
+ }
+},
+{
+ "id": "t3671-ctl-454-objects-dir-notes",
+ "origin": "control",
+ "refs": ["AUD-SEC-454"],
+ "input": {
+  "command": "mkdir -p d/objects && printf x > d/notes"
+ },
+ "expect": {
+  "allowed": true
+ }
+},
+{
+ "id": "t3671-455-bare-config-edit",
+ "origin": "adversarial-reviewer",
+ "refs": ["AUD-SEC-455"],
+ "input": {
+  "command": "git -C gd config --edit",
+  "files": {
+   "gd/HEAD": "ref: refs/heads/main\n",
+   "gd/objects/.keep": "",
+   "gd/config": "[core]\n\tbare = true\n"
+  }
+ },
+ "expect": {
+  "allowed": false,
+  "code": "HOOK_BYPASS"
+ }
+},
+{
+ "id": "t3671-ctl-455-bare-config-key",
+ "origin": "control",
+ "refs": ["AUD-SEC-455"],
+ "input": {
+  "command": "git -C gd config user.name T",
+  "files": {
+   "gd/HEAD": "ref: refs/heads/main\n",
+   "gd/objects/.keep": "",
+   "gd/config": "[core]\n\tbare = true\n"
+  }
+ },
+ "expect": {
+  "allowed": true
+ }
+},
+{
+ "id": "t3671-456-remove-section-core",
+ "origin": "adversarial-reviewer",
+ "refs": ["AUD-SEC-456"],
+ "input": {
+  "command": "git config --remove-section core"
+ },
+ "expect": {
+  "allowed": false,
+  "code": "HOOK_BYPASS"
+ }
+},
+{
+ "id": "t3671-ctl-456-remove-section-user",
+ "origin": "control",
+ "refs": ["AUD-SEC-456"],
+ "input": {
+  "command": "git config --remove-section user"
+ },
+ "expect": {
+  "allowed": true
+ }
+},
+{
+ "id": "t3671-457-failed-cd-evidence",
+ "origin": "adversarial-reviewer",
+ "refs": ["AUD-SEC-457"],
+ "input": {
+  "command": "cd /khong-co; echo x > .autopilot/state.json"
+ },
+ "expect": {
+  "allowed": false,
+  "code": "EVIDENCE_HANDWRITE"
+ }
+},
+{
+ "id": "t3671-ctl-457-cd-existing-dir",
+ "origin": "control",
+ "refs": ["AUD-SEC-457"],
+ "input": {
+  "command": "cd src; echo x > a.txt",
+  "files": {
+   "src/.keep": ""
+  }
+ },
+ "expect": {
+  "allowed": true
+ }
+},
+{
+ "id": "t3671-458-tar-into-current-git-dir",
+ "origin": "adversarial-reviewer",
+ "refs": ["AUD-SEC-458"],
+ "input": {
+  "command": "cd gd && tar -xf a.tar",
+  "files": {
+   "gd/HEAD": "ref: refs/heads/main\n",
+   "gd/objects/.keep": ""
+  }
+ },
+ "expect": {
+  "allowed": false,
+  "code": "HOOK_BYPASS"
+ }
+},
+{
+ "id": "t3671-ctl-458-tar-in-plain-dir",
+ "origin": "control",
+ "refs": ["AUD-SEC-458"],
+ "input": {
+  "command": "cd src && tar -xf a.tar",
+  "files": {
+   "src/.keep": ""
+  }
+ },
+ "expect": {
+  "allowed": true
+ }
 }
  ]
 }
