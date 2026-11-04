@@ -1,7 +1,7 @@
 # AUDIT-STATUS — lưu trữ (Khung X-Templates)
 
 > Lưu trữ của [`AUDIT-STATUS.md`](AUDIT-STATUS.md) (T-3651, AUD-DOC-180): dòng `đã sửa` mà PR sửa đã merge **trước bản 3.28.0**, dời nguyên văn, giữ thứ tự.
-> **Cách chọn:** dòng `đã sửa` có mặt nguyên văn (cả trạng thái) trong sổ ở tag `v3.28.0` (đợt 2026-11-03, T-3635: tag `v3.29.0`, 37 dòng — trần `docs/ops` D-314; đợt 2 2026-11-03, D-330: 40 dòng `đã sửa` có nguyên văn trên `main` (PR sửa đã merge), cũ nhất trước; đợt 3 2026-11-04, review #435: 9 dòng cùng cách chọn, trên `main` `23447d8`; đợt 4 2026-11-04, T-3670: cùng cách chọn trên `main` `9c03257`; đợt 6 2026-11-04, T-3674: cùng cách chọn trên `main` `f47c8c9`) (`git show v3.28.0:docs/ops/AUDIT-STATUS.md`, tag 2026-10-28) — sổ ở tag là bản của nhánh chính lúc cắt bản nên PR sửa đã merge trước đó; dòng sửa/đổi sau tag ở lại sổ chính.
+> **Cách chọn:** dòng `đã sửa` có mặt nguyên văn (cả trạng thái) trong sổ ở tag `v3.28.0` (đợt 2026-11-03, T-3635: tag `v3.29.0`, 37 dòng — trần `docs/ops` D-314; đợt 2 2026-11-03, D-330: 40 dòng `đã sửa` có nguyên văn trên `main` (PR sửa đã merge), cũ nhất trước; đợt 3 2026-11-04, review #435: 9 dòng cùng cách chọn, trên `main` `23447d8`; đợt 4 2026-11-04, T-3670: cùng cách chọn trên `main` `9c03257`; đợt 5 2026-11-04, T-3674: cùng cách chọn trên `main` `f47c8c9`) (`git show v3.28.0:docs/ops/AUDIT-STATUS.md`, tag 2026-10-28) — sổ ở tag là bản của nhánh chính lúc cắt bản nên PR sửa đã merge trước đó; dòng sửa/đổi sau tag ở lại sổ chính.
 > **Máy đọc cả hai file:** `audit check` (ID duy nhất xuyên hai file, đếm `lưu trữ`; file này chỉ nhận `đã sửa`), `pr debt`, `release-check`, `autonomy-bench`, `next-step`. Không sửa dòng đã lưu trữ — phát hiện mới dùng ID mới ở sổ chính.
 
 ## Phát hiện
