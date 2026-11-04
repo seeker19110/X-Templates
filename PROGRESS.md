@@ -4,7 +4,7 @@
 
 ## Đang làm
 - 2026-11-04 **PLAN-upgrade-2026-11-02** (D-304): T-3662 và T-3635 đã được đánh dấu xong. Audit sau #434 phát hiện sổ strict đỏ lại vì sáu mục nợ review. Kết quả sửa Git guard và quét bí mật CI ở [báo cáo delta](docs/ops/AUDIT-REPORT-2026-11-04-delta.md) (D-340). Còn T-3636 (`loop verify --all`, `release-check`) và perf trial T-3551/3552/3557 (PLAN-harden-2026-10-27-loops, D-258) trước mốc **3.30.0**.
-- Nhánh `claude/amazing-brahmagupta-9jqbg1` (PR #437 chờ, chưa merge): đã làm ADR-0069 (D-347), ADR-0070 (D-349), ADR-0068 lát A (D-350, `PLAN-factory-A.md` T-3673…3677 xong + sửa review; nợ AUD-HAR-219, AUD-TEST-061, AUD-SEC-469). Chủ dự án 2026-11-05: không mở PR/merge. Lát B (gói Web/API stack hotel-manager: Node 24 + pnpm + TS + Postgres) cần PLAN riêng; C/D/E sau B.
+- Nhánh `claude/amazing-brahmagupta-9jqbg1` (PR #437 chờ, chưa merge): đã làm ADR-0069 (D-352), ADR-0070 (D-354), ADR-0068 lát A (D-355, `PLAN-factory-A.md` T-3675…3677 xong + sửa review; nợ AUD-HAR-219, AUD-TEST-061, AUD-SEC-497). Chủ dự án 2026-11-05: không mở PR/merge. Lát B (gói Web/API stack hotel-manager: Node 24 + pnpm + TS + Postgres) cần PLAN riêng; C/D/E sau B.
 - Phép đo `LOOP-ORCH-020` tích luỹ từ PLAN-upgrade; tăng số agent chỉ khi có số (ADR-0061). Phản hồi dự án đích: 10 nhóm `cong-cu` chờ phân loại ([TARGETS](docs/ops/TARGETS.md)).
 - Hoãn tới harden: T-1690/T-1691 (quét lại SEC-091…099). Rà `seeker19110/stored`: chờ chủ repo (HAR-036/041, SEC-026, CI-006/7/9, SEC-043; hạn xét: 2026-12-31).
 

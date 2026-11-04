@@ -2,10 +2,10 @@
 
 - **Trạng thái:** **Đã chấp nhận 2026-11-04** — chủ dự án trả lời bốn câu hỏi ở
   [`research/2026-11-04-software-factory-direction.md`](../../research/2026-11-04-software-factory-direction.md) §9:
-  **1a · 2a hotel-manager · 3a · 4a** (tiền lệ ADR-0064: nháp cùng PR, chấp nhận cùng ngày; **D-348**). Bản nháp cùng ngày
+  **1a · 2a hotel-manager · 3a · 4a** (tiền lệ ADR-0064: nháp cùng PR, chấp nhận cùng ngày; **D-353**). Bản nháp cùng ngày
   chỉ khác ở trạng thái và đoạn "Bốn câu hỏi" ở §Quyết định.
-- **Trạng thái triển khai:** lát A đã làm 2026-11-05 trên nhánh, chưa merge (D-350,
-  [`PLAN-factory-A.md`](../autopilot/PLAN-factory-A.md) T-3673…3677: `report_result`, `<khoá>_report`, `release_artifacts`,
+- **Trạng thái triển khai:** lát A đã làm 2026-11-05 trên nhánh, chưa merge (D-355,
+  [`PLAN-factory-A.md`](../autopilot/PLAN-factory-A.md) T-3675…3677: `report_result`, `<khoá>_report`, `release_artifacts`,
   `subject`/`promotion`, `schema: 3`; test `tests/test_release_contract.py`); evidence v2 của `loop record` giữ nguyên.
   Lát B–E chưa bắt đầu. Ghi lúc chấp nhận: không thêm ID, không đổi mức, không đổi schema/CLI trong PR của ADR này.
 - **Ngày:** 2026-11-04.
@@ -63,7 +63,7 @@ Chọn **phương án 3**, năm lát theo research §7, thứ tự A → B → C
 - **E — Registry nhiều sản phẩm** mở rộng `TARGETS.md` (core/gói/version/owner/release/ngoại lệ còn hạn) + trang đọc ở
   `xt.py app`; vòng học qua `feedback aggregate` với cùng ngưỡng ADR-0010.
 
-Bốn câu hỏi chủ dự án đã chốt 2026-11-04 (D-348; phương án thay thế ở research §9):
+Bốn câu hỏi chủ dự án đã chốt 2026-11-04 (D-353; phương án thay thế ở research §9):
 
 1. **Nơi lưu gói (1a):** gói đầu tiên trong repo khung tại `framework/templates/packs/<stack>/`, phiên bản theo `VERSION`;
    chuyển repo riêng khi có ≥ 2 gói hoặc owner khác chủ khung. Gói không kéo dependency vào CLI stdlib.

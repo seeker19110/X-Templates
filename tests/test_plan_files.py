@@ -15,7 +15,7 @@ import xt
 
 class RepoPlanFilesTest(unittest.TestCase):
     def test_archived_plans_are_closed(self) -> None:
-        """ADR-0070 (D-349): kho chỉ giữ PLAN đã đóng — PLAN còn task mở phải ở `docs/autopilot/`."""
+        """ADR-0070 (D-354): kho chỉ giữ PLAN đã đóng — PLAN còn task mở phải ở `docs/autopilot/`."""
         archived = sorted((ROOT / xt.PLAN_ARCHIVE_DIR).glob("PLAN*.md"))
         self.assertTrue(archived)
         for plan in archived:

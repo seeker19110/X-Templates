@@ -1,7 +1,7 @@
 # Kho lịch sử của repo khung
 
 > Lịch sử của **chính repo X-Templates**: PLAN đã đóng, báo cáo audit, GO-NO-GO và ghi chép đo đạc cũ — dời khỏi
-> `docs/autopilot/` và `docs/ops/` theo [ADR-0070](../adr/0070-archive-repo-history.md) (D-349). Nội dung giữ nguyên văn,
+> `docs/autopilot/` và `docs/ops/` theo [ADR-0070](../adr/0070-archive-repo-history.md) (D-354). Nội dung giữ nguyên văn,
 > đúng tại thời điểm viết; luật hiện hành ở `framework/`, quyết định ở `docs/adr/` và `docs/autopilot/DECISIONS*.md`.
 > Không cài sang dự án đích. Tìm kiếm mặc định bỏ qua thư mục này (`.ignore`); truy vết thì tìm đích danh
 > (`rg <mẫu> docs/archive/`).

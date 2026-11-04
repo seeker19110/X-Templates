@@ -1,7 +1,7 @@
 # PLAN-factory-A.md — ADR-0068 lát A · hợp đồng kết quả/phát hành có kiểu
 
 > Lập 2026-11-05 trên nhánh `claude/amazing-brahmagupta-9jqbg1` (chủ dự án: "hoàn thiện cho xong hết", không mở PR, không
-> merge). Duyệt: D-350 (phạm vi: chỉ hợp đồng phát hành; evidence v2 của `loop record` giữ nguyên). Nguồn:
+> merge). Duyệt: D-355 (phạm vi: chỉ hợp đồng phát hành; evidence v2 của `loop record` giữ nguyên). Nguồn:
 > [ADR-0068](../adr/0068-software-factory-direction.md) §Quyết định A + §Xác nhận A; research
 > [`2026-11-04-software-factory-direction.md`](../../research/2026-11-04-software-factory-direction.md) §6–§7.
 > Không chen mốc 3.30.0 của `main` (research §7): lát làm trên nhánh, chưa merge.
@@ -29,14 +29,14 @@
 - Mở PR, merge, cắt bản: không làm (chủ dự án 2026-11-05). Ký GO-NO-GO: việc người.
 
 ## Task
-- [x] `T-3673` Adapter report (`report_result`): JUnit XML (testcase/failure/error/skipped, 0 test chạy = FAIL), SARIF
+- [x] `T-3675` Adapter report (`report_result`): JUnit XML (testcase/failure/error/skipped, 0 test chạy = FAIL), SARIF
   (run không có/`executionSuccessful: false` = chưa xong, `level: error` = FAIL), `pip-audit` JSON (vuln = FAIL, 0 gói hoặc
   mọi gói bị bỏ qua = chưa xong), dạng lạ/hỏng = INCONCLUSIVE — Gate: `python3 -m unittest tests.test_release_contract.ReportAdapterTest`
-- [x] `T-3674` `_release_run` đọc `<key>_report`: exit 0 mà report thiếu, cũ hơn lúc chạy, hay kết quả khác PASS → hàng
-  FAIL; kết quả vào `results[]` (kèm sha256 report); khoá vắng → như cũ (sau: T-3673) — Gate: `python3 -m unittest tests.test_release_contract.ReleaseReportTest`
-- [x] `T-3675` `release_artifacts` → hàng `artifacts` (chỉ khi khai): thiếu file / sidecar lệch digest → FAIL BLOCKER;
+- [x] `T-3676` `_release_run` đọc `<key>_report`: exit 0 mà report thiếu, cũ hơn lúc chạy, hay kết quả khác PASS → hàng
+  FAIL; kết quả vào `results[]` (kèm sha256 report); khoá vắng → như cũ (sau: T-3675) — Gate: `python3 -m unittest tests.test_release_contract.ReleaseReportTest`
+- [x] `T-3677` `release_artifacts` → hàng `artifacts` (chỉ khi khai): thiếu file / sidecar lệch digest → FAIL BLOCKER;
   `subject` + `artifacts[]` trong JSON — Gate: `python3 -m unittest tests.test_release_contract.ReleaseArtifactTest`
-- [x] `T-3676` `promotion` + `schema: 3` (sau: T-3674, T-3675): luật ở §Tóm tắt; text in dòng `promotion:`; test cũ của
+- [x] `T-3678` `promotion` + `schema: 3` (sau: T-3676, T-3677): luật ở §Tóm tắt; text in dòng `promotion:`; test cũ của
   `release-check`/`signoff-package` không đổi kỳ vọng — Gate: `python3 -m unittest tests.test_release_contract.PromotionTest tests.test_xt_cli.ReleaseCheckTest`
-- [x] `T-3677` Tài liệu: mẫu `framework/templates/xt.yaml` (khoá mới, ghi chú), nhà `release-check` ở khung, ADR-0068
-  trạng thái triển khai lát A, CHANGELOG (sau: T-3676) — Gate: `scripts/dev-task.sh gate-fast`
+- [x] `T-3679` Tài liệu: mẫu `framework/templates/xt.yaml` (khoá mới, ghi chú), nhà `release-check` ở khung, ADR-0068
+  trạng thái triển khai lát A, CHANGELOG (sau: T-3678) — Gate: `scripts/dev-task.sh gate-fast`

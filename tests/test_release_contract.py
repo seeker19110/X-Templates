@@ -1,4 +1,4 @@
-"""ADR-0068 lát A (D-350, PLAN-factory-A): hợp đồng kết quả/phát hành có kiểu — adapter đọc report (JUnit XML, SARIF,
+"""ADR-0068 lát A (D-355, PLAN-factory-A): hợp đồng kết quả/phát hành có kiểu — adapter đọc report (JUnit XML, SARIF,
 `pip-audit` JSON), report bắt buộc của lệnh phát hành, digest artifact, `subject` và `promotion` trong `release-check --json`.
 Ca âm ở ADR-0068 §Xác nhận A (sai digest, report thiếu, 0 test, scan chưa xong, duyệt chờ/từ chối/hết hạn) không được
 `approved`; `go`/`verdict`/`human` và exit code giữ nghĩa cũ."""
@@ -35,7 +35,7 @@ def today(delta: int = 0) -> str:
 
 
 class ReportAdapterTest(TmpDirCase):
-    """T-3673: `report_result` nhận dạng theo nội dung; kết quả có kiểu PASS/FAIL/PENDING/INCONCLUSIVE kèm số đếm."""
+    """T-3675: `report_result` nhận dạng theo nội dung; kết quả có kiểu PASS/FAIL/PENDING/INCONCLUSIVE kèm số đếm."""
 
     def result(self, content, name: str = "r") -> dict:
         p = self.tmp / name
@@ -220,7 +220,7 @@ class ReleaseCase(TmpRepoCase):
 
 
 class ReleaseReportTest(ReleaseCase):
-    """T-3674: `<key>_report` — exit 0 chưa đủ: report phải có, do lần chạy này sinh, kết quả PASS."""
+    """T-3676: `<key>_report` — exit 0 chưa đủ: report phải có, do lần chạy này sinh, kết quả PASS."""
 
     def junit_cmd(self, content: str) -> str:
         (self.repo / "in.xml").write_text(content, encoding="utf-8")
@@ -277,7 +277,7 @@ class ReleaseReportTest(ReleaseCase):
 
 
 class ReleaseArtifactTest(ReleaseCase):
-    """T-3675: `release_artifacts` → hàng `artifacts` (chỉ khi khai) và `subject.digest`."""
+    """T-3677: `release_artifacts` → hàng `artifacts` (chỉ khi khai) và `subject.digest`."""
 
     def art(self, data: bytes = b"bundle", sidecar: str | None = None) -> str:
         (self.repo / "dist").mkdir(exist_ok=True)
@@ -363,7 +363,7 @@ class ReleaseArtifactTest(ReleaseCase):
 
 
 class PromotionTest(ReleaseCase):
-    """T-3676: `promotion` — chỉ `approved` khi không FAIL, không N/A BLOCKER, GO-NO-GO của VERSION ký GO còn hạn và nhắc
+    """T-3678: `promotion` — chỉ `approved` khi không FAIL, không N/A BLOCKER, GO-NO-GO của VERSION ký GO còn hạn và nhắc
     digest (khi có artifact); máy không nâng `pending_human`. `go`/`verdict`/exit giữ nghĩa cũ."""
 
     SIGN = "## 5. Ký\n\n| Vai trò | Tên | Quyết định | Ngày |\n|---|---|---|---|\n"

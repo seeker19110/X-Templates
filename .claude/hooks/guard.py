@@ -498,7 +498,7 @@ def _git_cfg_env_why(cmd: str, root: str = "", cwd: Optional[str] = None) -> str
     if not GIT_CFG_NAME_RE.search(cmd):
         return ""
     env: Dict[str, str] = {}
-    for c, here in _commands_with_cwd(tokenize(cmd), cwd):
+    for c, here in _commands_each_cwd(tokenize(cmd), cwd):  # mọi thư mục ứng viên (D-347)
         c = list(itertools.dropwhile(lambda t: t in SHELL_KEYWORDS, c))  # `do git …`, `then git …`
         s = _strip_prefixes(c)
         env.update(_git_cfg_set(s))
@@ -600,6 +600,36 @@ def _git_metadata_dir(path: str) -> bool:
     return os.path.lexists(os.path.join(path, "HEAD")) and (
         os.path.lexists(os.path.join(path, "objects")) or os.path.isfile(os.path.join(path, "commondir"))
     )
+
+
+GIT_HEADREF_RE = re.compile(rb"ref:\s*refs/|[0-9a-fA-F]{40}")  # `validate_headref`: ref tượng trưng hay mã băm
+
+
+def _git_dir_accepted(path: str) -> bool:
+    """AUD-SEC-487: `path` chắc là Git dir mà git DỪNG DÒ ở đó (`is_git_directory`, đo git 2.53): HEAD hợp lệ (symlink
+    tới `refs/…`, tệp thường `ref: refs/…` hay mã băm hex), `objects` và `refs` vào được. Hẹp hơn git (commondir, tệp
+    đặc biệt → False) — chỉ dùng để MIỄN; nhận diện rộng là `_git_metadata_dir`."""
+    with contextlib.suppress(OSError):
+        heads = _git_headref_ok(os.path.join(path, "HEAD"))
+        return heads and all(os.access(os.path.join(path, d), os.X_OK) for d in ("objects", "refs"))
+    return False
+
+
+def _git_headref_ok(head: str) -> bool:
+    """`validate_headref` của git: symlink tới `refs/…`, hay tệp thường bắt đầu bằng `ref: refs/…`/mã băm hex. Tệp đặc
+    biệt (FIFO…) không mở — guard không treo; coi là không hợp lệ."""
+    if os.path.islink(head):
+        return os.readlink(head).startswith("refs/")
+    if not os.path.isfile(head):
+        return False
+    with open(head, "rb") as file:
+        return bool(GIT_HEADREF_RE.match(file.read(255)))
+
+
+def _stops_git_discovery(dot_git: str) -> bool:
+    """`.git` làm git dừng dò lên trên/không xét thư mục chứa nó như repo trần: gitfile (kể cả hỏng — git báo lỗi) hay
+    Git dir hợp lệ (`_git_dir_accepted`)."""
+    return os.path.isfile(dot_git) or _git_dir_accepted(dot_git)
 
 
 def _repo_git_metadata(path: str, root: str, keyed: bool = False) -> bool:
@@ -3761,12 +3791,12 @@ def _gh_strict_why(folded: str, live: str, cwd: Optional[str]) -> str:
     line = _GhLine(bool(re.search(r"\bHOME=", live)), bool(GH_FUNC_RE.search(live)), set(GH_DYN_RE.findall(live)))
     start = posixpath.normpath(cwd) if cwd else GH_CWD  # `cd <thư mục đang đứng> && …` không tính là đổi thư mục
     toks = tokenize(folded)
-    cmds = _commands_with_cwd(toks, start)
+    cmds = _commands_with_cwds(toks, start)
     # khâu trước mỗi lệnh đơn trong ống của nó; hai cách chia lệch nhau (không nên xảy ra) → coi như không có ống
     ups = [[s for s in pipe[:k] if s] for pipe in pipelines(toks) for k, st in enumerate(pipe) if st]
     ups = ups if len(ups) == len(cmds) else [[] for _ in cmds]
-    for (raw, d), up in zip(cmds, ups):
-        why = _gh_cmd_why(raw, d is None or posixpath.normpath(d) != start, line, up)
+    for (raw, ds), up in zip(cmds, ups):  # dời thư mục ở BẤT KỲ ứng viên nào (D-347)
+        why = _gh_cmd_why(raw, any(d is None or posixpath.normpath(d) != start for d in ds), line, up)
         if why:
             return f"{why} — chỉ `xt.py pr reviewed` đăng dấu review (ADR-0063, AUD-SEC-191/192/193/253)"
     return ""
@@ -4482,175 +4512,240 @@ def _enterable_dir(path: Optional[str]) -> bool:
 
 
 def _is_cd_back(n: List[str]) -> bool:
-    """`cd -` (cả `cd -- -`, cờ `-P`/`-L` đứng trước): bash `cd "$OLDPWD"` — thư mục KHÔNG BIẾT (AUD-SEC-466: OLDPWD
-    đổi qua gán tiền tố `OLDPWD=X cd -`, `PWD=X` trước `cd`, `false && cd -`… guard không theo dõi chắc được)."""
-    return n[:1] == ["cd"] and _cd_operands(n[1:])[0] == ["-"]
+    """`cd -`/`pushd -` (cả `cd -- -`, `pushd -- -`, cờ `-P`/`-L` đứng trước — bash 5.3): `cd "$OLDPWD"` — thư mục
+    KHÔNG BIẾT (AUD-SEC-466: OLDPWD đổi qua gán tiền tố `OLDPWD=X cd -`, `PWD=X` trước `cd`, `false && cd -`… guard
+    không theo dõi chắc được); tiền tố `cd … &&` cũng vậy (AUD-SEC-488)."""
+    return n[:1] in (["cd"], ["pushd"]) and _cd_operands(n[1:])[0] == ["-"]
 
 
 Cands = Tuple[Optional[str], ...]  # thư mục ứng viên của một lệnh (T-3672); None = không biết (D-106)
-CwdSnap = Tuple[Cands, Cands]  # (ứng viên, ứng viên còn lại nếu `cd` trước đó hỏng)
 # Mảnh của token tách lệnh (shlex gom `);`, `&\n`, `&&(`): xử lý theo thứ tự
 SEP_PIECE_RE = re.compile(r"\|\||&&|\|&|;;&?|;&|[;&|\n()]")
-# Từ mở/đóng lệnh ghép (đứng đầu lệnh): nhóm `{ … }` hay khối điều khiển đứng trong ống/nền chạy ở shell con
-CD_OPEN_WORDS = frozenset({"{", "if", "while", "until", "for", "select", "case"})
-CD_CLOSE_WORDS = frozenset({"}", "fi", "done", "esac"})
-# Lệnh có thể xoá/dời thư mục mà `cd` sau đó tới (AUD-SEC-459); `find` chỉ khi có hành động xoá/chạy lệnh
-CD_GONE_HEADS = frozenset({"rm", "rmdir", "mv", "unlink"})
-FIND_REMOVE_RE = re.compile(r"-(?:delete|exec|execdir|ok|okdir)")
+CWD_UNION_MAX = 16  # D-347: số thư mục ứng viên tối đa của một lệnh; vượt → thêm None (không biết, D-106)
+CD_LOOP_HEADS = frozenset({"while", "until", "for", "select"})
+CD_CHAIN_SEPS = ("&&", "|", "|&")  # vế sau chỉ chạy khi `cd` của tiền tố thành công (`|` gắn chặt hơn `&&`)
+CD_MOVE_HEADS = frozenset({"cd", "pushd", "popd"})
+# Thân `eval` có thể chứa lệnh đổi thư mục: nhắc tên lệnh, hay có nháy/`\`/`$`/backtick (`c''d`, `c\d` ghép lại sau đọc)
+CD_WORD_IN_EVAL_RE = re.compile(r"cd|pushd|popd|eval|[\"'\\$`]")
+SimpleCmds = List[Tuple[List[str], List[str]]]  # (argv, mảnh tách đứng sau nó)
 
 
-def _uniq(*groups: Cands) -> Cands:
-    return tuple(dict.fromkeys(d for g in groups for d in g))
-
-
-def _gone_paths(n: List[str], cands: Cands) -> List[Optional[str]]:
-    """Đường lệnh `n` có thể xoá/dời (`rm`/`rmdir`/`mv`/`unlink`: mọi toán hạng; `find -delete|-exec`: thư mục gốc),
-    giải theo mọi thư mục ứng viên; biến/glob/thư mục không biết → None (mọi `cd` sau đó có thể hỏng)."""
-    words = _cd_operands(n[1:])[0]  # bỏ chuyển hướng (`2>/dev/null`) và `-P`/`-L` của `find`
-    if n[:1] == ["find"]:
-        roots = list(itertools.takewhile(lambda t: not t.startswith(("-", "(", "!")), words))
-        ops = (roots or ["."]) if any(FIND_REMOVE_RE.fullmatch(t) for t in n) else []
-    elif n[:1] and n[0] in CD_GONE_HEADS:
-        ops = [t for t in words if not t.startswith("-")]
-    else:
-        return []
-    out: List[Optional[str]] = []
-    for t, c in itertools.product(ops, cands):
-        rel = not t.startswith(("/", "~"))
-        unknown = "$" in t or bool(re.search(r"[*?\[]", t)) or (rel and c is None)
-        out.append(None if unknown else posixpath.normpath(posixpath.join(c or "/", posixpath.expanduser(t))))
-    return out
-
-
-class _CwdWalk:
-    """Đi qua các lệnh đơn theo ngữ nghĩa bash, giữ TẬP thư mục mỗi lệnh có thể chạy (T-3672, thay nhánh `cd` hỏng
-    của D-342). `cd T` chắc thành công (T vào được lúc kiểm — `isdir` trên đường THÔ như bash: `cd /khong-co/..` hỏng —
-    và không bị lệnh trước xoá/dời) → {T}. Có thể hỏng → {T}, còn thư mục cũ được giữ ở `fail` tới khi chuỗi `&&` dừng:
-    `;`/xuống dòng/`||`/`&` gộp lại (`cd T || exit|return` thì không — nhánh hỏng đã thoát); `!`/`until` trước `cd`
-    gộp ngay. `cd` trong ống (`|`, `|&`), nền (`&` cả danh sách `&&`/`||` của nó) hay `( … )` chạy ở shell con — không
-    đổi tập của lệnh sau. Đích không biết (biến, `cd -` — AUD-SEC-466, `CDPATH`, `popd`) → None như D-106;
-    `shopt -s cdable_vars` (hay `BASHOPTS`): `cd` hỏng thử `$T` → thêm None."""
-
-    def __init__(self, start: Optional[str]) -> None:
-        self.cands: Cands = (start,)
-        self.fail: Cands = ()
-        self.cdpath = bool(os.environ.get("CDPATH"))
-        self.cdable = "cdable_vars" in os.environ.get("BASHOPTS", "")
-        self.home = False
-        self.gone: List[Optional[str]] = []
-        # (loại `(`/`{`, trạng thái lúc mở, đầu danh sách bên ngoài, HOME, nhóm đứng sau ống)
-        self.frames: List[Tuple[str, CwdSnap, CwdSnap, bool, bool]] = []
-        self.lstart: CwdSnap = self.snap()  # đầu danh sách `&&`/`||` đang đi (nền `&` trả về đây)
-        self.piped = False  # đơn vị đang gom đứng sau `|`
-        self.out: List[Tuple[List[str], Cands]] = []
-
-    def snap(self) -> CwdSnap:
-        return self.cands, self.fail
-
-    def restore(self, s: CwdSnap) -> None:
-        self.cands, self.fail = s
-
-    def merge(self) -> None:
-        self.cands, self.fail = _uniq(self.cands, self.fail), ()
-
-    def sure(self, n: List[str], c: Optional[str], t: str) -> bool:
-        raw = posixpath.join(c or "/", posixpath.expanduser(_cd_operands(n[1:])[0][0]))
-        gone = any(g is None or t == g or t.startswith(g.rstrip("/") + "/") for g in self.gone)
-        return _enterable_dir(raw) and not gone
-
-    def moves(self, n: List[str]) -> Tuple[Cands, Cands]:
-        """(ứng viên sau `cd`/`pushd`, ứng viên còn ở thư mục cũ nếu nó hỏng)."""
-        new: List[Optional[str]] = []
-        fail: List[Optional[str]] = []
-        for c in self.cands:
-            t = _cd_target(n, c, self.cdpath, self.home)
-            new.append(t)
-            if t is not None and not self.sure(n, c, t):
-                fail.append(c)
-                new += [None] if self.cdable else []
-        return _uniq(tuple(new)), _uniq(tuple(fail))
-
-    def apply(self, n: List[str], argv: List[str]) -> None:
-        lead = set(itertools.takewhile(lambda t: t in SHELL_KEYWORDS, argv))
-        fail: Cands = ()
-        if _is_cd_back(n) or n[:1] == ["popd"]:
-            new: Cands = (None,)
-        elif n[:1] in (["cd"], ["pushd"]):
-            new, fail = self.moves(n)
-        else:
-            self.gone += _gone_paths(n, self.cands)
-            new = self.cands
-        if lead & {"!", "until"}:  # `! cd T && x`: x chạy khi `cd` hỏng
-            new, fail = _uniq(new, self.cands), ()
-        self.cands, self.fail = new, _uniq(self.fail, fail)
-
-    def command(self, cur: List[str], nxt: str) -> None:
-        before = self.snap()
-        head = next((t for t in cur if t != "!"), "")
-        if head in CD_OPEN_WORDS:
-            self.frames.append(("{", before, self.lstart, self.home, self.piped))
-            self.lstart, self.piped, self.fail = before, False, ()
-        self.cdpath = self.cdpath or _sets_cdpath(cur)
-        self.home = self.home or _sets_home(cur)
-        self.cdable = self.cdable or any("cdable_vars" in t for t in cur)
-        self.apply(normalize(cur), cur)
-        self.out.append((list(cur), _uniq(tuple(_run_dir(cur, c) for c in self.cands))))
-        unit, piped = before, self.piped
-        if head in CD_CLOSE_WORDS and self.frames and self.frames[-1][0] == "{":
-            _, unit, self.lstart, _, piped = self.frames.pop()
-            self.fail = _uniq(unit[1], self.fail)
-        if piped or nxt in ("|", "|&"):  # đơn vị chạy trong ống: shell con
-            self.restore(unit)
-
-    def sep(self, p: str, peek: List[str]) -> None:
-        self.piped = p in ("|", "|&")
-        if self.piped or p == "&&":
-            return
-        if p == "(":
-            self.frames.append(("(", self.snap(), self.lstart, self.home, False))
-            self.fail = ()
-            self.lstart = self.snap()
-        elif p == ")":
-            if self.frames and self.frames[-1][0] == "(":
-                _, s, self.lstart, self.home, _ = self.frames.pop()
-                self.restore(s)
-            else:  # `)` lẻ (mẫu `case`): không biết như cũ
-                self.restore(((None,), ()))
-        elif p == "||":
-            self.fail = () if peek[:1] in (["exit"], ["return"]) else self.fail
-            self.merge()
-        elif p == "&":  # cả danh sách `&&`/`||` chạy nền
-            self.restore(self.lstart)
-        else:  # `;`, xuống dòng, `;;`
-            self.merge()
-            self.lstart = self.snap()
-
-
-def _commands_with_cwds(tokens: List[str], start: Optional[str]) -> List[Tuple[List[str], Cands]]:
-    """Mỗi lệnh đơn kèm TẬP thư mục nó có thể chạy (`_CwdWalk`, T-3672); phần tử đầu là nhánh mọi `cd` thành công.
-    `(`…`)`, `$(`…`)`, `<(`…`)` là subshell — ra khỏi đó thì về tập cũ (`(cd ../b && git pull); git commit`)."""
-    walk = _CwdWalk(start)
+def _simple_commands(tokens: List[str]) -> Tuple[List[str], SimpleCmds]:
+    """(mảnh tách đứng trước lệnh đầu, [(argv, mảnh tách đứng sau nó)]) — tách theo `SEP_PIECE_RE`."""
+    lead: List[str] = []
+    out: SimpleCmds = []
     cur: List[str] = []
-    for i, t in enumerate(tokens):
+    for t in tokens:
         if _is_punct(t) and not _is_redirect(t):
             pieces = SEP_PIECE_RE.findall(t)
             if cur:
-                walk.command(cur, pieces[0] if pieces else "")
+                out.append((cur, pieces))
                 cur = []
-            for k, p in enumerate(pieces):
-                walk.sep(p, tokens[i + 1 : i + 2] if k == len(pieces) - 1 else [])
+            else:
+                (out[-1][1] if out else lead).extend(pieces)
         else:
             cur.append(t)
     if cur:
-        walk.command(cur, "")
-    return walk.out
+        out.append((cur, []))
+    return lead, out
 
 
-def _commands_with_cwd(tokens: List[str], start: Optional[str]) -> List[Tuple[List[str], Optional[str]]]:
-    """Mỗi lệnh đơn kèm thư mục của nhánh mọi `cd` thành công (`_commands_with_cwds`): `cd`/`pushd` dời thư mục,
-    `popd`/`cd -`/đích không rõ → None (AUD-SEC-466), `CDPATH` → `cd` tương đối không rõ
-    (D-106); `cd` trong ống/nền/subshell không dời. Luật đích ghi xét MỌI ứng viên (`_cwd_scan`)."""
-    return [(argv, cands[0]) for argv, cands in _commands_with_cwds(tokens, start)]
+def _joins(after: List[str], seps: Tuple[str, ...]) -> bool:
+    """Mảnh sau lệnh là đúng một nối trong `seps`, theo sau chỉ xuống dòng hay `(` mở subshell (`cd x && (a; b)`)."""
+    return bool(after) and after[0] in seps and all(p in ("\n", "(") for p in after[1:])
+
+
+def _cd_physical(n: List[str]) -> bool:
+    """`cd -P …`/`pushd -P …` (cả cờ ghép `-LP`), hay `SHELLOPTS` có `physical`: `..` giải theo đường vật lý."""
+    flags = itertools.takewhile(lambda a: a != "--", n[1:])
+    return "physical" in os.environ.get("SHELLOPTS", "") or any(CD_FLAG_RE.fullmatch(a) and "P" in a for a in flags)
+
+
+class _CwdFlags:
+    """Trạng thái shell ảnh hưởng cách `cd` giải đích (D-347): `CDPATH`, `HOME` gán lại, `cdable_vars`."""
+
+    def __init__(self) -> None:
+        self.cdpath = bool(os.environ.get("CDPATH"))
+        self.cdable = "cdable_vars" in os.environ.get("BASHOPTS", "")
+        self.home = False
+
+    def see(self, argv: List[str]) -> None:
+        self.cdpath = self.cdpath or _sets_cdpath(argv)
+        self.home = self.home or _sets_home(argv)
+        self.cdable = self.cdable or any("cdable_vars" in t for t in argv)
+
+
+def _exact_prefix(
+    cmds: SimpleCmds, start: Optional[str], flags: _CwdFlags
+) -> Tuple[List[List[Optional[str]]], List[Optional[str]]]:
+    """Tiền tố chính xác (D-347): `cd`/`pushd <đích nguyên văn>` nối bằng `&&` ngay từ đầu lệnh — (tập thư mục sau
+    từng `cd` của tiền tố, thư mục còn lại nếu một `cd` của nó hỏng). Mỗi tập giữ đích theo chữ và realpath của đường
+    thô như `_cd_step` (AUD-SEC-491: bash rơi về đường vật lý khi đường logic không có, kernel giải `..` của đích ghi
+    theo thư mục vật lý); `cd -`/`cd -- -` không thuộc tiền tố (AUD-SEC-488). `cd` chắc thành công khi đích vào được
+    lúc kiểm (`isdir` trên đường THÔ như bash: `cd /khong-co/..` hỏng); `-P` (đường vật lý) không thuộc tiền tố."""
+    heres: List[Optional[str]] = [start]
+    steps: List[List[Optional[str]]] = []
+    fallback: List[Optional[str]] = []
+    for argv, after in cmds:
+        ok = argv[:1] in (["cd"], ["pushd"]) and _joins(after, ("&&",)) and not _cd_physical(argv)
+        n = argv if ok and not _is_cd_back(argv) else []
+        targets = [_cd_target(n, h, flags.cdpath) for h in heres] if n else [None]
+        if None in targets:
+            break
+        raws = [posixpath.join(h or "/", posixpath.expanduser(_cd_operands(n[1:])[0][0])) for h in heres]
+        if not all(map(_enterable_dir, raws)):
+            if flags.cdable:  # `cd` hỏng thử `cd "$T"`: không biết
+                break
+            fallback += heres
+        heres = list(dict.fromkeys([*targets, *map(_realpath_safe, raws)]))
+        steps.append(heres)
+    return steps, fallback
+
+
+def _cd_step(n: List[str], c: Optional[str], flags: _CwdFlags) -> List[Optional[str]]:
+    """Thư mục sau `cd`/`pushd`/`popd` `n` chạy ở `c`: đích theo chữ và theo realpath của đường thô (`cd -P`, `set -P`
+    — symlink giải trước `..`); không biết (biến, `cd -`, `popd`, `pushd +N`, CDPATH, `cdable_vars` khi đích chưa có)
+    → None."""
+    t = None if n[0] == "popd" or _is_cd_back(n) else _cd_target(n, c, flags.cdpath, flags.home)
+    if t is None:
+        return [None]
+    raw = posixpath.join(c or "/", posixpath.expanduser(_cd_operands(n[1:])[0][0]))
+    return [t, _realpath_safe(raw), *([None] if flags.cdable and not _enterable_dir(raw) else [])]
+
+
+def _cd_moves(
+    n: List[str], cur: List[Optional[str]], primary: Optional[str], flags: _CwdFlags, repeat: bool
+) -> Optional[Tuple[Optional[str], List[Optional[str]]]]:
+    """(thư mục của nhánh mọi `cd` thành công, mọi thư mục mới) sau lệnh `n` chạy ở MỘT trong `cur` (D-347); lệnh
+    không đổi thư mục → None. `repeat` (vòng lặp, thân hàm): đích tương đối giải lại từ đích mới tới bao đóng — quá
+    `CWD_UNION_MAX` thì thêm None — và cộng None (D-351, AUD-SEC-490: thân chạy lại sau `cd` ĐỨNG SAU nó — cuối thân
+    vòng, nơi gọi hàm — guard không giải lại từ đó); `eval`/`trap` (thân trap chạy lúc tín hiệu/`DEBUG`, trong shell
+    này) có `cd`/`eval` → mọi thư mục của thân cộng None."""
+    if n[:1] in (["eval"], ["trap"]):
+        if not CD_WORD_IN_EVAL_RE.search(" ".join(n[1:])):  # đường nhanh: thân không nhắc lệnh đổi thư mục
+            return None
+        body = tokenize(" ".join(a for a in n[1:] if a != "--"))  # `eval -- cd x`, `trap -- 'cd x' DEBUG`
+        if not any(normalize(c)[:1] in (["eval"], *([h] for h in CD_MOVE_HEADS)) for c in split_commands(body)):
+            return None
+        return None, [*(d for c in cur for _, cs in _commands_with_cwds(body, c) for d in cs), None]
+    if not n or n[0] not in CD_MOVE_HEADS:
+        return None
+    out: List[Optional[str]] = []
+    frontier = list(cur)
+    while frontier:
+        new = [d for c in frontier for d in _cd_step(n, c, flags) if d not in cur and d not in out]
+        out += list(dict.fromkeys(new))
+        frontier = list(dict.fromkeys(new)) if repeat else []
+        if len(out) > CWD_UNION_MAX:
+            out.append(None)
+            break
+    relative = repeat and None in _cd_step(n, None, flags)  # đích không tuyệt đối nguyên văn (cả `..`)
+    return _cd_step(n, primary, flags)[0], [*out, *([None] if relative else [])]
+
+
+def _commands_with_cwds(tokens: List[str], start: Optional[str]) -> List[Tuple[List[str], Cands]]:
+    """Mỗi lệnh đơn kèm TẬP thư mục nó có thể chạy — HỢP MỌI ĐÍCH (D-347, thay mô phỏng luồng điều khiển của T-3672):
+    tiền tố `cd <đích nguyên văn> && …` từ đầu lệnh giữ một thư mục (`_exact_prefix`; vế `&&`/`|` nối tiếp chạy ở đó,
+    hết chuỗi thì thêm thư mục của `cd` có thể hỏng); sau đó mỗi lệnh xét trên {thư mục đầu} ∪ {mọi đích `cd`/`pushd`
+    đứng trước nó, giải từ mọi ứng viên đã có} (`_cd_moves`) — đúng cho mọi `if`/`while`/hàm/ống/subshell/`exit`/`||`
+    mà không mô phỏng chúng. Lệnh trong vòng lặp nhận tập ở cuối vòng ngoài cùng; mọi lệnh từ định nghĩa hàm đầu tiên
+    và `trap` nhận tập cuối. Phần tử đầu là nhánh mọi `cd` thành công (giữ bảng env/cờ của `res`)."""
+    lead, cmds = _simple_commands(tokens)
+    walk = _CwdUnion(start, cmds, lead)
+    for i, (argv, after) in enumerate(cmds):
+        walk.command(i, argv, cmds[i - 1][1] if i else lead, after)
+    sets, final = walk.sets, walk.ordered()
+    for s, e in walk.spans + ([(walk.loops[0], len(cmds) - 1)] if walk.loops else []):
+        sets[s : e + 1] = [[*sets[k], *sets[e]] for k in range(s, e + 1)]
+    out: List[Tuple[List[str], Cands]] = []
+    for i, (argv, _) in enumerate(cmds):
+        late = (walk.func is not None and i >= walk.func) or i in walk.traps
+        here = [*sets[i], *final] if late else sets[i]
+        out.append((list(argv), tuple(dict.fromkeys(_run_dir(argv, c) for c in here))))
+    return out
+
+
+class _CwdUnion:
+    """Trạng thái đi qua các lệnh đơn của `_commands_with_cwds` (D-347): tập `cur` chỉ lớn dần, trừ đích `cd` trong
+    subshell `( … )`/`$( … )` — bỏ khi ra khỏi đó (subshell luôn là tiến trình con, không phụ thuộc luồng điều khiển);
+    `primary` (nhánh mọi `cd` thành công — chỉ để xếp thứ tự, không thu hẹp tập) không theo `cd` trong ống/nền và trở
+    về sau `( … )` cùng cờ `HOME`/`CDPATH`; `)` lẻ (mẫu `case`) → không biết như cũ."""
+
+    def __init__(self, start: Optional[str], cmds: SimpleCmds, lead: List[str]) -> None:
+        self.flags = _CwdFlags()
+        self.steps, self.fallback = _exact_prefix(cmds, start, self.flags) if not lead else ([], [])
+        self.m = len(self.steps)
+        self.cur: List[Optional[str]] = [start]
+        self.start, self.primary, self.chain = start, start, self.m > 0
+        self.stack: List[Tuple[Optional[str], bool, bool, bool, int]] = []
+        self.kept: List[Optional[str]] = []  # thêm vào tập không do `cd` (thư mục của `cd` hỏng, `)` lẻ): giữ qua `)`
+        self.sets: List[List[Optional[str]]] = []
+        self.loops: List[int] = []
+        self.spans: List[Tuple[int, int]] = []  # (đầu, cuối) của vòng lặp ngoài cùng đã đóng
+        self.func: Optional[int] = None
+        self.traps: Set[int] = set()  # lệnh `trap`: thân chạy lúc thoát/nhận tín hiệu — tập cuối
+
+    def add(self, dirs: List[Optional[str]], keep: bool = False) -> None:
+        self.kept += dirs if keep else []
+        self.cur += [d for d in dirs if d not in self.cur]
+        self.cur = self.cur if len(self.cur) <= CWD_UNION_MAX else [*self.cur[:CWD_UNION_MAX], None]
+
+    def ordered(self) -> List[Optional[str]]:
+        return [self.primary, *(d for d in self.cur if d != self.primary)] if self.primary in self.cur else self.cur
+
+    def pieces(self, before: List[str]) -> None:
+        f = self.flags
+        for p in before:
+            if p == "(":
+                self.stack.append((self.primary, f.cdpath, f.home, f.cdable, len(self.cur)))
+            elif p == ")" and self.stack:
+                self.primary, f.cdpath, f.home, f.cdable, size = self.stack.pop()
+                self.cur = [*self.cur[:size], *(d for d in self.cur[size:] if d in self.kept)]
+            elif p == ")":
+                self.primary = None
+                self.add([None], keep=True)
+
+    def command(self, i: int, argv: List[str], before: List[str], after: List[str]) -> None:
+        self.pieces(before)
+        lead_kw = itertools.takewhile(lambda t: t in SHELL_KEYWORDS or t in CD_LOOP_HEADS, argv)
+        self.loops += [i] * sum(t in CD_LOOP_HEADS for t in lead_kw)
+        self.func = i if self.func is None and (after[:2] == ["(", ")"] or argv[:1] == ["function"]) else self.func
+        self.flags.see(argv)
+        n = normalize(argv)
+        self.traps |= {i} if n[:1] == ["trap"] else set()
+        repeat = bool(self.loops) or self.func is not None
+        if i < self.m:
+            self.cur = list(self.steps[i])
+            self.primary = self.cur[0]
+        elif (moved := _cd_moves(n, self.cur, self.primary, self.flags, repeat)) is not None:
+            sub = {"|", "|&"} & {*before, *after[:1]} or after[:1] == ["&"]  # ống/nền: shell con
+            self.primary = self.primary if sub else moved[0]
+            self.add([moved[0], *moved[1]])
+        self.sets.append(self.ordered())
+        if argv[:1] == ["done"] and self.loops:
+            s = self.loops.pop()
+            self.spans += [] if self.loops else [(s, i)]
+        if self.chain and i >= self.m and not _joins(after, CD_CHAIN_SEPS):
+            bg = after[:1] == ["&"]  # cả danh sách `&&` chạy nền: shell này vẫn ở thư mục đầu
+            self.primary = self.start if bg else self.primary
+            self.add([*self.fallback, *([self.start] if bg else [])], keep=True)
+            self.chain = False
+
+
+def _commands_with_cwd(tokens: List[str], start: Optional[str], pick: int = 0) -> List[Tuple[List[str], Optional[str]]]:
+    """Mỗi lệnh đơn kèm MỘT thư mục: ứng viên thứ `pick` của `_commands_with_cwds` (ứng viên cuối nếu ít hơn) — gọi với
+    mọi `pick` dưới `_cwd_picks` thì mỗi cặp (lệnh, ứng viên) được xét ít nhất một lần (D-347)."""
+    return [(argv, cands[min(pick, len(cands) - 1)]) for argv, cands in _commands_with_cwds(tokens, start)]
+
+
+def _cwd_picks(placed: List[Tuple[List[str], Cands]]) -> int:
+    """Số ứng viên nhiều nhất của một lệnh đơn (`placed` = `_commands_with_cwds`) — số lượt `pick` phủ mọi ứng viên."""
+    return max((len(c) for _, c in placed), default=1)
+
+
+def _commands_each_cwd(tokens: List[str], start: Optional[str]) -> List[Tuple[List[str], Optional[str]]]:
+    """Mọi cặp (lệnh đơn, thư mục ứng viên) — luật xét đích theo thư mục xét ĐỦ mọi ứng viên (D-347)."""
+    return [(argv, d) for argv, cands in _commands_with_cwds(tokens, start) for d in cands]
 
 
 def normalize(argv: List[str]) -> List[str]:
@@ -5007,6 +5102,70 @@ def _parse_opts(args: List[str], short_val: str, long_val: Tuple[str, ...]) -> P
         else:
             pos.append(a)
     return flags, pos, vals
+
+
+# T-3673: bộ đọc tuỳ chọn dùng chung cho lệnh ngoài git — mục ("", toán hạng) | (chữ cờ ngắn hay tên dài đầy đủ, giá
+# trị|None), giữ thứ tự (tar `-C` theo vị trí). Bảng theo lệnh: (chữ cờ ngắn ăn giá trị, mọi tên dài, tên dài bắt buộc
+# giá trị, nhận viết tắt). Đọc sai cờ từng làm lọt cả họ lỗ (AUD-SEC-468…477): cụm `-ft D`, dính `-tD`, `--t D`, `--`.
+OptItems = List[Tuple[str, Optional[str]]]
+OptTable = Tuple[str, Tuple[str, ...], Tuple[str, ...], bool]
+
+
+def _long_name(name: str, longs: Tuple[str, ...], abbrev: bool = True) -> str:
+    """Tên dài đầy đủ như getopt_long/argp/argparse: trùng khớp, hay tiền tố của đúng một tên; mơ hồ (công cụ báo lỗi,
+    không chạy) hay lạ → giữ nguyên. popt (rsync) không nhận viết tắt (`abbrev` False)."""
+    hits = [x for x in longs if x.startswith(name)] if abbrev and name not in longs else [name]
+    return (hits[0] if len(hits) == 1 else name) or "-"
+
+
+def _getopt(args: List[str], table: OptTable) -> OptItems:
+    """Đọc `args` như getopt_long (hoán vị, GNU): cụm cờ ngắn dừng ở chữ ăn giá trị (phần còn lại của cụm, không thì
+    token kế), `--tên=v`/`--tên v` (tên bắt buộc giá trị), tên viết tắt, sau `--` và `-` là toán hạng."""
+    short_val, longs, long_val, abbrev = table
+    out: OptItems = []
+    i = 0
+    while i < len(args):
+        a, i = args[i], i + 1
+        if a == "--":
+            return out + [("", x) for x in args[i:]]
+        if a.startswith("--"):
+            name, eq, val = a[2:].partition("=")
+            name = _long_name(name, longs, abbrev)
+            took = [val] if eq else args[i : i + 1] if name in long_val else []
+            i += 0 if eq else len(took)
+            out.append((name, took[0] if took else None))
+        elif a.startswith("-") and len(a) > 1:
+            flags, got, ate = _short_cluster(a, args[i : i + 1], short_val)
+            out += [(f[1:], None) for f in flags[: len(flags) - len(got)]] + [(k[1:], v) for k, v in got]
+            i += ate
+        else:
+            out.append(("", a))
+    return out
+
+
+def _opt_keys(items: OptItems) -> Set[str]:
+    return {k for k, _ in items if k}
+
+
+def _opt_vals(items: OptItems, *keys: str) -> List[str]:
+    return [v for k, v in items if k in keys and v is not None]
+
+
+def _operands(items: OptItems) -> List[str]:
+    return [v for k, v in items if not k and v is not None]
+
+
+def _old_style(args: List[str], short_val: str) -> List[str]:
+    """Kiểu cũ của tar/jar (`xfC a d` = `-x -f a -C d`): chữ ăn giá trị lấy token kế theo thứ tự chữ."""
+    if not args or not re.fullmatch(r"[A-Za-z0-9]+", args[0]):
+        return args
+    out, k = [], 1
+    for ch in args[0]:
+        out.append("-" + ch)
+        if ch in short_val and k < len(args):
+            out.append(args[k])
+            k += 1
+    return out + args[k:]
 
 
 def _has_opt(flags: Set[str], opts: Set[str]) -> bool:
@@ -5816,7 +5975,7 @@ def build_phase(root: str) -> bool:
     return _BUILD_PHASE[root]
 
 
-# ADR-0069 (chủ dự án 2026-11-04, D-347): xt.yaml `stage_approval: agent` → agent được `xt.py stage approve` (tự nghiệm thu
+# ADR-0069 (chủ dự án 2026-11-04, D-352): xt.yaml `stage_approval: agent` → agent được `xt.py stage approve` (tự nghiệm thu
 # giai đoạn); như `delivery_phase`, chỉ có hiệu lực khi CẢ cây làm việc LẪN bản đã commit ở nhánh mặc định khai — phiên
 # không tự cấp quyền cho mình. `init --adopt`, dạng mờ (`$(…)`, biến, glob, stdin) vẫn chặn; `XT_GUARD_POLICY=strict` không nới.
 STAGE_APPROVAL_LINE_RE = re.compile(r"^stage_approval:[ \t]*([\"']?)([A-Za-z]*)\1[ \t]*(?:#.*)?$", re.M)
@@ -6125,7 +6284,6 @@ def _snapshot_update_rule(n: List[str]) -> Tuple[str, str]:
 # `--del`, `--delete`, `--delete-after`, cả tên nhiều đoạn `--delete-missing-args` (AUD-SEC-076)
 RSYNC_DELETE_RE = re.compile(r"--(?:del|delete(?:-[\w-]+)?)(?:=.*)?")
 HOME_ROOT_TARGETS = {"/", "~", "$HOME", "${HOME}"}  # dời đi đâu cũng là mất (`mv ~ ./x`)
-MV_VALUE_OPTS = ("-t", "--target-directory", "-S", "--suffix")
 
 
 def _drop_redirects(args: List[str]) -> List[str]:
@@ -6142,9 +6300,38 @@ def _drop_redirects(args: List[str]) -> List[str]:
     return out
 
 
+# Bảng popt của rsync (options.c, RsyncProject/rsync master, đọc 2026-11-04): chữ ngắn ăn giá trị `@BMTef`, tên dài bắt
+# buộc giá trị dưới đây; popt KHÔNG nhận tên viết tắt (popt.c `longOptionStrcmp` so cả độ dài) — AUD-SEC-476: bảng cờ
+# của ssh (`-P -p -l -o -i -F -J` ăn giá trị) từng nuốt nguồn và làm mất đích.
+RSYNC_LONG_VALUE: Tuple[str, ...] = (
+    "address",
+    "backup-dir",
+    "block-size",
+    "bwlimit",
+    "cc",
+    "checksum-choice",
+    "checksum-seed",
+    "chmod",
+)
+RSYNC_LONG_VALUE += ("chown", "compare-dest", "compress-choice", "compress-level", "compress-threads", "config")
+RSYNC_LONG_VALUE += ("confine-root", "contimeout", "copy-as", "copy-dest", "debug", "dparam", "early-input", "exclude")
+RSYNC_LONG_VALUE += ("exclude-from", "files-from", "filter", "groupmap", "iconv", "include", "include-from", "info")
+RSYNC_LONG_VALUE += ("link-dest", "log-file", "log-file-format", "log-format", "max-alloc", "max-delete", "max-size")
+RSYNC_LONG_VALUE += ("min-size", "modify-window", "nice", "only-write-batch", "out-format", "outbuf", "partial-dir")
+RSYNC_LONG_VALUE += ("password-file", "port", "protocol", "read-batch", "remote-option", "rsh", "rsync-path")
+RSYNC_LONG_VALUE += ("skip-compress", "sockopts", "stderr", "stop-after", "stop-at", "suffix", "temp-dir", "time-limit")
+RSYNC_LONG_VALUE += ("timeout", "usermap", "write-batch", "zc", "zl", "zt")
+RSYNC_OPTS: OptTable = ("@BMTef", (), RSYNC_LONG_VALUE, False)
+
+
+def _rsync_pos(args: List[str]) -> List[str]:
+    """Toán hạng của rsync (nguồn…, đích) theo bảng popt riêng."""
+    return _operands(_getopt(args, RSYNC_OPTS))
+
+
 def _rsync_wipes(args: List[str], root: str, cwd: Optional[str]) -> List[str]:
     """`rsync --delete` lên đích local ngoài dự án; `--remove-source-files` xoá nguồn ngoài dự án."""
-    pos = _positionals(args, COPY_VALUE_OPTS["rsync"])
+    pos = _rsync_pos(args)
     out = [s for s in pos[:-1] if _outside_project(s, root, cwd)] if "--remove-source-files" in args else []
     deleting = pos and any(RSYNC_DELETE_RE.fullmatch(a) for a in args) and not REMOTE_SPEC_RE.match(pos[-1])
     return out + ([pos[-1]] if deleting and _outside_project(pos[-1], root, cwd) else [])
@@ -6153,9 +6340,8 @@ def _rsync_wipes(args: List[str], root: str, cwd: Optional[str]) -> List[str]:
 def _mv_wipes(args: List[str], root: str, cwd: Optional[str]) -> List[str]:
     """`mv` dời gốc/home (đi đâu cũng mất) hoặc dời thư mục ngoài dự án sang chỗ khác ngoài dự án (`mv ~/x /tmp/y`);
     dời một file ngoài dự án (`mv ~/Downloads/a.zip /tmp/`) là đổi chỗ, không phải xoá."""
-    pos = _positionals(args, MV_VALUE_OPTS)
-    target = _flag_value(args, "-t") or _flag_value(args, "--target-directory")
-    srcs, dest = (pos, target) if target else (pos[:-1], pos[-1] if pos else "")
+    t_dirs, pos, _ = _copy_opts("mv", args)
+    srcs, dest = (pos, t_dirs[-1]) if t_dirs else (pos[:-1], pos[-1] if pos else "")
     away = bool(dest) and not _inside_root(dest, root, cwd)
     return [
         s
@@ -8112,8 +8298,9 @@ GIT_CONFIG_UNSET = {"--unset", "--unset-all", "unset"}
 GIT_EXEC_KEY_RE = re.compile(
     r"core\.(fsmonitor|sshcommand|gitproxy|pager|editor|askpass|alternaterefscommand)|sequence\.editor"
     r"|diff\.external|pager\..+|alias\..+|protocol(\..+)?\.allow|gpg(\..+)?\.(program|defaultkeycommand)"
-    r"|sendemail\.(\w*cmd|smtpserver)|init\.templatedir|uploadpack\.packobjectshook|submodule\..+\.update|delta\.pager"
+    r"|sendemail\.(.+\.)?(\w*cmd|smtpserver)|init\.templatedir|uploadpack\.packobjectshook|submodule\..+\.update|delta\.pager"
     r"|gc\.recentobjectshook|interactive\.difffilter|imap\.tunnel|instaweb\.httpd"  # AUD-SEC-461, git-config(1) 2.43.0
+    # AUD-SEC-485: `sendemail.<identity>.*` (`git help --config` 2.43.0) — `sendmailCmd`/`smtpServer` là đường lệnh
     r"|.+\.(textconv|clean|smudge|process|driver|cmd|command|program|helper|uploadpack|receivepack|path)",
     re.I,
 )
@@ -8300,12 +8487,52 @@ def _git_exec_config(n: List[str], argv: Optional[List[str]] = None, exported: O
 REDIRECTS = (">", ">>", ">|", "&>", "&>>", "<>")
 
 
+# Bảng getopt của cp/mv/ln/install (`--help` của coreutils 9.4): `-t`/`-S` (install thêm `-g -m -o`) ăn giá trị; tên dài
+# viết tắt được (`--t D` = `--target-directory D` — AUD-SEC-469).
+_COPY_LONG = ("backup", "help", "no-target-directory", "suffix", "target-directory", "verbose", "version")
+_CP_MV = ("context", "debug", "force", "interactive", "no-clobber", "strip-trailing-slashes", "update")
+_CP_ONLY: Tuple[str, ...] = (
+    "archive",
+    "attributes-only",
+    "copy-contents",
+    "dereference",
+    "link",
+    "no-dereference",
+    "no-preserve",
+)
+_CP_ONLY += ("one-file-system", "parents", "preserve", "recursive", "reflink", "remove-destination", "sparse")
+_LN_ONLY = ("directory", "force", "interactive", "logical", "no-dereference", "physical", "relative", "symbolic")
+_INSTALL_ONLY: Tuple[str, ...] = (
+    "compare",
+    "context",
+    "debug",
+    "directory",
+    "group",
+    "mode",
+    "owner",
+    "preserve-context",
+)
+_INSTALL_ONLY += ("preserve-timestamps", "strip", "strip-program")
+_COPY_VAL = ("suffix", "target-directory")  # bắt buộc giá trị ở cả bốn lệnh
+COPY_OPT_TABLES: Dict[str, OptTable] = {
+    "cp": ("St", _COPY_LONG + _CP_MV + _CP_ONLY + ("symbolic-link",), _COPY_VAL + ("no-preserve", "sparse"), True),
+    "mv": ("St", _COPY_LONG + _CP_MV + ("no-copy",), _COPY_VAL, True),
+    "ln": ("St", _COPY_LONG + _LN_ONLY, _COPY_VAL, True),
+    "install": ("Sgmot", _COPY_LONG + _INSTALL_ONLY, _COPY_VAL + ("group", "mode", "owner", "strip-program"), True),
+}
+
+
+def _copy_opts(name: str, args: List[str]) -> Tuple[List[str], List[str], Set[str]]:
+    """(thư mục `-t`, toán hạng, khoá cờ) của cp/mv/ln/install."""
+    items = _getopt(args, COPY_OPT_TABLES[name])
+    return _opt_vals(items, "t", "target-directory"), _operands(items), _opt_keys(items)
+
+
 def _copy_targets(name: str, args: List[str]) -> List[str]:
     """cp/install/ln: thư mục `-t` hoặc đích cuối; mv: cả nguồn (bị dời đi = xoá ở chỗ cũ) lẫn đích (AUD-SEC-019)."""
-    t_dir = _flag_value(args, "-t") or _flag_value(args, "--target-directory")
-    pos = _positionals(args, ("-t", "--target-directory", "-m", "--mode", "-S", "--suffix"))
-    if t_dir:  # `-t DIR nguồn…`: file đích là DIR/<tên nguồn>
-        dests = [posixpath.join(t_dir, posixpath.basename(s)) for s in pos]
+    t_dirs, pos, _ = _copy_opts(name, args)
+    if t_dirs:  # `-t DIR nguồn…`: file đích là DIR/<tên nguồn>
+        dests = [posixpath.join(t, posixpath.basename(s.rstrip("/"))) for t in t_dirs for s in pos]
         return dests + (pos if name == "mv" else [])
     if name == "mv":
         return pos
@@ -8356,14 +8583,20 @@ def _wget_outputs(args: List[str]) -> List[str]:
 
 
 def _rsync_dest(args: List[str]) -> List[str]:
-    pos = _positionals(args, REMOTE_VALUE_FLAGS)
+    pos = _rsync_pos(args)
     return pos[-1:] if len(pos) >= 2 and ":" not in pos[-1] else []
 
 
 def _scp_dest(args: List[str]) -> List[str]:
-    """`scp [cờ] nguồn… đích`: đích cục bộ (không `host:`/`scp://`) bị ghi như `cp` (AUD-SEC-449, review #438)."""
-    pos = _positionals(args, COPY_VALUE_OPTS["scp"])
-    return pos[-1:] if len(pos) >= 2 and not REMOTE_SPEC_RE.match(pos[-1]) else []
+    """`scp [cờ] nguồn… đích`: đích cục bộ (không `host:`/`scp://`) bị ghi như `cp` (AUD-SEC-449, review #438); `-t D`
+    (chế độ nhận ẩn của OpenSSH, ghi tệp từ stdin vào D — scp.c, chưa đo: máy không có scp) → D."""
+    items = _getopt(args, SCP_OPTS)
+    pos = _operands(items)
+    many = len(pos) >= 2 or "t" in _opt_keys(items)
+    return pos[-1:] if pos and many and not REMOTE_SPEC_RE.match(pos[-1]) else []
+
+
+SCP_OPTS: OptTable = ("cDFiJloPSX", (), (), False)  # scp(1) OpenSSH: cờ ngắn ăn giá trị, không tên dài
 
 
 def _patch_targets(args: List[str]) -> List[str]:
@@ -8481,12 +8714,26 @@ def _awk_targets(args: List[str]) -> List[str]:
 
 
 def _tar_dest(args: List[str]) -> List[str]:
-    """Thư mục giải nén của `tar -x … -C d` (tạo/liệt kê lưu trữ với `-C` chỉ đọc thư mục đó)."""
-    short = "".join(a[1:] for a in args if a[:1] == "-" and a[1:2] != "-") + (
-        args[0] if args and args[0][:1] != "-" else ""
-    )
-    extract = "x" in short or any(a in ("--extract", "--get") for a in args)
-    return _flag_values(args, ("-C", "--directory")) if extract else []
+    """Thư mục giải nén của `tar -x … -C d` (tạo/liệt kê lưu trữ với `-C` chỉ đọc thư mục đó) và tệp archive mà chế độ
+    tạo/ghi archive ghi ra (`tar -czf F` — AUD-SEC-475)."""
+    opts = _tar_opts(args)
+    dirs = _opt_vals(opts, "C", "directory") if _opt_keys(opts) & TAR_EXTRACT else []
+    return dirs + _tar_archives(opts)
+
+
+# Tuỳ chọn truyền qua biến môi trường, ghép vào trước argv (AUD-SEC-474): GNU tar `TAR_OPTIONS` (đo trên tar 1.35: kiểu
+# cũ `xf` vẫn đọc được), UnZip `UNZIP`/`UNZIPOPT` (đo trên UnZip 6.00 Debian) — gán đầu lệnh, `env`, `export` trước đó.
+ENV_OPTS = {"tar": ("TAR_OPTIONS",), "gtar": ("TAR_OPTIONS",), "unzip": ("UNZIP", "UNZIPOPT")}
+
+
+def _with_env_opts(n: List[str], argv: List[str], env: Optional[Dict[str, str]]) -> List[str]:
+    """`n` với tuỳ chọn từ biến môi trường của lệnh ghép vào sau tên lệnh (kiểu cũ của tar nở trước)."""
+    names = ENV_OPTS.get(n[0], ()) if n else ()
+    vals = {**(env or {}), **_assign_values(argv[: len(argv) - len(_strip_prefixes(argv))])} if names else {}
+    extra = [w for k in names for w in _split_words(vals.get(k, ""))]
+    if not extra:
+        return n
+    return [n[0], *extra, *(_old_style(n[1:], TAR_SHORT_VALUE) if n[0] != "unzip" else n[1:])]
 
 
 def _extract_here(n: List[str]) -> List[str]:
@@ -8496,7 +8743,7 @@ def _extract_here(n: List[str]) -> List[str]:
     khẩu `-d`), `7z x|e`, `cpio -i`, `jar x`, `python -m zipfile -e` theo `_unpack_dirs`; `pax -r` (`_pax_dirs`)."""
     name, args = (n[0], n[1:]) if n else ("", [])
     if name in TAR_NAMES:
-        keys = {k for k, _ in _tar_opts(args)}
+        keys = _opt_keys(_tar_opts(args))
         return [] if keys & {"O", "to-stdout", "to-command"} else _tar_extract_dirs(args)
     return _pax_dirs(args) if name == "pax" else _unpack_dirs(name, args)
 
@@ -8510,6 +8757,12 @@ def _pax_dirs(args: List[str]) -> List[str]:
     if "-r" not in flags:
         return []
     return pos[-1:] if "-w" in flags else ["."]
+
+
+def _pax_archive(args: List[str]) -> List[str]:
+    """`pax -w -f F` (ghi archive, không `-r`) ghi F (AUD-SEC-475)."""
+    flags, _, vals = _parse_opts(args, PAX_SHORT_VALUE, ())
+    return [v for k, v in vals if k == "-f"] if "-w" in flags and "-r" not in flags else []
 
 
 UNIQ_VALUE_OPTS = ("-f", "-s", "-w", "--skip-fields", "--skip-chars", "--check-chars")
@@ -8526,6 +8779,11 @@ def _uniq_output(args: List[str]) -> List[str]:
     return (pos + words[k + 1 :])[1:2]
 
 
+def _archive_writer(name: str) -> Callable[[List[str]], List[str]]:
+    """Hàm đích ghi của trình tạo archive `name` (`_archive_outputs` định nghĩa sau, gọi lúc chạy)."""
+    return lambda a: _archive_outputs(name, a)
+
+
 FILE_WRITERS: Dict[str, Callable[[List[str]], List[str]]] = {
     "curl": _curl_outputs,
     "wget": _wget_outputs,
@@ -8536,7 +8794,11 @@ FILE_WRITERS: Dict[str, Callable[[List[str]], List[str]]] = {
     "awk": _awk_targets,
     "gawk": _awk_targets,
     "tar": _tar_dest,
-    "unzip": lambda a: _flag_values(a, ("-d",)),
+    "gtar": _tar_dest,
+    "bsdtar": _tar_dest,
+    "unzip": lambda a: _unzip_parse(a)[0],
+    # tệp archive tạo ra là đích ghi (AUD-SEC-475)
+    **{k: _archive_writer(k) for k in ("zip", "jar", "ar", "cpio", "pax", "7z", "7za", "7zr", "7zz")},
     "split": lambda a: _positionals(a, ("-l", "-b", "-C", "-n", "-a", "-t", "--additional-suffix"))[1:2],
     "csplit": lambda a: _flag_values(a, ("-f", "--prefix")),
     "dd": lambda a: [x[3:] for x in a if x.startswith("of=")],  # review #186 lần 2: `dd of=.env` là ghi
@@ -8611,7 +8873,8 @@ def write_targets(n: List[str], argv: List[str]) -> List[str]:
         return out + FILE_WRITERS[name](args)
     if name == "sed":
         out += _sed_writes(args)
-    return out + _inplace_targets(name, args)
+    created = _py_archive(args)[1] if PY_UNPACK_RE.fullmatch(name) else []  # `python -m zipfile -c F` (AUD-SEC-475)
+    return out + created + _inplace_targets(name, args)
 
 
 COMMIT_LONG_OPTS_WITH_VALUE = ("--message", "--file", "--author", "--date", "--template", "--reuse-message")
@@ -8748,15 +9011,18 @@ def _perm_asks(n: List[str], argv: List[str], root: str, cwd: Optional[str]) -> 
     return asks + ([PERM_NO_TARGET_WHY] if hidden else [])
 
 
-def _write_asks(n: List[str], argv: List[str], root: str, cwd: Optional[str] = None) -> List[str]:
+def _write_asks(
+    n: List[str], argv: List[str], root: str, cwd: Optional[str] = None, env: Optional[Dict[str, str]] = None
+) -> List[str]:
     """Câu hỏi xác nhận cho file hàng rào/bí mật/cổng/migration mà lệnh có thể ghi (bỏ qua /dev/*). `cwd` None = thư
-    mục đang đứng không biết (D-106, `_where`)."""
+    mục đang đứng không biết (D-106, `_where`); `env`: biến chuỗi lệnh đã đặt (`TAR_OPTIONS`, `UNZIP` — AUD-SEC-474)."""
+    n = _with_env_opts(n, argv, env)
     asks = _perm_asks(n, argv, root, cwd) if n and n[0] in PERM_CMDS else []
     cfg = _git_config_file(n)
     find_evidence = _find_evidence_targets(n[1:]) if n[:1] == ["find"] else []
     # AUD-SEC-458: giải nén không nêu thư mục ghi vào thư mục đang đứng — xét như `-C .`/`-d .` (chỉ ở đây: `.` không
-    # là đích của luật tệp-vừa-ghi-rồi-chạy, ADR-0066)
-    targets = [*write_targets(n, argv), *([cfg] if cfg else []), *_extract_here(n)]
+    # là đích của luật tệp-vừa-ghi-rồi-chạy, ADR-0066); AUD-SEC-470: chép VÀO thư mục → cả `đích/<tên nguồn>`
+    targets = [*write_targets(n, argv), *([cfg] if cfg else []), *_extract_here(n), *_copied_into(n, root, cwd)]
     found = [x for t in find_evidence for x in _where(t, root, cwd) if t not in targets]
     asks += [EVIDENCE_WHY.format(t) for t in found if _target_kind(t, root) == "evidence"]
     asks += [FENCE_WHY.format(t) for t in found if _is_fence(t, root)]
@@ -8811,7 +9077,6 @@ def _write_asks(n: List[str], argv: List[str], root: str, cwd: Optional[str] = N
 
 # sổ giai đoạn và thư mục tổ tiên của nó (`docs/autopilot`, `docs`)
 LEDGER_PATHS = tuple(STAGE_LEDGER.rsplit("/", i)[0] for i in range(STAGE_LEDGER.count("/") + 1))
-COPY_DEST_OPTS = ("-t", "--target-directory", "-m", "--mode", "-S", "--suffix")
 
 
 def _ledger_hit(rel: str) -> bool:
@@ -8831,8 +9096,8 @@ def _removed_targets(n: List[str]) -> List[str]:
         pos = _positionals(args[1:])
         return pos if args[0] == "rm" else pos[:-1]
     if name == "mv":
-        pos = _positionals(args, MV_VALUE_OPTS)
-        return pos if _flag_value(args, "-t") or _flag_value(args, "--target-directory") else pos[:-1]
+        t_dirs, pos, _ = _copy_opts("mv", args)
+        return pos if t_dirs else pos[:-1]
     if name in ("rm", "unlink", "shred"):
         return _positionals(args)
     return _find_ledger_roots(args) if name == "find" else _git_file_targets(n)
@@ -8864,11 +9129,7 @@ def _ledger_asks(n: List[str], argv: List[str], root: str, cwd: Optional[str]) -
     base = _git_path_dir(n, argv, cwd) if removed else cwd  # chỉ đọc `-C` khi có đích xoá/dời
     found = dict.fromkeys(x for t in removed for x in _where(t, root, base))
     hits = [x for x in found if _ledger_hit(_rel_dir(x, root))]
-    pos = _copy_into_positionals(n)
-    for d in _where(pos[-1], root, cwd) if len(pos) > 1 else []:
-        if pos[-1].endswith("/") or os.path.isdir(os.path.join(root, d)):
-            joined = [posixpath.join(d, _copied_name(n, s)) for s in pos[:-1]]
-            hits += [j for j in joined if _ledger_hit(_rel_dir(j, root))]
+    hits += [j for j in _copied_into(n, root, cwd) if _ledger_hit(_rel_dir(j, root))]
     hits += [x for t in _merge_roots(n) for x in _where(t, root, cwd) if _ledger_hit(_rel_dir(x, root))]
     hits += [posixpath.join(root, STAGE_LEDGER)] if _merge_renamed(n) else []
     return [EVIDENCE_WHY.format(h) for h in dict.fromkeys(hits)]
@@ -8876,18 +9137,31 @@ def _ledger_asks(n: List[str], argv: List[str], root: str, cwd: Optional[str]) -
 
 def _copy_into_positionals(n: List[str]) -> List[str]:
     """Đối số vị trí của lệnh chép/dời VÀO thư mục có sẵn (nguồn…, đích): `cp`/`mv`/`install`/`ln`, cả `rsync`
-    (`rsync -a src/* docs/autopilot/` — AUD-SEC-340); lệnh khác → rỗng."""
-    if n[:1] and n[0] in ("cp", "mv", "install", "ln"):
-        return _positionals(n[1:], COPY_DEST_OPTS)
-    return _positionals(n[1:], COPY_VALUE_OPTS["rsync"]) if n[:1] == ["rsync"] else []
+    (`rsync -a src/* docs/autopilot/` — AUD-SEC-340), `scp` đích cục bộ; `-t D` → (nguồn…, D); lệnh khác → rỗng."""
+    if n[:1] and n[0] in COPY_OPT_TABLES:
+        t_dirs, pos, _ = _copy_opts(n[0], n[1:])
+        return pos + t_dirs[-1:]
+    if n[:1] == ["scp"]:
+        return _operands(_getopt(n[1:], SCP_OPTS))
+    return _rsync_pos(n[1:]) if n[:1] == ["rsync"] else []
+
+
+def _copied_into(n: List[str], root: str, cwd: Optional[str]) -> List[str]:
+    """`đích/<tên nguồn>` khi lệnh chép/dời VÀO thư mục (đích kết `/` hay đã là thư mục): `cp -r X/.claude .` gộp đè
+    `./.claude` có sẵn — luật đích bảo vệ phải xét cả đường này, không chỉ `.` (AUD-SEC-470)."""
+    pos = _copy_into_positionals(n)
+    if len(pos) < 2 or REMOTE_SPEC_RE.match(pos[-1]):
+        return []
+    dirs = [d for d in _where(pos[-1], root, cwd) if pos[-1].endswith("/") or os.path.isdir(os.path.join(root, d))]
+    return [posixpath.join(d, _copied_name(n, s)) for d in dirs for s in pos[:-1]]
 
 
 def _keeps_path(n: List[str]) -> bool:
     """Chép giữ đường nguồn dưới đích (review lượt 2): `cp --parents` (cả tiền tố `--pa…`), `rsync -R/--relative`."""
-    args = list(itertools.takewhile(lambda a: a != "--", n[1:]))
     if n[:1] == ["cp"]:
-        return any(len(a) > 3 and "--parents".startswith(a) for a in args)
-    return n[:1] == ["rsync"] and ("--relative" in args or "R" in _short_flags(args))
+        return "parents" in _copy_opts("cp", n[1:])[2]
+    keys = _opt_keys(_getopt(n[1:], RSYNC_OPTS)) if n[:1] == ["rsync"] else set()
+    return bool(keys & {"R", "relative"})
 
 
 def _copied_name(n: List[str], src: str) -> str:
@@ -8912,13 +9186,12 @@ def _merge_roots(n: List[str]) -> List[str]:
     tiên của nó → ghi tay sổ (`_ledger_hit`)."""
     name, args = (n[0], n[1:]) if n else ("", [])
     if name in ("cp", "install"):
-        t_dir = _flag_value(args, "-t") or _flag_value(args, "--target-directory")
-        pos = _positionals(args, COPY_DEST_OPTS)
-        srcs, dest = (pos, t_dir) if t_dir else (pos[:-1], pos[-1] if len(pos) > 1 else "")
-        no_t = not t_dir and ("--no-target-directory" in args or "T" in _short_flags(args))
+        t_dirs, pos, keys = _copy_opts(name, args)
+        srcs, dest = (pos, t_dirs[-1]) if t_dirs else (pos[:-1], pos[-1] if len(pos) > 1 else "")
+        no_t = not t_dirs and bool(keys & {"T", "no-target-directory"})
         return [dest] if dest and (no_t or any(map(_dot_source, srcs))) else []
     if name == "rsync":
-        pos = _positionals(args, COPY_VALUE_OPTS["rsync"])
+        pos = _rsync_pos(args)
         return pos[-1:] if any(s.endswith("/") or _dot_source(s) for s in pos[:-1]) else []
     return _tar_extract_dirs(args) if name in TAR_NAMES else _unpack_dirs(name, args)
 
@@ -8927,64 +9200,277 @@ def _merge_roots(n: List[str]) -> List[str]:
 # -D …`/`cpio -p <đích>`, `jar x` (review lượt 2), `python -m zipfile|tarfile -e A [D]`; vắng cờ đích = thư mục đang
 # đứng. Chế độ chỉ liệt kê/kiểm/in ra stdout → không ghi. `tar`/`gtar`/`bsdtar`: `TAR_NAMES`.
 SEVEN_ZIP = ("7z", "7za", "7zr", "7zz")
-UNZIP_READ_FLAGS = set("ltvpczZ")
-CPIO_VALUE_OPTS = ("-D", "-E", "-F", "-H", "-I", "-M", "-O", "-R", "--directory", "--file", "--format", "--owner")
 PY_UNPACK_RE = re.compile(r"python[\d.]*")
-JAR_MODE_RE = re.compile(r"-?[A-Za-z0-9]*x[A-Za-z0-9]*")
+# UnZip 6.00 (unzip.c `uz_opts`, đo trên bản Debian): `-` trong cụm phủ định chữ cờ KẾ TIẾP, kể cả sang token sau
+# (`-l --l`, `-l- -l`, `--- -l` đều giải nén); `-d -P -O -I` ăn giá trị (phần còn lại của cụm, không thì token kế);
+# chữ cờ chỉ đọc (cùng nhóm thì cộng/trừ chung); tuỳ chọn sau tên zip là mẫu tên tệp, trừ `-d` — AUD-SEC-473.
+UNZIP_READ = {"l": "v", "v": "v", "t": "t", "c": "c", "p": "c", "z": "z", "Z": "Z"}
+# AUD-SEC-489: `tflag`/`cflag` (`-t`, `-c`/`-p`) là bật/tắt — phủ định một lần tắt hẳn (`-tt --t` giải nén); `vflag`
+# (`-l`/`-v`) và `zflag` mới là bộ đếm trừ theo số `-` (đo trên UnZip 6.00 Debian)
+UNZIP_SWITCH = frozenset("tc")
+
+
+def _unzip_flag(counts: Dict[str, int], key: str, neg: int) -> None:
+    """Áp một chữ cờ chỉ đọc nhóm `key` có `neg` dấu `-` phủ định đứng trước vào `counts` theo ngữ nghĩa UnZip 6.00."""
+    if key in UNZIP_SWITCH:
+        counts[key] = 0 if neg else 1
+    else:
+        counts[key] = max(counts.get(key, 0) - neg, 0) if neg else counts.get(key, 0) + 1
+
+
+def _unzip_parse(args: List[str]) -> Tuple[List[str], bool]:
+    """(thư mục `-d`, chỉ đọc/liệt kê/in ra stdout) của `unzip`."""
+    counts: Dict[str, int] = {}
+    neg, dirs, i, seen_zip = 0, [], 0, False
+    while i < len(args):
+        a, i = args[i], i + 1
+        if a[:1] != "-" or a == "-" or (seen_zip and a[:2] != "-d"):
+            seen_zip = True
+            continue
+        for j, c in enumerate(a[1:], 2):
+            if c == "-":
+                neg += 1
+                continue
+            if c in "dPOI":
+                val = a[j:] or (args[i] if i < len(args) else None)
+                i += 0 if a[j:] else 1
+                dirs += [val] if c == "d" and val is not None else []
+                neg = 0
+                break
+            _unzip_flag(counts, UNZIP_READ.get(c, ""), neg)
+            neg = 0
+    return dirs, any(v for k, v in counts.items() if k)
 
 
 def _unzip_dirs(args: List[str]) -> List[str]:
-    """Thư mục đích của `unzip`: `-d D`, `-dD`, cụm `-qd D`/`-qdD` (chữ sau `d`/`P` trong cụm là giá trị — mật khẩu
-    `-P` không phải cờ); chế độ đọc → []."""
-    flags, dirs, i = "", [], 0
+    """Thư mục đích của `unzip`: `-d D`, `-dD`, cụm `-qd D`; vắng = thư mục đang đứng; chế độ đọc → []."""
+    dirs, reading = _unzip_parse(args)
+    return [] if reading else (dirs or ["."])
+
+
+# CPython: cụm cờ của trình thông dịch (`-Im tarfile`, `-mtarfile`), `-W`/`-X`/`--check-hash-based-pycs` ăn giá trị,
+# `-c`/`--`/tên script thì không còn `-m`. Mô-đun lưu trữ đọc đối số bằng argparse (Lib/tarfile.py, Lib/zipfile/
+# __init__.py của 3.13): {tên dài: (chữ ngắn, nargs)}; tên dài nhận tiền tố duy nhất (`--e` = `--extract`) — AUD-SEC-472.
+PY_ARCHIVE_OPTS: Dict[str, Dict[str, Tuple[str, int]]] = {  # nargs −1 = `+`
+    "tarfile": {"verbose": ("v", 0), "filter": ("", 1), "list": ("l", 1), "extract": ("e", -1), "create": ("c", -1)},
+    "zipfile": {"metadata-encoding": ("", 1), "list": ("l", 1), "extract": ("e", 2), "create": ("c", -1)},
+}
+PY_ARCHIVE_OPTS["tarfile"]["test"] = PY_ARCHIVE_OPTS["zipfile"]["test"] = ("t", 1)
+
+
+def _py_module(args: List[str]) -> Tuple[str, List[str]]:
+    """(mô-đun của `-m`, đối số của nó) theo cách CPython đọc dòng lệnh; không có `-m` → ("", [])."""
+    i = 0
     while i < len(args):
-        body = args[i][1:] if args[i][:1] == "-" and args[i][1:2] not in ("", "-") else ""
-        head, opt, val = min(body.partition("d"), body.partition("P"), key=lambda x: len(x[0]))
-        flags += head
-        dirs += ([val] if val else args[i + 1 : i + 2]) if opt == "d" else []
-        i += 2 if opt and not val else 1
-    return [] if UNZIP_READ_FLAGS & set(flags) else (dirs or ["."])
+        a, i = args[i], i + 1
+        if a == "--check-hash-based-pycs":
+            i += 1
+        elif a[:1] != "-" or a in ("-", "--"):
+            return "", []
+        elif a[:2] != "--":
+            for j, c in enumerate(a[1:], 2):
+                if c in "cm":
+                    mod = a[j:] or (args[i] if i < len(args) else "")
+                    return (mod, args[i + (0 if a[j:] else 1) :]) if c == "m" else ("", [])
+                if c in "WX":
+                    i += 0 if a[j:] else 1
+                    break
+    return "", []
 
 
-def _py_unpack_dirs(args: List[str]) -> List[str]:
-    """`python -m zipfile|tarfile -e|--extract A [D]` (argparse nhận tiền tố `--ext`): D, vắng = thư mục đang đứng."""
-    # `-m` đứng cuối: không có tên module (review #420, AUD-SEC-382 — IndexError từng làm guard thả cửa cả lệnh)
-    mod = next(
-        (
-            (args[i + 1] if i + 1 < len(args) else "") if a == "-m" else a[2:]
-            for i, a in enumerate(args)
-            if a.startswith("-m")
-        ),
-        "",
-    )
-    if mod not in ("zipfile", "tarfile"):
-        return []
-    rest = args[args.index("-m") + 2 if "-m" in args else args.index("-m" + mod) + 1 :]
-    k = next((i for i, a in enumerate(rest) if a == "-e" or (len(a) > 3 and "--extract".startswith(a))), None)
-    return [] if k is None else ([a for a in rest[k + 1 :] if not a.startswith("-")][1:2] or ["."])
+def _argparse(args: List[str], table: Dict[str, Tuple[str, int]]) -> Dict[str, List[str]]:
+    """Giá trị (lần cuối) của từng tuỳ chọn theo argparse: `-eA`, `-e=A`, cụm cờ không giá trị (`-ve`), `--ext=A`, tiền tố
+    duy nhất; nargs `+` ăn mọi token không bắt đầu bằng `-`, số n ăn tối đa n token. Token thừa → khoá "" (argparse báo
+    lỗi; người gọi đọc theo chiều chặt)."""
+    out: Dict[str, List[str]] = {}
+    args, i = list(args), 0
+    while i < len(args):
+        a, i = args[i], i + 1
+        if a[:1] != "-" or a in ("-", "--"):
+            out.setdefault("", []).extend(args[i:] if a == "--" else [a])
+            i = len(args) if a == "--" else i
+            continue
+        if a[:2] == "--":
+            name, eq, val = a[2:].partition("=")
+            hits = [k for k in table if k.startswith(name)]
+            key, explicit = (name if name in table else hits[0] if len(hits) == 1 else ""), (val if eq else None)
+        else:
+            key = next((k for k, (s, _) in table.items() if s and s == a[1]), "")
+            explicit = a[3:] if a[2:3] == "=" else a[2:] or None
+        if not key:
+            continue
+        nargs = table[key][1]
+        if nargs == 0:
+            args[i:i] = ["-" + explicit] if explicit and a[:2] != "--" else []
+            out[key] = []
+            continue
+        k = i
+        while explicit is None and k < len(args) and args[k][:1] != "-" and (nargs < 0 or k - i < nargs):
+            k += 1
+        out[key], i = ([explicit] if explicit is not None else args[i:k]), k
+    return out
+
+
+def _py_archive(args: List[str]) -> Tuple[List[str], List[str]]:
+    """(thư mục giải nén, tệp archive tạo ra) của `python -m tarfile|zipfile`: tarfile `-e A [D]` (vắng D = thư mục đang
+    đứng), zipfile `-e A D`; `-c F nguồn…` ghi F (AUD-SEC-475). Sai số đối số → argparse/mô-đun báo lỗi, không ghi."""
+    mod, rest = _py_module(args)
+    table = PY_ARCHIVE_OPTS.get(mod)
+    if table is None:
+        return [], []
+    got = _argparse(rest, table)
+    ext = got.get("extract", [])
+    dirs = ext[1:2] if len(ext) == 2 else ["."] if len(ext) == 1 and mod == "tarfile" else []
+    # token thừa (`-e A -v out`: Python 3.13 báo lỗi, không ghi) — chiều chặt: cả `.` lẫn token đó là đích
+    stray = got.get("", []) if "extract" in got else []
+    return (dirs or ["."] * bool(stray)) + stray, got.get("create", [])[:1]
+
+
+# jar của JDK (`jar --help`, JDK 21): cụm đầu (có hay không `-`) là kiểu cũ (`xf a.jar`, `-cvfm a m`); sau đó kiểu GNU
+# (`-x -f a`, `--file=a`), tên dài không viết tắt; chế độ ở MỌI token (`jar -v -x -f a` — AUD-SEC-473).
+JAR_LONG_VALUE: Tuple[str, ...] = (
+    "file",
+    "generate-index",
+    "main-class",
+    "manifest",
+    "release",
+    "module-version",
+    "hash-modules",
+)
+JAR_LONG_VALUE += ("module-path", "date", "dir")
+JAR_OPTS: OptTable = ("Cefimp", (), JAR_LONG_VALUE, False)
+
+
+def _jar_opts(args: List[str]) -> OptItems:
+    old = bool(args) and bool(re.fullmatch(r"-?[A-Za-z0-9]+", args[0]))
+    return _getopt(_old_style([args[0].lstrip("-"), *args[1:]], "fme") if old else args, JAR_OPTS)
+
+
+def _jar_extract(items: OptItems) -> bool:
+    keys = _opt_keys(items)
+    return bool(keys & {"x", "extract"}) and not keys & {"c", "t", "u", "create", "list", "update"}
+
+
+# GNU ar 2.42 (`ar --help`, binutils ar.c): token đầu không `-` là cụm khoá (`xv`); tên dài qua getopt_long (viết tắt
+# được: `--o=D`, `--outp D`), `--plugin`/`--target`/`--output`/`--record-libdeps` ăn giá trị; khoá cũng có thể là toán
+# hạng đầu sau các tuỳ chọn (`ar --target T x a.a`) — AUD-SEC-473.
+_AR_VALUE = ("output", "plugin", "record-libdeps", "target")
+AR_OPTS: OptTable = ("", _AR_VALUE + ("help", "thin", "version"), _AR_VALUE, True)
+
+
+def _ar_parse(args: List[str]) -> Tuple[str, List[str], OptItems]:
+    """(chữ khoá/sửa đổi, toán hạng sau khoá, mục tuỳ chọn) của `ar`."""
+    items = _getopt(["-" + args[0], *args[1:]] if args and args[0][:1] != "-" else args, AR_OPTS)
+    letters, pos = "".join(k for k, _ in items if len(k) == 1), _operands(items)
+    if not set(letters) & set("dmpqrstx") and pos:
+        letters, pos = letters + pos[0], pos[1:]
+    return letters, pos, items
+
+
+def _ar_archive(args: List[str]) -> List[str]:
+    """Tệp archive mà `ar r|q|m|d|s` ghi: toán hạng sau khoá, bỏ thành viên mốc (`a`/`b`/`i`) và số đếm (`N`)."""
+    letters, pos, _ = _ar_parse(args)
+    skip = bool(set(letters) & set("abi")) + ("N" in letters)
+    return pos[skip : skip + 1] if set(letters) & set("rqmds") else []
+
+
+# GNU cpio (src/main.c, argp + ARGP_IN_ORDER): chữ ngắn ăn giá trị, mọi tên dài (viết tắt được) — chữ `t` trong
+# `-idHtar` là giá trị của `-H`, không phải liệt kê (AUD-SEC-468); `-iD D`, `--dir=D`, `--ext` (AUD-SEC-477).
+CPIO_LONG_VALUE: Tuple[str, ...] = (
+    "block-size",
+    "directory",
+    "file",
+    "format",
+    "io-size",
+    "message",
+    "owner",
+    "pattern-file",
+)
+CPIO_LONG_VALUE += ("rename-batch-file", "rsh-command", "warning")
+_CPIO_FLAGS = "absolute-filenames append create debug dereference device-independent dot extract force-local help"
+_CPIO_FLAGS += " ignore-devno link list make-directories no-absolute-filenames no-preserve-owner nonmatching null"
+_CPIO_FLAGS += " numeric-uid-gid only-verify-crc pass-through preserve-modification-time quiet rename renumber-inodes"
+_CPIO_FLAGS += " reproducible reset-access-time sparse swap swap-bytes swap-halfwords to-stdout unconditional usage"
+_CPIO_FLAGS += " verbose version"
+CPIO_OPTS: OptTable = ("CDEFHIMORW", CPIO_LONG_VALUE + tuple(_CPIO_FLAGS.split()), CPIO_LONG_VALUE, True)
+
+
+def _cpio_dirs(args: List[str]) -> List[str]:
+    items = _getopt(args, CPIO_OPTS)
+    keys, dirs = _opt_keys(items), _opt_vals(items, "D", "directory")
+    if keys & {"p", "pass-through"}:
+        return dirs + _operands(items)[-1:]
+    listing = keys & {"t", "list", "to-stdout"}  # `cpio -it`: chỉ liệt kê (AUD-SEC-462)
+    return (dirs or ["."]) if keys & {"i", "extract"} and not listing else []
+
+
+def _cpio_archive(args: List[str]) -> List[str]:
+    """`cpio -o` ghi archive ra `-O F`/`-F F`/`--file=F` (AUD-SEC-475)."""
+    items = _getopt(args, CPIO_OPTS)
+    return _opt_vals(items, "O", "F", "file") if _opt_keys(items) & {"o", "create"} else []
+
+
+def _seven_zip(args: List[str]) -> Tuple[List[str], List[str]]:
+    """(thư mục giải nén, archive ghi) của 7z: lệnh và khoá chuyển không phân biệt hoa thường (chưa đo: máy không có 7z
+    — theo tài liệu 7-Zip, mục cmdline/syntax.htm); `x|e` giải vào `-o<D>` (vắng = `.`), `a|u|d|rn` ghi archive."""
+    pos = _positionals(args)
+    cmd = pos[0].lower() if pos else ""
+    dirs = [a[2:] for a in args if a[:2].lower() == "-o"] or ["."]
+    return (dirs if cmd in ("x", "e") else []), (pos[1:2] if cmd in ("a", "u", "d", "rn") else [])
 
 
 def _unpack_dirs(name: str, args: List[str]) -> List[str]:
     if name == "unzip":
         return _unzip_dirs(args)
     if PY_UNPACK_RE.fullmatch(name):
-        return _py_unpack_dirs(args)
+        return _py_archive(args)[0]
     if name == "jar":
-        extract = bool(args) and (bool(JAR_MODE_RE.fullmatch(args[0])) or "--extract" in args)
-        return (_flag_values(args, ("-C", "--dir")) or ["."]) if extract else []
+        items = _jar_opts(args)
+        return (_opt_vals(items, "C", "dir") or ["."]) if _jar_extract(items) else []
     if name in SEVEN_ZIP:
-        return (_flag_values(args, ("-o",)) or ["."]) if _positionals(args)[:1] in (["x"], ["e"]) else []
+        return _seven_zip(args)[0]
     if name == "ar":  # `ar x|-xv a.a [thành viên…]` giải vào thư mục đang đứng, `--output D` (AUD-SEC-462)
-        key = next((a for a in args if not a.startswith("--")), "").lstrip("-")
-        return (_flag_values(args, ("--output",)) or ["."]) if re.fullmatch(r"[A-Za-z]*x[A-Za-z]*", key) else []
-    if name != "cpio":
-        return []
-    flags = _short_flags([a for i, a in enumerate(args) if not (i and args[i - 1] in CPIO_VALUE_OPTS)])
-    dirs = _flag_values(args, ("-D", "--directory"))
-    if "p" in flags or "--pass-through" in args:
-        return dirs + _positionals(args, CPIO_VALUE_OPTS)[-1:]
-    listing = "t" in flags or bool({"--list", "--to-stdout"} & set(args))  # `cpio -it`: chỉ liệt kê (AUD-SEC-462)
-    return (dirs or ["."]) if ("i" in flags or "--extract" in args) and not listing else []
+        letters, _, items = _ar_parse(args)
+        return (_opt_vals(items, "output") or ["."]) if "x" in letters else []
+    return _cpio_dirs(args) if name == "cpio" else []
+
+
+def _archive_outputs(name: str, args: List[str]) -> List[str]:
+    """Tệp archive mà lệnh tạo/ghi archive ghi ra (AUD-SEC-475): `zip F`, `jar c|u` kèm `f`, `ar r|q`, `cpio -o`, `7z a`,
+    `pax -w -f`, `python -m zipfile|tarfile -c F` (tar: `_tar_dest`)."""
+    if name == "zip":
+        return _positionals(args, ZIP_VALUE_OPTS)[:1] + _flag_values(args, ("-O", "--out", "--output-file"))
+    if name == "jar":
+        items = _jar_opts(args)
+        return _opt_vals(items, "f", "file") if _opt_keys(items) & {"c", "u", "create", "update"} else []
+    if name == "ar":
+        return _ar_archive(args)
+    if name == "cpio":
+        return _cpio_archive(args)
+    if name in SEVEN_ZIP:
+        return _seven_zip(args)[1]
+    return _pax_archive(args) if name == "pax" else _py_archive(args)[1] if PY_UNPACK_RE.fullmatch(name) else []
+
+
+# Info-ZIP zip 3.0 (`zip -h2`): tuỳ chọn là cả token (`-tt`, `-ds`), các tuỳ chọn ăn giá trị dưới; toán hạng đầu là
+# archive, `-O`/`--out` là tệp ra.
+ZIP_VALUE_OPTS: Tuple[str, ...] = (
+    "-b",
+    "-n",
+    "-t",
+    "-tt",
+    "-P",
+    "-Z",
+    "-s",
+    "-ds",
+    "-O",
+    "-TT",
+    "-lf",
+    "--out",
+    "--temp-path",
+)
+ZIP_VALUE_OPTS += ("--password", "--suffixes", "--compression-method", "--split-size", "--from-date", "--before-date")
+ZIP_VALUE_OPTS += ("--unzip-command", "--logfile-path", "--output-file")
 
 
 def _merge_renamed(n: List[str]) -> bool:
@@ -8992,69 +9478,74 @@ def _merge_renamed(n: List[str]) -> bool:
     có thể ghi sổ (AUD-SEC-340)."""
     if not n or n[0] not in TAR_NAMES or not _tar_extract_dirs(n[1:]):
         return False
-    keys = {k for k, _ in _tar_opts(n[1:])}
+    keys = _opt_keys(_tar_opts(n[1:]))
     return bool(keys & {"transform", "xform"}) or (n[0] == "bsdtar" and "s" in keys)
 
 
-# Cờ ngắn của GNU tar ăn một giá trị (trong cụm `-xC d`: phần còn lại của cụm, không thì token kế; kiểu cũ `xfC a d`:
-# token kế theo thứ tự chữ). Cờ dài viết tắt được (getopt): tiền tố ≥ 3 chữ của tên dưới (`--dir=` = `--directory=`).
+# Bảng argp của GNU tar 1.35 (`tar --help`, đo 2026-11-04): chữ ngắn ăn giá trị; mọi tên dài (viết tắt được nếu là
+# tiền tố của đúng một tên: `--dir=` = `--directory=`, `--ge` = `--get`; mơ hồ như `--fil` thì tar báo lỗi) và tên bắt
+# buộc giá trị (`--exclude -O` là mẫu `-O`, không phải ra stdout — AUD-SEC-471). Kiểu cũ `xfC a d`: `_old_style`.
 TAR_SHORT_VALUE = "bCfFgHIKLNTVX"
-TAR_LONG_NAMES = ("directory", "extract", "one-top-level", "transform", "xform", "to-stdout", "to-command")
-TAR_LONG_VALUE = ("directory", "file", "transform", "xform", "to-command")
+TAR_LONG_VALUE: Tuple[str, ...] = (
+    "add-file",
+    "after-date",
+    "blocking-factor",
+    "checkpoint-action",
+    "directory",
+    "exclude",
+)
+TAR_LONG_VALUE += ("exclude-from", "exclude-ignore", "exclude-ignore-recursive", "exclude-tag", "exclude-tag-all")
+TAR_LONG_VALUE += ("exclude-tag-under", "file", "files-from", "format", "group", "group-map", "hole-detection")
+TAR_LONG_VALUE += ("index-file", "info-script", "label", "level", "listed-incremental", "mode", "mtime")
+TAR_LONG_VALUE += ("new-volume-script", "newer", "newer-mtime", "no-quote-chars", "owner", "owner-map", "pax-option")
+TAR_LONG_VALUE += ("quote-chars", "quoting-style", "record-size", "rmt-command", "rsh-command", "sort")
+TAR_LONG_VALUE += ("sparse-version", "starting-file", "strip-components", "suffix", "tape-length", "to-command")
+TAR_LONG_VALUE += ("transform", "use-compress-program", "volno-file", "warning", "xattrs-exclude", "xattrs-include")
+TAR_LONG_VALUE += ("xform",)
+_TAR_FLAGS = "absolute-names acls anchored append atime-preserve auto-compress backup block-number bzip2 catenate"
+_TAR_FLAGS += " check-device check-links checkpoint clamp-mtime compare compress concatenate confirmation create"
+_TAR_FLAGS += " delay-directory-restore delete dereference diff exclude-backups exclude-caches exclude-caches-all"
+_TAR_FLAGS += " exclude-caches-under exclude-vcs exclude-vcs-ignores extract force-local full-time get gunzip gzip"
+_TAR_FLAGS += " hard-dereference help ignore-case ignore-command-error ignore-failed-read ignore-zeros incremental"
+_TAR_FLAGS += " interactive keep-directory-symlink keep-newer-files keep-old-files list lzip lzma lzop multi-volume"
+_TAR_FLAGS += " no-acls no-anchored no-auto-compress no-check-device no-delay-directory-restore no-ignore-case"
+_TAR_FLAGS += " no-ignore-command-error no-null no-overwrite-dir no-recursion no-same-owner no-same-permissions"
+_TAR_FLAGS += " no-seek no-selinux no-unquote no-verbatim-files-from no-wildcards no-wildcards-match-slash no-xattrs"
+_TAR_FLAGS += " null numeric-owner occurrence old-archive one-file-system one-top-level overwrite overwrite-dir"
+_TAR_FLAGS += " portability posix preserve-order preserve-permissions read-full-records recursion recursive-unlink"
+_TAR_FLAGS += " remove-files restrict same-order same-owner same-permissions seek selinux show-defaults"
+_TAR_FLAGS += " show-omitted-dirs show-snapshot-field-ranges show-stored-names show-transformed-names skip-old-files"
+_TAR_FLAGS += " sparse test-label to-stdout totals touch uncompress ungzip unlink-first unquote update usage utc"
+_TAR_FLAGS += " verbatim-files-from verbose verify version wildcards wildcards-match-slash xattrs xz zstd"
+TAR_OPTS: OptTable = (TAR_SHORT_VALUE, TAR_LONG_VALUE + tuple(_TAR_FLAGS.split()), TAR_LONG_VALUE, True)
 TAR_SUFFIX_RE = re.compile(r"\.(?:tar(?:\.\w+)?|t[gbx]z|tbz2|taz|tz2?|tlz|tzst)$")
+TAR_EXTRACT = {"x", "extract", "get"}
+TAR_WRITE_ARCHIVE = {"c", "r", "u", "A", "create", "append", "update", "catenate", "concatenate", "delete"}
 
 
-def _tar_long(a: str, args: List[str], i: int) -> Tuple[List[Tuple[str, Optional[str]]], int]:
-    name, eq, val = a[2:].partition("=")
-    name = next((x for x in TAR_LONG_NAMES if len(name) >= 3 and x.startswith(name)), name)
-    if eq or name not in TAR_LONG_VALUE or i >= len(args):
-        return [(name, val if eq else None)], i
-    return [(name, args[i])], i + 1
+def _tar_opts(args: List[str]) -> OptItems:
+    """(cờ, giá trị) và ("", toán hạng) của `tar` theo thứ tự (`_getopt` trên bảng TAR_OPTS, kiểu cũ đã nở)."""
+    return _getopt(_old_style(args, TAR_SHORT_VALUE), TAR_OPTS)
 
 
-def _tar_short(a: str, args: List[str], i: int, old: bool) -> Tuple[List[Tuple[str, Optional[str]]], int]:
-    out: List[Tuple[str, Optional[str]]] = []
-    for j, ch in enumerate(a.lstrip("-")):
-        if ch not in TAR_SHORT_VALUE:
-            out.append((ch, None))
-        elif not old and a[j + 2 :]:  # `-Cdocs`, `-xCdocs`: phần còn lại của cụm là giá trị
-            return out + [(ch, a[j + 2 :])], i
-        else:
-            out.append((ch, args[i] if i < len(args) else None))
-            i += 1
-            if not old:
-                break
-    return out, i
-
-
-def _tar_opts(args: List[str]) -> List[Tuple[str, Optional[str]]]:
-    """(cờ, giá trị) của `tar` theo thứ tự: chữ của cờ ngắn/kiểu cũ (`x`, `C`), tên dài đầy đủ (`directory`)."""
-    out: List[Tuple[str, Optional[str]]] = []
-    i = 0
-    while i < len(args):
-        a, i = args[i], i + 1
-        old = i == 1 and bool(re.fullmatch(r"[A-Za-z]+", a))
-        if a.startswith("--") and len(a) > 2:
-            got, i = _tar_long(a, args, i)
-        elif old or (a.startswith("-") and len(a) > 1):
-            got, i = _tar_short(a, args, i, old)
-        else:
-            got = []
-        out += got
-    return out
+def _tar_archives(opts: OptItems) -> List[str]:
+    """Tệp archive mà `tar -c/-r/-u/-A/--delete` ghi (`-f F`, `--file=F`; `-` là stdout) — AUD-SEC-475."""
+    return [v for v in _opt_vals(opts, "f", "file") if v != "-"] if _opt_keys(opts) & TAR_WRITE_ARCHIVE else []
 
 
 def _tar_extract_dirs(args: List[str]) -> List[str]:
     """Mọi thư mục `tar` có thể giải nén vào: `-C` cộng dồn (`-C docs -C autopilot` = `docs/autopilot`), cả thư mục
     `--one-top-level[=D]` (vắng D = tên archive bỏ đuôi); không `-C` = `.`; không giải nén → rỗng (review #405)."""
     opts = _tar_opts(args)
-    if not any(k in ("x", "extract", "get") for k, _ in opts):
+    if not _opt_keys(opts) & TAR_EXTRACT:
         return []
     cur, dirs = ".", []
     for k, v in opts:
         if k in ("C", "directory") and v:
             cur = posixpath.join(cur, v)
             dirs.append(cur)
+        elif not k and not dirs:  # thành viên nêu trước `-C` đầu tiên giải vào thư mục đang đứng (AUD-SEC-471)
+            dirs.append(".")
     archive = posixpath.basename(next((v for k, v in opts if k in ("f", "file") and v), ""))
     tops = [v if v is not None else TAR_SUFFIX_RE.sub("", archive) for k, v in opts if k == "one-top-level"]
     return (dirs or ["."]) + [posixpath.join(cur, t) for t in tops if t]
@@ -9762,7 +10253,12 @@ def _fake_git_dirs(commands: List[Tuple[List[str], Optional[str]]]) -> Set[str]:
             for k in [k for k, part in enumerate(parts) if part == mark and (mark == "objects" or k == len(parts) - 1)]:
                 d = "/".join(parts[:k]) or ("/" if path.startswith("/") else ".")
                 unknown = re.search(r"[$`*?\[]", d) or (here is None and not d.startswith("/"))
-                out.add("" if unknown else posixpath.join(here or "/", d))
+                full = posixpath.join(here or "/", d)
+                # T-3674: thư mục đã có `.git` (gốc dự án) — git dò thấy `.git` trước, không nhận chính nó là Git dir;
+                # chỉ `GIT_DIR`/`--git-dir` tường minh mới nhận (đã chặn riêng: `_git_cfg_env_why`, `hook_bypass`).
+                # AUD-SEC-487: chỉ `.git` làm git dừng dò (gitfile, Git dir hợp lệ) — `.git` rỗng/hỏng git bỏ qua
+                if unknown or not _stops_git_discovery(posixpath.join(full, ".git")):  # đường thô: kernel giải `..`
+                    out.add("" if unknown else full)
     return out
 
 
@@ -9775,10 +10271,8 @@ def _copied_git_dirs(n: List[str], here: Optional[str]) -> Set[str]:
     dir đang chờ; đích là biến/tương đối khi thư mục không biết → '' (mọi đuôi metadata)."""
     if not n or n[0] not in GIT_DIR_COPIERS:
         return set()
-    args = n[1:]
-    t_dir = (_flag_value(args, "-t") or _flag_value(args, "--target-directory")) if n[0] == "cp" else None
-    pos = _positionals(args, COPY_DEST_OPTS if n[0] == "cp" else COPY_VALUE_OPTS[n[0]])
-    srcs, dest = (pos, t_dir) if t_dir else (pos[:-1], pos[-1] if pos else "")
+    pos = _copy_into_positionals(n)  # (nguồn…, đích), `-t D` đã đưa về cuối
+    srcs, dest = pos[:-1], pos[-1] if pos else ""
     out: Set[str] = set()
     for src in srcs:
         p = posixpath.normpath(posixpath.expanduser(src))
@@ -9848,8 +10342,7 @@ def _discover_bare_git_dir(path: str, ceilings: str, across: Tuple[str, ...]) ->
     cross = any(value.lower() not in ("", "false", "no", "off", "0") for value in across)
     directory = _realpath_safe(path)
     while True:
-        dot_git = os.path.join(directory, ".git")
-        if os.path.isfile(dot_git) or _git_metadata_dir(dot_git):
+        if _stops_git_discovery(os.path.join(directory, ".git")):  # AUD-SEC-487: `.git` hỏng git bỏ qua
             return ""
         if _git_metadata_dir(directory):
             return directory
@@ -9961,7 +10454,7 @@ def _scan_command(
     )
     if bypass:
         asks.append(f"{bypass}: {' '.join(argv)[:200]}")
-    asks.extend(_write_asks(n, argv, root, cwd))
+    asks.extend(_write_asks(n, argv, root, cwd, env))
     if n[0] in (*DB_CLIENTS, "docker", "podman") and decision != "ask":  # `PGHOST=… psql`: normalize đã bóc phần gán
         pairs = [_assign_split(t) for t in argv[: len(argv) - len(n)] if ENV_ASSIGN_RE.fullmatch(t)]
         assigns = [f"{k}={v}" for k, v in pairs]
@@ -10013,6 +10506,8 @@ class ScanBudget:
         # tạo trong cùng lệnh (đi vào shell lồng: `git init --bare X && sh -c 'printf x > X/config'`)
         self.dirs: Set[str] = set()
         self.pending_bare: Optional[FrozenSet[str]] = None
+        # AUD-SEC-481: alias git đặt trong cùng lệnh (`git config alias.u …`) — shell lồng/`eval` gọi nó dùng chung bảng
+        self.aliases: List[Tuple[str, Optional[str]]] = []
         # Đọc bảng alias: ngân sách TỔNG của quyết định gốc — lệnh con của `find -exec` được quét bằng quyết định mới
         # (nested) vẫn tiêu chung, không được thêm ALIAS_SECONDS mỗi lần.
         if not nested or ScanBudget.current_alias is None:
@@ -10666,15 +11161,21 @@ SPAN_MARK_RE = re.compile(r"\$__xt_span_(\d+)_")
 
 
 def _nested_pairs(
-    cmd: str, tokens: List[str], placed: PlacedCmds, start: Optional[str], budget: Optional[ScanBudget] = None
+    cmd: str,
+    tokens: List[str],
+    placed: PlacedCmds,
+    start: Optional[str],
+    budget: Optional[ScanBudget] = None,
+    pick: int = 0,
 ) -> Placed:
     """Lệnh chạy lồng (AUD-SEC-017) kèm thư mục nó chạy (AUD-SEC-094): `sh -c '…'`, `eval '…'`, backtick, `$(…)`,
-    `$(cat <<E …)`, `<( )`, thân heredoc mở rộng, `echo/printf '…' | sh`, here-string/heredoc vào shell."""
+    `$(cat <<E …)`, `<( )`, thân heredoc mở rộng, `echo/printf '…' | sh`, here-string/heredoc vào shell. `pick`: ứng
+    viên thư mục đang xét (`_commands_with_cwd`, D-347)."""
     moved = any(here != start for _, here in placed)
     out: Placed = [(s, here) for c, here in placed for s in [_shell_c_script(c)] if s]
     out += [(s, here) for c, here in placed for s in _eval_scripts(c)]
-    out += _span_pairs(strip_heredocs(literal_bodies_masked(cmd)), _backtick_spans, start, moved)
-    out += _span_pairs(strip_heredocs(cmd), _dollar_spans, start, moved)
+    out += _span_pairs(strip_heredocs(literal_bodies_masked(cmd)), _backtick_spans, start, moved, pick)
+    out += _span_pairs(strip_heredocs(cmd), _dollar_spans, start, moved, pick)
     out += [(b, here) for sc, here in list(out) for b in _cat_heredoc_bodies(sc)]
     out += _procsub_scripts(tokens, _token_dirs(tokens, placed))
     visited = list(dict.fromkeys([start, *(here for _, here in placed)]))
@@ -10686,17 +11187,19 @@ def _nested_pairs(
     return out + [(body, d) for body in _heredoc_scripts(cmd, budget=budget) for d in shells]
 
 
-def _span_pairs(text: str, finder: Callable[[str], List[Span]], start: Optional[str], moved: bool) -> Placed:
+def _span_pairs(
+    text: str, finder: Callable[[str], List[Span]], start: Optional[str], moved: bool, pick: int = 0
+) -> Placed:
     """Thân thay lệnh (`finder` = `_dollar_spans`/`_backtick_spans`) kèm thư mục lệnh chứa nó; không lệnh nào dời thư
     mục → mọi thân ở `start`."""
     out: Placed = []
     for spans in _span_readings(text, finder):
-        dirs = _span_dirs(text, spans, start) if moved and spans else [start] * len(spans)
+        dirs = _span_dirs(text, spans, start, pick) if moved and spans else [start] * len(spans)
         out += [(body, d) for (_, _, body), d in zip(spans, dirs)]
     return list(dict.fromkeys(out))
 
 
-def _span_dirs(text: str, spans: List[Span], start: Optional[str]) -> List[Optional[str]]:
+def _span_dirs(text: str, spans: List[Span], start: Optional[str], pick: int = 0) -> List[Optional[str]]:
     """Thư mục của lệnh chứa mỗi thay lệnh trong `text`: thay span thứ K bằng dấu `$__xt_span_K_`, tách lệnh, đọc dấu
     trong argv của `_commands_with_cwd` (`cd .claude && echo "$(…)"` chạy trong `.claude`). Không thấy dấu (span trong
     comment) → `start`."""
@@ -10706,7 +11209,7 @@ def _span_dirs(text: str, spans: List[Span], start: Optional[str]) -> List[Optio
         parts += [text[pos:a], SPAN_MARK.format(k)]
         pos = b
     found: Dict[int, Optional[str]] = {}
-    for c, here in _commands_with_cwd(tokenize("".join(parts) + text[pos:]), start):
+    for c, here in _commands_with_cwd(tokenize("".join(parts) + text[pos:]), start, pick):
         for m in SPAN_MARK_RE.finditer(" ".join(c)):
             found.setdefault(int(m[1]), here)
     return [found.get(k, start) for k in range(len(spans))]
@@ -10835,10 +11338,10 @@ def _xargs_fed_dest(down: List[str], inner: List[str]) -> bool:
     if posixpath.basename(inner[0]) not in ("cp", "install", "ln"):
         return True
     mark = _xargs_replace(down[1 : len(down) - len(inner)])
-    target = _flag_values(inner[1:], ("-t", "--target-directory"))
+    target, pos, _ = _copy_opts(posixpath.basename(inner[0]), inner[1:])
     if mark is None:
         return not target
-    return any(mark in d for d in target or _positionals(inner[1:], COPY_DEST_OPTS)[-1:])
+    return any(mark in d for d in target or pos[-1:])
 
 
 def _xargs_evidence(tokens: List[str], cmd: str) -> List[str]:
@@ -11008,9 +11511,9 @@ def _push_subst_rule(cmd: str, root: str, cwd: str) -> Tuple[str, List[str]]:
     (unsure → chặn). Trả (lý do deny, câu hỏi)."""
     base = strip_heredocs(cmd)
     variants = _subst_variants(base) if "push" in base else []
-    seen = {tuple(a) for a, _ in _commands_with_cwd(tokenize(base), cwd)} if variants else set()
+    seen = {tuple(a) for a, _ in _commands_each_cwd(tokenize(base), cwd)} if variants else set()
     asks: List[str] = []
-    for argv, here in (c for v in variants for c in _commands_with_cwd(tokenize(v), cwd)):
+    for argv, here in (c for v in variants for c in _commands_each_cwd(tokenize(v), cwd)):
         n = normalize(argv)
         if n[:2] != ["git", "push"] or tuple(argv) in seen:
             continue
@@ -11057,7 +11560,7 @@ def _push_var_rule(cmd: str, root: str, cwd: str) -> Tuple[str, List[str]]:
     asks: List[str] = []
     for variant in _subst_variants(base) or [base]:
         env: Dict[str, str] = {}
-        for argv, here in _commands_with_cwd(tokenize(variant), cwd):
+        for argv, here in _commands_each_cwd(tokenize(variant), cwd):
             n = normalize(argv)
             if n[:2] == ["git", "push"]:
                 deny, more = _push_var_refspec(n, env, _git_dir(argv, here) or root)
@@ -11531,9 +12034,11 @@ def _scan_nested(
     asks: List[str],
     budget: ScanBudget,
     rewrites: int,
+    picks: int = 1,
 ) -> str:
     """Quét đệ quy lệnh lồng; trả lý do deny (rỗng nếu không), thêm câu hỏi vào `asks`. Lệnh trong container không
-    đụng file máy → chặn/hỏi của nó thành hỏi (ra mạng, thêm gói vẫn là việc thật)."""
+    đụng file máy → chặn/hỏi của nó thành hỏi (ra mạng, thêm gói vẫn là việc thật). `picks`: số ứng viên thư mục
+    nhiều nhất của một lệnh (`_cwd_picks`) — nguồn lồng lấy ở mọi ứng viên (D-347)."""
     if max([0, *(_for_words(c) for c in split_commands(tokens))]) > VAR_FOR_PICKS:
         return f"Lệnh quá phức tạp để guard quét hết (vòng `for` hơn {VAR_FOR_PICKS} giá trị khác nhau): chia nhỏ lệnh."
     asks += _opaque_shells(tokens) + _xargs_evidence(tokens, cmd)
@@ -11542,8 +12047,12 @@ def _scan_nested(
         return push_deny
     asks += push_asks
     asks += _container_asks(_wrapped_scripts(tokens)[1], depth, budget)  # mọi lệnh, không cắt (review #82)
-    rewritten, nested, opaque = _nested_sources(cmd, tokens, cwd, root, budget)
-    asks += opaque
+    rewritten: Placed = []
+    nested: Placed = []
+    for pick in range(picks):  # mỗi cặp (lệnh, thư mục ứng viên) ít nhất một lượt (D-347)
+        rw_at, ns_at, opaque = _nested_sources(cmd, tokens, cwd, root, budget, pick)
+        rewritten, nested = list(dict.fromkeys(rewritten + rw_at)), list(dict.fromkeys(nested + ns_at))
+        asks += opaque
     for here, (rw, ns) in _moved_groups(rewritten, nested, cwd).items():
         moved = _scan_scripts(rw, root, here, depth, asks, 0, budget, rewrites)
         moved = moved or _scan_scripts(ns, root, here, depth, asks, 1, budget)
@@ -11555,21 +12064,27 @@ def _scan_nested(
 
 
 def _nested_sources(
-    cmd: str, tokens: List[str], start: Optional[str], root: str, budget: Optional["ScanBudget"] = None
+    cmd: str,
+    tokens: List[str],
+    start: Optional[str],
+    root: str,
+    budget: Optional["ScanBudget"] = None,
+    pick: int = 0,
 ) -> Tuple[Placed, Placed, List[str]]:
     """MỘT danh sách nguồn lệnh lồng cho cả lượt quét ở thư mục ban đầu lẫn sau `cd`/`pushd`/`env -C` (AUD-SEC-087,
     AUD-SEC-094 — hai danh sách riêng từng lệch nhau): (bản viết lại cùng lệnh, lệnh lồng, câu hỏi chặn), mỗi script
     kèm thư mục nó chạy. Bản viết lại: thay biến/gán thay lệnh (cả dòng, gồm `cd`) và hậu tố lệnh bọc (`flock`,
     `script -qc`, `su -c`, `watch`…), lệnh git gọi alias. Lệnh lồng: `_nested_pairs`, lệnh bọc trên máy (`uv run bash
     -c`), `os.system` trong script trình thông dịch, ống giải mã vào shell, ssh chạy tại máy này, magic ipython, alias
-    git `!`. `root`: repo đọc alias bền khi thư mục lệnh không biết; `budget`: ngân sách đọc alias của quyết định."""
-    placed = _commands_with_cwd(tokens, start)
+    git `!`. `root`: repo đọc alias bền khi thư mục lệnh không biết; `budget`: ngân sách đọc alias của quyết định;
+    `pick`: ứng viên thư mục của mỗi lệnh (`_commands_with_cwd`; bên gọi lặp mọi ứng viên — D-347)."""
+    placed = _commands_with_cwd(tokens, start, pick)
     alias_rw, alias_ns, alias_asks = _git_alias_sources(placed, root, budget)
     built: Placed = [(s, start) for s in _var_scripts(tokens)] + alias_rw + [(s, start) for s in _lifted_scripts(cmd)]
     built += _patch_fence_scripts(cmd, placed, start)  # AUD-SEC-414: đích `patch`/`git apply` trong thân heredoc
     runner = [(s, here) for c, here in placed for s in _runner_scripts(c)]
     decoded, opaque = _decoded_pipes(tokens, [here for _, here in placed])
-    nested = _nested_pairs(cmd, tokens, placed, start, budget)
+    nested = _nested_pairs(cmd, tokens, placed, start, budget, pick)
     nested += [(s, here) for c, here in placed for s in _wrapped_scripts(c)[0]]
     interp = _interp_scripts_at(cmd, tokens, start, budget)
     loose = [(s, here) for raw, here in interp for s in _exec_api_scripts([raw])]
@@ -11809,7 +12324,9 @@ def _git_alias_sources(
     nested: Placed = []
     asks: List[str] = []
     exported: Dict[str, str] = {}
-    defined: AliasTable = []  # alias đặt ở lệnh trước trong chuỗi — bảng của git chưa có lúc kiểm (AUD-SEC-464)
+    # alias đặt ở lệnh trước trong chuỗi — bảng của git chưa có lúc kiểm (AUD-SEC-464); cả alias tầng ngoài đặt (shell
+    # lồng, `eval` — AUD-SEC-481, giữ trong ngân sách của quyết định)
+    defined: AliasTable = list(budget.aliases) if budget is not None else []
     for c, here in placed:
         s = _strip_prefixes(c)
         _chain_assign(exported, c)
@@ -11818,6 +12335,8 @@ def _git_alias_sources(
         pos = _git_config_write(n)
         if len(pos) > 1 and pos[0][:6].lower() == "alias.":  # mọi phạm vi/tệp (`--global`, `-f`): chiều chặt
             defined.append((pos[0][6:], pos[1]))
+            if budget is not None and defined[-1] not in budget.aliases:
+                budget.aliases.append(defined[-1])
             continue
         sub = n[1] if n[:1] == ["git"] and len(n) > 1 else ""
         aliased = bool(sub) and not sub.startswith("-") and sub not in GIT_BUILTINS
@@ -13389,16 +13908,43 @@ def _budget_track(
 def _cwd_scan(
     placed: List[Tuple[List[str], Cands]], root: str, res: Dict[str, object], asks: List[str], dirs: FrozenSet[str]
 ) -> str:
-    """Quét từng lệnh đơn (`_scan_command`) ở MỌI thư mục ứng viên của nó (T-3672: `cd` có thể hỏng → cả thư mục cũ,
-    AUD-SEC-457/459); ứng viên đầu (nhánh `cd` thành công) ghi cờ vào `res`, ứng viên khác quét với bản sao cờ —
-    chặt nhất thắng."""
+    """Quét từng lệnh đơn (`_scan_command`) ở MỌI thư mục ứng viên của nó (D-347: hợp mọi đích `cd`); ứng viên đầu
+    (nhánh mọi `cd` thành công) ghi cờ vào `res`, ứng viên khác quét với bản sao cờ — chặt nhất thắng. `git commit`
+    có nhiều ứng viên: thư mục cổng chọn chặt (`_strict_commit_dir`)."""
     for argv, (here, *others) in placed:
         reason = _scan_command(argv, root, res, asks, here, dirs)
+        commit_dirs = [str(res["commit_dir"])]
         for other in others:
-            reason = reason or _scan_command(argv, root, dict(res), asks, other, dirs)
+            copy = dict(res)
+            reason = reason or _scan_command(argv, root, copy, asks, other, dirs)
+            commit_dirs.append(str(copy["commit_dir"]))
+        if others and normalize(argv)[:2] == ["git", "commit"]:
+            res["commit_dir"] = _strict_commit_dir(commit_dirs, root)
         if reason:
             return reason
     return ""
+
+
+def _repo_top(path: str) -> str:
+    """Gốc cây làm việc chứa `path` (thư mục có `.git` — thư mục hay gitfile — gần nhất đi lên, theo realpath); không
+    có → ''."""
+    d = _realpath_safe(path)
+    while not os.path.lexists(os.path.join(d, ".git")):
+        if posixpath.dirname(d) == d:
+            return ""
+        d = posixpath.dirname(d)
+    return d
+
+
+def _strict_commit_dir(dirs: List[str], root: str) -> str:
+    """Thư mục cổng commit khi `git commit` có nhiều thư mục ứng viên (D-347): mọi ứng viên cùng một cây làm việc (hay
+    cùng không thuộc cây nào) → ứng viên đầu; có ứng viên thuộc cây khác dự án → nó (hook hỏi người ở `strict`, như
+    `cd ../khac && git commit`); còn lại (thư mục không biết, repo trần lẫn dự án) → '' như thư mục không biết."""
+    tops = [_repo_top(d) if d else "" for d in dirs]
+    if len(set(tops)) == 1:
+        return dirs[0]
+    own = _repo_top(root)
+    return next((d for d, t in zip(dirs, tops) if t and t != own), "")
 
 
 def _late_pending_asks(
@@ -13451,10 +13997,10 @@ def _bash_decision(
         return res
     placed = _commands_with_cwds(tokens, cwd)
     commands = [(argv, cands[0]) for argv, cands in placed]
-    pending_bare = _budget_track(budget, cmd, commands, root, cwd)
-    budget.dirs.update(d for _, cands in placed for d in cands if d)  # mọi ứng viên là thư mục đã biết (T-3672)
+    every = [(argv, d) for argv, cands in placed for d in cands]  # luật theo thư mục xét ĐỦ mọi ứng viên (D-347)
+    pending_bare = _budget_track(budget, cmd, every, root, cwd)
     asks: List[str] = interp_write_asks(cmd, tokens, root, cwd, pending_bare)
-    asks += _pending_git_write_asks(commands, pending_bare)
+    asks += _pending_git_write_asks(every, pending_bare)
     asks += [REVIEW_FORGE_WHY] if _review_forge_hit(cmd, tokens, cwd, budget) else []
     asks += [STAGE_APPROVE_WHY] if any(_stage_approve_denied(c, root) for c in split_commands(tokens)) else []
     braces = brace_variants(cmd)
@@ -13462,19 +14008,19 @@ def _bash_decision(
         "Lệnh quá phức tạp để guard quét hết (brace expansion quá nhiều biến thể): chia nhỏ lệnh."
         if braces is None
         else _scan_scripts(braces, root, cwd, depth, asks, 0, budget, rewrites)
-    ) or _scan_nested(cmd, tokens, root, cwd, depth, asks, budget, rewrites)
+    ) or _scan_nested(cmd, tokens, root, cwd, depth, asks, budget, rewrites, _cwd_picks(placed))
     nested_deny = nested_deny or _scan_glob_rewrites(cmd, tokens, root, cwd, depth, asks, budget, rewrites)
     if nested_deny:
         return _nested_deny_result(res, nested_deny, budget)
-    asks += _late_pending_asks(cmd, tokens, commands, root, cwd, pending_bare, budget)
-    asks += _git_config_env_asks(tokens, commands, root)
+    asks += _late_pending_asks(cmd, tokens, every, root, cwd, pending_bare, budget)
+    asks += _git_config_env_asks(tokens, every, root)
     dirs = frozenset(budget.dirs)
     deny_reason = _cwd_scan(placed, root, res, asks, dirs)
     res.pop("exported_env", None)
     _carry_push_no_verify(res, budget)
     deny_reason = deny_reason or find_root_scan(cmd, root, cwd) or _commit_after_write(commands)
     deny_reason = deny_reason or (
-        ai_attribution(cmd, commands, root) or title_rule(cmd, commands, root)
+        ai_attribution(cmd, every, root) or title_rule(cmd, every, root)
         if res["commit"] or GH_PR_TEXT_RE.search(cmd)
         else ""
     )

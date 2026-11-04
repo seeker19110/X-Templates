@@ -7698,7 +7698,7 @@ def _harden_sources(base: Path, st: Dict[str, Any], status: str) -> List[Dict[st
     return out
 
 
-PLAN_ARCHIVE_DIR = "docs/archive/autopilot"  # ADR-0070 (D-349): PLAN đã đóng dời khỏi docs/autopilot, số task vẫn giữ
+PLAN_ARCHIVE_DIR = "docs/archive/autopilot"  # ADR-0070 (D-354): PLAN đã đóng dời khỏi docs/autopilot, số task vẫn giữ
 
 
 def _plan_paths(base: Path, st: Dict[str, Any]) -> List[Path]:
@@ -11435,7 +11435,7 @@ PLAN_STAGE_RE = re.compile(r"^\s*>?\s*Giai đoạn sản phẩm:\s*([1-3])\s*\((
 STAGE_AGENT_ENV = ("CLAUDECODE", "CLAUDE_CODE_SESSION_ID", "AI_AGENT")  # biến môi trường mà phiên agent mang
 STAGE_DIFF_UNKNOWN = "(nội dung khác bản trình)"  # vân tay lệch mà diff theo SHA không chỉ ra file (hay SHA mất)
 STAGE_HUMAN_ONLY = "chỉ người duyệt — chạy ở terminal của chủ dự án, ngoài phiên agent (ADR-0058)"
-# ADR-0069 (chủ dự án 2026-11-04, D-347): xt.yaml `stage_approval: agent` → agent tự nghiệm thu giai đoạn bằng `stage approve`
+# ADR-0069 (chủ dự án 2026-11-04, D-352): xt.yaml `stage_approval: agent` → agent tự nghiệm thu giai đoạn bằng `stage approve`
 # (bản trình phải còn nguyên); vắng/khác → chỉ người. `init --adopt` luôn chỉ người.
 STAGE_APPROVAL_KEY = "stage_approval"
 STAGE_AGENT_BY = "agent"
@@ -12245,7 +12245,7 @@ def _gate_tail(code: int, out: str) -> str:
     return redact(" ".join(keep))[:300]  # lần hai trên một dòng: cờ ở dòng trước, giá trị ở dòng sau (`--password⏎x`)
 
 
-# ADR-0068 lát A (D-350): adapter đọc report của lệnh phát hành — kết quả có kiểu thay cho chỉ exit code. Nhận dạng theo
+# ADR-0068 lát A (D-355): adapter đọc report của lệnh phát hành — kết quả có kiểu thay cho chỉ exit code. Nhận dạng theo
 # nội dung: XML gốc `testsuites`/`testsuite` = JUnit; JSON có `runs` = SARIF 2.1.0; JSON `dependencies`/danh sách = pip-audit.
 REPORT_SUFFIX = "_report"  # khoá xt.yaml `<key>_report: <đường report do lệnh `<key>` sinh>` (tuỳ chọn)
 REPORT_CLOCK_SLACK = 2.0  # giây: độ mịn mtime của hệ file — report cũ hơn lúc bắt đầu chạy quá mức này là report cũ
@@ -12553,7 +12553,7 @@ def _release_unchecked_must(base: Path, blueprint: str, mode: str) -> Dict[str, 
     return _release_row("unchecked_must", "WARN", ev, "SHOULD")
 
 
-# ADR-0068 lát A (D-350): artifact ứng viên và quyết định promotion. Khoá tuỳ chọn; vắng = hành vi trước lát A.
+# ADR-0068 lát A (D-355): artifact ứng viên và quyết định promotion. Khoá tuỳ chọn; vắng = hành vi trước lát A.
 ARTIFACTS_KEY = "release_artifacts"  # đường file cách nhau bởi khoảng trắng; sidecar `<file>.sha256` (sha256sum) nếu có
 APPROVAL_DAYS_KEY = "release_approval_days"  # chữ ký GO-NO-GO còn hiệu lực bao nhiêu ngày (mặc định 30)
 APPROVAL_DAYS = 30

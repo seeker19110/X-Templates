@@ -1,4 +1,4 @@
-"""ADR-0069: `stage_approval: agent` — agent tự nghiệm thu giai đoạn (chủ dự án 2026-11-04, D-347). Khoá có hiệu lực khi CẢ
+"""ADR-0069: `stage_approval: agent` — agent tự nghiệm thu giai đoạn (chủ dự án 2026-11-04, D-352). Khoá có hiệu lực khi CẢ
 xt.yaml ở cây làm việc LẪN bản đã commit ở nhánh chính của remote đều khai; `init --adopt`, dạng mờ và bản trình đã đổi
 vẫn bị chặn (ADR-0058 giữ cho mọi trường hợp còn lại)."""
 

@@ -1,7 +1,7 @@
 # ADR-0070: Lịch sử của chính repo khung vào `docs/archive/`; `framework/` giữ nguyên
 
 - **Trạng thái:** Đã chấp nhận 2026-11-04 (chủ dự án: tài liệu ghi cả những điều đã bỏ — "bỏ lịch sử sang một thư mục
-  khác", rồi "chốt phương án"; phiên chính chọn bản hẹp theo tiêu chí chất lượng cuối, ADR-0008 — **D-349**; ghi lúc đầu là D-344, đánh số lại khi gộp `main` vì #438 đã dùng D-344).
+  khác", rồi "chốt phương án"; phiên chính chọn bản hẹp theo tiêu chí chất lượng cuối, ADR-0008 — **D-354**; ghi lúc đầu là D-344 rồi D-349, đánh số lại khi gộp `main` vì #438 đã dùng D-344, #439 dùng D-347…351).
 - **Trạng thái triển khai:** đã làm cùng commit: 61 file dời bằng `git mv`, liên kết Markdown tương đối viết lại,
   `scripts/xt.py` `PLAN_ARCHIVE_DIR` + `_plan_paths`, `.ignore`, `xt.yaml` `merge_risk_paths`, test
   `tests/test_plan_files.py` và `tests/test_next_step.py`.
@@ -30,7 +30,7 @@ là P2; câu lý do giữ luật guard khỏi bị "đơn giản hoá". Ngoài r
 
 ## Quyết định
 
-Chọn **phương án 1** (D-349).
+Chọn **phương án 1** (D-354).
 
 - **Dời** (`git mv`, giữ tên, giữ lịch sử file): PLAN không còn task mở và không được `PROGRESS.md` nhắc là việc sống →
   `docs/archive/autopilot/`; báo cáo audit, GO-NO-GO, ghi chép đo đạc cũ ở `docs/ops/` → `docs/archive/ops/` (kèm
