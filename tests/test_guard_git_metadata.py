@@ -176,5 +176,161 @@ class GitMetadataTest(unittest.TestCase):
         self.assert_code(f"export GIT_OBJECT_DIRECTORY={store}; git -C {self.bare} diff HEAD^ HEAD", "BUDGET")
 
 
+class ReviewDebt435Test(unittest.TestCase):
+    """T-3670: nợ review #435 — AUD-SEC-449 (đầu đọc/ghi repo trần lọt), 450 (repo cha), 452 (chặn oan)."""
+
+    git_init = GitMetadataTest.git_init
+    policy = GitMetadataTest.policy
+    assert_code = GitMetadataTest.assert_code
+
+    def setUp(self):
+        GitMetadataTest.setUp(self)
+        with (self.bare / "config").open("a") as f:
+            f.write("[core]\n\tsshCommand = touch /tmp/pwn\n")
+
+    def test_449_cd_back_resolves_to_known_dir(self):
+        """`cd -` về thư mục trước khi đã biết chắc; không biết → giữ None như cũ (D-106)."""
+        a, b = str(self.bare), str(self.tmp)
+        cmds = guard._commands_with_cwd(guard.tokenize(f"cd {a}; cd {b}; cd - && git ls-remote"), str(self.root))
+        self.assertEqual([h for _, h in cmds], [a, b, a, a])
+        cmds = guard._commands_with_cwd(guard.tokenize(f"cd {a}; cd -- -; pwd"), str(self.root))
+        self.assertEqual([h for _, h in cmds], [a, str(self.root), str(self.root)])
+        for cmd in (
+            f"cd {a}; cd {self.tmp / 'nope'}; cd -; pwd",  # cd hỏng giữ OLDPWD cũ → không đoán
+            f"cd {a} | cat; cd -; pwd",  # cd trong ống chạy ở shell con
+            f"(cd {a}; cd {b}); cd -; pwd",
+            f"cd {a}; OLDPWD={b}; cd -; pwd",
+            f'cd {a}; cd "$X"; cd -; pwd',
+            "cd -; pwd",
+        ):
+            self.assertIsNone(guard._commands_with_cwd(guard.tokenize(cmd), str(self.root))[-1][1], cmd)
+
+    def test_449_bare_config_read_with_cd_back_or_unknown_dir(self):
+        for cmd in (
+            f"cd {self.bare}; cd {self.tmp}; cd - && git ls-remote origin",
+            f"cd {self.bare}; cd {self.tmp}; cd -- - && git ls-remote origin",
+            f'cd {self.bare}; cd "$X" && git ls-remote origin',  # thư mục không biết: thử mọi thư mục đã biết
+            f'cd {self.bare}; cd {self.tmp}; git -C "$X" ls-remote origin',
+            f"cd {self.bare}; cd {self.tmp}; cd - && sh -c 'git ls-remote origin'",
+            f'cd {self.bare}; cd "$X" && sh -c "git ls-remote origin"',
+        ):
+            self.assert_code(cmd, "HOOK_BYPASS")
+        for cmd in ('cd "$X" && git status', 'git -C "$X" status', "cd - && git status", "popd; git log -1"):
+            self.assert_code(cmd, "NONE")  # gốc dự án có `.git`: không chặn oan
+        self.assert_code(f"cd {self.bare}; cd {self.root}; cd {self.tmp} && git status", "NONE")
+
+    def test_449_pending_bare_into_nested_shell(self):
+        future = self.tmp / "future"
+        for cmd in (
+            f"git init --bare {future} && sh -c 'printf x > {future}/config'",
+            f"git init --bare {future} && bash -c 'printf x > {future}/hooks/pre-commit'",
+            f"git init --bare {future} && bash -c \"sh -c 'printf x >> {future}/config'\"",
+            f"git clone --mirror {self.root} {future} && sh -c 'printf x > {future}/config'",
+        ):
+            self.assert_code(cmd, "HOOK_BYPASS")
+        self.assert_code(f"git init --bare {future} && sh -c 'cat {future}/config'", "NONE")
+
+    def test_449_writer_into_git_dir_directory(self):
+        bare = self.bare
+        for cmd in (
+            f"cp f {bare}/",
+            f"cp f {bare}",
+            f"cp -r d/. {bare}",
+            f"tar -xf a.tar -C {bare}",
+            f"rsync -a d/ {bare}/",
+            f"unzip a.zip -d {bare}",
+            f"mv f {bare}/",
+            f"cd {bare} && cp f .",
+        ):
+            self.assert_code(cmd, "HOOK_BYPASS")
+        for cmd in (f"cp f {self.tmp}/", f"tar -xf a.tar -C {self.tmp}", f"cp f {bare}/objects/", "cp f ."):
+            self.assert_code(cmd, "NONE")
+
+    def test_450_project_inside_parent_repo_hardlink(self):
+        """Dự án `mono/apps/web` (gốc dự án), `.git` ở `mono/`: link cứng tới hook/config của repo cha bị chặn."""
+        for separate in (False, True):
+            with self.subTest(separate=separate):
+                mono = self.tmp / f"mono{int(separate)}"
+                meta = self.tmp / f"meta{int(separate)}"
+                self.git_init(mono, *([f"--separate-git-dir={meta}"] if separate else []))
+                gitdir = meta if separate else mono / ".git"
+                web = mono / "apps" / "web"
+                web.mkdir(parents=True)
+                (gitdir / "hooks" / "pre-commit").write_text("#!/bin/sh\nexit 1\n")
+                os.link(gitdir / "hooks" / "pre-commit", web / "hk")
+                os.link(gitdir / "config", web / "cfglink")
+                (web / "plain").write_text("x")
+                os.link(web / "plain", web / "plain2")
+                env = {"CLAUDE_PROJECT_DIR": str(web), "XT_GUARD_POLICY": "", "XT_GUARD_PHASE": "harden"}
+                with patch.dict(os.environ, env):
+                    for cmd in ("printf 'exit 0' > hk", f"printf 'exit 0' > {web / 'hk'}", "printf x >> cfglink"):
+                        code = guard.apply_policy(guard.bash_decision(cmd, str(web)))["code"]
+                        self.assertEqual(code, "HOOK_BYPASS", cmd)
+                    self.assertEqual(
+                        guard.apply_policy(guard.bash_decision("printf x > plain2", str(web)))["code"], "NONE"
+                    )
+                    for name in ("hk", "cfglink"):
+                        self.assertEqual(guard.edit_decision(str(web / name), str(web), {"content": "x"})[0], "deny")
+                    self.assertEqual(guard.edit_decision(str(web / "plain2"), str(web), {"content": "x"})[0], "")
+
+    def test_452_own_git_dir_trailing_slash(self):
+        for cmd in (
+            f"GIT_DIR={self.root}/.git/ git status",
+            "GIT_DIR=.git/ git status",
+            f"git --git-dir={self.root}//.git status",
+        ):
+            self.assert_code(cmd, "NONE")
+        for cmd in (
+            f"GIT_DIR={self.root}/x/../.git git status",  # `..` không chuẩn hoá theo chữ (symlink)
+            f"GIT_DIR={self.bare}/ git status",
+            f"GIT_COMMON_DIR={self.bare}/ git status",
+        ):
+            self.assert_code(cmd, "BUDGET")
+
+    def test_452_config_file_on_bare_like_dash_c(self):
+        config = self.bare / "config"
+        for form in (f"--file {config}", f"-f {config}", f"--file={config}"):
+            self.assert_code(f"git config {form} user.name T", "NONE")
+            self.assert_code(f"git -C {self.bare} config user.name T", "NONE")
+            for key in ("core.sshCommand x", "core.hooksPath /dev/null", "include.path /tmp/x", "alias.x '!sh'"):
+                self.assert_code(f"git config {form} {key}", "HOOK_BYPASS")
+            self.assert_code(f"git config {form} --add core.fsmonitor x", "HOOK_BYPASS")
+        for cmd in (
+            f"git config --file {config} --edit",
+            f"git config --file {config} -e",
+            f"git config --file {config} edit",
+            f"git config --file {self.bare / 'hooks' / 'pre-commit'} user.name T",
+            f"git config --file {self.bare / 'commondir'} user.name T",
+            "git config --file .git/config user.name T",  # `.git` của dự án: luật cũ giữ nguyên
+        ):
+            self.assert_code(cmd, "HOOK_BYPASS")
+
+    def test_452_pending_bare_matches_created_dir(self):
+        future = self.tmp / "future"
+        (self.root / "src").mkdir()
+        for cmd in (
+            f"git init --bare {future} && printf x > src/config",
+            f"git init --bare {future} && printf x > {self.tmp / 'other'}/config",
+            f"git init --bare -b main {future} && printf x > src/hooks/pre-commit",
+            f"git clone --mirror {self.root} {future} && printf x > src/config",
+        ):
+            self.assert_code(cmd, "NONE")
+        for cmd in (
+            f"git init --bare {future} && printf x > {future}/config",
+            f"git init --bare {future} && cd {future} && printf x > config",
+            f"git init --bare {future} && cd {self.tmp} && printf x > future/hooks/pre-commit",
+            f"git -C {self.tmp} init --bare future && printf x > {future}/config",
+            f"cd {self.tmp} && git init --bare && printf x > config",
+            f"git clone --bare {self.root} && printf x > src/config",  # thư mục mặc định: không đoán
+            "git init --bare $F && printf x > src/config",
+            f"git init --bare --initial-br main {future} && printf x > src/config",  # viết tắt: cờ lạ
+            f"git init --bare {future} && ln -s {future} l && printf x > l/config",
+            f"git init --bare {future} && sh -c 'printf x > src/config'",
+            f'git init --bare {future} && cd "$X" && printf x > future/config',
+            f"GIT_DIR={future} git init --bare && printf x > src/config",
+        ):
+            self.assert_code(cmd, "HOOK_BYPASS")
+
+
 if __name__ == "__main__":
     unittest.main()

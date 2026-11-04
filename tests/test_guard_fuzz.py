@@ -143,6 +143,11 @@ KNOWN_RED: Dict[str, str] = {}  # biến thể AUD-SEC-202 cũ nay bị chặn b
 CWD_RELATIVE: Dict[str, str] = {
     "r434-446-bare-ancestor-external-diff": "bare/objects tương đối trỏ ra ngoài repo của fixture sau cd /tmp (AUD-SEC-446)",
     "r435-448-objects-file-bare-config": "gd/config tương đối → /tmp/gd/config không có Git dir sau cd /tmp (AUD-SEC-448)",
+    "r435-449-cd-back-bare-config": "cd gd tương đối → /tmp/gd không có Git dir sau cd /tmp (AUD-SEC-449)",
+    "r435-449-unknown-cd-bare-config": "cd gd tương đối → /tmp/gd không có Git dir sau cd /tmp (AUD-SEC-449)",
+    "r435-449-cp-into-bare": "gd/ tương đối → /tmp/gd không có Git dir sau cd /tmp (AUD-SEC-449)",
+    "r435-449-tar-into-bare": "-C gd tương đối → /tmp/gd không có Git dir sau cd /tmp (AUD-SEC-449)",
+    "r435-449-rsync-into-bare": "gd/ tương đối → /tmp/gd không có Git dir sau cd /tmp (AUD-SEC-449)",
     "t3633-248-cp-T": "docs/autopilot tương đối → /tmp/docs/autopilot (AUD-SEC-248)",
     "t3633-248-tar-C": "docs tương đối → /tmp/docs (AUD-SEC-248)",
     "t3633-248-glob": "docs/autopilot/* tương đối (AUD-SEC-248)",

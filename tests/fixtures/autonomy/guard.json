@@ -21788,6 +21788,156 @@
  "expect": {
   "allowed": true
  }
+},
+{
+ "id": "r435-449-cd-back-bare-config",
+ "origin": "adversarial-reviewer",
+ "refs": ["AUD-SEC-449"],
+ "input": {
+  "command": "cd gd; cd ..; cd - && git ls-remote origin",
+  "files": {
+   "gd/HEAD": "ref: refs/heads/main\n",
+   "gd/objects/.keep": "",
+   "gd/config": "[core]\n\tbare = true\n\tsshCommand = touch /tmp/pwn\n"
+  }
+ },
+ "expect": {
+  "allowed": false,
+  "code": "HOOK_BYPASS"
+ }
+},
+{
+ "id": "r435-449-unknown-cd-bare-config",
+ "origin": "adversarial-reviewer",
+ "refs": ["AUD-SEC-449"],
+ "input": {
+  "command": "cd gd; cd \"$X\" && git ls-remote origin",
+  "files": {
+   "gd/HEAD": "ref: refs/heads/main\n",
+   "gd/objects/.keep": "",
+   "gd/config": "[core]\n\tbare = true\n\tsshCommand = touch /tmp/pwn\n"
+  }
+ },
+ "expect": {
+  "allowed": false,
+  "code": "HOOK_BYPASS"
+ }
+},
+{
+ "id": "r435-ctl-449-unknown-cd-status",
+ "origin": "control",
+ "refs": ["AUD-SEC-449"],
+ "input": {
+  "command": "cd \"$X\" && git status"
+ },
+ "expect": {
+  "allowed": true
+ }
+},
+{
+ "id": "r435-449-nested-pending-bare",
+ "origin": "adversarial-reviewer",
+ "refs": ["AUD-SEC-449"],
+ "input": {
+  "command": "git init --bare fut && sh -c 'printf x > fut/config'"
+ },
+ "expect": {
+  "allowed": false,
+  "code": "HOOK_BYPASS"
+ }
+},
+{
+ "id": "r435-449-cp-into-bare",
+ "origin": "adversarial-reviewer",
+ "refs": ["AUD-SEC-449"],
+ "input": {
+  "command": "cp f gd/",
+  "files": {
+   "gd/HEAD": "ref: refs/heads/main\n",
+   "gd/objects/.keep": ""
+  }
+ },
+ "expect": {
+  "allowed": false,
+  "code": "HOOK_BYPASS"
+ }
+},
+{
+ "id": "r435-449-tar-into-bare",
+ "origin": "adversarial-reviewer",
+ "refs": ["AUD-SEC-449"],
+ "input": {
+  "command": "tar -xf a.tar -C gd",
+  "files": {
+   "gd/HEAD": "ref: refs/heads/main\n",
+   "gd/objects/.keep": ""
+  }
+ },
+ "expect": {
+  "allowed": false,
+  "code": "HOOK_BYPASS"
+ }
+},
+{
+ "id": "r435-449-rsync-into-bare",
+ "origin": "adversarial-reviewer",
+ "refs": ["AUD-SEC-449"],
+ "input": {
+  "command": "rsync -a d/ gd/",
+  "files": {
+   "gd/HEAD": "ref: refs/heads/main\n",
+   "gd/objects/.keep": ""
+  }
+ },
+ "expect": {
+  "allowed": false,
+  "code": "HOOK_BYPASS"
+ }
+},
+{
+ "id": "r435-ctl-449-cp-into-objects",
+ "origin": "control",
+ "refs": ["AUD-SEC-449"],
+ "input": {
+  "command": "cp f gd/objects/",
+  "files": {
+   "gd/HEAD": "ref: refs/heads/main\n",
+   "gd/objects/.keep": ""
+  }
+ },
+ "expect": {
+  "allowed": true
+ }
+},
+{
+ "id": "r435-ctl-452-init-bare-other-config",
+ "origin": "control",
+ "refs": ["AUD-SEC-452"],
+ "input": {
+  "command": "git init --bare fut && printf x > src/config",
+  "files": {
+   "src/.keep": ""
+  }
+ },
+ "expect": {
+  "allowed": true
+ }
+},
+{
+ "id": "r435-ctl-452-config-file-bare",
+ "origin": "control",
+ "refs": ["AUD-SEC-452"],
+ "input": {
+  "command": "git config --file gd/config user.name T",
+  "files": {
+   "gd/HEAD": "ref: refs/heads/main\n",
+   "gd/objects/.keep": "",
+   "gd/config": "[core]\n\tbare = true\n"
+  }
+ },
+ "expect": {
+  "allowed": true
+ }
 }
  ]
 }
