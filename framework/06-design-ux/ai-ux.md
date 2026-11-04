@@ -59,7 +59,7 @@ updated: 2026-11-04
 - [ ] `UX-AI-017` **SHOULD** Không dark pattern với AI: không tự bật tính năng AI thu dữ liệu, không ẩn nút tắt, không "giả tiến độ" khi mô hình chưa chạy. → Kiểm: checklist dark-pattern trong PR (xem [`content-and-microcopy.md`](content-and-microcopy.md)).
 - [ ] `UX-AI-018` **SHOULD** Thay đổi hành vi mô hình (đổi phiên bản, đổi prompt hệ thống) được thông báo cho người dùng khi ảnh hưởng kết quả. → Kiểm: changelog trong sản phẩm có mục AI; test eval trước khi đổi. · Nguồn: HAX G18
 - [ ] `UX-AI-019` **MAY** Cho người dùng chỉnh "giọng/độ dài/ngôn ngữ" của output qua tuỳ chọn thay vì phải viết prompt. → Kiểm: tuỳ chọn tồn tại trong UI và được truyền vào request.
-- [ ] `UX-AI-020` **MAY** Media AI tạo gắn Content Credentials (C2PA) ngoài nhãn nhìn thấy. → Kiểm: file xuất có manifest đọc được bằng công cụ C2PA (phiên bản SDK **chưa xác minh**). Ký C2PA sau bước nén cuối, kèm watermark ẩn: `CMP-AI-017`.
+- [ ] `UX-AI-020` **MAY** Media AI tạo gắn Content Credentials (C2PA) ngoài nhãn nhìn thấy; ký C2PA sau bước nén cuối, kèm watermark ẩn: [`CMP-AI-017`](../16-compliance-privacy/ai-regulation.md). → Kiểm: file xuất có manifest đọc được bằng công cụ C2PA (phiên bản SDK **chưa xác minh**).
 
 ## Bẫy thường gặp
 

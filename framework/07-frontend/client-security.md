@@ -59,7 +59,7 @@ updated: 2026-11-04
 - [ ] `FE-SEC-018` **SHOULD** Header phụ trợ phía client do server đặt và kiểm: `Referrer-Policy: strict-origin-when-cross-origin`, `Permissions-Policy` tắt API không dùng, `X-Content-Type-Options: nosniff` (danh sách đầy đủ ở appsec-web). → Kiểm: test header trong CI smoke.
 - [ ] `FE-SEC-019` **MAY** Quét CSP bằng công cụ đánh giá (CSP Evaluator) trong CI; ghi điểm. → Kiểm: báo cáo không "High severity".
 - [ ] `FE-SEC-020` **MAY** Ngừng dùng 2026-10-14 — gộp vào [`SEC-WEB-021`](../12-security/appsec-web.md): HTML/SVG người dùng tải lên phục vụ từ origin riêng (sandbox domain) hoặc `Content-Disposition: attachment`.
-- [ ] `FE-SEC-021` **SHOULD** Render Mermaid/Markdown do người dùng hoặc LLM viết giữ `securityLevel: 'strict'` (mặc định) hoặc `'sandbox'`; không `loose`/`antiscript`. → Kiểm: `rg "securityLevel:\s*['\"]loose\b"` = 0; test render sơ đồ có `click` + `<img onerror>` → không chạy script (bài test do dự án tự viết; docs chỉ là căn cứ cho hành vi `strict`). · Nguồn: Mermaid usage docs (securityLevel)
+- [ ] `FE-SEC-021` **SHOULD** Render sơ đồ Mermaid (kể cả nhúng trong Markdown) do người dùng hoặc LLM viết giữ `securityLevel: 'strict'` (mặc định) hoặc `'sandbox'`; không `loose`/`antiscript`. → Kiểm: `rg "securityLevel.{0,3}[:=] *.(loose|antiscript)"` = 0 (bắt cả dạng JSON/object, không bắt `sandbox`/`strict`); test render sơ đồ có `click` + `<img onerror>` → không chạy script, và nhãn có thẻ HTML (vd `<b>`, `<a href>`) hiện dạng text đã mã hoá (bài test do dự án tự viết; docs chỉ là căn cứ cho hành vi `strict`). · Nguồn: Mermaid usage docs (securityLevel)
 
 ## Bẫy thường gặp
 
