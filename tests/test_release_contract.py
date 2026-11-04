@@ -77,11 +77,95 @@ class ReportAdapterTest(TmpDirCase):
         self.assertEqual((r["kind"], r["status"], r["total"], r["failed"]), ("pip-audit", "PASS", 1, 0))
         r = self.result([{"name": "a", "version": "1", "vulns": []}])  # dạng cũ: danh sách
         self.assertEqual(r["status"], "PASS")
-        r = self.result({"dependencies": [{"name": "a", "vulns": [{"id": "PYSEC-1"}, {"id": "GHSA-x"}]}]})
+        vulns = [{"id": "PYSEC-1"}, {"id": "GHSA-x"}]
+        r = self.result({"dependencies": [{"name": "a", "version": "1", "vulns": vulns}]})
         self.assertEqual((r["status"], r["failed"]), ("FAIL", 2))
         r = self.result({"dependencies": [{"name": "b", "skip_reason": "x"}]})
         self.assertEqual((r["status"], r["total"]), ("PENDING", 0))
         self.assertIn("0 gói được quét", r["detail"])
+
+    def test_sarif_level_from_rule(self):
+        """Review lát A 🔴2: kết quả không ghi `level` lấy mức theo rule (§3.27.10) — override của invocation, rồi
+        `defaultConfiguration` theo chỉ số hay id; `kind` khác `fail` là `none`; không gì cả → `warning`."""
+        rules = [{"id": "W"}, {"id": "R", "defaultConfiguration": {"level": "error"}}]
+        driver = {"tool": {"driver": {"name": "codeql", "rules": rules}}}
+        for res, extra, failed in (
+            ({"ruleId": "R", "ruleIndex": 1}, {}, 1),
+            ({"ruleId": "R", "rule": {"index": 1}}, {}, 1),
+            ({"ruleId": "R"}, {}, 1),  # theo id
+            ({"ruleId": "R", "kind": "pass"}, {}, 0),
+            ({"ruleId": "W", "ruleIndex": 0}, {}, 0),  # rule không có mức → warning
+            ({"ruleIndex": 7}, {}, 0),  # chỉ số ngoài danh sách
+            (  # override không khớp rule nào → lấy mức mặc định của rule
+                {"ruleId": "R", "ruleIndex": 1},
+                {
+                    "invocations": [
+                        {
+                            "ruleConfigurationOverrides": [
+                                {"descriptor": {"id": "X"}, "configuration": {"level": "note"}}
+                            ]
+                        }
+                    ]
+                },
+                1,
+            ),
+            (
+                {"ruleId": "W", "ruleIndex": 0},
+                {
+                    "invocations": [
+                        {
+                            "ruleConfigurationOverrides": [
+                                {"descriptor": {"id": "W"}, "configuration": {"level": "error"}}
+                            ]
+                        }
+                    ]
+                },
+                1,
+            ),
+            (
+                {"ruleId": "R", "ruleIndex": 1},
+                {
+                    "invocations": [
+                        {
+                            "ruleConfigurationOverrides": [
+                                {"descriptor": {"index": 1}, "configuration": {"level": "note"}},
+                                5,
+                            ]
+                        }
+                    ]
+                },
+                0,
+            ),
+        ):
+            with self.subTest(res=res, extra=extra):
+                r = self.result({"runs": [{**driver, **extra, "results": [res]}]})
+                self.assertEqual(r["failed"], failed, r)
+
+    def test_wrong_shapes_are_inconclusive_not_pass_or_crash(self):
+        """Review lát A 🔴3 + 🟠6: chỉ mảng đúng dạng pip-audit mới là pip-audit; kiểu sai/lồng sâu không làm văng."""
+        for content in (
+            [{}],
+            [{"filePath": "a.js", "errorCount": 3}],  # ESLint
+            {"bomFormat": "CycloneDX", "dependencies": [{"ref": "x"}], "vulnerabilities": [{"id": "CVE-1"}]},
+            {"dependencies": [{"name": "a", "version": "1", "vulns": 5}]},
+            "[" * 100000,
+        ):
+            with self.subTest(content=str(content)[:40]):
+                r = self.result(content)
+                self.assertEqual(r["status"], "INCONCLUSIVE", r)
+        for content, status in (
+            ({"runs": 1}, "PENDING"),  # `runs` sai kiểu = không có run
+            ({"runs": [{"results": [], "invocations": 5}]}, "PASS"),  # `invocations` sai kiểu bị bỏ qua
+        ):
+            with self.subTest(content=content):
+                self.assertEqual(self.result(content)["status"], status)
+
+    def test_junit_bom_and_skipped_error(self):
+        """Review lát A 🟢14: BOM UTF-8 vẫn là JUnit; testcase vừa skipped vừa error tính là đã chạy và hỏng."""
+        r = self.result("﻿" + JUNIT_OK)
+        self.assertEqual((r["kind"], r["status"]), ("junit", "PASS"))
+        r = self.result('<testsuite><testcase name="a"><skipped/><error/></testcase></testsuite>')
+        self.assertEqual((r["status"], r["total"], r["failed"]), ("FAIL", 1, 1))
 
     def test_unknown_or_unreadable(self):
         for content, why in (
@@ -237,6 +321,46 @@ class ReleaseArtifactTest(ReleaseCase):
         self.assertEqual([a["problem"] for a in d["artifacts"]], ["thiếu file", "ngoài dự án"])
         self.assertIn("2/2 artifact lỗi", row["evidence"])
 
+    def test_sidecar_by_declared_path_inside_project(self):
+        """Review lát A 🟠5: sidecar lấy theo đường đã khai (artifact symlink không né được sidecar sai), phải trong dự án
+        và đúng 64 hex — không in token của file khác ra `expected`."""
+        build = self.repo / "build"
+        build.mkdir()
+        (build / "a-1.2.0.tar.gz").write_bytes(b"x")
+        (self.repo / "dist").mkdir()
+        (self.repo / "dist" / "a.tar.gz").symlink_to(build / "a-1.2.0.tar.gz")
+        side = self.repo / "dist" / "a.tar.gz.sha256"
+        side.write_text("0" * 64 + "\n", encoding="utf-8")
+        self.assertEqual(xt._artifact(self.repo, "dist/a.tar.gz")["problem"], "digest lệch sidecar")
+        side.unlink()
+        secret = self.tmp / "ngoai.txt"
+        secret.write_text("gh_token=ghp_fake_demo_0123456789\n", encoding="utf-8")
+        side.symlink_to(secret)
+        a = xt._artifact(self.repo, "dist/a.tar.gz")
+        self.assertEqual((a["problem"], a["expected"]), ("sidecar ngoài dự án", None))
+        side.unlink()
+        side.write_text("gh_token=ghp_fake_demo_0123456789\n", encoding="utf-8")
+        a = xt._artifact(self.repo, "dist/a.tar.gz")
+        self.assertEqual((a["problem"], a["expected"]), ("sidecar không phải sha256", None))
+
+    @unittest.skipIf(os.geteuid() == 0, "root đọc được file chmod 000")
+    def test_unreadable_files_fail_not_crash(self):
+        """Review lát A 🟠6: artifact, sidecar, report không đọc được → hàng FAIL/INCONCLUSIVE, không văng exit 2."""
+        (self.repo / "dist").mkdir()
+        art = self.repo / "dist" / "a.tar.gz"
+        art.write_bytes(b"x")
+        side = self.repo / "dist" / "a.tar.gz.sha256"
+        side.write_text("0" * 64, encoding="utf-8")
+        side.chmod(0)
+        self.addCleanup(side.chmod, 0o644)
+        self.assertIn("không đọc được sidecar", xt._artifact(self.repo, "dist/a.tar.gz")["problem"])
+        art.chmod(0)
+        self.addCleanup(art.chmod, 0o644)
+        self.assertIn("không đọc được", xt._artifact(self.repo, "dist/a.tar.gz")["problem"])
+        row, res = xt._release_report(self.repo, "acceptance", "dist/a.tar.gz", 0.0, "`x` exit 0")
+        self.assertEqual((row["result"], res["status"], res["detail"]), ("FAIL", "MISSING", "không đọc được"))
+        self.assertIn("không đọc được report", row["evidence"])
+
 
 class PromotionTest(ReleaseCase):
     """T-3676: `promotion` — chỉ `approved` khi không FAIL, không N/A BLOCKER, GO-NO-GO của VERSION ký GO còn hạn và nhắc
@@ -271,14 +395,58 @@ class PromotionTest(ReleaseCase):
         _, out, _ = run_main("release-check")
         self.assertIn("promotion: approved", out)
 
-    def test_rejected(self):
+    def test_decision_allowlist(self):
+        """Review lát A 🔴1: chỉ ô đúng GO (kèm phiên bản được) là duyệt; biến thể NO-GO/từ chối → `rejected`; ô trống,
+        ô mẫu "GO / NO-GO" chưa chọn, chữ khác → `pending_human` (máy không tự nhận là người đã từ chối)."""
         self.setup_xt()
-        for decision in ("NO-GO", "GO / NO-GO"):  # ô mẫu chưa chọn = không phải GO
+        for decision, state in (
+            ("GO", "approved"),
+            ("go v1.2.0", "approved"),
+            ("NO-GO", "rejected"),
+            ("NO GO", "rejected"),
+            ("NOGO", "rejected"),
+            ("NO–GO", "rejected"),
+            ("Từ chối", "rejected"),
+            ("Không duyệt", "rejected"),
+            ("GO / NO-GO", "pending_human"),
+            ("", "pending_human"),
+            ("Hoãn", "pending_human"),
+            ("GOOD", "pending_human"),
+        ):
             with self.subTest(decision=decision):
                 self.go_no_go(decision)
                 rc, d, p = self.promotion()
-                self.assertEqual((rc, p["state"]), (0, "rejected"))
-                self.assertIn("NO-GO", p["reasons"][0])
+                self.assertEqual((rc, d["verdict"], p["state"]), (0, "GO", state), p)
+
+    def test_every_signed_document_counts(self):
+        """Review lát A 🟠4: hai GO-NO-GO cùng VERSION — một bản NO-GO là `rejected` bất kể thứ tự file."""
+        self.setup_xt()
+        self.go_no_go()
+        (self.repo / "GO-NO-GO.md").write_text(
+            f"# GO/NO-GO v1.2.0\n\n{self.SIGN}| Bảo mật | Chi | NO-GO | {today()} |\n", encoding="utf-8"
+        )
+        self.commit()
+        rc, d, p = self.promotion()
+        self.assertEqual((rc, p["state"]), (0, "rejected"))
+        self.assertIn("GO-NO-GO.md", p["reasons"][0])
+        (self.repo / "GO-NO-GO.md").write_text(
+            f"# GO/NO-GO v1.2.0\n\n{self.SIGN}| Bảo mật | Chi | GO | {today(-40)} |\n", encoding="utf-8"
+        )
+        self.commit()
+        _, _, p = self.promotion()
+        self.assertEqual(p["state"], "pending_human")
+        self.assertIn("hết hạn", p["reasons"][0])
+
+    def test_failing_reports_never_approved(self):
+        """ADR-0068 §Xác nhận A end-to-end: 0 test, scan chưa xong → `blocked` dù GO-NO-GO đã ký GO còn hạn."""
+        self.go_no_go()
+        (self.repo / "zero.xml").write_text("<testsuites/>", encoding="utf-8")
+        (self.repo / "pending.sarif").write_text(json.dumps({"runs": [{"tool": {}}]}), encoding="utf-8")
+        for src in ("zero.xml", "pending.sarif"):
+            with self.subTest(src=src):
+                self.setup_xt(acceptance=f"mkdir -p out && cp {src} out/r", acceptance_report="out/r")
+                rc, d, p = self.promotion()
+                self.assertEqual((rc, p["state"], p["reasons"]), (1, "blocked", ["acceptance"]))
 
     def test_unsigned_or_bad_date(self):
         """Không có §5 → chưa ký (cùng luật hàng `go_no_go`); ngày dạng số nhưng không có thật → chờ người, không văng."""
@@ -306,6 +474,8 @@ class PromotionTest(ReleaseCase):
                 self.setup_xt(release_approval_days=bad)
                 self.assertEqual(self.promotion()[2]["state"], "pending_human")
         self.setup_xt()
+        self.go_no_go(date=today(1))  # người ký ở múi giờ đi trước UTC (review lát A 🟢11)
+        self.assertEqual(self.promotion()[2]["state"], "approved")
         self.go_no_go(date=today(3))
         _, _, p = self.promotion()
         self.assertEqual(p["state"], "pending_human")

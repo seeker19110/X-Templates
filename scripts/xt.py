@@ -12255,12 +12255,29 @@ def _report(kind: str, status: str, total: int, failed: int, detail: str) -> Dic
     return {"kind": kind, "status": status, "total": total, "failed": failed, "detail": detail}
 
 
+def _unknown(detail: str) -> Dict[str, Any]:
+    return _report("?", "INCONCLUSIVE", 0, 0, detail)
+
+
+def _seq(v: Any) -> List[Any]:
+    """`v` nếu là list, khác → rỗng: report sai kiểu (`"runs": 1`) không làm văng `release-check` (review lát A)."""
+    return v if isinstance(v, list) else []
+
+
+def _dict(v: Any) -> Dict[str, Any]:
+    return v if isinstance(v, dict) else {}
+
+
+def _junit_bad(case: Any) -> bool:
+    return case.find("failure") is not None or case.find("error") is not None
+
+
 def _junit_result(root: Any) -> Dict[str, Any]:
-    """JUnit XML: testcase có `failure`/`error` là hỏng, có `skipped` không tính là đã chạy; 0 testcase chạy = FAIL
-    (cổng rỗng là đỏ — ADR-0011, `LOOP-HARNESS-023`)."""
+    """JUnit XML: testcase có `failure`/`error` là hỏng; có `skipped` mà không hỏng thì không tính là đã chạy; 0 testcase
+    chạy = FAIL (cổng rỗng là đỏ — ADR-0011, `LOOP-HARNESS-023`)."""
     cases = list(root.iter("testcase"))
-    bad = sum(1 for c in cases if c.find("failure") is not None or c.find("error") is not None)
-    skipped = sum(1 for c in cases if c.find("skipped") is not None and c.find("failure") is None)
+    bad = sum(1 for c in cases if _junit_bad(c))
+    skipped = sum(1 for c in cases if c.find("skipped") is not None and not _junit_bad(c))
     ran = len(cases) - skipped
     if bad:
         return _report("junit", "FAIL", ran, bad, f"{bad}/{ran} testcase hỏng")
@@ -12269,61 +12286,106 @@ def _junit_result(root: Any) -> Dict[str, Any]:
     return _report("junit", "PASS", ran, 0, f"{ran} testcase xanh" + (f", {skipped} bỏ qua" if skipped else ""))
 
 
+def _sarif_rule_level(run: Dict[str, Any], x: Dict[str, Any]) -> str:
+    """Mức của rule mà kết quả `x` trỏ tới (SARIF 2.1.0 §3.27.10): `ruleConfigurationOverrides` của invocation rồi
+    `defaultConfiguration` của rule (`rule.index`/`ruleIndex`, rồi `ruleId`); không có → rỗng."""
+    rule = _dict(x.get("rule"))
+    key = (rule.get("index", x.get("ruleIndex")), rule.get("id", x.get("ruleId")))
+    for inv in _seq(run.get("invocations")):
+        for o in _seq(_dict(inv).get("ruleConfigurationOverrides")):
+            conf = _dict(_dict(o).get("configuration"))
+            if "level" in conf and _sarif_rule_hit(_dict(_dict(o).get("descriptor")), *key):
+                return str(conf["level"])
+    rules = [r for r in _seq(_dict(_dict(run.get("tool")).get("driver")).get("rules")) if isinstance(r, dict)]
+    idx = key[0]
+    found = rules[idx] if isinstance(idx, int) and 0 <= idx < len(rules) else None
+    found = found or next((r for r in rules if _sarif_rule_hit(r, None, key[1])), {})
+    return str(_dict(found.get("defaultConfiguration")).get("level", ""))
+
+
+def _sarif_rule_hit(desc: Dict[str, Any], idx: Any, rid: Any) -> bool:
+    """Bộ mô tả rule `desc` khớp kết quả theo chỉ số hay id (bỏ qua phía vắng)."""
+    return (idx is not None and desc.get("index") == idx) or (rid is not None and desc.get("id") == rid)
+
+
+def _sarif_level(run: Dict[str, Any], x: Dict[str, Any]) -> str:
+    """Mức hiệu lực của một kết quả SARIF: `level` ghi trên kết quả; không có và `kind` khác `fail` → `none`; còn lại theo
+    rule (`_sarif_rule_level`), mặc định `warning` (§3.27.10) — CodeQL không ghi `level` trên từng kết quả."""
+    if "level" in x:
+        return str(x["level"])
+    if x.get("kind", "fail") != "fail":
+        return "none"
+    return _sarif_rule_level(run, x) or "warning"
+
+
 def _sarif_result(doc: Dict[str, Any]) -> Dict[str, Any]:
     """SARIF 2.1.0: không run, run thiếu `results` (công cụ chưa xác định kết quả — §3.14.23) hay invocation
-    `executionSuccessful: false` = scan chưa xong (PENDING); kết quả `level: error` = FAIL."""
-    runs = [r for r in doc.get("runs") or [] if isinstance(r, dict)]
+    `executionSuccessful: false` = scan chưa xong (PENDING); kết quả mức hiệu lực `error` = FAIL."""
+    runs = [r for r in _seq(doc.get("runs")) if isinstance(r, dict)]
     if not runs:
         return _report("sarif", "PENDING", 0, 0, "SARIF chưa có run — scan chưa xong")
-    invocations = [i for r in runs for i in r.get("invocations") or [] if isinstance(i, dict)]
+    invocations = [i for r in runs for i in _seq(r.get("invocations")) if isinstance(i, dict)]
     if any(i.get("executionSuccessful") is False for i in invocations):
         return _report("sarif", "PENDING", 0, 0, "invocation `executionSuccessful: false` — scan chưa xong")
     if any(not isinstance(r.get("results"), list) for r in runs):
         return _report("sarif", "PENDING", 0, 0, "run không có `results` — scan chưa xác định kết quả")
-    found = [x for r in runs for x in r["results"] if isinstance(x, dict)]
-    errors = sum(1 for x in found if x.get("level") == "error")
+    found = [(r, x) for r in runs for x in r["results"] if isinstance(x, dict)]
+    errors = sum(1 for r, x in found if _sarif_level(r, x) == "error")
     status = "FAIL" if errors else "PASS"
     return _report("sarif", status, len(found), errors, f"{len(found)} kết quả, {errors} mức error")
 
 
+def _pip_audit_dep(d: Any) -> bool:
+    """Phần tử `dependencies` đúng dạng pip-audit: có `name` và (`version` + `vulns` là list) hoặc `skip_reason`."""
+    if not isinstance(d, dict) or not isinstance(d.get("name"), str):
+        return False
+    return "skip_reason" in d or (isinstance(d.get("version"), str) and isinstance(d.get("vulns"), list))
+
+
 def _pip_audit_result(deps: List[Any]) -> Dict[str, Any]:
-    """pip-audit JSON (`{"dependencies": [...]}` hay danh sách cũ): gói có `skip_reason` không được quét; vuln = FAIL;
-    không gói nào được quét = scan chưa xong."""
-    audited = [d for d in deps if isinstance(d, dict) and "skip_reason" not in d]
-    vulns = sum(len(d.get("vulns") or []) for d in audited)
+    """pip-audit JSON (`{"dependencies": [...]}` hay danh sách cũ): mọi phần tử phải đúng dạng (ESLint, CycloneDX, `[{}]`
+    → INCONCLUSIVE); gói có `skip_reason` không được quét; vuln = FAIL; không gói nào được quét = scan chưa xong."""
+    if not all(_pip_audit_dep(d) for d in deps):
+        return _unknown("không nhận dạng được report: `dependencies` không đúng dạng pip-audit (name, version, vulns)")
+    audited = [d for d in deps if "skip_reason" not in d]
+    vulns = sum(len(d["vulns"]) for d in audited)
     if not audited:
         return _report("pip-audit", "PENDING", 0, 0, "0 gói được quét")
     status = "FAIL" if vulns else "PASS"
     return _report("pip-audit", status, len(audited), vulns, f"{len(audited)} gói, {vulns} lỗ hổng")
 
 
-def report_result(path: Path) -> Dict[str, Any]:
-    """Kết quả có kiểu của một report (`kind`, `status` PASS|FAIL|PENDING|INCONCLUSIVE, `total`, `failed`, `detail`).
-    XML đọc bằng `xml.etree` của stdlib (expat có chặn bom thực thể từ 2.4.1); dạng lạ/hỏng → INCONCLUSIVE."""
-    import xml.etree.ElementTree as ET  # chỉ khi có report: không tăng thời gian nạp CLI
-
-    try:
-        raw = path.read_bytes()
-    except OSError as exc:
-        return _report("?", "INCONCLUSIVE", 0, 0, f"không đọc được report: {exc}")
-    if raw.lstrip().startswith(b"<"):
-        try:
-            root = ET.fromstring(raw)
-        except ET.ParseError as exc:
-            return _report("?", "INCONCLUSIVE", 0, 0, f"XML hỏng: {exc}")
-        if root.tag in ("testsuites", "testsuite"):
-            return _junit_result(root)
-        return _report("?", "INCONCLUSIVE", 0, 0, f"XML gốc <{root.tag}> không phải JUnit")
+def _json_report(raw: bytes) -> Dict[str, Any]:
     try:
         doc = json.loads(raw)
-    except ValueError:
-        return _report("?", "INCONCLUSIVE", 0, 0, "report không phải XML/JSON")
+    except (ValueError, RecursionError):
+        return _unknown("report không phải XML/JSON")
     if isinstance(doc, dict) and "runs" in doc:
         return _sarif_result(doc)
     deps = doc.get("dependencies") if isinstance(doc, dict) else doc
     if isinstance(deps, list):
         return _pip_audit_result(deps)
-    return _report("?", "INCONCLUSIVE", 0, 0, "không nhận dạng được report (JUnit XML, SARIF, pip-audit JSON)")
+    return _unknown("không nhận dạng được report (JUnit XML, SARIF, pip-audit JSON)")
+
+
+def report_result(path: Path) -> Dict[str, Any]:
+    """Kết quả có kiểu của một report (`kind`, `status` PASS|FAIL|PENDING|INCONCLUSIVE, `total`, `failed`, `detail`).
+    XML đọc bằng `xml.etree` của stdlib (expat có chặn bom thực thể từ 2.4.1); dạng lạ/hỏng/không đọc được → INCONCLUSIVE."""
+    import xml.etree.ElementTree as ET  # chỉ khi có report: không tăng thời gian nạp CLI
+
+    try:
+        raw = path.read_bytes()
+    except OSError as exc:
+        return _unknown(f"không đọc được report: {exc}")
+    if raw.removeprefix(b"\xef\xbb\xbf").lstrip().startswith(b"<"):
+        try:
+            root = ET.fromstring(raw)
+        except (ET.ParseError, RecursionError) as exc:
+            return _unknown(f"XML hỏng: {exc}")
+        if root.tag in ("testsuites", "testsuite"):
+            return _junit_result(root)
+        return _unknown(f"XML gốc <{root.tag}> không phải JUnit")
+    return _json_report(raw)
 
 
 def _inside(base: Path, rel: str) -> Optional[Path]:
@@ -12332,8 +12394,15 @@ def _inside(base: Path, rel: str) -> Optional[Path]:
     return p if p.is_relative_to(base.resolve()) else None
 
 
+def _stream_sha256(p: Path) -> str:
+    with p.open("rb") as f:
+        return hashlib.file_digest(f, "sha256").hexdigest()  # đọc theo khối: artifact lớn không nạp cả vào RAM
+
+
 def _release_report(base: Path, key: str, rel: str, start: float, ev: str) -> Tuple[Dict[str, str], Dict[str, Any]]:
-    """Hàng `key` sau exit 0 khi khai `<key>_report`: report phải có, trong dự án, không cũ hơn lúc chạy, kết quả PASS."""
+    """Hàng `key` sau exit 0 khi khai `<key>_report`: report phải có, trong dự án, không cũ hơn lúc chạy, kết quả PASS.
+    `results[].status` thêm MISSING (thiếu/ngoài dự án/không đọc được) và STALE (cũ hơn lần chạy) ngoài bốn trạng thái của
+    adapter."""
     res: Dict[str, Any] = {"key": key, "path": rel, "sha256": None, **_report("?", "MISSING", 0, 0, "")}
     p = _inside(base, rel)
     if p is None:
@@ -12342,8 +12411,12 @@ def _release_report(base: Path, key: str, rel: str, start: float, ev: str) -> Tu
     if not p.is_file():
         res["detail"] = "thiếu"
         return _release_row(key, "FAIL", f"{ev} nhưng report `{rel}` thiếu — lệnh phải sinh report"), res
-    res["sha256"] = hashlib.sha256(p.read_bytes()).hexdigest()
-    if p.stat().st_mtime + REPORT_CLOCK_SLACK < start:
+    try:
+        res["sha256"], mtime = _stream_sha256(p), p.stat().st_mtime
+    except OSError as exc:
+        res["detail"] = "không đọc được"
+        return _release_row(key, "FAIL", f"{ev} nhưng không đọc được report `{rel}`: {exc}"), res
+    if mtime + REPORT_CLOCK_SLACK < start:
         res.update(status="STALE", detail="cũ hơn lần chạy")
         return _release_row(key, "FAIL", f"{ev} nhưng report `{rel}` cũ hơn lần chạy — không do lệnh này sinh"), res
     res.update(report_result(p))
@@ -12487,17 +12560,38 @@ APPROVAL_DAYS = 30
 RELEASE_SCHEMA = 3  # schema của `release-check --json`: 3 = thêm subject/artifacts/results/promotion, giữ trường cũ
 
 
+SHA256_HEX_RE = re.compile(r"[0-9a-f]{64}")
+
+
+def _sidecar(base: Path, rel: str, sha: str) -> Tuple[Optional[str], str]:
+    """(digest sidecar, vấn đề) của `<rel>.sha256` theo ĐÚNG đường đã khai (không theo đích symlink của artifact), trong
+    dự án; vắng → (None, ""). Token đầu chỉ được in khi đúng 64 ký tự hex — không lộ nội dung file khác."""
+    side = _inside(base, rel + ".sha256")
+    if side is None:
+        return None, "sidecar ngoài dự án"
+    if not side.is_file():
+        return None, ""
+    try:
+        token = (side.read_text(encoding="utf-8", errors="replace").split() or [""])[0].lower()
+    except OSError as exc:
+        return None, f"không đọc được sidecar: {exc}"
+    if not SHA256_HEX_RE.fullmatch(token):
+        return None, "sidecar không phải sha256"
+    return token, "" if token == sha else "digest lệch sidecar"
+
+
 def _artifact(base: Path, rel: str) -> Dict[str, Any]:
     a: Dict[str, Any] = {"path": rel, "sha256": None, "expected": None, "problem": ""}
     p = _inside(base, rel)
     if p is None or not p.is_file():
         a["problem"] = "ngoài dự án" if p is None else "thiếu file"
         return a
-    a["sha256"] = hashlib.sha256(p.read_bytes()).hexdigest()
-    side = p.with_name(p.name + ".sha256")
-    if side.is_file():
-        a["expected"] = (side.read_text(encoding="utf-8", errors="replace").split() or [""])[0].lower()
-        a["problem"] = "" if a["expected"] == a["sha256"] else "digest lệch sidecar"
+    try:
+        a["sha256"] = _stream_sha256(p)
+    except OSError as exc:
+        a["problem"] = f"không đọc được: {exc}"
+        return a
+    a["expected"], a["problem"] = _sidecar(base, rel, a["sha256"])
     return a
 
 
@@ -12524,13 +12618,14 @@ def _release_subject(base: Path, arts: List[Dict[str, Any]]) -> Dict[str, Any]:
     return {"head": _git_head(base), "tree": tree_fingerprint(base), "digest": digest}
 
 
-def _signed_go_no_go(base: Path) -> Optional[Tuple[str, str]]:
-    """GO-NO-GO đã ký §5 của `VERSION` (cùng luật hàng `go_no_go`); không có/không đọc được → None."""
+def _signed_go_no_go(base: Path) -> List[Tuple[str, str]]:
+    """MỌI GO-NO-GO đã ký §5 của `VERSION` (cùng luật hàng `go_no_go`) — xét hết để kết quả không phụ thuộc thứ tự file
+    (review lát A); không có/không đọc được → rỗng."""
     try:
         version = (base / "VERSION").read_text(encoding="utf-8").strip()
-        return next(((r, t) for r, t in _go_no_go_docs(base, version) if _go_no_go_signed(t)), None)
+        return [(r, t) for r, t in _go_no_go_docs(base, version) if _go_no_go_signed(t)]
     except (OSError, ValueError):
-        return None
+        return []
 
 
 def _approval_days(base: Path) -> int:
@@ -12541,20 +12636,38 @@ def _approval_days(base: Path) -> int:
     return n if n > 0 else APPROVAL_DAYS
 
 
+NO_GO_RE = re.compile(r"\bNO\s*[-‐-―]?\s*GO\b|từ\s*chối|không\s*duyệt|reject", re.I)
+GO_DECISION_RE = re.compile(r"GO(?:\s+v?\d[\w.+-]*)?", re.I)  # "GO" hay "GO v1.2.0" — danh sách cho phép
+
+
+def _decision(cell: str) -> str:
+    """`go` · `no` · `?` (trống, ô mẫu "GO / NO-GO" chưa chọn, chữ khác) — chỉ ô đúng GO mới là duyệt (review lát A)."""
+    text = cell.strip()
+    if "/" in text or not text:
+        return "?"
+    if NO_GO_RE.search(text):
+        return "no"
+    return "go" if GO_DECISION_RE.fullmatch(text) else "?"
+
+
 def _approval_problem(base: Path, rel: str, text: str, digest: Optional[str]) -> str:
-    """Lý do chữ ký §5 của `rel` chưa đủ cho promotion; rỗng = đủ. Quyết định có chữ NO-GO (kể cả ô mẫu "GO / NO-GO"
-    chưa chọn) → `rejected:`; ngày ký cũ hơn hạn, ở tương lai, hay có digest mà văn bản không nhắc → chờ người."""
+    """Lý do chữ ký §5 của `rel` chưa đủ cho promotion; rỗng = đủ. Dòng ký từ chối → `rejected:`; ô không phải GO, ngày
+    không hợp lệ/ở tương lai (quá 1 ngày — múi giờ người ký)/quá hạn, hay có digest mà văn bản không nhắc → chờ người."""
     rows = _go_sign_rows(text)
-    no = [d for d, _ in rows if re.search(r"NO-GO", d, re.I)]
+    kinds = [(_decision(d), d) for d, _ in rows]
+    no = [d for k, d in kinds if k == "no"]
     if no:
         return f"rejected:{rel}: quyết định ký §5 ghi `{no[0]}` (NO-GO)"
+    other = [d for k, d in kinds if k != "go"]
+    if other:
+        return f"{rel}: ô quyết định `{other[0] or '(trống)'}` không phải GO — người ký ghi GO hoặc NO-GO"
     today = _dt.datetime.now(_dt.timezone.utc).date()
     try:
         dates = [_dt.date.fromisoformat(d) for _, d in rows]
     except ValueError:
         return f"{rel}: ngày ký không hợp lệ ({', '.join(d for _, d in rows)})"
     days = _approval_days(base)
-    if max(dates) > today:
+    if max(dates) > today + _dt.timedelta(days=1):
         return f"{rel}: ngày ký {max(dates)} ở tương lai"
     if (today - min(dates)).days > days:
         return f"{rel}: chữ ký {min(dates)} hết hạn ({days} ngày — `{APPROVAL_DAYS_KEY}`)"
@@ -12564,21 +12677,24 @@ def _approval_problem(base: Path, rel: str, text: str, digest: Optional[str]) ->
 
 
 def _release_promotion(base: Path, fails: List[str], human: List[str], digest: Optional[str]) -> Dict[str, Any]:
-    """`blocked` (hàng BLOCKER FAIL) · `rejected` (ký NO-GO) · `pending_human` (còn việc người, chữ ký thiếu/hết hạn/
-    chưa gắn subject) · `approved`. Máy không nâng `pending_human` (ADR-0068 câu 3): "đã duyệt" vẫn là chữ ký người."""
+    """`blocked` (hàng BLOCKER FAIL) · `rejected` (một dòng ký từ chối ở bất kỳ GO-NO-GO nào của VERSION) ·
+    `pending_human` (còn việc người, chữ ký thiếu/không phải GO/hết hạn/chưa gắn subject) · `approved`. Máy không nâng
+    `pending_human` (ADR-0068 câu 3): "đã duyệt" vẫn là chữ ký người."""
     if fails:
         return {"state": "blocked", "reasons": fails}
-    doc = _signed_go_no_go(base)
-    problem = _approval_problem(base, *doc, digest) if doc else ""
-    if problem.startswith("rejected:"):
-        return {"state": "rejected", "reasons": [problem.removeprefix("rejected:")]}
+    docs = _signed_go_no_go(base)
+    problems = [_approval_problem(base, rel, text, digest) for rel, text in docs]
+    rejected = [p.removeprefix("rejected:") for p in problems if p.startswith("rejected:")]
+    if rejected:
+        return {"state": "rejected", "reasons": rejected}
     if human:
         return {"state": "pending_human", "reasons": human}
-    if doc is None:
+    if not docs:
         return {"state": "pending_human", "reasons": ["chưa có GO-NO-GO đã ký §5 cho VERSION — người ký"]}
-    if problem:
-        return {"state": "pending_human", "reasons": [problem]}
-    return {"state": "approved", "reasons": [doc[0]]}
+    pending = [p for p in problems if p]
+    if pending:
+        return {"state": "pending_human", "reasons": pending}
+    return {"state": "approved", "reasons": [rel for rel, _ in docs]}
 
 
 def release_check(base: Path, blueprint: str, status: str, unchecked_must: str = "warn") -> Dict[str, Any]:
