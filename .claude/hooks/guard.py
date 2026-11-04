@@ -498,7 +498,7 @@ def _git_cfg_env_why(cmd: str, root: str = "", cwd: Optional[str] = None) -> str
     if not GIT_CFG_NAME_RE.search(cmd):
         return ""
     env: Dict[str, str] = {}
-    for c, here in _commands_with_cwd(tokenize(cmd), cwd):
+    for c, here in _commands_each_cwd(tokenize(cmd), cwd):  # mọi thư mục ứng viên (D-347)
         c = list(itertools.dropwhile(lambda t: t in SHELL_KEYWORDS, c))  # `do git …`, `then git …`
         s = _strip_prefixes(c)
         env.update(_git_cfg_set(s))
@@ -3761,12 +3761,12 @@ def _gh_strict_why(folded: str, live: str, cwd: Optional[str]) -> str:
     line = _GhLine(bool(re.search(r"\bHOME=", live)), bool(GH_FUNC_RE.search(live)), set(GH_DYN_RE.findall(live)))
     start = posixpath.normpath(cwd) if cwd else GH_CWD  # `cd <thư mục đang đứng> && …` không tính là đổi thư mục
     toks = tokenize(folded)
-    cmds = _commands_with_cwd(toks, start)
+    cmds = _commands_with_cwds(toks, start)
     # khâu trước mỗi lệnh đơn trong ống của nó; hai cách chia lệch nhau (không nên xảy ra) → coi như không có ống
     ups = [[s for s in pipe[:k] if s] for pipe in pipelines(toks) for k, st in enumerate(pipe) if st]
     ups = ups if len(ups) == len(cmds) else [[] for _ in cmds]
-    for (raw, d), up in zip(cmds, ups):
-        why = _gh_cmd_why(raw, d is None or posixpath.normpath(d) != start, line, up)
+    for (raw, ds), up in zip(cmds, ups):  # dời thư mục ở BẤT KỲ ứng viên nào (D-347)
+        why = _gh_cmd_why(raw, any(d is None or posixpath.normpath(d) != start for d in ds), line, up)
         if why:
             return f"{why} — chỉ `xt.py pr reviewed` đăng dấu review (ADR-0063, AUD-SEC-191/192/193/253)"
     return ""
@@ -4488,169 +4488,221 @@ def _is_cd_back(n: List[str]) -> bool:
 
 
 Cands = Tuple[Optional[str], ...]  # thư mục ứng viên của một lệnh (T-3672); None = không biết (D-106)
-CwdSnap = Tuple[Cands, Cands]  # (ứng viên, ứng viên còn lại nếu `cd` trước đó hỏng)
 # Mảnh của token tách lệnh (shlex gom `);`, `&\n`, `&&(`): xử lý theo thứ tự
 SEP_PIECE_RE = re.compile(r"\|\||&&|\|&|;;&?|;&|[;&|\n()]")
-# Từ mở/đóng lệnh ghép (đứng đầu lệnh): nhóm `{ … }` hay khối điều khiển đứng trong ống/nền chạy ở shell con
-CD_OPEN_WORDS = frozenset({"{", "if", "while", "until", "for", "select", "case"})
-CD_CLOSE_WORDS = frozenset({"}", "fi", "done", "esac"})
-# Lệnh có thể xoá/dời thư mục mà `cd` sau đó tới (AUD-SEC-459); `find` chỉ khi có hành động xoá/chạy lệnh
-CD_GONE_HEADS = frozenset({"rm", "rmdir", "mv", "unlink"})
-FIND_REMOVE_RE = re.compile(r"-(?:delete|exec|execdir|ok|okdir)")
+CWD_UNION_MAX = 16  # D-347: số thư mục ứng viên tối đa của một lệnh; vượt → thêm None (không biết, D-106)
+CD_LOOP_HEADS = frozenset({"while", "until", "for", "select"})
+CD_CHAIN_SEPS = ("&&", "|", "|&")  # vế sau chỉ chạy khi `cd` của tiền tố thành công (`|` gắn chặt hơn `&&`)
+CD_MOVE_HEADS = frozenset({"cd", "pushd", "popd"})
+# Thân `eval` có thể chứa lệnh đổi thư mục: nhắc tên lệnh, hay có nháy/`\`/`$`/backtick (`c''d`, `c\d` ghép lại sau đọc)
+CD_WORD_IN_EVAL_RE = re.compile(r"cd|pushd|popd|eval|[\"'\\$`]")
+SimpleCmds = List[Tuple[List[str], List[str]]]  # (argv, mảnh tách đứng sau nó)
 
 
-def _uniq(*groups: Cands) -> Cands:
-    return tuple(dict.fromkeys(d for g in groups for d in g))
-
-
-def _gone_paths(n: List[str], cands: Cands) -> List[Optional[str]]:
-    """Đường lệnh `n` có thể xoá/dời (`rm`/`rmdir`/`mv`/`unlink`: mọi toán hạng; `find -delete|-exec`: thư mục gốc),
-    giải theo mọi thư mục ứng viên; biến/glob/thư mục không biết → None (mọi `cd` sau đó có thể hỏng)."""
-    words = _cd_operands(n[1:])[0]  # bỏ chuyển hướng (`2>/dev/null`) và `-P`/`-L` của `find`
-    if n[:1] == ["find"]:
-        roots = list(itertools.takewhile(lambda t: not t.startswith(("-", "(", "!")), words))
-        ops = (roots or ["."]) if any(FIND_REMOVE_RE.fullmatch(t) for t in n) else []
-    elif n[:1] and n[0] in CD_GONE_HEADS:
-        ops = [t for t in words if not t.startswith("-")]
-    else:
-        return []
-    out: List[Optional[str]] = []
-    for t, c in itertools.product(ops, cands):
-        rel = not t.startswith(("/", "~"))
-        unknown = "$" in t or bool(re.search(r"[*?\[]", t)) or (rel and c is None)
-        out.append(None if unknown else posixpath.normpath(posixpath.join(c or "/", posixpath.expanduser(t))))
-    return out
-
-
-class _CwdWalk:
-    """Đi qua các lệnh đơn theo ngữ nghĩa bash, giữ TẬP thư mục mỗi lệnh có thể chạy (T-3672, thay nhánh `cd` hỏng
-    của D-342). `cd T` chắc thành công (T vào được lúc kiểm — `isdir` trên đường THÔ như bash: `cd /khong-co/..` hỏng —
-    và không bị lệnh trước xoá/dời) → {T}. Có thể hỏng → {T}, còn thư mục cũ được giữ ở `fail` tới khi chuỗi `&&` dừng:
-    `;`/xuống dòng/`||`/`&` gộp lại (`cd T || exit|return` thì không — nhánh hỏng đã thoát); `!`/`until` trước `cd`
-    gộp ngay. `cd` trong ống (`|`, `|&`), nền (`&` cả danh sách `&&`/`||` của nó) hay `( … )` chạy ở shell con — không
-    đổi tập của lệnh sau. Đích không biết (biến, `cd -` — AUD-SEC-466, `CDPATH`, `popd`) → None như D-106;
-    `shopt -s cdable_vars` (hay `BASHOPTS`): `cd` hỏng thử `$T` → thêm None."""
-
-    def __init__(self, start: Optional[str]) -> None:
-        self.cands: Cands = (start,)
-        self.fail: Cands = ()
-        self.cdpath = bool(os.environ.get("CDPATH"))
-        self.cdable = "cdable_vars" in os.environ.get("BASHOPTS", "")
-        self.home = False
-        self.gone: List[Optional[str]] = []
-        # (loại `(`/`{`, trạng thái lúc mở, đầu danh sách bên ngoài, HOME, nhóm đứng sau ống)
-        self.frames: List[Tuple[str, CwdSnap, CwdSnap, bool, bool]] = []
-        self.lstart: CwdSnap = self.snap()  # đầu danh sách `&&`/`||` đang đi (nền `&` trả về đây)
-        self.piped = False  # đơn vị đang gom đứng sau `|`
-        self.out: List[Tuple[List[str], Cands]] = []
-
-    def snap(self) -> CwdSnap:
-        return self.cands, self.fail
-
-    def restore(self, s: CwdSnap) -> None:
-        self.cands, self.fail = s
-
-    def merge(self) -> None:
-        self.cands, self.fail = _uniq(self.cands, self.fail), ()
-
-    def sure(self, n: List[str], c: Optional[str], t: str) -> bool:
-        raw = posixpath.join(c or "/", posixpath.expanduser(_cd_operands(n[1:])[0][0]))
-        gone = any(g is None or t == g or t.startswith(g.rstrip("/") + "/") for g in self.gone)
-        return _enterable_dir(raw) and not gone
-
-    def moves(self, n: List[str]) -> Tuple[Cands, Cands]:
-        """(ứng viên sau `cd`/`pushd`, ứng viên còn ở thư mục cũ nếu nó hỏng)."""
-        new: List[Optional[str]] = []
-        fail: List[Optional[str]] = []
-        for c in self.cands:
-            t = _cd_target(n, c, self.cdpath, self.home)
-            new.append(t)
-            if t is not None and not self.sure(n, c, t):
-                fail.append(c)
-                new += [None] if self.cdable else []
-        return _uniq(tuple(new)), _uniq(tuple(fail))
-
-    def apply(self, n: List[str], argv: List[str]) -> None:
-        lead = set(itertools.takewhile(lambda t: t in SHELL_KEYWORDS, argv))
-        fail: Cands = ()
-        if _is_cd_back(n) or n[:1] == ["popd"]:
-            new: Cands = (None,)
-        elif n[:1] in (["cd"], ["pushd"]):
-            new, fail = self.moves(n)
-        else:
-            self.gone += _gone_paths(n, self.cands)
-            new = self.cands
-        if lead & {"!", "until"}:  # `! cd T && x`: x chạy khi `cd` hỏng
-            new, fail = _uniq(new, self.cands), ()
-        self.cands, self.fail = new, _uniq(self.fail, fail)
-
-    def command(self, cur: List[str], nxt: str) -> None:
-        before = self.snap()
-        head = next((t for t in cur if t != "!"), "")
-        if head in CD_OPEN_WORDS:
-            self.frames.append(("{", before, self.lstart, self.home, self.piped))
-            self.lstart, self.piped, self.fail = before, False, ()
-        self.cdpath = self.cdpath or _sets_cdpath(cur)
-        self.home = self.home or _sets_home(cur)
-        self.cdable = self.cdable or any("cdable_vars" in t for t in cur)
-        self.apply(normalize(cur), cur)
-        self.out.append((list(cur), _uniq(tuple(_run_dir(cur, c) for c in self.cands))))
-        unit, piped = before, self.piped
-        if head in CD_CLOSE_WORDS and self.frames and self.frames[-1][0] == "{":
-            _, unit, self.lstart, _, piped = self.frames.pop()
-            self.fail = _uniq(unit[1], self.fail)
-        if piped or nxt in ("|", "|&"):  # đơn vị chạy trong ống: shell con
-            self.restore(unit)
-
-    def sep(self, p: str, peek: List[str]) -> None:
-        self.piped = p in ("|", "|&")
-        if self.piped or p == "&&":
-            return
-        if p == "(":
-            self.frames.append(("(", self.snap(), self.lstart, self.home, False))
-            self.fail = ()
-            self.lstart = self.snap()
-        elif p == ")":
-            if self.frames and self.frames[-1][0] == "(":
-                _, s, self.lstart, self.home, _ = self.frames.pop()
-                self.restore(s)
-            else:  # `)` lẻ (mẫu `case`): không biết như cũ
-                self.restore(((None,), ()))
-        elif p == "||":
-            self.fail = () if peek[:1] in (["exit"], ["return"]) else self.fail
-            self.merge()
-        elif p == "&":  # cả danh sách `&&`/`||` chạy nền
-            self.restore(self.lstart)
-        else:  # `;`, xuống dòng, `;;`
-            self.merge()
-            self.lstart = self.snap()
-
-
-def _commands_with_cwds(tokens: List[str], start: Optional[str]) -> List[Tuple[List[str], Cands]]:
-    """Mỗi lệnh đơn kèm TẬP thư mục nó có thể chạy (`_CwdWalk`, T-3672); phần tử đầu là nhánh mọi `cd` thành công.
-    `(`…`)`, `$(`…`)`, `<(`…`)` là subshell — ra khỏi đó thì về tập cũ (`(cd ../b && git pull); git commit`)."""
-    walk = _CwdWalk(start)
+def _simple_commands(tokens: List[str]) -> Tuple[List[str], SimpleCmds]:
+    """(mảnh tách đứng trước lệnh đầu, [(argv, mảnh tách đứng sau nó)]) — tách theo `SEP_PIECE_RE`."""
+    lead: List[str] = []
+    out: SimpleCmds = []
     cur: List[str] = []
-    for i, t in enumerate(tokens):
+    for t in tokens:
         if _is_punct(t) and not _is_redirect(t):
             pieces = SEP_PIECE_RE.findall(t)
             if cur:
-                walk.command(cur, pieces[0] if pieces else "")
+                out.append((cur, pieces))
                 cur = []
-            for k, p in enumerate(pieces):
-                walk.sep(p, tokens[i + 1 : i + 2] if k == len(pieces) - 1 else [])
+            else:
+                (out[-1][1] if out else lead).extend(pieces)
         else:
             cur.append(t)
     if cur:
-        walk.command(cur, "")
-    return walk.out
+        out.append((cur, []))
+    return lead, out
 
 
-def _commands_with_cwd(tokens: List[str], start: Optional[str]) -> List[Tuple[List[str], Optional[str]]]:
-    """Mỗi lệnh đơn kèm thư mục của nhánh mọi `cd` thành công (`_commands_with_cwds`): `cd`/`pushd` dời thư mục,
-    `popd`/`cd -`/đích không rõ → None (AUD-SEC-466), `CDPATH` → `cd` tương đối không rõ
-    (D-106); `cd` trong ống/nền/subshell không dời. Luật đích ghi xét MỌI ứng viên (`_cwd_scan`)."""
-    return [(argv, cands[0]) for argv, cands in _commands_with_cwds(tokens, start)]
+def _joins(after: List[str], seps: Tuple[str, ...]) -> bool:
+    """Mảnh sau lệnh là đúng một nối trong `seps`, theo sau chỉ xuống dòng hay `(` mở subshell (`cd x && (a; b)`)."""
+    return bool(after) and after[0] in seps and all(p in ("\n", "(") for p in after[1:])
+
+
+def _cd_physical(n: List[str]) -> bool:
+    """`cd -P …`/`pushd -P …` (cả cờ ghép `-LP`), hay `SHELLOPTS` có `physical`: `..` giải theo đường vật lý."""
+    flags = itertools.takewhile(lambda a: a != "--", n[1:])
+    return "physical" in os.environ.get("SHELLOPTS", "") or any(CD_FLAG_RE.fullmatch(a) and "P" in a for a in flags)
+
+
+class _CwdFlags:
+    """Trạng thái shell ảnh hưởng cách `cd` giải đích (D-347): `CDPATH`, `HOME` gán lại, `cdable_vars`."""
+
+    def __init__(self) -> None:
+        self.cdpath = bool(os.environ.get("CDPATH"))
+        self.cdable = "cdable_vars" in os.environ.get("BASHOPTS", "")
+        self.home = False
+
+    def see(self, argv: List[str]) -> None:
+        self.cdpath = self.cdpath or _sets_cdpath(argv)
+        self.home = self.home or _sets_home(argv)
+        self.cdable = self.cdable or any("cdable_vars" in t for t in argv)
+
+
+def _exact_prefix(cmds: SimpleCmds, start: Optional[str], flags: _CwdFlags) -> Tuple[int, List[Optional[str]]]:
+    """Tiền tố chính xác (D-347): `cd`/`pushd <đích nguyên văn>` nối bằng `&&` ngay từ đầu lệnh — (số lệnh của tiền
+    tố, thư mục còn lại nếu một `cd` của nó hỏng). `cd` chắc thành công khi đích vào được lúc kiểm (`isdir` trên đường
+    THÔ như bash: `cd /khong-co/..` hỏng); `-P` (đường vật lý) không thuộc tiền tố."""
+    here, fallback, m = start, [], 0
+    for argv, after in cmds:
+        n = argv if argv[:1] in (["cd"], ["pushd"]) and _joins(after, ("&&",)) and not _cd_physical(argv) else []
+        t = _cd_target(n, here, flags.cdpath) if n else None
+        if t is None:
+            break
+        raw = posixpath.join(here or "/", posixpath.expanduser(_cd_operands(n[1:])[0][0]))
+        if not _enterable_dir(raw):
+            if flags.cdable:  # `cd` hỏng thử `cd "$T"`: không biết
+                break
+            fallback.append(here)
+        here, m = t, m + 1
+    return m, fallback
+
+
+def _cd_step(n: List[str], c: Optional[str], flags: _CwdFlags) -> List[Optional[str]]:
+    """Thư mục sau `cd`/`pushd`/`popd` `n` chạy ở `c`: đích theo chữ và theo realpath của đường thô (`cd -P`, `set -P`
+    — symlink giải trước `..`); không biết (biến, `cd -`, `popd`, `pushd +N`, CDPATH, `cdable_vars` khi đích chưa có)
+    → None."""
+    t = None if n[0] == "popd" or _is_cd_back(n) else _cd_target(n, c, flags.cdpath, flags.home)
+    if t is None:
+        return [None]
+    raw = posixpath.join(c or "/", posixpath.expanduser(_cd_operands(n[1:])[0][0]))
+    return [t, _realpath_safe(raw), *([None] if flags.cdable and not _enterable_dir(raw) else [])]
+
+
+def _cd_moves(
+    n: List[str], cur: List[Optional[str]], primary: Optional[str], flags: _CwdFlags, repeat: bool
+) -> Optional[Tuple[Optional[str], List[Optional[str]]]]:
+    """(thư mục của nhánh mọi `cd` thành công, mọi thư mục mới) sau lệnh `n` chạy ở MỘT trong `cur` (D-347); lệnh
+    không đổi thư mục → None. `repeat` (vòng lặp, thân hàm): đích tương đối giải lại từ đích mới tới bao đóng — quá
+    `CWD_UNION_MAX` thì thêm None; `eval` có `cd`/`eval` → mọi thư mục của thân cộng None."""
+    if n[:1] == ["eval"]:
+        if not CD_WORD_IN_EVAL_RE.search(" ".join(n[1:])):  # đường nhanh: thân không nhắc lệnh đổi thư mục
+            return None
+        body = tokenize(" ".join(n[1:]))
+        if not any(normalize(c)[:1] in (["eval"], *([h] for h in CD_MOVE_HEADS)) for c in split_commands(body)):
+            return None
+        return None, [*(d for c in cur for _, cs in _commands_with_cwds(body, c) for d in cs), None]
+    if not n or n[0] not in CD_MOVE_HEADS:
+        return None
+    out: List[Optional[str]] = []
+    frontier = list(cur)
+    while frontier:
+        new = [d for c in frontier for d in _cd_step(n, c, flags) if d not in cur and d not in out]
+        out += list(dict.fromkeys(new))
+        frontier = list(dict.fromkeys(new)) if repeat else []
+        if len(out) > CWD_UNION_MAX:
+            out.append(None)
+            break
+    return _cd_step(n, primary, flags)[0], out
+
+
+def _commands_with_cwds(tokens: List[str], start: Optional[str]) -> List[Tuple[List[str], Cands]]:
+    """Mỗi lệnh đơn kèm TẬP thư mục nó có thể chạy — HỢP MỌI ĐÍCH (D-347, thay mô phỏng luồng điều khiển của T-3672):
+    tiền tố `cd <đích nguyên văn> && …` từ đầu lệnh giữ một thư mục (`_exact_prefix`; vế `&&`/`|` nối tiếp chạy ở đó,
+    hết chuỗi thì thêm thư mục của `cd` có thể hỏng); sau đó mỗi lệnh xét trên {thư mục đầu} ∪ {mọi đích `cd`/`pushd`
+    đứng trước nó, giải từ mọi ứng viên đã có} (`_cd_moves`) — đúng cho mọi `if`/`while`/hàm/ống/subshell/`exit`/`||`
+    mà không mô phỏng chúng. Lệnh trong vòng lặp nhận tập ở cuối vòng ngoài cùng; mọi lệnh từ định nghĩa hàm đầu tiên
+    và `trap` nhận tập cuối. Phần tử đầu là nhánh mọi `cd` thành công (giữ bảng env/cờ của `res`)."""
+    lead, cmds = _simple_commands(tokens)
+    walk = _CwdUnion(start, cmds, lead)
+    for i, (argv, after) in enumerate(cmds):
+        walk.command(i, argv, cmds[i - 1][1] if i else lead, after)
+    sets, final = walk.sets, walk.ordered()
+    for s, e in walk.spans + ([(walk.loops[0], len(cmds) - 1)] if walk.loops else []):
+        sets[s : e + 1] = [[*sets[k], *sets[e]] for k in range(s, e + 1)]
+    out: List[Tuple[List[str], Cands]] = []
+    for i, (argv, _) in enumerate(cmds):
+        late = (walk.func is not None and i >= walk.func) or i in walk.traps
+        here = [*sets[i], *final] if late else sets[i]
+        out.append((list(argv), tuple(dict.fromkeys(_run_dir(argv, c) for c in here))))
+    return out
+
+
+class _CwdUnion:
+    """Trạng thái đi qua các lệnh đơn của `_commands_with_cwds` (D-347): tập `cur` chỉ lớn dần, trừ đích `cd` trong
+    subshell `( … )`/`$( … )` — bỏ khi ra khỏi đó (subshell luôn là tiến trình con, không phụ thuộc luồng điều khiển);
+    `primary` (nhánh mọi `cd` thành công — chỉ để xếp thứ tự, không thu hẹp tập) không theo `cd` trong ống/nền và trở
+    về sau `( … )` cùng cờ `HOME`/`CDPATH`; `)` lẻ (mẫu `case`) → không biết như cũ."""
+
+    def __init__(self, start: Optional[str], cmds: SimpleCmds, lead: List[str]) -> None:
+        self.flags = _CwdFlags()
+        self.m, self.fallback = _exact_prefix(cmds, start, self.flags) if not lead else (0, [])
+        self.cur: List[Optional[str]] = [start]
+        self.start, self.primary, self.chain = start, start, self.m > 0
+        self.stack: List[Tuple[Optional[str], bool, bool, bool, int]] = []
+        self.kept: List[Optional[str]] = []  # thêm vào tập không do `cd` (thư mục của `cd` hỏng, `)` lẻ): giữ qua `)`
+        self.sets: List[List[Optional[str]]] = []
+        self.loops: List[int] = []
+        self.spans: List[Tuple[int, int]] = []  # (đầu, cuối) của vòng lặp ngoài cùng đã đóng
+        self.func: Optional[int] = None
+        self.traps: Set[int] = set()  # lệnh `trap`: thân chạy lúc thoát/nhận tín hiệu — tập cuối
+
+    def add(self, dirs: List[Optional[str]], keep: bool = False) -> None:
+        self.kept += dirs if keep else []
+        self.cur += [d for d in dirs if d not in self.cur]
+        self.cur = self.cur if len(self.cur) <= CWD_UNION_MAX else [*self.cur[:CWD_UNION_MAX], None]
+
+    def ordered(self) -> List[Optional[str]]:
+        return [self.primary, *(d for d in self.cur if d != self.primary)] if self.primary in self.cur else self.cur
+
+    def pieces(self, before: List[str]) -> None:
+        f = self.flags
+        for p in before:
+            if p == "(":
+                self.stack.append((self.primary, f.cdpath, f.home, f.cdable, len(self.cur)))
+            elif p == ")" and self.stack:
+                self.primary, f.cdpath, f.home, f.cdable, size = self.stack.pop()
+                self.cur = [*self.cur[:size], *(d for d in self.cur[size:] if d in self.kept)]
+            elif p == ")":
+                self.primary = None
+                self.add([None], keep=True)
+
+    def command(self, i: int, argv: List[str], before: List[str], after: List[str]) -> None:
+        self.pieces(before)
+        lead_kw = itertools.takewhile(lambda t: t in SHELL_KEYWORDS or t in CD_LOOP_HEADS, argv)
+        self.loops += [i] * sum(t in CD_LOOP_HEADS for t in lead_kw)
+        self.func = i if self.func is None and (after[:2] == ["(", ")"] or argv[:1] == ["function"]) else self.func
+        self.flags.see(argv)
+        n = normalize(argv)
+        self.traps |= {i} if n[:1] == ["trap"] else set()
+        repeat = bool(self.loops) or self.func is not None
+        if i < self.m:
+            self.primary = _cd_target(n, self.primary, self.flags.cdpath)
+            self.cur = [self.primary]
+        elif (moved := _cd_moves(n, self.cur, self.primary, self.flags, repeat)) is not None:
+            sub = {"|", "|&"} & {*before, *after[:1]} or after[:1] == ["&"]  # ống/nền: shell con
+            self.primary = self.primary if sub else moved[0]
+            self.add([moved[0], *moved[1]])
+        self.sets.append(self.ordered())
+        if argv[:1] == ["done"] and self.loops:
+            s = self.loops.pop()
+            self.spans += [] if self.loops else [(s, i)]
+        if self.chain and i >= self.m and not _joins(after, CD_CHAIN_SEPS):
+            bg = after[:1] == ["&"]  # cả danh sách `&&` chạy nền: shell này vẫn ở thư mục đầu
+            self.primary = self.start if bg else self.primary
+            self.add([*self.fallback, *([self.start] if bg else [])], keep=True)
+            self.chain = False
+
+
+def _commands_with_cwd(tokens: List[str], start: Optional[str], pick: int = 0) -> List[Tuple[List[str], Optional[str]]]:
+    """Mỗi lệnh đơn kèm MỘT thư mục: ứng viên thứ `pick` của `_commands_with_cwds` (ứng viên cuối nếu ít hơn) — gọi với
+    mọi `pick` dưới `_cwd_picks` thì mỗi cặp (lệnh, ứng viên) được xét ít nhất một lần (D-347)."""
+    return [(argv, cands[min(pick, len(cands) - 1)]) for argv, cands in _commands_with_cwds(tokens, start)]
+
+
+def _cwd_picks(placed: List[Tuple[List[str], Cands]]) -> int:
+    """Số ứng viên nhiều nhất của một lệnh đơn (`placed` = `_commands_with_cwds`) — số lượt `pick` phủ mọi ứng viên."""
+    return max((len(c) for _, c in placed), default=1)
+
+
+def _commands_each_cwd(tokens: List[str], start: Optional[str]) -> List[Tuple[List[str], Optional[str]]]:
+    """Mọi cặp (lệnh đơn, thư mục ứng viên) — luật xét đích theo thư mục xét ĐỦ mọi ứng viên (D-347)."""
+    return [(argv, d) for argv, cands in _commands_with_cwds(tokens, start) for d in cands]
 
 
 def normalize(argv: List[str]) -> List[str]:
@@ -8151,8 +8203,9 @@ GIT_CONFIG_UNSET = {"--unset", "--unset-all", "unset"}
 GIT_EXEC_KEY_RE = re.compile(
     r"core\.(fsmonitor|sshcommand|gitproxy|pager|editor|askpass|alternaterefscommand)|sequence\.editor"
     r"|diff\.external|pager\..+|alias\..+|protocol(\..+)?\.allow|gpg(\..+)?\.(program|defaultkeycommand)"
-    r"|sendemail\.(\w*cmd|smtpserver)|init\.templatedir|uploadpack\.packobjectshook|submodule\..+\.update|delta\.pager"
+    r"|sendemail\.(.+\.)?(\w*cmd|smtpserver)|init\.templatedir|uploadpack\.packobjectshook|submodule\..+\.update|delta\.pager"
     r"|gc\.recentobjectshook|interactive\.difffilter|imap\.tunnel|instaweb\.httpd"  # AUD-SEC-461, git-config(1) 2.43.0
+    # AUD-SEC-485: `sendemail.<identity>.*` (`git help --config` 2.43.0) — `sendmailCmd`/`smtpServer` là đường lệnh
     r"|.+\.(textconv|clean|smudge|process|driver|cmd|command|program|helper|uploadpack|receivepack|path)",
     re.I,
 )
@@ -10095,7 +10148,11 @@ def _fake_git_dirs(commands: List[Tuple[List[str], Optional[str]]]) -> Set[str]:
             for k in [k for k, part in enumerate(parts) if part == mark and (mark == "objects" or k == len(parts) - 1)]:
                 d = "/".join(parts[:k]) or ("/" if path.startswith("/") else ".")
                 unknown = re.search(r"[$`*?\[]", d) or (here is None and not d.startswith("/"))
-                out.add("" if unknown else posixpath.join(here or "/", d))
+                full = posixpath.join(here or "/", d)
+                # T-3674: thư mục đã có `.git` (gốc dự án) — git dò thấy `.git` trước, không nhận chính nó là Git dir;
+                # chỉ `GIT_DIR`/`--git-dir` tường minh mới nhận (đã chặn riêng: `_git_cfg_env_why`, `hook_bypass`)
+                if unknown or not os.path.lexists(posixpath.join(full, ".git")):  # đường thô: kernel giải `..`
+                    out.add("" if unknown else full)
     return out
 
 
@@ -10344,6 +10401,8 @@ class ScanBudget:
         # tạo trong cùng lệnh (đi vào shell lồng: `git init --bare X && sh -c 'printf x > X/config'`)
         self.dirs: Set[str] = set()
         self.pending_bare: Optional[FrozenSet[str]] = None
+        # AUD-SEC-481: alias git đặt trong cùng lệnh (`git config alias.u …`) — shell lồng/`eval` gọi nó dùng chung bảng
+        self.aliases: List[Tuple[str, Optional[str]]] = []
         # Đọc bảng alias: ngân sách TỔNG của quyết định gốc — lệnh con của `find -exec` được quét bằng quyết định mới
         # (nested) vẫn tiêu chung, không được thêm ALIAS_SECONDS mỗi lần.
         if not nested or ScanBudget.current_alias is None:
@@ -10997,15 +11056,21 @@ SPAN_MARK_RE = re.compile(r"\$__xt_span_(\d+)_")
 
 
 def _nested_pairs(
-    cmd: str, tokens: List[str], placed: PlacedCmds, start: Optional[str], budget: Optional[ScanBudget] = None
+    cmd: str,
+    tokens: List[str],
+    placed: PlacedCmds,
+    start: Optional[str],
+    budget: Optional[ScanBudget] = None,
+    pick: int = 0,
 ) -> Placed:
     """Lệnh chạy lồng (AUD-SEC-017) kèm thư mục nó chạy (AUD-SEC-094): `sh -c '…'`, `eval '…'`, backtick, `$(…)`,
-    `$(cat <<E …)`, `<( )`, thân heredoc mở rộng, `echo/printf '…' | sh`, here-string/heredoc vào shell."""
+    `$(cat <<E …)`, `<( )`, thân heredoc mở rộng, `echo/printf '…' | sh`, here-string/heredoc vào shell. `pick`: ứng
+    viên thư mục đang xét (`_commands_with_cwd`, D-347)."""
     moved = any(here != start for _, here in placed)
     out: Placed = [(s, here) for c, here in placed for s in [_shell_c_script(c)] if s]
     out += [(s, here) for c, here in placed for s in _eval_scripts(c)]
-    out += _span_pairs(strip_heredocs(literal_bodies_masked(cmd)), _backtick_spans, start, moved)
-    out += _span_pairs(strip_heredocs(cmd), _dollar_spans, start, moved)
+    out += _span_pairs(strip_heredocs(literal_bodies_masked(cmd)), _backtick_spans, start, moved, pick)
+    out += _span_pairs(strip_heredocs(cmd), _dollar_spans, start, moved, pick)
     out += [(b, here) for sc, here in list(out) for b in _cat_heredoc_bodies(sc)]
     out += _procsub_scripts(tokens, _token_dirs(tokens, placed))
     visited = list(dict.fromkeys([start, *(here for _, here in placed)]))
@@ -11017,17 +11082,19 @@ def _nested_pairs(
     return out + [(body, d) for body in _heredoc_scripts(cmd, budget=budget) for d in shells]
 
 
-def _span_pairs(text: str, finder: Callable[[str], List[Span]], start: Optional[str], moved: bool) -> Placed:
+def _span_pairs(
+    text: str, finder: Callable[[str], List[Span]], start: Optional[str], moved: bool, pick: int = 0
+) -> Placed:
     """Thân thay lệnh (`finder` = `_dollar_spans`/`_backtick_spans`) kèm thư mục lệnh chứa nó; không lệnh nào dời thư
     mục → mọi thân ở `start`."""
     out: Placed = []
     for spans in _span_readings(text, finder):
-        dirs = _span_dirs(text, spans, start) if moved and spans else [start] * len(spans)
+        dirs = _span_dirs(text, spans, start, pick) if moved and spans else [start] * len(spans)
         out += [(body, d) for (_, _, body), d in zip(spans, dirs)]
     return list(dict.fromkeys(out))
 
 
-def _span_dirs(text: str, spans: List[Span], start: Optional[str]) -> List[Optional[str]]:
+def _span_dirs(text: str, spans: List[Span], start: Optional[str], pick: int = 0) -> List[Optional[str]]:
     """Thư mục của lệnh chứa mỗi thay lệnh trong `text`: thay span thứ K bằng dấu `$__xt_span_K_`, tách lệnh, đọc dấu
     trong argv của `_commands_with_cwd` (`cd .claude && echo "$(…)"` chạy trong `.claude`). Không thấy dấu (span trong
     comment) → `start`."""
@@ -11037,7 +11104,7 @@ def _span_dirs(text: str, spans: List[Span], start: Optional[str]) -> List[Optio
         parts += [text[pos:a], SPAN_MARK.format(k)]
         pos = b
     found: Dict[int, Optional[str]] = {}
-    for c, here in _commands_with_cwd(tokenize("".join(parts) + text[pos:]), start):
+    for c, here in _commands_with_cwd(tokenize("".join(parts) + text[pos:]), start, pick):
         for m in SPAN_MARK_RE.finditer(" ".join(c)):
             found.setdefault(int(m[1]), here)
     return [found.get(k, start) for k in range(len(spans))]
@@ -11339,9 +11406,9 @@ def _push_subst_rule(cmd: str, root: str, cwd: str) -> Tuple[str, List[str]]:
     (unsure → chặn). Trả (lý do deny, câu hỏi)."""
     base = strip_heredocs(cmd)
     variants = _subst_variants(base) if "push" in base else []
-    seen = {tuple(a) for a, _ in _commands_with_cwd(tokenize(base), cwd)} if variants else set()
+    seen = {tuple(a) for a, _ in _commands_each_cwd(tokenize(base), cwd)} if variants else set()
     asks: List[str] = []
-    for argv, here in (c for v in variants for c in _commands_with_cwd(tokenize(v), cwd)):
+    for argv, here in (c for v in variants for c in _commands_each_cwd(tokenize(v), cwd)):
         n = normalize(argv)
         if n[:2] != ["git", "push"] or tuple(argv) in seen:
             continue
@@ -11388,7 +11455,7 @@ def _push_var_rule(cmd: str, root: str, cwd: str) -> Tuple[str, List[str]]:
     asks: List[str] = []
     for variant in _subst_variants(base) or [base]:
         env: Dict[str, str] = {}
-        for argv, here in _commands_with_cwd(tokenize(variant), cwd):
+        for argv, here in _commands_each_cwd(tokenize(variant), cwd):
             n = normalize(argv)
             if n[:2] == ["git", "push"]:
                 deny, more = _push_var_refspec(n, env, _git_dir(argv, here) or root)
@@ -11862,9 +11929,11 @@ def _scan_nested(
     asks: List[str],
     budget: ScanBudget,
     rewrites: int,
+    picks: int = 1,
 ) -> str:
     """Quét đệ quy lệnh lồng; trả lý do deny (rỗng nếu không), thêm câu hỏi vào `asks`. Lệnh trong container không
-    đụng file máy → chặn/hỏi của nó thành hỏi (ra mạng, thêm gói vẫn là việc thật)."""
+    đụng file máy → chặn/hỏi của nó thành hỏi (ra mạng, thêm gói vẫn là việc thật). `picks`: số ứng viên thư mục
+    nhiều nhất của một lệnh (`_cwd_picks`) — nguồn lồng lấy ở mọi ứng viên (D-347)."""
     if max([0, *(_for_words(c) for c in split_commands(tokens))]) > VAR_FOR_PICKS:
         return f"Lệnh quá phức tạp để guard quét hết (vòng `for` hơn {VAR_FOR_PICKS} giá trị khác nhau): chia nhỏ lệnh."
     asks += _opaque_shells(tokens) + _xargs_evidence(tokens, cmd)
@@ -11873,8 +11942,12 @@ def _scan_nested(
         return push_deny
     asks += push_asks
     asks += _container_asks(_wrapped_scripts(tokens)[1], depth, budget)  # mọi lệnh, không cắt (review #82)
-    rewritten, nested, opaque = _nested_sources(cmd, tokens, cwd, root, budget)
-    asks += opaque
+    rewritten: Placed = []
+    nested: Placed = []
+    for pick in range(picks):  # mỗi cặp (lệnh, thư mục ứng viên) ít nhất một lượt (D-347)
+        rw_at, ns_at, opaque = _nested_sources(cmd, tokens, cwd, root, budget, pick)
+        rewritten, nested = list(dict.fromkeys(rewritten + rw_at)), list(dict.fromkeys(nested + ns_at))
+        asks += opaque
     for here, (rw, ns) in _moved_groups(rewritten, nested, cwd).items():
         moved = _scan_scripts(rw, root, here, depth, asks, 0, budget, rewrites)
         moved = moved or _scan_scripts(ns, root, here, depth, asks, 1, budget)
@@ -11886,21 +11959,27 @@ def _scan_nested(
 
 
 def _nested_sources(
-    cmd: str, tokens: List[str], start: Optional[str], root: str, budget: Optional["ScanBudget"] = None
+    cmd: str,
+    tokens: List[str],
+    start: Optional[str],
+    root: str,
+    budget: Optional["ScanBudget"] = None,
+    pick: int = 0,
 ) -> Tuple[Placed, Placed, List[str]]:
     """MỘT danh sách nguồn lệnh lồng cho cả lượt quét ở thư mục ban đầu lẫn sau `cd`/`pushd`/`env -C` (AUD-SEC-087,
     AUD-SEC-094 — hai danh sách riêng từng lệch nhau): (bản viết lại cùng lệnh, lệnh lồng, câu hỏi chặn), mỗi script
     kèm thư mục nó chạy. Bản viết lại: thay biến/gán thay lệnh (cả dòng, gồm `cd`) và hậu tố lệnh bọc (`flock`,
     `script -qc`, `su -c`, `watch`…), lệnh git gọi alias. Lệnh lồng: `_nested_pairs`, lệnh bọc trên máy (`uv run bash
     -c`), `os.system` trong script trình thông dịch, ống giải mã vào shell, ssh chạy tại máy này, magic ipython, alias
-    git `!`. `root`: repo đọc alias bền khi thư mục lệnh không biết; `budget`: ngân sách đọc alias của quyết định."""
-    placed = _commands_with_cwd(tokens, start)
+    git `!`. `root`: repo đọc alias bền khi thư mục lệnh không biết; `budget`: ngân sách đọc alias của quyết định;
+    `pick`: ứng viên thư mục của mỗi lệnh (`_commands_with_cwd`; bên gọi lặp mọi ứng viên — D-347)."""
+    placed = _commands_with_cwd(tokens, start, pick)
     alias_rw, alias_ns, alias_asks = _git_alias_sources(placed, root, budget)
     built: Placed = [(s, start) for s in _var_scripts(tokens)] + alias_rw + [(s, start) for s in _lifted_scripts(cmd)]
     built += _patch_fence_scripts(cmd, placed, start)  # AUD-SEC-414: đích `patch`/`git apply` trong thân heredoc
     runner = [(s, here) for c, here in placed for s in _runner_scripts(c)]
     decoded, opaque = _decoded_pipes(tokens, [here for _, here in placed])
-    nested = _nested_pairs(cmd, tokens, placed, start, budget)
+    nested = _nested_pairs(cmd, tokens, placed, start, budget, pick)
     nested += [(s, here) for c, here in placed for s in _wrapped_scripts(c)[0]]
     interp = _interp_scripts_at(cmd, tokens, start, budget)
     loose = [(s, here) for raw, here in interp for s in _exec_api_scripts([raw])]
@@ -12140,7 +12219,9 @@ def _git_alias_sources(
     nested: Placed = []
     asks: List[str] = []
     exported: Dict[str, str] = {}
-    defined: AliasTable = []  # alias đặt ở lệnh trước trong chuỗi — bảng của git chưa có lúc kiểm (AUD-SEC-464)
+    # alias đặt ở lệnh trước trong chuỗi — bảng của git chưa có lúc kiểm (AUD-SEC-464); cả alias tầng ngoài đặt (shell
+    # lồng, `eval` — AUD-SEC-481, giữ trong ngân sách của quyết định)
+    defined: AliasTable = list(budget.aliases) if budget is not None else []
     for c, here in placed:
         s = _strip_prefixes(c)
         _chain_assign(exported, c)
@@ -12149,6 +12230,8 @@ def _git_alias_sources(
         pos = _git_config_write(n)
         if len(pos) > 1 and pos[0][:6].lower() == "alias.":  # mọi phạm vi/tệp (`--global`, `-f`): chiều chặt
             defined.append((pos[0][6:], pos[1]))
+            if budget is not None and defined[-1] not in budget.aliases:
+                budget.aliases.append(defined[-1])
             continue
         sub = n[1] if n[:1] == ["git"] and len(n) > 1 else ""
         aliased = bool(sub) and not sub.startswith("-") and sub not in GIT_BUILTINS
@@ -13720,16 +13803,43 @@ def _budget_track(
 def _cwd_scan(
     placed: List[Tuple[List[str], Cands]], root: str, res: Dict[str, object], asks: List[str], dirs: FrozenSet[str]
 ) -> str:
-    """Quét từng lệnh đơn (`_scan_command`) ở MỌI thư mục ứng viên của nó (T-3672: `cd` có thể hỏng → cả thư mục cũ,
-    AUD-SEC-457/459); ứng viên đầu (nhánh `cd` thành công) ghi cờ vào `res`, ứng viên khác quét với bản sao cờ —
-    chặt nhất thắng."""
+    """Quét từng lệnh đơn (`_scan_command`) ở MỌI thư mục ứng viên của nó (D-347: hợp mọi đích `cd`); ứng viên đầu
+    (nhánh mọi `cd` thành công) ghi cờ vào `res`, ứng viên khác quét với bản sao cờ — chặt nhất thắng. `git commit`
+    có nhiều ứng viên: thư mục cổng chọn chặt (`_strict_commit_dir`)."""
     for argv, (here, *others) in placed:
         reason = _scan_command(argv, root, res, asks, here, dirs)
+        commit_dirs = [str(res["commit_dir"])]
         for other in others:
-            reason = reason or _scan_command(argv, root, dict(res), asks, other, dirs)
+            copy = dict(res)
+            reason = reason or _scan_command(argv, root, copy, asks, other, dirs)
+            commit_dirs.append(str(copy["commit_dir"]))
+        if others and normalize(argv)[:2] == ["git", "commit"]:
+            res["commit_dir"] = _strict_commit_dir(commit_dirs, root)
         if reason:
             return reason
     return ""
+
+
+def _repo_top(path: str) -> str:
+    """Gốc cây làm việc chứa `path` (thư mục có `.git` — thư mục hay gitfile — gần nhất đi lên, theo realpath); không
+    có → ''."""
+    d = _realpath_safe(path)
+    while not os.path.lexists(os.path.join(d, ".git")):
+        if posixpath.dirname(d) == d:
+            return ""
+        d = posixpath.dirname(d)
+    return d
+
+
+def _strict_commit_dir(dirs: List[str], root: str) -> str:
+    """Thư mục cổng commit khi `git commit` có nhiều thư mục ứng viên (D-347): mọi ứng viên cùng một cây làm việc (hay
+    cùng không thuộc cây nào) → ứng viên đầu; có ứng viên thuộc cây khác dự án → nó (hook hỏi người ở `strict`, như
+    `cd ../khac && git commit`); còn lại (thư mục không biết, repo trần lẫn dự án) → '' như thư mục không biết."""
+    tops = [_repo_top(d) if d else "" for d in dirs]
+    if len(set(tops)) == 1:
+        return dirs[0]
+    own = _repo_top(root)
+    return next((d for d, t in zip(dirs, tops) if t and t != own), "")
 
 
 def _late_pending_asks(
@@ -13782,10 +13892,10 @@ def _bash_decision(
         return res
     placed = _commands_with_cwds(tokens, cwd)
     commands = [(argv, cands[0]) for argv, cands in placed]
-    pending_bare = _budget_track(budget, cmd, commands, root, cwd)
-    budget.dirs.update(d for _, cands in placed for d in cands if d)  # mọi ứng viên là thư mục đã biết (T-3672)
+    every = [(argv, d) for argv, cands in placed for d in cands]  # luật theo thư mục xét ĐỦ mọi ứng viên (D-347)
+    pending_bare = _budget_track(budget, cmd, every, root, cwd)
     asks: List[str] = interp_write_asks(cmd, tokens, root, cwd, pending_bare)
-    asks += _pending_git_write_asks(commands, pending_bare)
+    asks += _pending_git_write_asks(every, pending_bare)
     asks += [REVIEW_FORGE_WHY] if _review_forge_hit(cmd, tokens, cwd, budget) else []
     asks += [STAGE_APPROVE_WHY] if any(_approves_stage(c) for c in split_commands(tokens)) else []
     braces = brace_variants(cmd)
@@ -13793,19 +13903,19 @@ def _bash_decision(
         "Lệnh quá phức tạp để guard quét hết (brace expansion quá nhiều biến thể): chia nhỏ lệnh."
         if braces is None
         else _scan_scripts(braces, root, cwd, depth, asks, 0, budget, rewrites)
-    ) or _scan_nested(cmd, tokens, root, cwd, depth, asks, budget, rewrites)
+    ) or _scan_nested(cmd, tokens, root, cwd, depth, asks, budget, rewrites, _cwd_picks(placed))
     nested_deny = nested_deny or _scan_glob_rewrites(cmd, tokens, root, cwd, depth, asks, budget, rewrites)
     if nested_deny:
         return _nested_deny_result(res, nested_deny, budget)
-    asks += _late_pending_asks(cmd, tokens, commands, root, cwd, pending_bare, budget)
-    asks += _git_config_env_asks(tokens, commands, root)
+    asks += _late_pending_asks(cmd, tokens, every, root, cwd, pending_bare, budget)
+    asks += _git_config_env_asks(tokens, every, root)
     dirs = frozenset(budget.dirs)
     deny_reason = _cwd_scan(placed, root, res, asks, dirs)
     res.pop("exported_env", None)
     _carry_push_no_verify(res, budget)
     deny_reason = deny_reason or find_root_scan(cmd, root, cwd) or _commit_after_write(commands)
     deny_reason = deny_reason or (
-        ai_attribution(cmd, commands, root) or title_rule(cmd, commands, root)
+        ai_attribution(cmd, every, root) or title_rule(cmd, every, root)
         if res["commit"] or GH_PR_TEXT_RE.search(cmd)
         else ""
     )

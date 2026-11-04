@@ -253,6 +253,19 @@ CWD_RELATIVE: Dict[str, str] = {
             ("477-cpio-iD-cluster", ".claude/hooks", "AUD-SEC-477"),
         )
     },
+    # T-3674 (D-347): mọi ứng viên thư mục (thư mục đầu, đích `cd` tương đối) nằm dưới /tmp sau `cd /tmp &&`
+    **{
+        f"t3674-{k}": f"{v} tương đối → dưới /tmp sau cd /tmp ({ref})"
+        for k, v, ref in (
+            ("479-lastpipe-cd", "sub, ../.autopilot", "AUD-SEC-479"),
+            ("480-or-exit-in-pipe", ".autopilot", "AUD-SEC-480"),
+            ("482-dotdot-in-loop", "sub/deep, .autopilot", "AUD-SEC-482"),
+            ("482-false-and-cd", "sub, .autopilot", "AUD-SEC-482"),
+            ("483-cd-physical", "sub/.., .autopilot", "AUD-SEC-483"),
+            ("484-eval-cd", "sub, ../.autopilot", "AUD-SEC-484"),
+            ("486-dir-removed-by-other-tool", "w, .autopilot", "AUD-SEC-486"),
+        )
+    },
 }
 
 
