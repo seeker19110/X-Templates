@@ -414,8 +414,13 @@ GIT_CFG_ENV_WHY = (
 
 
 def _own_git_dir(value: str, root: str, cwd: Optional[str]) -> bool:
+    """`.git` của dự án (`$ROOT/.git`, `.git` khi đứng ở gốc). AUD-SEC-452: chuẩn hoá `/` thừa, `./` (`$ROOT/.git/`)
+    trước khi so — không chuẩn hoá `..` (symlink làm `x/..` khác thư mục chữ)."""
     path = _dequote(value)
-    return bool(root) and (path == posixpath.join(root, ".git") or (path in (".git", "./.git") and cwd == root))
+    if path and ".." not in path.split("/"):
+        path = _norm_path(path)
+    own = posixpath.join(root, ".git")
+    return bool(root) and (path in (own, _norm_path(own)) or (path in (".git", "./.git") and cwd == root))
 
 
 def _git_cfg_vars(env: Dict[str, str], root: str, cwd: Optional[str]) -> List[str]:
@@ -585,6 +590,7 @@ REPO_GIT_CONFIG_RE = re.compile(r"(?:^|/)\.git/(?:config|config\.worktree|worktr
 GIT_METADATA_TAIL_RE = re.compile(
     r"/(?=(?:config(?:\.worktree)?|commondir|hooks(?:/.*)?|worktrees/[^/]+/config\.worktree)$)"
 )
+GIT_KEYED_TAIL_RE = re.compile(r"/(?:config(?:\.worktree)?|worktrees/[^/]+/config\.worktree)")  # tệp cấu hình
 
 
 def _git_metadata_dir(path: str) -> bool:
@@ -596,10 +602,16 @@ def _git_metadata_dir(path: str) -> bool:
     )
 
 
-def _repo_git_metadata(path: str, root: str) -> bool:
-    """AUD-SEC-445/446: đích ghi nằm trong Git dir có thật, kể cả dir trần bên ngoài dự án."""
+def _repo_git_metadata(path: str, root: str, keyed: bool = False) -> bool:
+    """AUD-SEC-445/446: đích ghi nằm trong Git dir có thật, kể cả dir trần bên ngoài dự án. `keyed`: đích là tệp của
+    `git config --file` — bỏ qua đuôi tệp cấu hình (luật khoá của git config xét, như `git -C <dir> config` — AUD-SEC-452);
+    đuôi hook/commondir vẫn tính."""
     absolute = os.path.normpath(os.path.join(root, os.path.expanduser(path)))
-    return any(_git_metadata_dir(absolute[: m.start()] or "/") for m in GIT_METADATA_TAIL_RE.finditer(absolute))
+    return any(
+        _git_metadata_dir(absolute[: m.start()] or "/")
+        and not (keyed and GIT_KEYED_TAIL_RE.fullmatch(absolute, m.start()))
+        for m in GIT_METADATA_TAIL_RE.finditer(absolute)
+    )
 
 
 def _git_dir_pointer(path: str, prefix: bytes = b"") -> str:
@@ -613,12 +625,26 @@ def _git_dir_pointer(path: str, prefix: bytes = b"") -> str:
     return ""
 
 
+def _project_dotgit(root: str) -> str:
+    """`.git` mà git dùng cho dự án: dò từ gốc lên cha như git (AUD-SEC-450 — dự án `mono/apps/web` trong repo cha
+    `mono/`); không ceiling — canh thêm là hướng an toàn. Không thấy → `$ROOT/.git` như cũ."""
+    directory = _realpath_safe(os.path.abspath(root))  # gốc qua symlink: git dò theo đường vật lý (review #438)
+    while True:
+        dot_git = os.path.join(directory, ".git")
+        if os.path.lexists(dot_git):
+            return dot_git
+        parent = os.path.dirname(directory)
+        if parent == directory:
+            return os.path.join(root, ".git")
+        directory = parent
+
+
 def _git_config_inodes(root: str) -> Set[Tuple[int, int]]:
-    """Inode của cấu hình Git và gitfile, commondir, hook của dự án (AUD-SEC-440/443/447)."""
+    """Inode của cấu hình Git và gitfile, commondir, hook của dự án (AUD-SEC-440/443/447), kể cả repo cha (AUD-SEC-450)."""
     xdg = os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config")
     paths = [os.path.expanduser("~/.gitconfig"), os.path.join(xdg, "git", "config"), "/etc/gitconfig"]
     paths += ["/usr/local/etc/gitconfig", "/opt/homebrew/etc/gitconfig"]
-    dotgit = os.path.join(root, ".git")
+    dotgit = _project_dotgit(root)
     gitdir = _git_dir_pointer(dotgit, b"gitdir: ") or dotgit
     common_file = os.path.join(gitdir, "commondir")
     common = _git_dir_pointer(common_file) or gitdir
@@ -642,16 +668,24 @@ def _hardlink_git_config(path: str, root: str) -> bool:
     return stat.S_ISREG(st.st_mode) and st.st_nlink > 1 and (st.st_dev, st.st_ino) in _git_config_inodes(root)
 
 
-def _git_hook_target(path: str, root: str) -> bool:
-    """Đích hook/cấu hình git, kể cả đường dẫn vật lý qua symlink hoặc hard link."""
+def _git_hook_target(path: str, root: str, keyed: bool = False) -> bool:
+    """Đích hook/cấu hình git, kể cả đường dẫn vật lý qua symlink hoặc hard link. `keyed`: tệp của `git config --file`
+    (`_repo_git_metadata`, AUD-SEC-452)."""
     path = os.path.expanduser(path)
     real = rel_path(path, root)
     return (
         _match_any(_norm_path(path), GIT_HOOK_PATTERNS)
         or _match_any(real, GIT_HOOK_PATTERNS)
-        or _repo_git_metadata(real, root)
+        or _repo_git_metadata(real, root, keyed)
         or _hardlink_git_config(os.path.join(root, path), root)
     )
+
+
+def _git_dir_target(path: str, root: str) -> bool:
+    """AUD-SEC-449: `path` là chính một Git dir có thật (trần, tách riêng, worktree — `_git_metadata_dir`): trình ghi đặt
+    tệp vào đó (`cp f gd/`, `tar -C gd`) ghi được `config`/`hooks` như `.git` của dự án."""
+    p = os.path.expanduser(path)  # realpath trên đường thô: `lnk/../../bare` theo symlink như kernel (review #438)
+    return "$" not in p and _git_metadata_dir(_realpath_safe(os.path.join(root, p)))
 
 
 def _gitfile_target(path: str, root: str) -> bool:
@@ -4337,7 +4371,9 @@ def _git_dir(argv: List[str], cwd: Optional[str]) -> Optional[str]:
     gdir = cwd
     for d in _git_C_dirs(argv):
         known = "$" not in d and not TILDE_DIR_RE.match(d)
-        gdir = posixpath.normpath(posixpath.join(gdir, posixpath.expanduser(d))) if gdir and known else None
+        d = posixpath.expanduser(d)
+        # `-C` tuyệt đối đặt lại thư mục kể cả khi trước đó không biết (`git -C "$X" -C /abs …`, review #438)
+        gdir = posixpath.normpath(posixpath.join(gdir or "", d)) if known and (gdir or d.startswith("/")) else None
     return gdir
 
 
@@ -4440,43 +4476,181 @@ def _sets_home(argv: List[str]) -> bool:
     return head in HOME_PERSIST_HEADS
 
 
-def _commands_with_cwd(tokens: List[str], start: Optional[str]) -> List[Tuple[List[str], Optional[str]]]:
-    """Mỗi lệnh đơn kèm thư mục nó chạy: `cd`/`pushd` dời thư mục; `(`…`)` và `$(`…`)` là subshell — ra khỏi đó
-    thì về thư mục cũ (`(cd ../b && git pull); git commit` vẫn commit ở chỗ cũ). `popd`/đích không rõ → None.
-    `CDPATH` có trong môi trường hay được đặt trong lệnh → `cd` tương đối là không rõ (D-106)."""
-    out: List[Tuple[List[str], Optional[str]]] = []
-    stack: List[Optional[str]] = []
-    here: Optional[str] = start
+def _enterable_dir(path: Optional[str]) -> bool:
+    """Thư mục có thật và vào được lúc guard kiểm — `cd` tới đó gần như chắc thành công (đặt `OLDPWD`)."""
+    return bool(path) and os.path.isdir(str(path)) and os.access(str(path), os.X_OK)
+
+
+def _is_cd_back(n: List[str]) -> bool:
+    """`cd -` (cả `cd -- -`, cờ `-P`/`-L` đứng trước): bash `cd "$OLDPWD"` — thư mục KHÔNG BIẾT (AUD-SEC-466: OLDPWD
+    đổi qua gán tiền tố `OLDPWD=X cd -`, `PWD=X` trước `cd`, `false && cd -`… guard không theo dõi chắc được)."""
+    return n[:1] == ["cd"] and _cd_operands(n[1:])[0] == ["-"]
+
+
+Cands = Tuple[Optional[str], ...]  # thư mục ứng viên của một lệnh (T-3672); None = không biết (D-106)
+CwdSnap = Tuple[Cands, Cands]  # (ứng viên, ứng viên còn lại nếu `cd` trước đó hỏng)
+# Mảnh của token tách lệnh (shlex gom `);`, `&\n`, `&&(`): xử lý theo thứ tự
+SEP_PIECE_RE = re.compile(r"\|\||&&|\|&|;;&?|;&|[;&|\n()]")
+# Từ mở/đóng lệnh ghép (đứng đầu lệnh): nhóm `{ … }` hay khối điều khiển đứng trong ống/nền chạy ở shell con
+CD_OPEN_WORDS = frozenset({"{", "if", "while", "until", "for", "select", "case"})
+CD_CLOSE_WORDS = frozenset({"}", "fi", "done", "esac"})
+# Lệnh có thể xoá/dời thư mục mà `cd` sau đó tới (AUD-SEC-459); `find` chỉ khi có hành động xoá/chạy lệnh
+CD_GONE_HEADS = frozenset({"rm", "rmdir", "mv", "unlink"})
+FIND_REMOVE_RE = re.compile(r"-(?:delete|exec|execdir|ok|okdir)")
+
+
+def _uniq(*groups: Cands) -> Cands:
+    return tuple(dict.fromkeys(d for g in groups for d in g))
+
+
+def _gone_paths(n: List[str], cands: Cands) -> List[Optional[str]]:
+    """Đường lệnh `n` có thể xoá/dời (`rm`/`rmdir`/`mv`/`unlink`: mọi toán hạng; `find -delete|-exec`: thư mục gốc),
+    giải theo mọi thư mục ứng viên; biến/glob/thư mục không biết → None (mọi `cd` sau đó có thể hỏng)."""
+    words = _cd_operands(n[1:])[0]  # bỏ chuyển hướng (`2>/dev/null`) và `-P`/`-L` của `find`
+    if n[:1] == ["find"]:
+        roots = list(itertools.takewhile(lambda t: not t.startswith(("-", "(", "!")), words))
+        ops = (roots or ["."]) if any(FIND_REMOVE_RE.fullmatch(t) for t in n) else []
+    elif n[:1] and n[0] in CD_GONE_HEADS:
+        ops = [t for t in words if not t.startswith("-")]
+    else:
+        return []
+    out: List[Optional[str]] = []
+    for t, c in itertools.product(ops, cands):
+        rel = not t.startswith(("/", "~"))
+        unknown = "$" in t or bool(re.search(r"[*?\[]", t)) or (rel and c is None)
+        out.append(None if unknown else posixpath.normpath(posixpath.join(c or "/", posixpath.expanduser(t))))
+    return out
+
+
+class _CwdWalk:
+    """Đi qua các lệnh đơn theo ngữ nghĩa bash, giữ TẬP thư mục mỗi lệnh có thể chạy (T-3672, thay nhánh `cd` hỏng
+    của D-342). `cd T` chắc thành công (T vào được lúc kiểm — `isdir` trên đường THÔ như bash: `cd /khong-co/..` hỏng —
+    và không bị lệnh trước xoá/dời) → {T}. Có thể hỏng → {T}, còn thư mục cũ được giữ ở `fail` tới khi chuỗi `&&` dừng:
+    `;`/xuống dòng/`||`/`&` gộp lại (`cd T || exit|return` thì không — nhánh hỏng đã thoát); `!`/`until` trước `cd`
+    gộp ngay. `cd` trong ống (`|`, `|&`), nền (`&` cả danh sách `&&`/`||` của nó) hay `( … )` chạy ở shell con — không
+    đổi tập của lệnh sau. Đích không biết (biến, `cd -` — AUD-SEC-466, `CDPATH`, `popd`) → None như D-106;
+    `shopt -s cdable_vars` (hay `BASHOPTS`): `cd` hỏng thử `$T` → thêm None."""
+
+    def __init__(self, start: Optional[str]) -> None:
+        self.cands: Cands = (start,)
+        self.fail: Cands = ()
+        self.cdpath = bool(os.environ.get("CDPATH"))
+        self.cdable = "cdable_vars" in os.environ.get("BASHOPTS", "")
+        self.home = False
+        self.gone: List[Optional[str]] = []
+        # (loại `(`/`{`, trạng thái lúc mở, đầu danh sách bên ngoài, HOME, nhóm đứng sau ống)
+        self.frames: List[Tuple[str, CwdSnap, CwdSnap, bool, bool]] = []
+        self.lstart: CwdSnap = self.snap()  # đầu danh sách `&&`/`||` đang đi (nền `&` trả về đây)
+        self.piped = False  # đơn vị đang gom đứng sau `|`
+        self.out: List[Tuple[List[str], Cands]] = []
+
+    def snap(self) -> CwdSnap:
+        return self.cands, self.fail
+
+    def restore(self, s: CwdSnap) -> None:
+        self.cands, self.fail = s
+
+    def merge(self) -> None:
+        self.cands, self.fail = _uniq(self.cands, self.fail), ()
+
+    def sure(self, n: List[str], c: Optional[str], t: str) -> bool:
+        raw = posixpath.join(c or "/", posixpath.expanduser(_cd_operands(n[1:])[0][0]))
+        gone = any(g is None or t == g or t.startswith(g.rstrip("/") + "/") for g in self.gone)
+        return _enterable_dir(raw) and not gone
+
+    def moves(self, n: List[str]) -> Tuple[Cands, Cands]:
+        """(ứng viên sau `cd`/`pushd`, ứng viên còn ở thư mục cũ nếu nó hỏng)."""
+        new: List[Optional[str]] = []
+        fail: List[Optional[str]] = []
+        for c in self.cands:
+            t = _cd_target(n, c, self.cdpath, self.home)
+            new.append(t)
+            if t is not None and not self.sure(n, c, t):
+                fail.append(c)
+                new += [None] if self.cdable else []
+        return _uniq(tuple(new)), _uniq(tuple(fail))
+
+    def apply(self, n: List[str], argv: List[str]) -> None:
+        lead = set(itertools.takewhile(lambda t: t in SHELL_KEYWORDS, argv))
+        fail: Cands = ()
+        if _is_cd_back(n) or n[:1] == ["popd"]:
+            new: Cands = (None,)
+        elif n[:1] in (["cd"], ["pushd"]):
+            new, fail = self.moves(n)
+        else:
+            self.gone += _gone_paths(n, self.cands)
+            new = self.cands
+        if lead & {"!", "until"}:  # `! cd T && x`: x chạy khi `cd` hỏng
+            new, fail = _uniq(new, self.cands), ()
+        self.cands, self.fail = new, _uniq(self.fail, fail)
+
+    def command(self, cur: List[str], nxt: str) -> None:
+        before = self.snap()
+        head = next((t for t in cur if t != "!"), "")
+        if head in CD_OPEN_WORDS:
+            self.frames.append(("{", before, self.lstart, self.home, self.piped))
+            self.lstart, self.piped, self.fail = before, False, ()
+        self.cdpath = self.cdpath or _sets_cdpath(cur)
+        self.home = self.home or _sets_home(cur)
+        self.cdable = self.cdable or any("cdable_vars" in t for t in cur)
+        self.apply(normalize(cur), cur)
+        self.out.append((list(cur), _uniq(tuple(_run_dir(cur, c) for c in self.cands))))
+        unit, piped = before, self.piped
+        if head in CD_CLOSE_WORDS and self.frames and self.frames[-1][0] == "{":
+            _, unit, self.lstart, _, piped = self.frames.pop()
+            self.fail = _uniq(unit[1], self.fail)
+        if piped or nxt in ("|", "|&"):  # đơn vị chạy trong ống: shell con
+            self.restore(unit)
+
+    def sep(self, p: str, peek: List[str]) -> None:
+        self.piped = p in ("|", "|&")
+        if self.piped or p == "&&":
+            return
+        if p == "(":
+            self.frames.append(("(", self.snap(), self.lstart, self.home, False))
+            self.fail = ()
+            self.lstart = self.snap()
+        elif p == ")":
+            if self.frames and self.frames[-1][0] == "(":
+                _, s, self.lstart, self.home, _ = self.frames.pop()
+                self.restore(s)
+            else:  # `)` lẻ (mẫu `case`): không biết như cũ
+                self.restore(((None,), ()))
+        elif p == "||":
+            self.fail = () if peek[:1] in (["exit"], ["return"]) else self.fail
+            self.merge()
+        elif p == "&":  # cả danh sách `&&`/`||` chạy nền
+            self.restore(self.lstart)
+        else:  # `;`, xuống dòng, `;;`
+            self.merge()
+            self.lstart = self.snap()
+
+
+def _commands_with_cwds(tokens: List[str], start: Optional[str]) -> List[Tuple[List[str], Cands]]:
+    """Mỗi lệnh đơn kèm TẬP thư mục nó có thể chạy (`_CwdWalk`, T-3672); phần tử đầu là nhánh mọi `cd` thành công.
+    `(`…`)`, `$(`…`)`, `<(`…`)` là subshell — ra khỏi đó thì về tập cũ (`(cd ../b && git pull); git commit`)."""
+    walk = _CwdWalk(start)
     cur: List[str] = []
-    cdpath = bool(os.environ.get("CDPATH"))
-    home = False
-
-    def flush() -> None:
-        nonlocal here, cdpath, home
-        if cur:
-            n = normalize(cur)
-            cdpath = cdpath or _sets_cdpath(cur)
-            home = home or _sets_home(cur)
-            if n[:1] in (["cd"], ["pushd"]):
-                here = _cd_target(n, here, cdpath, home)
-            elif n[:1] == ["popd"]:
-                here = None
-            out.append((list(cur), _run_dir(cur, here)))
-            cur.clear()
-
-    hstack: List[bool] = []  # `HOME` đổi trong `( … )` chỉ có hiệu lực trong subshell đó
-    for t in tokens:
+    for i, t in enumerate(tokens):
         if _is_punct(t) and not _is_redirect(t):
-            flush()
-            stack.extend([here] * t.count("("))
-            hstack.extend([home] * t.count("("))
-            for _ in range(t.count(")")):
-                here = stack.pop() if stack else None
-                home = hstack.pop() if hstack else home
+            pieces = SEP_PIECE_RE.findall(t)
+            if cur:
+                walk.command(cur, pieces[0] if pieces else "")
+                cur = []
+            for k, p in enumerate(pieces):
+                walk.sep(p, tokens[i + 1 : i + 2] if k == len(pieces) - 1 else [])
         else:
             cur.append(t)
-    flush()
-    return out
+    if cur:
+        walk.command(cur, "")
+    return walk.out
+
+
+def _commands_with_cwd(tokens: List[str], start: Optional[str]) -> List[Tuple[List[str], Optional[str]]]:
+    """Mỗi lệnh đơn kèm thư mục của nhánh mọi `cd` thành công (`_commands_with_cwds`): `cd`/`pushd` dời thư mục,
+    `popd`/`cd -`/đích không rõ → None (AUD-SEC-466), `CDPATH` → `cd` tương đối không rõ
+    (D-106); `cd` trong ống/nền/subshell không dời. Luật đích ghi xét MỌI ứng viên (`_cwd_scan`)."""
+    return [(argv, cands[0]) for argv, cands in _commands_with_cwds(tokens, start)]
 
 
 def normalize(argv: List[str]) -> List[str]:
@@ -7864,6 +8038,9 @@ def hook_bypass(
         return f"lệnh đặt `{hit}` (tắt hook của khung)"
     if _git_hooks_off(n):
         return "tắt git hook của dự án (`core.hooksPath`) — bỏ qua hook của dự án"
+    rewrite = _git_config_rewrite_why(n)
+    if rewrite:
+        return rewrite
     key = _git_exec_config(n, argv, env) if n[:1] == ["git"] else ""
     if key and GIT_APPENDED_KEY_RE.match(key):
         return (
@@ -7884,6 +8061,7 @@ GIT_EXEC_KEY_RE = re.compile(
     r"core\.(fsmonitor|sshcommand|gitproxy|pager|editor|askpass|alternaterefscommand)|sequence\.editor"
     r"|diff\.external|pager\..+|alias\..+|protocol(\..+)?\.allow|gpg(\..+)?\.(program|defaultkeycommand)"
     r"|sendemail\.(\w*cmd|smtpserver)|init\.templatedir|uploadpack\.packobjectshook|submodule\..+\.update|delta\.pager"
+    r"|gc\.recentobjectshook|interactive\.difffilter|imap\.tunnel|instaweb\.httpd"  # AUD-SEC-461, git-config(1) 2.43.0
     r"|.+\.(textconv|clean|smudge|process|driver|cmd|command|program|helper|uploadpack|receivepack|path)",
     re.I,
 )
@@ -7946,16 +8124,78 @@ def _git_config_file(n: List[str]) -> str:
     """Tệp cấu hình mà `git config -f/--file <tệp>` ghi (`.git/config` → đích ghi hàng rào); rỗng nếu không."""
     if n[:2] != ["git", "config"]:
         return ""
-    for k, a in enumerate(n[2:-1], start=2):
-        if a in ("-f", "--file"):
-            return n[k + 1]
-    return next((a.split("=", 1)[1] for a in n[2:] if a.startswith("--file=")), "")
+    found = ""  # git ghi vào `--file` CUỐI (review #438: `--file <trần>/config --file .git/config`)
+    for k, a in enumerate(n[2:], start=2):
+        if a in ("-f", "--file") and k + 1 < len(n):
+            found = n[k + 1]
+        elif a.startswith("--file="):
+            found = a.split("=", 1)[1]
+    return found
+
+
+def _git_config_edit(n: List[str]) -> bool:
+    """`git config -e|--edit` (cả viết tắt `--ed`, cụm cờ ngắn có `e`) hay lệnh con `git config edit`: trình soạn thảo
+    ghi nội dung tuỳ ý vào tệp cấu hình — luật khoá không thấy (AUD-SEC-452)."""
+    args = list(itertools.takewhile(lambda a: a != "--", n[2:]))
+    pos = [a for a in args if not a.startswith("-")]  # thô: tên tệp của `-f X` cũng vào đây → xét hai chỗ đầu
+    return "edit" in pos[:2] or any(
+        _long_match(a, ("--edit",)) or re.fullmatch(r"-[A-Za-z]*e[A-Za-z]*", a) for a in args
+    )
 
 
 def _git_exec_value_unsafe(key: str, value: str) -> bool:
     """Giá trị đặt cho khoá chạy lệnh có thể chạy lệnh tuỳ ý: chỉ giá trị khớp nguyên văn `GIT_SAFE_VALUES` là an toàn."""
     v = value.strip()
     return not any(k.fullmatch(key) and ok.fullmatch(v) for k, ok in GIT_SAFE_VALUES)
+
+
+# AUD-SEC-456: section mà `git config --remove-section|--rename-section` (cả lệnh con `remove-section|rename-section`)
+# xoá/dời đi là bỏ khoá bảo vệ — `core` (hooksPath, khoá chạy lệnh), `include`/`includeIf` (tệp có thể đặt hooksPath),
+# `alias`. Đích của `--rename-section` thêm khoá vào section mới: khoá chạy lệnh nằm trong section có tên con
+# (`filter.x.clean`, `remote.x.uploadpack`) hay section riêng (`credential.helper`, `core.*`) → chỉ cho đích không tên
+# con thuộc danh sách dưới (không có khoá chạy lệnh trong git-config(1)); tên là biến/glob → không biết, chặn. `gc` bị
+# loại (AUD-SEC-461: `gc.recentObjectsHook` chạy lệnh — đối chiếu `git help --config` của git 2.43.0).
+GIT_CONFIG_GUARDED_SECTIONS = frozenset({"core", "include", "includeif", "alias"})
+GIT_CONFIG_RENAME_SAFE = frozenset(
+    "user author committer color push pull status log i18n column advice rerere pack tag fetch".split()
+)
+GIT_CONFIG_INCLUDE_KEY_RE = re.compile(r"include\.path|includeif\..+\.path", re.I)
+
+
+def _git_config_rewrite_why(n: List[str]) -> str:
+    """`git config --edit` (mọi phạm vi: dự án, `--global`, `-C <repo trần>` — AUD-SEC-455: trình soạn thảo ghi cấu
+    hình luật khoá không thấy) và xoá/đổi tên section chứa khoá bảo vệ, `--unset` khoá include (AUD-SEC-456)."""
+    if n[:2] != ["git", "config"]:
+        return ""
+    if _git_config_edit(n):
+        return "`git config --edit`: trình soạn thảo ghi cấu hình git guard không đọc (khoá chạy lệnh, `core.hooksPath`) — bỏ qua hook của dự án (AUD-SEC-455)"
+    opts = [a.partition("=")[0] for a in n[2:] if a.startswith("--")]
+    pos = _positionals(n[2:], GIT_CONFIG_VALUE_OPTS)
+    sub = pos[0] if pos[:1] and pos[0] in ("remove-section", "rename-section", "unset") else ""
+    names = pos[1:] if sub else pos
+    remove = sub == "remove-section" or any(_long_match(o, ("--remove-section",)) for o in opts)
+    rename = sub == "rename-section" or any(_long_match(o, ("--rename-section",)) for o in opts)
+    unset = sub == "unset" or bool(set(n) & GIT_CONFIG_UNSET) or any(_long_match(o, ("--unset-all",)) for o in opts)
+
+    def unknown(name: str) -> bool:
+        return bool(re.search(r"[$`*?\[\\]", name))
+
+    def guarded(name: str) -> bool:
+        return unknown(name) or name.split(".", 1)[0].lower() in GIT_CONFIG_GUARDED_SECTIONS
+
+    hit = ""
+    if (remove or rename) and names[:1] and guarded(names[0]):
+        hit = names[0]
+    elif rename and names[1:2] and (unknown(names[1]) or names[1].lower() not in GIT_CONFIG_RENAME_SAFE):
+        hit = names[1]
+    elif unset and names[:1] and (unknown(names[0]) or GIT_CONFIG_INCLUDE_KEY_RE.fullmatch(names[0])):
+        hit = names[0]
+    if not hit:
+        return ""
+    return (
+        f"`git config` xoá/đổi tên section hay khoá bảo vệ (`{hit}`: hooksPath, khoá chạy lệnh, alias, include)"
+        " — bỏ qua hook của dự án (AUD-SEC-456)"
+    )
 
 
 def _git_hooks_off(n: List[str]) -> bool:
@@ -8066,6 +8306,12 @@ def _wget_outputs(args: List[str]) -> List[str]:
 def _rsync_dest(args: List[str]) -> List[str]:
     pos = _positionals(args, REMOTE_VALUE_FLAGS)
     return pos[-1:] if len(pos) >= 2 and ":" not in pos[-1] else []
+
+
+def _scp_dest(args: List[str]) -> List[str]:
+    """`scp [cờ] nguồn… đích`: đích cục bộ (không `host:`/`scp://`) bị ghi như `cp` (AUD-SEC-449, review #438)."""
+    pos = _positionals(args, COPY_VALUE_OPTS["scp"])
+    return pos[-1:] if len(pos) >= 2 and not REMOTE_SPEC_RE.match(pos[-1]) else []
 
 
 def _patch_targets(args: List[str]) -> List[str]:
@@ -8191,6 +8437,29 @@ def _tar_dest(args: List[str]) -> List[str]:
     return _flag_values(args, ("-C", "--directory")) if extract else []
 
 
+def _extract_here(n: List[str]) -> List[str]:
+    """Mọi thư mục lệnh giải nén ghi vào, cả đích ngầm `.` = thư mục đang đứng (AUD-SEC-458/462). `tar|gtar|bsdtar`
+    đọc cờ theo `_tar_opts` (chữ ăn giá trị dừng cụm: `-xfO a` là archive `O`, không phải ra stdout; `-xC d`,
+    `--directory=d`, kiểu cũ `xfC a d`), trừ ra stdout (`-O`, `--to-stdout`, `--to-command`); `unzip` (`-P -d` là mật
+    khẩu `-d`), `7z x|e`, `cpio -i`, `jar x`, `python -m zipfile -e` theo `_unpack_dirs`; `pax -r` (`_pax_dirs`)."""
+    name, args = (n[0], n[1:]) if n else ("", [])
+    if name in TAR_NAMES:
+        keys = {k for k, _ in _tar_opts(args)}
+        return [] if keys & {"O", "to-stdout", "to-command"} else _tar_extract_dirs(args)
+    return _pax_dirs(args) if name == "pax" else _unpack_dirs(name, args)
+
+
+PAX_SHORT_VALUE = "bfopsxBEGTU"  # cờ ngắn của pax(1) POSIX ăn một giá trị
+
+
+def _pax_dirs(args: List[str]) -> List[str]:
+    """`pax -r` (đọc) giải nén vào thư mục đang đứng; `-r -w` (chép) ghi vào toán hạng cuối; không `-r` → không ghi."""
+    flags, pos, _ = _parse_opts(args, PAX_SHORT_VALUE, ())
+    if "-r" not in flags:
+        return []
+    return pos[-1:] if "-w" in flags else ["."]
+
+
 UNIQ_VALUE_OPTS = ("-f", "-s", "-w", "--skip-fields", "--skip-chars", "--check-chars")
 
 
@@ -8209,6 +8478,7 @@ FILE_WRITERS: Dict[str, Callable[[List[str]], List[str]]] = {
     "curl": _curl_outputs,
     "wget": _wget_outputs,
     "rsync": _rsync_dest,
+    "scp": _scp_dest,
     "patch": _patch_targets,
     "sort": lambda a: _flag_values(a, ("-o", "--output")),
     "awk": _awk_targets,
@@ -8432,7 +8702,9 @@ def _write_asks(n: List[str], argv: List[str], root: str, cwd: Optional[str] = N
     asks = _perm_asks(n, argv, root, cwd) if n and n[0] in PERM_CMDS else []
     cfg = _git_config_file(n)
     find_evidence = _find_evidence_targets(n[1:]) if n[:1] == ["find"] else []
-    targets = [*write_targets(n, argv), *([cfg] if cfg else [])]
+    # AUD-SEC-458: giải nén không nêu thư mục ghi vào thư mục đang đứng — xét như `-C .`/`-d .` (chỉ ở đây: `.` không
+    # là đích của luật tệp-vừa-ghi-rồi-chạy, ADR-0066)
+    targets = [*write_targets(n, argv), *([cfg] if cfg else []), *_extract_here(n)]
     found = [x for t in find_evidence for x in _where(t, root, cwd) if t not in targets]
     asks += [EVIDENCE_WHY.format(t) for t in found if _target_kind(t, root) == "evidence"]
     asks += [FENCE_WHY.format(t) for t in found if _is_fence(t, root)]
@@ -8447,13 +8719,23 @@ def _write_asks(n: List[str], argv: List[str], root: str, cwd: Optional[str] = N
         if _global_git_config(x)
     ]
     # AUD-SEC-439: tệp gitfile `.git` (`gitdir: …`) trỏ repo sang thư mục git khác — ghi (không xoá) như `.git/config`
+    # AUD-SEC-449: đích là THƯ MỤC của Git dir có thật (`cp f gd/`, `tar -xf a -C gd`, `rsync -a d/ gd/`) — như `.git`
     if not n or n[0] not in REUSE_DELETERS and n[:2] != ["git", "rm"]:
-        asks += [GIT_HOOK_WHY.format(t) for t in targets if any(_gitfile_target(x, root) for x in _where(t, root, cwd))]
+        asks += [
+            GIT_HOOK_WHY.format(t)
+            for t in targets
+            if any(_gitfile_target(x, root) or _git_dir_target(x, root) for x in _where(t, root, cwd))
+        ]
+    # AUD-SEC-452: `git config --file <Git dir>/config <khoá>` như `git -C <Git dir> config <khoá>` — luật khoá xét
+    # (khoá chạy lệnh/hooksPath vẫn chặn); `--edit` hay tệp cũng là đích ghi khác thì vẫn như ghi thô
+    keyed = (
+        set(_where(cfg, root, cwd)) if cfg and cfg not in write_targets(n, argv) and not _git_config_edit(n) else set()
+    )
     for target in (x for t in targets for x in _where(t, root, cwd)):
         kind = _target_kind(target, root)
         if _is_fence(target, root):
             asks.append(FENCE_WHY.format(target))
-        elif target and _git_hook_target(target, root):
+        elif target and _git_hook_target(target, root, target in keyed):
             asks.append(GIT_HOOK_WHY.format(target))
         elif kind == "secret":
             asks += [] if build_local_secret(target, root, cwd) else [f"ghi file bí mật qua Bash: {target}"]
@@ -8640,13 +8922,17 @@ def _unpack_dirs(name: str, args: List[str]) -> List[str]:
         return (_flag_values(args, ("-C", "--dir")) or ["."]) if extract else []
     if name in SEVEN_ZIP:
         return (_flag_values(args, ("-o",)) or ["."]) if _positionals(args)[:1] in (["x"], ["e"]) else []
+    if name == "ar":  # `ar x|-xv a.a [thành viên…]` giải vào thư mục đang đứng, `--output D` (AUD-SEC-462)
+        key = next((a for a in args if not a.startswith("--")), "").lstrip("-")
+        return (_flag_values(args, ("--output",)) or ["."]) if re.fullmatch(r"[A-Za-z]*x[A-Za-z]*", key) else []
     if name != "cpio":
         return []
     flags = _short_flags([a for i, a in enumerate(args) if not (i and args[i - 1] in CPIO_VALUE_OPTS)])
     dirs = _flag_values(args, ("-D", "--directory"))
     if "p" in flags or "--pass-through" in args:
         return dirs + _positionals(args, CPIO_VALUE_OPTS)[-1:]
-    return (dirs or ["."]) if "i" in flags or "--extract" in args else []
+    listing = "t" in flags or bool({"--list", "--to-stdout"} & set(args))  # `cpio -it`: chỉ liệt kê (AUD-SEC-462)
+    return (dirs or ["."]) if ("i" in flags or "--extract" in args) and not listing else []
 
 
 def _merge_renamed(n: List[str]) -> bool:
@@ -8661,8 +8947,8 @@ def _merge_renamed(n: List[str]) -> bool:
 # Cờ ngắn của GNU tar ăn một giá trị (trong cụm `-xC d`: phần còn lại của cụm, không thì token kế; kiểu cũ `xfC a d`:
 # token kế theo thứ tự chữ). Cờ dài viết tắt được (getopt): tiền tố ≥ 3 chữ của tên dưới (`--dir=` = `--directory=`).
 TAR_SHORT_VALUE = "bCfFgHIKLNTVX"
-TAR_LONG_NAMES = ("directory", "extract", "one-top-level", "transform", "xform")
-TAR_LONG_VALUE = ("directory", "file", "transform", "xform")
+TAR_LONG_NAMES = ("directory", "extract", "one-top-level", "transform", "xform", "to-stdout", "to-command")
+TAR_LONG_VALUE = ("directory", "file", "transform", "xform", "to-command")
 TAR_SUFFIX_RE = re.compile(r"\.(?:tar(?:\.\w+)?|t[gbx]z|tbz2|taz|tz2?|tlz|tzst)$")
 
 
@@ -9328,13 +9614,179 @@ def _pending_git_metadata(path: str) -> bool:
     return GIT_METADATA_TAIL_RE.search("/" + _norm_path(path).lstrip("/")) is not None
 
 
-def _pending_git_write_asks(commands: List[Tuple[List[str], Optional[str]]]) -> List[str]:
-    """AUD-SEC-446: repo trần tạo trong cùng lệnh chưa có HEAD; tách việc tạo khỏi ghi thô đuôi metadata."""
+# AUD-SEC-452: cờ không nhận giá trị / tuỳ chọn nhận giá trị ở token kế của `git init|clone` (git-init(1), git-clone(1))
+# — để tìm thư mục repo trần được tạo; gặp cờ khác (viết tắt, cụm cờ ngắn) → thư mục không biết (chiều chặt)
+BARE_CREATE_FLAGS = frozenset(
+    "--bare --mirror -q --quiet -n --no-checkout -l --local --no-hardlinks -s --shared --progress --no-tags"
+    " --single-branch --no-single-branch -v --verbose --no-reject-shallow --reject-shallow --remote-submodules"
+    " --no-remote-submodules --shallow-submodules --no-shallow-submodules --sparse --also-filter-submodules"
+    " --recurse-submodules --no-recurse-submodules".split()  # `--recurse-submodules[=<pathspec>]`: giá trị chỉ qua `=`
+)
+BARE_CREATE_VALUE_OPTS = frozenset(
+    "-b --initial-branch --branch --object-format --ref-format --template --separate-git-dir -o --origin -u"
+    " --upload-pack --reference --reference-if-able --depth -c --config --filter -j --jobs --shallow-since"
+    " --shallow-exclude --server-option --bundle-uri".split()
+)
+# Lệnh mà chuỗi có repo trần vừa tạo vẫn được khớp đích theo đúng thư mục repo đó (AUD-SEC-452); lệnh khác (ln/mv/cp/rm,
+# shell lồng, trình thông dịch, biến làm tên lệnh…) có thể dời/nhân bản/trỏ thư mục mới tạo → mọi đuôi metadata (#435)
+PENDING_BARE_PLAIN_HEADS = frozenset("printf echo cat tee touch mkdir true false test [ ls pwd cd head tail wc".split())
+PENDING_BARE_GIT_SUBS = frozenset("init clone status log diff show add".split())
+
+
+def _bare_git_created(argv: List[str], here: Optional[str]) -> Optional[str]:
+    """Thư mục repo trần lệnh `argv` tạo (`git init --bare X`, `git clone --bare|--mirror U X`, kể cả `-C`); không
+    tạo → None; tạo mà không biết chắc chỗ (biến, cờ lạ, `GIT_DIR`, clone không nêu thư mục) → ''."""
+    if not _creates_bare_git_dir(argv):
+        return None
+    s = _strip_prefixes(argv)
+    base = _git_dir(argv, here)
+    if (
+        base is None
+        or any("GIT_DIR" in t for t in argv)
+        or {"--git-dir", "--work-tree"} & {o for o, _ in _git_globals(s)}
+    ):
+        return ""
+    n = normalize(argv)
+    pos: List[str] = []
+    args = iter(n[2:])
+    for a in args:
+        if a == "--":
+            pos += list(args)
+        elif a in BARE_CREATE_VALUE_OPTS:
+            next(args, None)
+        elif a.startswith("-") and not (a in BARE_CREATE_FLAGS or a.startswith("--") and "=" in a):
+            return ""
+        elif not a.startswith("-"):
+            pos.append(a)
+    want = 1 if n[1] == "init" else 2
+    if len(pos) > want or (n[1] == "clone" and len(pos) < want):
+        return ""
+    d = pos[want - 1] if len(pos) == want else "."
+    if re.search(r"[$`*?\[\\]", d) or (d.startswith("~") and not HOME_TILDE_RE.match(d)):
+        return ""
+    return posixpath.join(_git_C_raw(argv, here), posixpath.expanduser(d))
+
+
+def _git_C_raw(argv: List[str], here: Optional[str]) -> str:
+    """Thư mục của `git -C …` dạng THÔ chưa chuẩn hoá (AUD-SEC-467: `-C lnk init --bare ../F` là lnk vật lý rồi `..`
+    — `_phys_dir` giải khi so)."""
+    raw = here or "/"
+    for c in _git_C_dirs(argv):
+        raw = posixpath.join(raw, posixpath.expanduser(c))
+    return raw
+
+
+def _phys_dir(path: str) -> str:
+    """AUD-SEC-467: khoá so thư mục vật lý của đường tuyệt đối CHƯA chuẩn hoá — realpath (symlink giải trước `..` như
+    kernel) rồi casefold (hệ tệp không phân biệt hoa/thường: `Fq` = `fq`); `..` sau phần chưa có lúc kiểm → '' (không
+    chắc — khớp mọi đuôi metadata như #435)."""
+    parts = path.split("/")
+    if any(part == ".." and not os.path.isdir("/".join(parts[:k]) or "/") for k, part in enumerate(parts)):
+        return ""
+    return _realpath_safe(path).casefold()
+
+
+def _pending_bare(cmd: str, commands: List[Tuple[List[str], Optional[str]]]) -> Optional[FrozenSet[str]]:
+    """Repo trần tạo trong chuỗi (AUD-SEC-446) — tập thư mục; phần tử '' = khớp mọi đuôi metadata như #435 (không biết
+    thư mục, hay chuỗi có lệnh ngoài `PENDING_BARE_PLAIN_HEADS`); None = không tạo."""
+    created = {d for argv, here in commands if (d := _bare_git_created(argv, here)) is not None}
+    created |= _fake_git_dirs(commands)
+    return frozenset(created | ({""} if created and _pending_bare_broad(cmd, commands) else set())) or None
+
+
+def _fake_git_dirs(commands: List[Tuple[List[str], Optional[str]]]) -> Set[str]:
+    """AUD-SEC-454: thư mục D mà chuỗi tự dựng thành Git dir — ghi `D/HEAD` hay tạo `D/objects` (`mkdir`) — để ghi
+    `D/config`/`D/hooks/*` trong cùng lệnh xét như ghi metadata repo trần đang chờ (không theo thứ tự: `config` ghi trước
+    `HEAD` vẫn thành Git dir). Thư mục không biết (`here` None với đường tương đối, biến) → '' (mọi đuôi metadata)."""
+    out: Set[str] = set()
+    for argv, here in commands:
+        n = normalize(argv)
+        out |= _copied_git_dirs(n, here)
+        paths = [(p, "HEAD") for p in write_targets(n, argv)]
+        if n[:1] == ["mkdir"]:
+            paths += [(p, "objects") for p in _positionals(n[1:], ("-m", "--mode", "--context"))]
+        for path, mark in paths:
+            parts = posixpath.expanduser(path).split("/")  # thô: `..`/symlink do `_phys_dir` giải (AUD-SEC-467)
+            for k in [k for k, part in enumerate(parts) if part == mark and (mark == "objects" or k == len(parts) - 1)]:
+                d = "/".join(parts[:k]) or ("/" if path.startswith("/") else ".")
+                unknown = re.search(r"[$`*?\[]", d) or (here is None and not d.startswith("/"))
+                out.add("" if unknown else posixpath.join(here or "/", d))
+    return out
+
+
+GIT_DIR_COPIERS = ("cp", "rsync", "scp")
+
+
+def _copied_git_dirs(n: List[str], here: Optional[str]) -> Set[str]:
+    """AUD-SEC-465: dựng Git dir bằng sao chép — `cp -r .git d`, `cp -a <trần> d`, `rsync -a .git/ d/`, `scp -r` — nguồn
+    tên `.git` hay là Git dir có thật lúc kiểm → đích (đích chưa có) và `đích/<tên nguồn>` (đích đã là thư mục) thành Git
+    dir đang chờ; đích là biến/tương đối khi thư mục không biết → '' (mọi đuôi metadata)."""
+    if not n or n[0] not in GIT_DIR_COPIERS:
+        return set()
+    args = n[1:]
+    t_dir = (_flag_value(args, "-t") or _flag_value(args, "--target-directory")) if n[0] == "cp" else None
+    pos = _positionals(args, COPY_DEST_OPTS if n[0] == "cp" else COPY_VALUE_OPTS[n[0]])
+    srcs, dest = (pos, t_dir) if t_dir else (pos[:-1], pos[-1] if pos else "")
+    out: Set[str] = set()
+    for src in srcs:
+        p = posixpath.normpath(posixpath.expanduser(src))
+        rel = not p.startswith("/")
+        absolute = "" if here is None and rel else _norm_path(posixpath.join(here or "/", p))
+        if posixpath.basename(p) != ".git" and not (absolute and _git_metadata_dir(absolute)):
+            continue
+        d = posixpath.expanduser(dest)
+        if re.search(r"[$`*?\[]", d) or (here is None and not d.startswith("/")):
+            out.add("")
+            continue
+        d = posixpath.join(here or "/", d)
+        out |= {d, posixpath.join(d, posixpath.basename(p))}
+    return out
+
+
+def _pending_bare_broad(cmd: str, commands: List[Tuple[List[str], Optional[str]]]) -> bool:
+    for argv, _ in commands:
+        n = normalize([t for t in argv if t not in SHELL_KEYWORDS])
+        if n[:1] == ["git"] and n[1:2] and n[1] in PENDING_BARE_GIT_SUBS or not n or n[0] in PENDING_BARE_PLAIN_HEADS:
+            continue
+        return True
+    return "$" in cmd or "`" in cmd
+
+
+def _pending_bare_hit(path: str, here: Optional[str], pending: Optional[FrozenSet[str]]) -> bool:
+    """Đích ghi `path` (tính từ `here`) có thể là metadata của repo trần đang chờ tạo (AUD-SEC-446/452): khớp đuôi và
+    tiền tố là thư mục được tạo — hoặc không chắc (thư mục không biết, tiền tố qua symlink, tập có `''`). Chuỗi không
+    có lệnh dời/nhân bản/trỏ thư mục (`_pending_bare_broad`) nên tiền tố khác thư mục được tạo không thành repo đó."""
+    if not pending or not _pending_git_metadata(path):
+        return False
+    p = posixpath.expanduser(path)
+    if "" in pending or re.search(r"[$`*?\[]", p) or (here is None and not p.startswith("/")):
+        return True
+    # AUD-SEC-467: so khoá vật lý (`_phys_dir`) của cả đường thô lẫn đường đã chuẩn hoá — `lnk/../F` khác chữ `deep/F`
+    made = {_phys_dir(c) for c in pending}
+    if "" in made:
+        return True
+    raw = posixpath.join(here or "/", p)
+    for absolute in (raw, _norm_path(raw)):
+        for m in GIT_METADATA_TAIL_RE.finditer(absolute):
+            key = _phys_dir(absolute[: m.start()] or "/")
+            if not key or key in made:
+                return True
+    absolute = _norm_path(raw)
+    return any(  # tiền tố qua symlink (#435)
+        _realpath_safe(absolute[: m.start()] or "/") != (absolute[: m.start()] or "/")
+        for m in GIT_METADATA_TAIL_RE.finditer(absolute)
+    )
+
+
+def _pending_git_write_asks(
+    commands: List[Tuple[List[str], Optional[str]]], pending: Optional[FrozenSet[str]]
+) -> List[str]:
+    """AUD-SEC-446: repo trần tạo trong cùng lệnh chưa có HEAD; tách việc tạo khỏi ghi thô đuôi metadata của nó."""
     return [
         GIT_HOOK_WHY.format(path)
-        for argv, _ in commands
+        for argv, here in commands
         for path in write_targets(normalize(argv), argv)
-        if _pending_git_metadata(path)
+        if _pending_bare_hit(path, here, pending)
     ]
 
 
@@ -9360,17 +9812,29 @@ def _explicit_bare_cwd(command: List[str], cwd: Optional[str]) -> Optional[str]:
     leading = ["git"]
     for flag, value in _git_globals(command):
         if flag == "--bare":
-            return _git_dir(leading, cwd) or ""
+            return _git_dir(leading, cwd) or cwd or ""  # `-C "$X"` chưa giải: thử thư mục ứng viên (AUD-SEC-449)
         if flag == "-C":
             leading.extend((flag, value))
     return None
 
 
-def _bare_git_config_ask(n: List[str], argv: List[str], cwd: Optional[str], env: Dict[str, str]) -> str:
-    """AUD-SEC-446: chặn khóa chạy lệnh có sẵn trong config repo trần; `git config` vẫn đọc được để chẩn đoán."""
+def _bare_git_config_ask(
+    n: List[str], argv: List[str], cwd: Optional[str], env: Dict[str, str], dirs: FrozenSet[str] = frozenset()
+) -> str:
+    """AUD-SEC-446: chặn khóa chạy lệnh có sẵn trong config repo trần; `git config` vẫn đọc được để chẩn đoán.
+    AUD-SEC-449: thư mục chạy không biết (`cd "$X"`, `git -C "$X"`) → thử như D-106 ở mọi thư mục đã biết của quyết
+    định (`dirs`: gốc, thư mục bắt đầu, đích `cd` đã giải) — repo trần nào trong đó có khoá nguy hiểm thì chặn; gốc dự
+    án có `.git` nên `cd "$X" && git status` vẫn qua."""
     if n[:1] != ["git"] or not n[1:2] or n[1] in ("init", "clone", "config"):
         return ""
-    directory = _git_dir(argv, cwd)
+    known = cwd is not None and _git_dir(argv, cwd) is not None
+    bases = [cwd] if known else sorted({*dirs, *([cwd] if cwd else [])})
+    return next((a for b in bases if b and (a := _bare_git_config_from(argv, b, env))), "")
+
+
+def _bare_git_config_from(argv: List[str], cwd: str, env: Dict[str, str]) -> str:
+    """`_bare_git_config_ask` với thư mục bắt đầu `cwd`; `-C` chưa giải (`$X`) → thử chính `cwd` (ứng viên D-106)."""
+    directory = _git_dir(argv, cwd) or cwd
     command = _strip_prefixes(argv)
     prefix = argv[: len(argv) - len(command)]
     inline = _assign_values(prefix)
@@ -9411,9 +9875,15 @@ def _git_config_read_ask(config: str) -> str:
 
 
 def _scan_command(
-    argv: List[str], root: str, res: Dict[str, object], asks: List[str], cwd: Optional[str] = None
+    argv: List[str],
+    root: str,
+    res: Dict[str, object],
+    asks: List[str],
+    cwd: Optional[str] = None,
+    dirs: FrozenSet[str] = frozenset(),
 ) -> Optional[str]:
-    """Quét một lệnh đơn: thêm câu hỏi vào `asks`, ghi cờ commit (kèm thư mục commit) vào `res`; trả lý do deny nếu phải chặn."""
+    """Quét một lệnh đơn: thêm câu hỏi vào `asks`, ghi cờ commit (kèm thư mục commit) vào `res`; trả lý do deny nếu phải chặn.
+    `dirs`: thư mục đã biết của quyết định (ứng viên khi `cwd` không biết — AUD-SEC-449)."""
     env = _track_env(res, argv)
     n = normalize(argv)
     if not n:  # chỉ chuyển hướng: `exec 3> .env`, `> .env` (review #186 lần 2) — vẫn là ghi
@@ -9435,7 +9905,7 @@ def _scan_command(
     bypass = (
         hook_bypass(argv, n, _track_exports(res, argv, n), env)
         or _git_metadata_creation_ask(n)
-        or _bare_git_config_ask(n, argv, cwd, env)
+        or _bare_git_config_ask(n, argv, cwd, env, dirs)
     )
     if bypass:
         asks.append(f"{bypass}: {' '.join(argv)[:200]}")
@@ -9487,6 +9957,10 @@ class ScanBudget:
         self.extracted: Set[str] = set()
         self.push_no_verify = False  # có lệnh (cả lồng) `git push --no-verify` — cờ cho adapter (AUD-SEC-352)
         self.nested_deny: Tuple[str, str] = ("", "")  # (lý do, mã) của lệnh lồng bị chặn gần nhất — mã đi lên lệnh gốc
+        # AUD-SEC-449: thư mục đã biết trong cả quyết định (ứng viên khi lệnh git chạy ở thư mục không biết) và repo trần
+        # tạo trong cùng lệnh (đi vào shell lồng: `git init --bare X && sh -c 'printf x > X/config'`)
+        self.dirs: Set[str] = set()
+        self.pending_bare: Optional[FrozenSet[str]] = None
         # Đọc bảng alias: ngân sách TỔNG của quyết định gốc — lệnh con của `find -exec` được quét bằng quyết định mới
         # (nested) vẫn tiêu chung, không được thêm ALIAS_SECONDS mỗi lần.
         if not nested or ScanBudget.current_alias is None:
@@ -11251,18 +11725,24 @@ def _fed_ref_why(n: List[str], fed: Fed, shell: bool = False) -> str:
 
 
 def _alias_resolve(
-    n: List[str], g: List[str], gdir: str, env: Dict[str, str], budget: Optional["ScanBudget"]
+    n: List[str],
+    g: List[str],
+    gdir: str,
+    env: Dict[str, str],
+    budget: Optional["ScanBudget"],
+    defined: Optional[AliasTable] = None,
 ) -> Tuple[str, List[str]]:
-    """Mở alias của lệnh git `n` (`g` = argv chưa chuẩn hoá, `env` = biến của lệnh) bằng bảng git dựng ở `gdir`: như
-    `_git_alias_expand`, lệnh con không phải alias → ("", n); lệnh con là file `find -exec {}` tìm thấy (`find
-    update-ref -exec git {} …`) hay không đọc được cấu hình → ("unresolved", [lý do])."""
+    """Mở alias của lệnh git `n` (`g` = argv chưa chuẩn hoá, `env` = biến của lệnh) bằng bảng git dựng ở `gdir` nối
+    thêm alias đặt ở lệnh trước trong cùng chuỗi (`defined`, AUD-SEC-464 — mục sau thắng): như `_git_alias_expand`,
+    lệnh con không phải alias → ("", n); lệnh con là file `find -exec {}` tìm thấy (`find update-ref -exec git {} …`)
+    hay không đọc được cấu hình → ("unresolved", [lý do])."""
     if FIND_FOUND in n[1]:
         return "unresolved", ["lệnh con là file `find` tìm thấy"]
     read = _alias_read_args(g, env)
     table = _git_alias_table(gdir, *read, budget) if read else None
     if table is None:
         return "unresolved", ["không đọc được cấu hình alias của lệnh (biến, lỗi, quá hạn)"]
-    kind, out = _git_alias_expand(n, table)
+    kind, out = _git_alias_expand(n, [*table, *(defined or [])])
     return (kind, out) if kind else ("", n)
 
 
@@ -11277,18 +11757,23 @@ def _git_alias_sources(
     nested: Placed = []
     asks: List[str] = []
     exported: Dict[str, str] = {}
+    defined: AliasTable = []  # alias đặt ở lệnh trước trong chuỗi — bảng của git chưa có lúc kiểm (AUD-SEC-464)
     for c, here in placed:
         s = _strip_prefixes(c)
         _chain_assign(exported, c)
         g, wrapped, fed = _stdin_fed(c, s)
         n = normalize(g)
+        pos = _git_config_write(n)
+        if len(pos) > 1 and pos[0][:6].lower() == "alias.":  # mọi phạm vi/tệp (`--global`, `-f`): chiều chặt
+            defined.append((pos[0][6:], pos[1]))
+            continue
         sub = n[1] if n[:1] == ["git"] and len(n) > 1 else ""
         aliased = bool(sub) and not sub.startswith("-") and sub not in GIT_BUILTINS
         if n[:1] != ["git"] or not (aliased or wrapped):
             continue
         gdir = _git_dir(g, here) or root
         env = {**exported, **_assign_values(c[: len(c) - len(s)])}
-        kind, out = _alias_resolve(n, g, gdir, env, budget) if aliased else ("", n)
+        kind, out = _alias_resolve(n, g, gdir, env, budget, defined) if aliased else ("", n)
         why = "" if not wrapped or kind == "unresolved" else _fed_ref_why(out, fed, kind == "shell")
         asks += [f"{why}: {' '.join(c)[:200]}"] if why else []
         if kind == "git":
@@ -11540,18 +12025,18 @@ def _interp_scripts_at(
     here-string (`python3 <<< '…'`) hay ống (`echo '…' | node`) cũng tính (D-105)."""
     out: List[Tuple[str, Optional[str]]] = []
     stdin_dirs: List[Optional[str]] = []
-    placed = _commands_with_cwd(tokens, cwd)
-    for c, here in placed:
+    placed = _commands_with_cwds(tokens, cwd)  # mọi thư mục ứng viên (T-3672: `cd` có thể hỏng)
+    for c, cands in placed:
         n = _interp_argv(c)  # cả sau lệnh chạy hộ (`uv run python -c …` — AUD-SEC-093)
         if n and INTERP_RE.fullmatch(n[0]):
-            out += [(s, here) for s in _inline_scripts(n)]
+            out += [(s, here) for s in _inline_scripts(n) for here in cands]
         if _stdin_interp(c):
-            stdin_dirs.append(here)
-            out += [(c[i + 1], here) for i, a in enumerate(c[:-1]) if a == "<<<"]
+            stdin_dirs += cands
+            out += [(c[i + 1], here) for i, a in enumerate(c[:-1]) if a == "<<<" for here in cands]
     i, places = 0, [d for _, d in placed]  # dựng một lần: dựng lại mỗi pipeline từng bậc hai (review #361 lượt 2)
     for pipe in pipelines(tokens):
-        for feed, down, here in zip(_pipe_feeds(pipe), pipe[1:], places[i + 1 : i + len(pipe)]):
-            out += [(s, here) for s in feed or [] if _stdin_interp(down)]
+        for feed, down, downs in zip(_pipe_feeds(pipe), pipe[1:], places[i + 1 : i + len(pipe)]):
+            out += [(s, here) for s in feed or [] if _stdin_interp(down) for here in downs]
         i += len(pipe)
     dirs = list(dict.fromkeys(stdin_dirs)) or [cwd]
     return out + [(body, d) for body in _heredoc_scripts(cmd, _stdin_interp, budget) for d in dirs]
@@ -11795,7 +12280,11 @@ def _ipython_nested(cmd: str, tokens: List[str], start: Optional[str]) -> List[T
 
 
 def interp_write_asks(
-    cmd: str, tokens: List[str], root: str, cwd: Optional[str] = None, pending_bare: bool = False
+    cmd: str,
+    tokens: List[str],
+    root: str,
+    cwd: Optional[str] = None,
+    pending_bare: Optional[FrozenSet[str]] = None,
 ) -> List[str]:
     """Script trình thông dịch ghi/xoá file bí mật/cổng/bằng chứng/năng lực agent → hỏi, như Edit/chuyển hướng
     (LOOP-STOP-025: bị chặn ở Edit thì không đổi sang `python -c` để lách). Phân tích tĩnh, chỉ chữ nguyên văn; đích
@@ -11920,7 +12409,7 @@ def _interp_literal_ask(
     hint: bool = True,
     ro: object = False,
     probe: Optional[_WriteProbe] = None,
-    pending_bare: bool = False,
+    pending_bare: Optional[FrozenSet[str]] = None,
 ) -> str:
     """Câu hỏi cho chuỗi `raw` trong script. Là hàng rào/cấu hình git/bí mật/bằng chứng (thử ở mọi thư mục canh khi
     `here` không biết — D-106) → câu mang dấu chặn, TRỪ khi toàn script chỉ gồm thao tác đọc (`ro`, D-105: mặc định
@@ -11937,8 +12426,7 @@ def _interp_literal_ask(
             _gitfile_target(target, root)
             or _global_git_config(target)
             or _git_hook_target(target, root)
-            or pending_bare
-            and _pending_git_metadata(target)
+            or _pending_bare_hit(target, here, pending_bare)
         )
         if not (fence or git_hook or kind in ("secret", "evidence")):
             continue
@@ -12830,6 +13318,55 @@ def _nested_deny_result(res: Dict[str, object], reason: str, budget: ScanBudget)
     return res
 
 
+def _budget_track(
+    budget: ScanBudget, cmd: str, commands: List[Tuple[List[str], Optional[str]]], root: str, cwd: Optional[str]
+) -> Optional[FrozenSet[str]]:
+    """Ghi vào ngân sách của quyết định (dùng chung với shell lồng) thư mục đã biết (AUD-SEC-449) và repo trần tạo trong
+    chuỗi — kể cả ở tầng ngoài (`git init --bare X && sh -c 'printf x > X/config'`); trả repo trần đang chờ của lệnh."""
+    budget.dirs.update({root, *(here for _, here in commands if here), *([cwd] if cwd else [])})
+    # AUD-SEC-453/454: cả lệnh đơn (`sh -c 'git init --bare X'` lồng chỉ có một lệnh; `tee d/HEAD d/config`) — repo trần
+    # tạo ở tầng trong được ghi vào ngân sách để tầng ngoài xét lại sau khi quét lồng (`_late_pending_asks`)
+    pending = _pending_bare(cmd, commands)
+    if budget.pending_bare is not None:
+        broad = frozenset({""}) if _pending_bare_broad(cmd, commands) else frozenset()
+        pending = budget.pending_bare | (pending or frozenset()) | broad
+    budget.pending_bare = pending
+    return pending
+
+
+def _cwd_scan(
+    placed: List[Tuple[List[str], Cands]], root: str, res: Dict[str, object], asks: List[str], dirs: FrozenSet[str]
+) -> str:
+    """Quét từng lệnh đơn (`_scan_command`) ở MỌI thư mục ứng viên của nó (T-3672: `cd` có thể hỏng → cả thư mục cũ,
+    AUD-SEC-457/459); ứng viên đầu (nhánh `cd` thành công) ghi cờ vào `res`, ứng viên khác quét với bản sao cờ —
+    chặt nhất thắng."""
+    for argv, (here, *others) in placed:
+        reason = _scan_command(argv, root, res, asks, here, dirs)
+        for other in others:
+            reason = reason or _scan_command(argv, root, dict(res), asks, other, dirs)
+        if reason:
+            return reason
+    return ""
+
+
+def _late_pending_asks(
+    cmd: str,
+    tokens: List[str],
+    commands: List[Tuple[List[str], Optional[str]]],
+    root: str,
+    cwd: Optional[str],
+    before: Optional[FrozenSet[str]],
+    budget: ScanBudget,
+) -> List[str]:
+    """AUD-SEC-453: repo trần tạo trong shell lồng (`sh -c 'git init --bare X' && printf x > X/config`) chỉ biết sau khi
+    quét lồng — xét lại đích ghi của tầng này với tập đang chờ mới (chiều ngược của AUD-SEC-449)."""
+    late = budget.pending_bare
+    if not late or late == before:
+        return []
+    late = late | (frozenset({""}) if _pending_bare_broad(cmd, commands) else frozenset())
+    return interp_write_asks(cmd, tokens, root, cwd, late) + _pending_git_write_asks(commands, late)
+
+
 def _bash_decision(
     cmd: str, root: str, cwd: Optional[str], depth: int, budget: Optional[ScanBudget], rewrites: int
 ) -> Dict[str, object]:
@@ -12860,10 +13397,12 @@ def _bash_decision(
     if leak:
         res.update(decision="deny", reason=f"Lệnh bị khung chặn ({leak}): {cmd[:300]}")
         return res
-    commands = _commands_with_cwd(tokens, cwd)
-    pending_bare = len(commands) > 1 and any(_creates_bare_git_dir(argv) for argv, _ in commands)
+    placed = _commands_with_cwds(tokens, cwd)
+    commands = [(argv, cands[0]) for argv, cands in placed]
+    pending_bare = _budget_track(budget, cmd, commands, root, cwd)
+    budget.dirs.update(d for _, cands in placed for d in cands if d)  # mọi ứng viên là thư mục đã biết (T-3672)
     asks: List[str] = interp_write_asks(cmd, tokens, root, cwd, pending_bare)
-    asks += _pending_git_write_asks(commands) if pending_bare else []
+    asks += _pending_git_write_asks(commands, pending_bare)
     asks += [REVIEW_FORGE_WHY] if _review_forge_hit(cmd, tokens, cwd, budget) else []
     asks += [STAGE_APPROVE_WHY] if any(_approves_stage(c) for c in split_commands(tokens)) else []
     braces = brace_variants(cmd)
@@ -12875,8 +13414,10 @@ def _bash_decision(
     nested_deny = nested_deny or _scan_glob_rewrites(cmd, tokens, root, cwd, depth, asks, budget, rewrites)
     if nested_deny:
         return _nested_deny_result(res, nested_deny, budget)
+    asks += _late_pending_asks(cmd, tokens, commands, root, cwd, pending_bare, budget)
     asks += _git_config_env_asks(tokens, commands, root)
-    deny_reason = next((r for argv, here in commands if (r := _scan_command(argv, root, res, asks, here))), "")
+    dirs = frozenset(budget.dirs)
+    deny_reason = _cwd_scan(placed, root, res, asks, dirs)
     res.pop("exported_env", None)
     _carry_push_no_verify(res, budget)
     deny_reason = deny_reason or find_root_scan(cmd, root, cwd) or _commit_after_write(commands)
