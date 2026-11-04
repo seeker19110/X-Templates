@@ -1,9 +1,9 @@
 # PROGRESS.md — Khung X-Templates
 
-> Giai đoạn hiện tại: G8 Vận hành & tiến hoá (khung 3.29.0, pha `harden` — D-136) · Cập nhật: 2026-11-03 · Nhánh: main
+> Giai đoạn hiện tại: G8 Vận hành & tiến hoá (khung 3.29.0, pha `harden` — D-136) · Cập nhật: 2026-11-04 · Nhánh: main
 
 ## Đang làm
-- 2026-11-03 **PLAN-upgrade-2026-11-02** (D-304) gần xong: #413…#425 merge (D-311…D-324). T-3633/3634/3651/3661 xong; **ADR-0065** guard danh sách trắng mở rộng động (#423, D-322/323). Còn: T-3662 (🔴 AUD-SEC-399/400 có từ trước + 🟢 nợ review AUD-SEC-385/386/387/397/402, AUD-PERF-017) → T-3635 (`audit check --strict` xanh) → T-3636 (`loop verify --all`, `release-check` chỉ còn hàng chờ người) → perf trial T-3551/3552/3557 (PLAN-harden-2026-10-27-loops, D-258) → cắt **3.30.0**.
+- 2026-11-04 **PLAN-upgrade-2026-11-02** (D-304): T-3662 và T-3635 đã được đánh dấu xong. Audit sau #434 phát hiện sổ strict đỏ lại vì sáu mục nợ review. Kết quả sửa Git guard và quét bí mật CI ở [báo cáo delta](docs/ops/AUDIT-REPORT-2026-11-04-delta.md) (D-340). Còn T-3636 (`loop verify --all`, `release-check`) và perf trial T-3551/3552/3557 (PLAN-harden-2026-10-27-loops, D-258) trước mốc **3.30.0**.
 - Phép đo `LOOP-ORCH-020` tích luỹ từ PLAN-upgrade; tăng số agent chỉ khi có số (ADR-0061). Phản hồi dự án đích: 10 nhóm `cong-cu` chờ phân loại ([TARGETS](docs/ops/TARGETS.md)).
 - Hoãn tới harden: T-1690/T-1691 (quét lại SEC-091…099). Rà `seeker19110/stored`: chờ chủ repo (HAR-036/041, SEC-026, CI-006/7/9, SEC-043; hạn xét: 2026-12-31).
 

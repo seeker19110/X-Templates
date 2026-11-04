@@ -26,7 +26,7 @@ Lượt xác minh độc lập tái hiện cả năm mục 🔴/🟠 trong repo 
 | `python3 scripts/xt.py ci-check` | 0 | 11 workflow qua kiểm cấu hình của repo |
 | `gitleaks git --redact --no-banner --log-opts=--all` (CLI 8.30.1) | 0 | 1.312 commit, 0 bí mật phát hiện |
 
-Kết quả quét cục bộ áp dụng cho lịch sử đã tải ở mốc quét. `ci-check` kiểm cấu hình tĩnh. Các kiểm tra độc lập qua Semgrep, OSV Scanner, Bandit, actionlint và zizmor chưa có số đo trong lượt này. Kiểm tra trình duyệt và a11y nằm ngoài phạm vi delta.
+Kết quả quét cục bộ áp dụng cho lịch sử đã tải ở mốc quét. `ci-check` kiểm cấu hình tĩnh. Semgrep, OSV Scanner, Bandit và actionlint chưa chạy trong lượt này. Kiểm tra trình duyệt và a11y nằm ngoài phạm vi delta.
 
 ## 4. Git guard
 
@@ -72,12 +72,19 @@ Các bước tái hiện dưới đây dùng Git 2.53.0, repo tạm và payload 
 
 | Đợt | Phát hiện | Thay đổi và kiểm tra |
 |---|---|---|
-| Git guard · D-340 | AUD-SEC-442/443/445/446/447 | Giới hạn nguồn cấu hình Git ở đầu đọc và bảo vệ gitfile, cấu hình Git và hook ở đầu ghi. Chạy test hồi quy có đối chứng, `scripts/dev-task.sh gate` và kiểm sổ strict. |
+| Git guard · D-340 | AUD-SEC-442…447 | Giới hạn nguồn cấu hình Git ở đầu đọc và bảo vệ gitfile, cấu hình Git và hook ở đầu ghi. Chạy test hồi quy có đối chứng, `scripts/dev-task.sh gate` và kiểm sổ strict. |
 | Secret scan | AUD-CI-030 và bằng chứng Blueprint đã cũ | Giữ required check `gitleaks`, ghim CLI và checksum trong workflow repo và mẫu cài đặt, kiểm tra phạm vi lịch sử và cập nhật bằng chứng Blueprint theo cấu hình thật. |
 
 ## 7. Nợ 🟢
 
 | Mục | Chủ | Hạn hoặc mốc rà lại |
 |---|---|---|
-| AUD-SEC-444 · ghi nhận ngoại lệ và các ca Git hợp lệ bị chặn oan | Phiên chính | 2027-01-21 theo [sổ audit](AUDIT-STATUS.md) |
-| Lưu tệp gzip khớp digest provenance | Chủ workflow phát hành | Trước lần phát hành cần kiểm chứng provenance từ tệp tải về |
+| AUD-DOC-244 · lưu tệp gzip khớp digest provenance | Chủ workflow phát hành | Trước lần phát hành cần kiểm chứng provenance từ tệp tải về |
+| AUD-CODE-047 · theo dõi dấu nháy thoát khi đọc scalar YAML | Chủ `dev-task.sh` và `xt.py` | Rà lần tới theo [sổ audit](AUDIT-STATUS.md) |
+
+## 8. Kiểm lại thay đổi
+
+- Git guard có test cho `--exec-path=` rỗng, ghi qua symlink tới gitfile, ghi hook qua hard link ở linked worktree, repo trần được Git dò từ thư mục con, và tạo repo trần rồi ghi cấu hình trong cùng lệnh Bash. Test đối chứng giữ các lệnh đọc và ghi file thường.
+- Chạy đúng bước Bash trong workflow mới với tarball Gitleaks 8.30.1 từ nhà phát hành. SHA-256 khớp, quét 1.405 commit ở các ref cục bộ, 0 phát hiện, exit 0. Hai mẫu thử ở commit PR thứ 31 và ở diff merge đều làm job quét exit 1. SARIF che nội dung mẫu thử.
+- `python3 -m unittest -q tests.test_ci tests.test_ci_template` exit 0 (73 test). `zizmor --offline --persona regular --min-severity high` exit 0 cho workflow đổi.
+- AUD-SEC-444 chỉnh quy tắc dựa trên tham số gốc và nơi Git chạy. Guard vẫn yêu cầu dùng đường dẫn Git nguyên văn trong phạm vi được nhận diện. Tên Git dir dựng ở runtime và giới hạn sandbox được theo dõi theo ADR-0067.
