@@ -362,6 +362,14 @@
     "AUD-DOC-247",
     "AUD-DOC-248"
    ]
+  },
+  {
+   "reason": "Khoá `stage_approval: agent` (ADR-0069) chỉ có hiệu lực khi xt.yaml đã commit ở `origin/main`/`origin/master` của remote — fixture `files` của autonomy-bench không dựng được repo git có remote ref. Kiểm bằng tests.test_stage_agent_approval (repo git thật có remote: `env -u …` né nhánh agent, `remote set-head`, PR đổi khoá là ngoại lệ cứng).",
+   "ids": [
+    "AUD-SEC-499",
+    "AUD-SEC-500",
+    "AUD-HAR-222"
+   ]
   }
  ]
 }

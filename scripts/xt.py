@@ -603,12 +603,17 @@ def _check_links(d: Doc, where: str, seen: Dict[str, bool]) -> List[str]:
     return errors
 
 
+# Gói sản phẩm (ADR-0068 lát B): `starter/`/`managed/` là cây chép sang dự án đích (mã, CI), không phải chỉ mục của khung —
+# README của gói (`packs/<id>/README.md`) là chỉ mục; đòi README trong từng thư mục mã sẽ chép rác vào dự án.
+PACK_PAYLOAD_RE = re.compile(r"(?:^|/)templates/packs/[^/]+/(?:starter|managed)(?:/|$)")
+
+
 def _check_readmes(root: Path) -> List[str]:
-    """Mỗi thư mục con của framework/ phải có README.md (chỉ mục)."""
+    """Mỗi thư mục con của framework/ phải có README.md (chỉ mục), trừ cây nội dung của gói sản phẩm."""
     return [
-        f"{sub.relative_to(root).as_posix()}/: thiếu README.md (chỉ mục thư mục)"
+        f"{rel}/: thiếu README.md (chỉ mục thư mục)"
         for sub in sorted(p for p in root.rglob("*") if p.is_dir())
-        if not (sub / "README.md").exists()
+        if not (sub / "README.md").exists() and not PACK_PAYLOAD_RE.search(rel := sub.relative_to(root).as_posix())
     ]
 
 

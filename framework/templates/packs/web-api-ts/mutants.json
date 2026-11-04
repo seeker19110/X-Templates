@@ -1,0 +1,38 @@
+{
+  "schema": 1,
+  "note": "Ca sai cố ý (ADR-0068 §Xác nhận B): mỗi ca sửa đúng một chỗ của repo sạch; bộ nghiệm thu phải ĐỎ ở đúng test `expect_fail` (tên test chứa chuỗi này). Không cài vào dự án đích.",
+  "mutants": [
+    {
+      "id": "tenant-leak",
+      "why": "policy RLS cho mọi dòng — tenant chéo đọc được dữ liệu",
+      "file": "src/migrations/0002_notes.ts",
+      "find": "USING (tenant_id = app.current_tenant())",
+      "replace": "USING (true)",
+      "expect_fail": "tenant B không đọc được ghi chú của A"
+    },
+    {
+      "id": "broken-down",
+      "why": "migration lùi không xoá bảng — rollback hỏng",
+      "file": "src/migrations/0002_notes.ts",
+      "find": "    DROP TABLE notes;\n",
+      "replace": "    SELECT 1;\n",
+      "expect_fail": "lùi hết rồi tiến lại"
+    },
+    {
+      "id": "contract-runtime",
+      "why": "server đổi tên trường phản hồi — phá client đang dùng",
+      "file": "src/server.ts",
+      "find": "return [200, { token }];",
+      "replace": "return [200, { accessToken: token }];",
+      "expect_fail": "mọi phản hồi khớp schema đã khai"
+    },
+    {
+      "id": "contract-static",
+      "why": "contract bỏ trường bắt buộc của phản hồi so với baseline đã phát hành",
+      "file": "contract/openapi.json",
+      "find": "\"Session\": { \"type\": \"object\", \"required\": [\"token\"]",
+      "replace": "\"Session\": { \"type\": \"object\", \"required\": []",
+      "expect_fail": "không thay đổi không tương thích so với baseline"
+    }
+  ]
+}
