@@ -198,3 +198,10 @@
 - Chọn: Mở rộng luật phía đọc (D-336/337) thêm GIT_DIR/--git-dir/GIT_COMMON_DIR (khác .git của dự án), GIT_TEMPLATE_DIR/--template, GIT_EXEC_PATH/--exec-path; chặn ghi qua hard link bằng so inode — T-3667
 - Lý do (tiêu chí chất lượng cuối): (1) các dạng này nguyên văn trong một lệnh nên luật tĩnh bắt được (ADR-0067 chỉ chấp nhận tên dựng lúc chạy); (3) cùng một luật phía đọc, không thêm miễn trừ
 - Đường lùi: Bỏ các biến/cờ mới khỏi luật phía đọc
+
+### D-339 · 2026-11-04T00:38:43+00:00 · AUD-SEC-446: cấu hình/hook git ghi ở lệnh Bash trước rồi dùng qua thư mục git NGOÀI dự án (git -C /tmp/gd x) — guard từng lệnh không thấy; xử lý?
+
+- Phương án: (1) Guard có trạng thái giữa các lệnh · (2) Chặn mọi git ngoài cây dự án · (3) ADR-0068: chấp nhận có hạn 2027-01-21 khi cần ≥ 2 lệnh và lệnh dùng không có biến/cờ chỉ cấu hình lạ; mọi dạng một lệnh vẫn sửa; gitdir của dự án không thuộc lớp; sandbox opt-in là lớp cứng
+- Chọn: ADR-0068: chấp nhận có hạn 2027-01-21 khi cần ≥ 2 lệnh và lệnh dùng không có biến/cờ chỉ cấu hình lạ; mọi dạng một lệnh vẫn sửa; gitdir của dự án không thuộc lớp; sandbox opt-in là lớp cứng
+- Lý do (tiêu chí chất lượng cuối): (3) guard không trạng thái theo thiết kế (ADR-0018/0063), trạng thái giả mạo được; (4) chặn mọi git ngoài dự án gây chặn oan CI/worktree; (1) không nới luật đang chặn, không khai đóng
+- Đường lùi: Đổi AUD-SEC-446 về mở
