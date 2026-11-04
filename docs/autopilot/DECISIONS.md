@@ -135,3 +135,10 @@
 - Chọn: Nhận cả 14 đề xuất của bản nháp: FLOW giữ nghĩa nghiên cứu §10 cho 20…23, ca mới FLOW-27…34; candidate đo ở worktree dựng lại; cấu hình JSON đọc từ commit gốc; kiểm trỏ đúng cây bằng probe + quét .pth/symlink; từ chối start khi HEAD^{tree} ≠ kept_tree; held-out hạt giống lúc finish, phải improved; falsifier trúng → thu hồi; PERF-LOG miễn khi chỉ nối thêm; --resume R1 rơi về R2; công cụ chấm neo cả exec blob gốc lẫn Gate <(git show); sửa file khoá → thu hồi + tính lượt; khoá điểm nóng theo đường file + kiểm diff; luôn đo xen kẽ
 - Lý do (tiêu chí chất lượng cuối): (1) spike đo được: đo theo khối 18 % improved sai trong A/A, đo tại chỗ bị .pth bị ignore lừa — các phương án chặt hơn chặn cả hai; (3) ID ổn định theo conventions (không đổi nghĩa ID đã dùng); (2) mỗi task một PR, perf trial là lệnh mới, Gate mẫu cũ giữ nguyên làm đường lùi; chi phí +0,8 s/cây chỉ phá hoà (5)
 - Đường lùi: Gỡ skill /optimize khỏi perf trial, quay về Gate mẫu perf-gate.sh; finish --no-apply là lối tạm
+
+### D-357 · 2026-11-04T22:54:48+00:00 · T-3680…T-3687 (perf trial, ADR-0071): mỗi task một PR (8 PR) hay gộp?
+
+- Phương án: (1) 4 PR, mỗi PR hai task liền kề (3680+3681, 3682+3683, 3684+3685, 3686+3687), mỗi task một commit, nhánh xếp chồng, gộp origin/main sau mỗi merge (không force-push) · (2) 8 PR, mỗi task một PR như PLAN
+- Chọn: 4 PR, mỗi PR hai task liền kề (3680+3681, 3682+3683, 3684+3685, 3686+3687), mỗi task một commit, nhánh xếp chồng, gộp origin/main sau mỗi merge (không force-push)
+- Lý do (tiêu chí chất lượng cuối): (3) mỗi PR ~300–400 dòng vẫn review trọn được (review #439 ~1100 dòng chạm trần lượt); tiền lệ D-244 gộp T-3548…T-3550; (2) mỗi task một commit nên revert từng task được; (5) giảm nửa số vòng CI + review
+- Đường lùi: Tách lại theo task nếu reviewer báo PR quá lớn (INCONCLUSIVE)
