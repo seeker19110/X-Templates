@@ -273,6 +273,23 @@ class ReviewDebt435Test(unittest.TestCase):
                         self.assertEqual(guard.edit_decision(str(web / name), str(web), {"content": "x"})[0], "deny")
                     self.assertEqual(guard.edit_decision(str(web / "plain2"), str(web), {"content": "x"})[0], "")
 
+    def test_450_project_dotgit_none_up_to_root(self):
+        """Không có `.git` nào từ gốc dự án lên `/` → giữ `$ROOT/.git` như trước (nhánh cuối của `_project_dotgit`)."""
+        with patch.object(guard.os.path, "lexists", return_value=False):
+            self.assertEqual(guard._project_dotgit(str(self.root)), os.path.join(str(self.root), ".git"))
+
+    def test_449_bare_created_unknown_place(self):
+        """Tạo repo trần mà không biết chắc chỗ (`GIT_DIR`, `--git-dir`, thư mục chạy không biết) → '' (khớp mọi đuôi
+        metadata như #435), không phải None."""
+        for argv in (
+            ["GIT_DIR=x", "git", "init", "--bare", "y"],
+            ["git", "--git-dir=x", "init", "--bare", "y"],
+        ):
+            with self.subTest(argv=argv):
+                self.assertEqual(guard._bare_git_created(argv, str(self.root)), "")
+        self.assertEqual(guard._bare_git_created(["git", "init", "--bare", "y"], None), "")
+        self.assertIsNone(guard._bare_git_created(["git", "status"], str(self.root)))
+
     def test_452_own_git_dir_trailing_slash(self):
         for cmd in (
             f"GIT_DIR={self.root}/.git/ git status",
