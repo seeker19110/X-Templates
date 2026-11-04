@@ -39,7 +39,7 @@ updated: 2026-11-02
 | 7 | BLOCKER | Threat model: mọi mối đe doạ mức Cao có biện pháp + bằng chứng | | | docs/THREAT-MODEL.md bảng 4, cột trạng thái | |
 | 8 | BLOCKER | Migration có đường lùi; rollback deploy đã diễn tập | | | RUNBOOK mục 1; log diễn tập <ngày> | |
 | 9 | BLOCKER | Backup bật và đã khôi phục thử | | | log khôi phục <ngày>, thời gian <phút> | |
-| 10 | BLOCKER | Giám sát + cảnh báo đã thử kích hoạt, tới đúng kênh | | | ảnh/log cảnh báo thử <ngày> | |
+| 10 | BLOCKER | Giám sát + cảnh báo đã thử kích hoạt, tới đúng kênh; dịch vụ hướng người dùng: SLO dạng file qua CI validate (`OPS-SLO-001`) và error budget hiện tại ghi số (% còn, burn 28/30 ngày, ngày đo) — budget âm thì áp chính sách error budget (`OPS-SLO-003`: đóng băng tính năng hoặc ngoại lệ có người ký); thiếu file SLO = FAIL | | | ảnh/log cảnh báo thử <ngày>; `docs/ops/SLO.md` + lệnh validate → exit; budget <x %> đo <ngày> | |
 | 11 | BLOCKER | Dữ liệu cá nhân: DPIA (nếu áp dụng), đồng ý trước khi thu thập, chính sách riêng tư/điều khoản công bố | | | docs/DPIA.md trạng thái; E2E không request analytics trước đồng ý | |
 | 12 | BLOCKER | Hiệu năng đạt ngưỡng hồ sơ (CWV / p95 / thời gian chạy) đo thật | | | Lighthouse CI / k6 báo cáo <link> | |
 | 13 | BLOCKER | Tiếp cận: 0 vi phạm nghiêm trọng (axe/WCAG AA) trên luồng chính (hồ sơ có UI) | | | báo cáo axe run #<n> | |
