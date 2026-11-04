@@ -4,6 +4,7 @@
 
 ## Đang làm
 - 2026-11-04 **PLAN-upgrade-2026-11-02** (D-304): T-3662 và T-3635 đã được đánh dấu xong. Audit sau #434 phát hiện sổ strict đỏ lại vì sáu mục nợ review. Kết quả sửa Git guard và quét bí mật CI ở [báo cáo delta](docs/ops/AUDIT-REPORT-2026-11-04-delta.md) (D-340). Còn T-3636 (`loop verify --all`, `release-check`) và perf trial T-3551/3552/3557 (PLAN-harden-2026-10-27-loops, D-258) trước mốc **3.30.0**.
+- Nhánh `claude/amazing-brahmagupta-9jqbg1` (PR #437 chờ, chưa merge): đã làm ADR-0069 (agent tự nghiệm thu, D-347), ADR-0070 (lưu trữ `docs/archive/`, D-349); ADR-0068 lát A (`PLAN-factory-A.md`) đi sau T-3636 + perf trial (research §7).
 - Phép đo `LOOP-ORCH-020` tích luỹ từ PLAN-upgrade; tăng số agent chỉ khi có số (ADR-0061). Phản hồi dự án đích: 10 nhóm `cong-cu` chờ phân loại ([TARGETS](docs/ops/TARGETS.md)).
 - Hoãn tới harden: T-1690/T-1691 (quét lại SEC-091…099). Rà `seeker19110/stored`: chờ chủ repo (HAR-036/041, SEC-026, CI-006/7/9, SEC-043; hạn xét: 2026-12-31).
 
@@ -19,7 +20,7 @@
 8. Hàng rào (hook + `settings.json`, cần Claude Code ≥ 2.1.295 — `claude_min_version`): **xét lại hàng rào 2027-01-21** hoặc khi đổi model (LOOP-DESIGN-014).
 
 ## Quyết định
-> Chi tiết ở `docs/adr/` (ADR-0001…0067) và `docs/autopilot/DECISIONS.md` (D-NNN); ở đây chỉ giữ điều chưa có nhà khác.
+> Chi tiết ở `docs/adr/` (ADR-0001…0070) và `docs/autopilot/DECISIONS.md` (D-NNN); ở đây chỉ giữ điều chưa có nhà khác.
 - Khung = thư viện yêu cầu có ID + ghép blueprint + máy kiểm "xong" (ADR-0001); hook fail-open về luồng, fail-closed về hành động nguy hiểm (ADR-0002); blueprint theo quy mô S/M (ADR-0003/0004/0012).
 - Luật VN: Luật 91/2025/QH15 + NĐ 356/2025 (thay NĐ 13/2023 từ 01/01/2026); Luật ANM 116/2025 (01/07/2026). OWASP LLM Top 10 2026; EU AI Act Đ.50 áp dụng 02/08/2026. Mặc định OSI: OpenTofu, Valkey.
 - Repo khung: Python ≥ 3.11; `mypy --strict`; coverage 100 % (cả subprocess); `changelog-check`/`progress-check` trong `lint`; PROGRESS chỉ ghi SHA trên `main` (squash-merge). Tên: X-stored → X-Templates (ADR-0006/0007).
@@ -46,4 +47,4 @@
 | PR xanh ngay lần push đầu | 96/123 (78%) |
 | Run `cancelled` cùng SHA với run khác | 1 |
 
-- Container mới: `scripts/dev-task.sh setup`; trước khi đẩy `gate-fast`, CI là cổng đầy đủ. Subagent dùng thư mục scratch riêng (bài học audit 2026-11-01).
+- Container mới: `scripts/dev-task.sh setup`; trước khi đẩy `gate-fast`, CI là cổng đầy đủ. Subagent dùng thư mục scratch riêng (bài học audit 2026-11-01). Gate cục bộ: `coverage` và `pip` phải ở site-packages của `python3` (hook chạy `python3 -I`, bỏ user site → mất coverage subprocess) — dùng venv.
