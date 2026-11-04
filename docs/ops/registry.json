@@ -1,0 +1,53 @@
+{
+  "schema": 1,
+  "products": [
+    {
+      "repo": "seeker19110/hotel-manager",
+      "owner": "seeker19110",
+      "type": null,
+      "risk": null,
+      "core": "3.15.1",
+      "pack": null,
+      "environments": [],
+      "slo": "",
+      "release": null,
+      "exceptions": []
+    },
+    {
+      "repo": "seeker19110/X-Company",
+      "owner": "seeker19110",
+      "type": null,
+      "risk": null,
+      "core": "3.15.1",
+      "pack": null,
+      "environments": [],
+      "slo": "",
+      "release": null,
+      "exceptions": []
+    },
+    {
+      "repo": "seeker19110/xboss",
+      "owner": "seeker19110",
+      "type": null,
+      "risk": null,
+      "core": "2.0.0",
+      "pack": null,
+      "environments": [],
+      "slo": "",
+      "release": null,
+      "exceptions": []
+    },
+    {
+      "repo": "seeker19110/dhcb",
+      "owner": "seeker19110",
+      "type": null,
+      "risk": null,
+      "core": "3.15.3",
+      "pack": null,
+      "environments": [],
+      "slo": "",
+      "release": null,
+      "exceptions": []
+    }
+  ]
+}
