@@ -3318,20 +3318,55 @@ class GuardDebt433Test(unittest.TestCase):
 
     def test_aud_sec_438_ln_own_target_devnull_global(self):
         """AUD-SEC-438 🟢: (a) `ln` chỉ bỏ đích của chính nó khỏi tập link — `ln -sf X gc` thay tệp `GIT_CONFIG_GLOBAL`
-        vẫn tính; (c) `GIT_CONFIG_GLOBAL=/dev/null` thì `HOME`/`XDG_CONFIG_HOME` không trỏ cấu hình toàn cục — nhưng
-        `GIT_CONFIG_SYSTEM`, `GIT_DIR` vẫn tính."""
+        vẫn tính. (c) bị review #434 thu hồi: `HOME`/`XDG_CONFIG_HOME` luôn tính, kể cả cạnh `GIT_CONFIG_GLOBAL=/dev/null`
+        — kỳ vọng đổi từ cho qua về chặn."""
         self.assert_hook_bypass(("GIT_CONFIG_GLOBAL=gc git log -1; ln -sf /tmp/evil gc",))
         self.assert_budget(
             (
                 "GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/tmp/s git status",
                 "GIT_CONFIG_GLOBAL=/dev/null GIT_DIR=x git status",
-            ),
-            (
                 "GIT_CONFIG_GLOBAL=/dev/null HOME=/tmp/h git status",
                 "GIT_CONFIG_GLOBAL=/dev/null XDG_CONFIG_HOME=/tmp/x git log -1",
             ),
+            (),
             "AUD-SEC-434",
         )
+
+
+class GuardReview434Test(unittest.TestCase):
+    """Review #434 🔴: miễn 438c (`GIT_CONFIG_GLOBAL=/dev/null` làm `HOME`/`XDG_CONFIG_HOME` không tính) tin cả khi biến
+    không tới git (`env -u`, `env -i`, `export -n`, `unset`, subshell, gán trần không export) → thu hồi. Base chặn thì
+    head còn chặn; lệnh hook giữ `no_verify`. Đỏ ở c203d2e4."""
+
+    assert_budget = GuardStrictDebtTest.assert_budget
+
+    def test_r434_devnull_does_not_exempt_home(self):
+        self.assert_budget(
+            (
+                "GIT_CONFIG_GLOBAL=/dev/null; HOME=/tmp/h git commit -m x",
+                "GIT_CONFIG_GLOBAL=/dev/null; HOME=/tmp/h git push origin feat",
+                "GIT_CONFIG_GLOBAL=/dev/null HOME=/tmp/h env -u GIT_CONFIG_GLOBAL git commit -m x",
+                "GIT_CONFIG_GLOBAL=/dev/null HOME=/tmp/h env --unset=GIT_CONFIG_GLOBAL git commit -m x",
+                "GIT_CONFIG_GLOBAL=/dev/null HOME=/tmp/h env -uGIT_CONFIG_GLOBAL git commit -m x",
+                "GIT_CONFIG_GLOBAL=/dev/null HOME=/tmp/h nohup env -u GIT_CONFIG_GLOBAL git commit -m x",
+                "GIT_CONFIG_GLOBAL=/dev/null env -i HOME=/tmp/h git status",
+                "GIT_CONFIG_GLOBAL=/dev/null env --ignore-environment HOME=/tmp/h git status",
+                "readonly GIT_CONFIG_GLOBAL=/dev/null; HOME=/tmp/h git status",
+                "export GIT_CONFIG_GLOBAL=/dev/null HOME=/tmp/h; export -n GIT_CONFIG_GLOBAL; git status",
+                "export GIT_CONFIG_GLOBAL=/dev/null HOME=/tmp/h; unset GIT_CONFIG_GLOBAL; git status",
+                "(export GIT_CONFIG_GLOBAL=/dev/null); HOME=/tmp/h git status",
+                "GIT_CONFIG_GLOBAL=/dev/null; XDG_CONFIG_HOME=/tmp/x git commit -m x",
+            ),
+            ("GIT_CONFIG_GLOBAL=/dev/null git status > /dev/null 2>&1",),
+            "AUD-SEC-434",
+        )
+        for cmd in (
+            "GIT_CONFIG_GLOBAL=/dev/null; HOME=/tmp/h git commit -m x",
+            "GIT_CONFIG_GLOBAL=/dev/null; HOME=/tmp/h git push origin feat",
+        ):
+            with self.subTest(cmd=cmd), mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(ROOT)}):
+                raw = guard.bash_decision(cmd, str(ROOT))
+                self.assertTrue(raw.get("no_verify"), raw)
 
 
 class LedgerMatchesGuardTest(unittest.TestCase):

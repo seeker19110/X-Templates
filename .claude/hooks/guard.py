@@ -412,8 +412,8 @@ GIT_CFG_ENV_WHY = (
 
 def _git_cfg_vars(env: Dict[str, str], root: str = "") -> List[str]:
     """Tên biến cấu hình git trong `env` (AUD-SEC-434); không tính: `GIT_CONFIG_GLOBAL|SYSTEM=/dev/null`; `GIT_DIR`/
-    `GIT_COMMON_DIR` là `.git` của dự án; `HOME`/`XDG_CONFIG_HOME` khi `GIT_CONFIG_GLOBAL=/dev/null` (git không đọc
-    cấu hình toàn cục — AUD-SEC-438)."""
+    `GIT_COMMON_DIR` là `.git` của dự án. `HOME`/`XDG_CONFIG_HOME` LUÔN tính — review #434 thu hồi miễn 438c
+    (`GIT_CONFIG_GLOBAL=/dev/null` có thể không tới git: `env -u`, `env -i`, `export -n`, `unset`, subshell…)."""
 
     def null(k: str) -> bool:
         return k in env and env[k] != GIT_CFG_DYN and _norm_path(_dequote(env[k]) or "x") == GIT_CONFIG_NULL
@@ -424,7 +424,6 @@ def _git_cfg_vars(env: Dict[str, str], root: str = "") -> List[str]:
         for k, v in env.items()
         if GIT_READ_ENV_RE.fullmatch(k)
         and not (k in ("GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM") and null(k))
-        and not (k in ("HOME", "XDG_CONFIG_HOME") and null("GIT_CONFIG_GLOBAL"))
         and not (k in GIT_DIR_VARS and v != GIT_CFG_DYN and _norm_path(_dequote(v) or "x") in own)
     )
 

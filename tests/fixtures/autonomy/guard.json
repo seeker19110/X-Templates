@@ -21617,9 +21617,10 @@
    "command": "GIT_CONFIG_GLOBAL=/dev/null HOME=/tmp/h git status"
   },
   "expect": {
-   "allowed": true
+   "allowed": false,
+   "code": "BUDGET"
   },
-  "note": "nợ review #433 (AUD-SEC-438…440, T-3667, D-337/D-338)"
+  "note": "review #434: miễn 438c thu hồi — `GIT_CONFIG_GLOBAL=/dev/null` có thể không tới git; HOME luôn tính"
  },
  {
   "id": "d433-ctl-440-git-init",
