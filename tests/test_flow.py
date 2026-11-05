@@ -1145,7 +1145,7 @@ class TrialFlowTest(TmpRepoCase):
         self.assertEqual(self.fp(), fp0)
         self.assertIn("mem", self.why(self.decided(tid)[0]))
 
-    @flow("FLOW-27")
+    @flow("FLOW-27", done="T-3705")
     def test_flow_27_improved_candidate_is_kept_and_next_start_accepts(self) -> None:
         """Given candidate K = 2 (`improved` so với gốc và `start_head`), tương đương + held-out xanh · When `finish` ·
         Then exit 0, candidate còn trong cây; commit nó → `candidate_tree` của dòng `decide` = `HEAD^{tree}` (cây giữ);
@@ -1257,7 +1257,7 @@ class TrialFlowTest(TmpRepoCase):
         self.assertEqual(rc, 1, out + err)
         self.assertNotEqual(self.decided(tid)[0]["verdict"], "kept")
 
-    @flow("FLOW-30")
+    @flow("FLOW-30", done="T-3705")
     def test_flow_30_hardcoded_bench_input_fails_heldout(self) -> None:
         """Given candidate trả 1 khi `n == 1000` (đúng input bộ đo: −99,97 %) · When `finish` · Then held-out (input từ
         hạt giống lúc finish, 2000…8999) không `improved` so với `start_head` lẫn gốc → thu hồi (exit 1), lý do nêu
@@ -1296,7 +1296,7 @@ class TrialFlowTest(TmpRepoCase):
         self.assertEqual((st["hypothesis"], st["falsifier"]), (TRIAL_ARGS[1], TRIAL_ARGS[3]))
         self.assertEqual((st["fp_start"], st["start_head"], st["base_sha"]), (self.fp(), self.base, self.base))
 
-    @flow("FLOW-31")
+    @flow("FLOW-31", done="T-3705")
     def test_flow_31_falsifier_hit_reverts(self) -> None:
         """Given falsifier `primary > -50%`, candidate K = 2 (−28,6 % — `improved` nhưng không đạt điều giả thuyết hứa)
         · When `finish` · Then thu hồi (exit 1), lý do nêu falsifier, vân tay = lúc start."""

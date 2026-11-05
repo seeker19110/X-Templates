@@ -416,10 +416,7 @@ class TrialBaseTest(TrialCase):
     def test_git_error_is_exit_2_and_todo_commands(self) -> None:
         with unittest.mock.patch.object(xt, "trial_context", side_effect=RuntimeError("git lỗi")):
             self.assertEqual(self.tr("status")[0], 2)
-        todo = (
-            (("finish", "--resume"), "T-3706"),
-            (("finish", "--no-apply"), "ADR-0071 §2, chưa giao task"),
-        )
+        todo = ((("finish", "--resume"), "T-3706"), (("finish", "--no-apply"), "T-3706"))
         for args, task in todo:
             with self.subTest(args):
                 self.assertIn(f"chưa triển khai ({task})", self.refused(*args))
@@ -902,8 +899,9 @@ class TrialFinishTest(TrialCase):
         self.republish({"perf/trial.json": json.dumps(trial_config(**over))})
 
     def test_keep_json_records_interleaved_samples(self) -> None:
-        """Giữ (exit 0): `--json` in dòng `decide`; mẫu v2 của ba cây (`exact` 3 lần), hai phép so, `pending-T-3705` cho
-        held-out/falsifier, ⚠ PATH; pha `closed`, `kept_tree` = `candidate_tree`; candidate còn trong cây."""
+        """Giữ (exit 0): `--json` in dòng `decide`; mẫu v2 của ba cây (`exact` 3 lần), hai phép so, held-out (hạt giống,
+        input, tổng mỗi vòng) và falsifier không trúng, ⚠ PATH; pha `closed`, `kept_tree` = `candidate_tree`; candidate
+        còn trong cây."""
         wd = self.ctl / "w"
         wd.mkdir()
         self.regrounded(env={"path": f"/usr/bin:/bin:{wd}"})
@@ -917,7 +915,10 @@ class TrialFinishTest(TrialCase):
         self.assertEqual([prim[t]["samples"] for t in ("base", "head", "cand")], [[3500.0] * 3] * 2 + [[3000.0] * 3])
         self.assertEqual((prim["base"]["schema"], prim["cand"]["kind"]), (2, "exact"))
         self.assertEqual([prim["compare"][t]["verdict"] for t in ("base", "head")], ["improved"] * 2)
-        self.assertEqual((row["heldout"], row["falsifier_hit"]), ("pending-T-3705",) * 2)
+        held = row["heldout"]
+        self.assertEqual((len(held["seed"]), len(held["inputs"]), row["falsifier_hit"]), (16, 5, False))
+        self.assertEqual([held["compare"][t]["verdict"] for t in ("base", "head")], ["improved"] * 2)
+        self.assertLessEqual(set(held["per_input"].values()), {"improved", "neutral"})  # EXTRA −500 ≤ 2 % ở n lớn
         self.assertEqual(row["warnings"], [f"PATH có {wd} — uid này ghi được"])
         st = self.tstate()
         self.assertEqual((st["phase"], st["kept_tree"]), ("closed", row["candidate_tree"]))
@@ -1009,8 +1010,9 @@ class TrialFinishTest(TrialCase):
         root = self.tmp / "t"
         root.mkdir()
         run = xt.TrialRun(xt.TrialTree("cand", "c", root, self.tmp), {"PATH": "/usr/bin:/bin"}, {})
-        self.assertGreater(xt.trial_sample(run, {"cmd": "true", "kind": "wall"}, 10), 0)
-        self.assertEqual(xt.trial_sample(run, {"cmd": "echo a 42", "kind": "exact"}, 10), 42.0)
+        secs, text = xt.trial_sample(run, {"cmd": "echo out", "kind": "wall"}, 10)
+        self.assertEqual((secs > 0, text), (True, "out\n"))
+        self.assertEqual(xt.trial_sample(run, {"cmd": "echo a  b 42", "kind": "exact"}, 10), (42.0, "a b"))
         for cmd in ("echo abc", "echo inf", "true"):
             with self.subTest(cmd), self.assertRaisesRegex(xt.TrialBroken, "không phải số hữu hạn"):
                 xt.trial_sample(run, {"cmd": cmd, "kind": "exact"}, 10)
@@ -1092,6 +1094,140 @@ class TrialSecondaryTest(TrialCase):
         self.started()
         self.ok("abort", "--reason", "y")
         self.assertIn("loop defer", self.refused("status", "--check", code=3))
+
+
+def _held(base: float, head: float, cand: float, n: int = 3) -> dict[str, list[float]]:
+    return {"base": [base] * n, "head": [head] * n, "cand": [cand] * n}
+
+
+class TrialHeldoutTest(TrialCase):
+    """T-3705: held-out (ADR-0071 §6 — hạt giống mỗi lượt, gộp + từng input, so `start_head` VÀ gốc) và falsifier (§7).
+    Ca luồng FLOW-27/30/31 ở `tests.test_flow`; đây là các nhánh còn lại."""
+
+    EXACT = {"kind": "exact", "higher_is_better": False}
+
+    def judge(self, samples: dict[str, dict[str, list[float]]], outs: Any = None) -> str:
+        same = {x: {"base": {""}, "cand": {""}} for x in samples}
+        return xt.trial_heldout_judge(samples, outs or same, self.EXACT)[1]
+
+    def test_heldout_compares_base_not_only_start_head(self) -> None:
+        """D-363 (vế held-out của AUD-HAR-231): candidate `improved` so `start_head` nhưng KHÔNG so gốc (đường tắt/lùi đã
+        nằm sẵn trong `start_head`) → lý do "so gốc"; chỉ so `start_head` thì đã giữ. Đối chứng: tốt hơn cả hai → ""."""
+        samples = {"2500": _held(100, 200, 150), "7000": _held(100, 200, 150)}
+        doc, why = xt.trial_heldout_judge(samples, {x: {"base": {""}, "cand": {""}} for x in samples}, self.EXACT)
+        self.assertEqual([doc["compare"][t]["verdict"] for t in ("base", "head")], ["regressed", "improved"])
+        self.assertTrue(why.startswith("held-out gộp so gốc: regressed"), why)
+        self.assertNotIn("so start_head", why)
+        self.assertEqual(doc["samples"], {"base": [200.0] * 3, "head": [400.0] * 3, "cand": [300.0] * 3})
+        self.assertEqual(self.judge({"2500": _held(100, 100, 90), "7000": _held(100, 100, 90)}), "")
+
+    def test_heldout_per_input_uneven_and_output(self) -> None:
+        """Tổng `improved` nhưng một input `regressed` so `start_head` → lý do nêu input; mẫu `exact` lệch giữa các lần →
+        `insufficient`; đầu ra candidate khác gốc → lý do; tối đa ba lý do."""
+        lop = {"a": _held(100, 100, 10), "b": _held(100, 100, 110)}
+        self.assertEqual(self.judge(lop), f"held-out input b so start_head: {self.report(100, 110)}")
+        uneven = {"a": {"base": [9.0, 9.0, 9.0], "head": [9.0, 9.0, 9.0], "cand": [1.0, 2.0, 1.0]}}
+        self.assertIn("held-out input a so start_head: ? thiếu mẫu", self.judge(uneven))
+        outs = {"a": {"base": {"42"}, "cand": {"41"}}}
+        self.assertEqual(self.judge({"a": _held(9, 9, 1)}, outs), "held-out input a: đầu ra candidate khác gốc")
+        many = {x: _held(100, 100, 200) for x in "abcd"}
+        self.assertEqual(self.judge(many).count("; "), 2)
+
+    def report(self, head: float, cand: float) -> str:
+        return xt._perf_report(xt.perf_compare([head] * 3, [cand] * 3, exact=True))
+
+    def test_inputs_from_gen_with_seed_on_stdin(self) -> None:
+        """`heldout.gen` đọc hạt giống từ stdin, input = dòng khác rỗng (bỏ trùng, giữ thứ tự); gen lỗi hay không ra
+        input → TrialRefused(2) không lộ hạt giống."""
+        root = self.tmp / "t"
+        root.mkdir()
+        run = xt.TrialRun(xt.TrialTree("base", "c", root, self.tmp), {"PATH": "/usr/bin:/bin"}, {})
+        gen = {"gen": "read s; printf '%s\\n\\n b\\n%s\\n' $s $s", "cmd": "x {input}"}
+        self.assertEqual(xt.trial_heldout_inputs(run, gen, "ab12", 10), ["ab12", "b"])
+        for cmd in ("exit 3", "true"):
+            with self.subTest(cmd), self.assertRaisesRegex(xt.TrialRefused, "cấu hình gốc hỏng") as cm:
+                xt.trial_heldout_inputs(run, {"gen": cmd, "cmd": "x {input}"}, "bí-mật", 10)
+            self.assertNotIn("bí-mật", str(cm.exception))
+
+    def test_seed_not_on_disk_before_decide(self) -> None:
+        """Hạt giống mới mỗi lượt, KHÔNG có trong state/sổ trong lúc đo (§6: agent không đọc trước được) — chỉ ở dòng
+        `decide` sau khi đo."""
+        real, seen = xt.trial_heldout_inputs, []
+
+        def spy(run: Any, h: Any, seed: str, timeout: float) -> list[str]:
+            seen.append((seed, self.ledger()))
+            return list(real(run, h, seed, timeout))
+
+        seeds = []
+        for k in (2, 1):
+            self.started()
+            self.put("src/hot.py", HOT.replace("K = 3", f"K = {k}"))
+            with unittest.mock.patch.object(xt, "trial_heldout_inputs", spy):
+                rc, out, err = self.tr("finish")
+            self.assertEqual(rc, 0, out + err)
+            self.git("commit", "-q", "-am", f"giữ K = {k}")
+            seed, ledger = seen[-1]
+            self.assertFalse(any(seed.encode() in b for b in ledger if b), "hạt giống lộ trước khi đo xong")
+            self.assertEqual(self.rows()[-1]["heldout"]["seed"], seed)
+            seeds.append(seed)
+        self.assertNotEqual(*seeds)
+
+    def test_input_is_shell_quoted(self) -> None:
+        """Input có ký tự shell (do `heldout.gen` in) vào `heldout.cmd` đã quote: không chạy lệnh chèn; số đo bằng nhau
+        ở ba cây → held-out không `improved` → thu hồi (exit 1)."""
+        gen = f"read s; echo '2000; touch {self.ctl}/pwned'"
+        held = {"gen": gen, "cmd": "printf %s {input} | wc -c"}
+        self.republish({"perf/trial.json": json.dumps(trial_config(heldout=held))})
+        tid = self.started()
+        self.put("src/hot.py", HOT.replace("K = 3", "K = 2"))
+        rc, out, err = self.tr("finish")
+        self.assertEqual(rc, 1, out + err)
+        row = [r for r in self.rows() if r.get("id") == tid and r["event"] == "decide"][0]
+        self.assertEqual(row["verdict"], "heldout")
+        self.assertEqual(row["heldout"]["inputs"], [f"2000; touch {self.ctl}/pwned"])
+        self.assertFalse((self.ctl / "pwned").exists())
+
+    def test_no_heldout_warns_and_records_not_applicable(self) -> None:
+        cfg = trial_config()
+        del cfg["heldout"]
+        self.republish({"perf/trial.json": json.dumps(cfg)})
+        self.started()
+        self.put("src/hot.py", HOT.replace("K = 3", "K = 2"))
+        rc, out, err = self.tr("finish", "--json")
+        self.assertEqual(rc, 0, out + err)
+        row = json.loads(out)
+        self.assertEqual(row["heldout"], xt.PERF_TRIAL_NO_HELDOUT)
+        self.assertIn(f"held-out: {xt.PERF_TRIAL_NO_HELDOUT}", row["warnings"])
+
+    def test_heldout_config_shape(self) -> None:
+        bad = (
+            {"gen": "g", "cmd": "c"},
+            {"gen": "", "cmd": "c {input}"},
+            {"gen": "g", "cmd": "c {input}", "seed": "1"},
+            {"cmd": "c {input}"},
+            {"gen": 1, "cmd": "c {input}"},
+        )
+        for h in bad:
+            with self.subTest(h):
+                self.assertIn('"heldout"', str(xt.trial_config_problem(trial_config(heldout=h))))
+
+    def test_falsifier_units(self) -> None:
+        """Trúng → lý do (thu hồi); không trúng → ""; chỉ số phụ theo tên; thiếu số hoặc biểu thức không đọc được → coi
+        như trúng (chặt hơn)."""
+        cfg = trial_config()
+        measures = {"primary": {"compare": {"head": {"change": -0.3}}}, "mem": {"compare": {"head": {"change": 0.1}}}}
+        cases = {
+            "primary > -50%": "falsifier `primary > -50%` trúng: primary -30.00% so start_head",
+            "primary > -5%": "",
+            "mem >= 10%": "falsifier `mem >= 10%` trúng: mem +10.00% so start_head",
+            "mem < 0%": "",
+            "rss > 1%": "không đánh giá được",
+        }
+        for expr, want in cases.items():
+            with self.subTest(expr):
+                got = xt.trial_falsified(expr, cfg, measures)
+                self.assertIn(want, got) if want else self.assertEqual(got, "")
+        self.assertIn("coi như trúng", xt.trial_falsified("primary > 0%", cfg, {"primary": {"compare": {}}}))
 
 
 class TrialParserTest(unittest.TestCase):
