@@ -170,3 +170,17 @@
 - Chọn: Sửa HẾT 3 🟠 + 4 🟢 trong một commit trên PR, rồi review lượt 2 cả PR ở head mới bằng reviewer-alt (effort max)
 - Lý do (tiêu chí chất lượng cuối): (1) các phát hiện đều nhỏ, sửa được ngay, có tái hiện; (3) tách PR làm báo cáo/ARCH lệch khỏi bản đang cắt; (5) một lượt sửa + một review rẻ hơn hai PR
 - Đường lùi: Tách ADR-0072 sang PR riêng nếu review lượt 2 vẫn chặn ở phần đó
+
+### D-377 · 2026-11-05T13:50:11+00:00 · Nhánh ADR-0068 (3.31.0) sau gộp 3.30.0: 4 điểm mở — nhóm DATA ghi N/A dù gói web-api-ts có migration; AUD-SEC-498 🟠 python3 -c gọi xt.main lách guard; BASE-SEC-005 đỏ vì POSTGRES_PASSWORD literal trong pack-web-api.yml; AUD-SEC-502 phần baseline.json chép đè được trong cùng PR
+
+- Phương án: (1) Chặt cả bốn: quét nhóm DATA cho gói (audit, không giải trình thay); thêm luật guard cho AUD-SEC-498 kèm test + ca autonomy-bench; CI dùng POSTGRES_HOST_AUTH_METHOD: trust cho service container (không literal mật khẩu, không nới lệnh kiểm); CI so contract với baseline.json của nhánh gốc, chỉ cho đổi baseline khi PR tăng phiên bản gói · (2) Giải trình DATA, chấp nhận có hạn AUD-SEC-498, thu hẹp lệnh kiểm BASE-SEC-005, giữ review tay baseline
+- Chọn: Chặt cả bốn: quét nhóm DATA cho gói (audit, không giải trình thay); thêm luật guard cho AUD-SEC-498 kèm test + ca autonomy-bench; CI dùng POSTGRES_HOST_AUTH_METHOD: trust cho service container (không literal mật khẩu, không nới lệnh kiểm); CI so contract với baseline.json của nhánh gốc, chỉ cho đổi baseline khi PR tăng phiên bản gói
+- Lý do (tiêu chí chất lượng cuối): (1) gói cài migration và guard vào dự án đích — lỗ ở đây nhân lên mọi dự án; không nới cổng (LOOP-CI-001); (3) mỗi điểm có test; (5) chỉ phá hoà
+- Đường lùi: Chấp nhận có hạn từng điểm nếu sửa làm vỡ hành vi dự án đích đã dùng gói
+
+### D-380 · 2026-11-05T15:13:01+00:00 · gate-fast tự gây đỏ: test_fast/test chạy xargs -P nproc (16) khiến test đo thời gian (GlobCommandNameTest cpu-ratio, PerfGateExampleTest) đỏ do chính tải của cổng; covpar 8 tiến trình thì ổn định
+
+- Phương án: (1) test_fast và test dùng -P bằng nửa số nhân (tối thiểu 1); không nới ngưỡng test nào · (2) Nới ngưỡng các test thời gian
+- Chọn: test_fast và test dùng -P bằng nửa số nhân (tối thiểu 1); không nới ngưỡng test nào
+- Lý do (tiêu chí chất lượng cuối): (1) cổng phải ổn định, không đỏ do chính nó; nới ngưỡng là nới cổng (LOOP-CI-001); (5) nửa số nhân vẫn nhanh gấp ~3 lần tuần tự (đo covpar 8: 5 phút 51 giây)
+- Đường lùi: Trả về -P nproc nếu test thời gian được làm bền với tải

@@ -1566,7 +1566,7 @@ class PerfCompareV2Test(unittest.TestCase):
 
 
 GATE_DOC = ROOT / "framework" / "11-autonomous-loop" / "optimization-loop.md"
-SLOWER = "sleep 0.05\n"  # candidate chậm hơn gốc (0,02 s) thật: verdict thật là regressed, không phụ thuộc nhiễu
+SLOWER = "sleep 0.5\n"  # candidate chậm hơn gốc (0,2 s) thật: verdict thật là regressed, không phụ thuộc nhiễu (D-380: giãn ×10 để nhiễu lập lịch khi cổng chạy song song không lật kết quả)
 # Candidate gian lận (AUD-XFEAT-026/027): mã chạy trong lượt đo after, cùng uid với Gate.
 TAMPER_BASELINE = SLOWER + (  # sửa `samples` của mọi before.json tìm được, ngay trong lúc đang đo
     'find "${TMPDIR:-/tmp}" . -name before.json -exec python3 -c \'import json, sys\n'
@@ -1615,7 +1615,7 @@ class PerfGateExampleTest(unittest.TestCase):
             "bench/run.sh": "#!/bin/sh\nexec sh ./app.sh\n",
             "tests/equiv/check.sh": "true\n",
             "scripts/perf-gate.sh": self.script,
-            "app.sh": "sleep 0.02\n",
+            "app.sh": "sleep 0.2\n",
         }
         for rel, body in files.items():
             (repo / rel).parent.mkdir(parents=True, exist_ok=True)
