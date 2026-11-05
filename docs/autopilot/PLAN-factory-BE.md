@@ -51,3 +51,5 @@
 - D: worker trong gói; fixture payload host thật (Codex/Gemini) chưa làm — cần chạy CLI bằng tài khoản trả phí của chủ.
 - Review (`reviewer-alt`): lát B–D 1 🔴 · 4 🟠 · 1 🟢 đã sửa ở `f3fe754`; nợ AUD-SEC-502, AUD-HAR-227. Lát E:
   APPROVE, 2 🟠 sửa ở `d2a779e`; nợ AUD-HAR-228, AUD-CODE-050, AUD-TEST-064.
+- Trả nợ (sau gộp 3.30.0): AUD-HAR-227/228, AUD-CODE-050, AUD-TEST-064 đã sửa ở `f629e81`; AUD-SEC-502 sửa phần kiểu
+  request, còn mở phần `baseline.json` chép đè cùng PR (cần quyết thiết kế).
