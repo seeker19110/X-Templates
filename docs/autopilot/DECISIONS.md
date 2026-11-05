@@ -121,3 +121,10 @@
 - Chọn: Thu hẹp: rút phần sửa check-links (AUD-CODE-061, FB-115) khỏi 3.30.1 — trả scripts/check-links.py và test về main, AUD-CODE-061 về mở (sửa ở 3.31.0 bằng bộ quét backtick theo CommonMark + tách ô GFM), CHANGELOG bỏ dòng; sửa F2; review lượt 3 chỉ delta
 - Lý do (tiêu chí chất lượng cuối): (1) bản vá không được mang hồi quy (F1); regex che code span đã hai lượt lộ ca sai — viết bộ quét đúng là việc của bản thường; (2) mục tiêu chính 3.30.1 (AI-GUARD-018, compose, cổng ký tự vô hình) đã sạch qua hai lượt review; FB-115 là báo oan có từ trước, giữ thêm một bản không tệ hơn
 - Đường lùi: Đưa lại phần check-links vào 3.30.x nếu bộ quét mới xong trước khi dự án đích cần
+
+### D-379 · 2026-11-05T14:57:43+00:00 · PR #450: review lượt 3 chặn vì phần sót của D-378 (CHANGELOG còn hứa check-links bỏ code span; GO-NO-GO số đo cũ)
+
+- Phương án: (1) Đã sửa ở 31dbad4; review delta lượt 4 · (2) Tách PR
+- Chọn: Đã sửa ở 31dbad4; review delta lượt 4
+- Lý do (tiêu chí chất lượng cuối): (1) chỉ là chữ sót của D-378, đã sửa và đo lại sau git add; (5) tách PR không thêm an toàn
+- Đường lùi: Tách PR nếu lượt 4 còn chặn
