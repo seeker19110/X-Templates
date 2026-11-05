@@ -31,11 +31,23 @@
 - Mở PR, merge, cắt bản, PR vào dự án đích, chạy CLI host bằng tài khoản của chủ: việc người (chủ dự án 2026-11-05).
 
 ## Task
-- [ ] `T-3685` B gói `web-api-ts`: `pack.json` + starter (node:http, kysely/pg, RLS, scrypt, migration up/down) + lock — Gate: `python3 -m unittest tests.test_packs`
-- [ ] `T-3686` B lát dọc `vitest` với Postgres thật + sao lưu/khôi phục + artifact digest (sau: T-3685) — Gate: `python3 -m unittest tests.test_packs`
-- [ ] `T-3687` B workflow `pack-web-api.yml`: repo sạch từ `install.py --pack`, lát dọc xanh, ba ca `mutants.json` đỏ (sau: T-3686, T-3688) — Gate: `python3 scripts/xt.py ci-check .github/workflows`
-- [ ] `T-3688` C `install.py --pack`: starter chỉ repo sạch, managed theo hash, drift trong `--plan`, idempotent, lùi bằng bản cũ — Gate: `python3 -m unittest tests.test_install_pack`
-- [ ] `T-3689` C chạy `install.py --plan --pack web-api-ts` trên bản clone hotel-manager, ghi kết quả vào báo cáo (sau: T-3688) — Gate: `python3 -m unittest tests.test_install_pack`
-- [ ] `T-3690` D worker: khoá ý định, lease, crash, reconcile trong gói + test (sau: T-3686) — Gate: `python3 -m unittest tests.test_packs`
-- [ ] `T-3691` E `docs/ops/registry.json` + `xt.py registry` + trang `xt.py app` — Gate: `python3 -m unittest tests.test_registry`
-- [ ] `T-3692` Tài liệu: ADR-0068 trạng thái, `packs/README.md`, CHANGELOG, harness/README (mức hỗ trợ), sổ nợ (sau: T-3687, T-3689, T-3690, T-3691) — Gate: `scripts/dev-task.sh gate-fast`
+- [x] `T-3685` B gói `web-api-ts`: `pack.json` + starter (node:http, kysely/pg, RLS, scrypt, migration up/down) + lock — Gate: `python3 -m unittest tests.test_packs`
+- [x] `T-3686` B lát dọc `vitest` với Postgres thật + sao lưu/khôi phục + artifact digest (sau: T-3685) — Gate: `python3 -m unittest tests.test_packs`
+- [x] `T-3687` B workflow `pack-web-api.yml`: repo sạch từ `install.py --pack`, lát dọc xanh, ba ca `mutants.json` đỏ (sau: T-3686, T-3688) — Gate: `python3 scripts/xt.py ci-check .github/workflows`
+- [x] `T-3688` C `install.py --pack`: starter chỉ repo sạch, managed theo hash, drift trong `--plan`, idempotent, lùi bằng bản cũ — Gate: `python3 -m unittest tests.test_install_pack`
+- [x] `T-3689` C chạy `install.py --plan --pack web-api-ts` trên bản clone hotel-manager, ghi kết quả vào báo cáo (sau: T-3688) — Gate: `python3 -m unittest tests.test_install_pack`
+- [x] `T-3690` D worker: khoá ý định, lease, crash, reconcile trong gói + test (sau: T-3686) — Gate: `python3 -m unittest tests.test_packs`
+- [x] `T-3691` E `docs/ops/registry.json` + `xt.py registry` + trang `xt.py app` — Gate: `python3 -m unittest tests.test_registry`
+- [x] `T-3692` Tài liệu: ADR-0068 trạng thái, `packs/README.md`, CHANGELOG, harness/README (mức hỗ trợ), sổ nợ (sau: T-3687, T-3689, T-3690, T-3691) — Gate: `scripts/dev-task.sh gate-fast`
+
+## Kết quả (bằng chứng cục bộ 2026-11-05)
+- B: bản cài sạch từ `install.py --pack` với `postgres:17.11` — lint, typecheck, `vitest` 18/18 xanh; 4/4 ca
+  `mutants.json` đỏ đúng test (`tests/pack_mutants.py check`); build hai lần cùng digest; `release-check` artifacts PASS,
+  `promotion` chưa `approved` khi chưa ký.
+- C: bản clone `seeker19110/hotel-manager@30492c9` (không đẩy): `--plan --pack` = brownfield, starter 22/22
+  `skipped-brownfield`; workflow managed lúc đầu làm `ci-gates.test.mjs` đỏ (AUD-HAR-225) → sửa thành đề xuất
+  `.xtemplates-new`; `blueprint-status --run` trước = sau (33 kiểm, 6 đỏ có sẵn của môi trường, 73 MUST mở); cài lại
+  không đổi gì. PR nâng thật vào hotel-manager: việc người.
+- D: worker trong gói; fixture payload host thật (Codex/Gemini) chưa làm — cần chạy CLI bằng tài khoản trả phí của chủ.
+- Review (`reviewer-alt`): lát B–D 1 🔴 · 4 🟠 · 1 🟢 đã sửa ở `f3fe754`; nợ AUD-SEC-502, AUD-HAR-227. Lát E:
+  APPROVE, 2 🟠 sửa ở `d2a779e`; nợ AUD-HAR-228, AUD-CODE-050, AUD-TEST-064.

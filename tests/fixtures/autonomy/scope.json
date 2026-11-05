@@ -370,6 +370,25 @@
     "AUD-SEC-500",
     "AUD-HAR-222"
    ]
+  },
+  {
+   "reason": "Gói sản phẩm và `install.py --pack` (ADR-0068 lát B–D) — hành vi của installer, mã TypeScript của gói và ca sai cố ý, không phải guard/PR/CI/harness. Kiểm bằng tests.test_install_pack, tests.test_packs và workflow pack-web-api.yml (Postgres thật, mutants.json).",
+   "ids": [
+    "AUD-SEC-501",
+    "AUD-HAR-223",
+    "AUD-TEST-063",
+    "AUD-CODE-048",
+    "AUD-HAR-224",
+    "AUD-HAR-225",
+    "AUD-HAR-226"
+   ]
+  },
+  {
+   "reason": "Registry sản phẩm (`xt.py registry`, `GET /api/registry` của `xt.py app` — ADR-0068 lát E): kiểm schema và thông điệp lỗi của lệnh đọc, không phải guard/PR/CI/harness. Kiểm bằng tests.test_registry.",
+   "ids": [
+    "AUD-CODE-049",
+    "AUD-SEC-503"
+   ]
   }
  ]
 }
