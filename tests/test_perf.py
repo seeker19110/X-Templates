@@ -1586,8 +1586,9 @@ TAMPER_USERSITE = SLOWER + (  # python3 không `-I` nạp usercustomize.py của
 
 
 class PerfGateExampleTest(unittest.TestCase):
-    """Gate mẫu của optimization-loop.md chạy NGUYÊN VĂN (trích từ tài liệu) trên repo giả có `.xtemplates/scripts/xt.py`
-    và `origin/main`; candidate là `app.sh` chưa commit trong cây agent (bench gọi `./app.sh` của cây đang đứng)."""
+    """Script đo tay mẫu của optimization-loop.md (đường lùi khi gỡ skill khỏi `perf trial`; không làm Gate của vòng —
+    guard chặn `bash <(…)`, D-371) chạy NGUYÊN VĂN (trích từ tài liệu) trên repo giả có `.xtemplates/scripts/xt.py` và
+    `origin/main`; candidate là `app.sh` chưa commit trong cây agent (bench gọi `./app.sh` của cây đang đứng)."""
 
     def setUp(self):
         patcher = unittest.mock.patch.dict(os.environ, ISOLATED)
@@ -1596,7 +1597,9 @@ class PerfGateExampleTest(unittest.TestCase):
         self.tmp = Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, self.tmp, True)
         found = re.search(r"```bash\n(# scripts/perf-gate\.sh.*?)```", GATE_DOC.read_text(encoding="utf-8"), re.S)
-        self.assertIsNotNone(found, "không thấy khối Gate mẫu trong optimization-loop.md")
+        self.assertIsNotNone(found, "không thấy khối script đo tay mẫu trong optimization-loop.md")
+        # D-371: guard chặn `bash <(git show …)` — tài liệu không hứa script này làm Gate của vòng
+        self.assertNotIn("Gate: `bash <(git show", GATE_DOC.read_text(encoding="utf-8"))
         self.script = found.group(1)
         (self.tmp / "bin").mkdir()
         (self.tmp / "bin" / "python3").symlink_to(sys.executable)  # `python3` của Gate = Python chạy test
