@@ -172,8 +172,10 @@ class GitMetadataTest(unittest.TestCase):
         (self.bare / "objects").rename(store)
         with (self.bare / "config").open("a") as f:
             f.write("[diff]\n\texternal = /tmp/driver\n")
-        self.assert_code(f"GIT_OBJECT_DIRECTORY={store} git -C {self.bare} diff HEAD^ HEAD", "BUDGET")
-        self.assert_code(f"export GIT_OBJECT_DIRECTORY={store}; git -C {self.bare} diff HEAD^ HEAD", "BUDGET")
+        # AUD-SEC-496: repo trần thiếu `objects` vẫn được nhận (HEAD + `refs`) → khoá chạy lệnh trong config chặn trước
+        # luật biến cấu hình git (BUDGET) — vẫn chặn, mã cụ thể hơn
+        self.assert_code(f"GIT_OBJECT_DIRECTORY={store} git -C {self.bare} diff HEAD^ HEAD", "HOOK_BYPASS")
+        self.assert_code(f"export GIT_OBJECT_DIRECTORY={store}; git -C {self.bare} diff HEAD^ HEAD", "HOOK_BYPASS")
 
 
 class ReviewDebt435Test(unittest.TestCase):
@@ -1055,8 +1057,8 @@ class OptionParse3673Test(unittest.TestCase):
         )
         self.assertEqual(guard._operands(guard._getopt(["--t", "D", "-fS~", "a", "--", "-x"], cp)), ["a", "-x"])
         self.assertEqual(
-            guard._getopt(["--p", "--=x", "-t"], cp), [("p", None), ("-", "x"), ("t", None)]
-        )  # mơ hồ, rỗng
+            guard._getopt(["--p", "--=x", "-t"], cp), [("parents", None), ("preserve", None), ("-", "x"), ("t", None)]
+        )  # mơ hồ → mọi tên khớp (AUD-SEC-495), rỗng
         self.assertEqual(guard._getopt(["--exc"], guard.RSYNC_OPTS), [("exc", None)])  # popt không nhận viết tắt
         self.assertEqual(guard._old_style(["xfC", "a"], guard.TAR_SHORT_VALUE), ["-x", "-f", "a", "-C"])
         self.assertEqual(
@@ -1090,7 +1092,10 @@ class OptionParse3673Test(unittest.TestCase):
         self.assertEqual(guard._copy_into_positionals(["mv", "-t", "D", "a"]), ["a", "D"])
         self.assertEqual(guard._copied_into(["rsync", "a", "host:d/"], str(self.root), str(self.root)), [])
         self.assertTrue(guard._keeps_path(["rsync", "-aR", "a", "d/"]))
-        self.assertFalse(guard._keeps_path(["cp", "--p", "a", "d/"]))  # `--p` mơ hồ (parents/preserve)
+        self.assertTrue(guard._keeps_path(["cp", "--p", "a", "d/"]))  # `--p` mơ hồ: xét cả parents (AUD-SEC-495)
+        # … và cả tên cuối (preserve): đích nhận cả `d/x/a` lẫn `d/a`
+        got = guard._copied_into(["cp", "--p", "x/a", "d/"], str(self.root), str(self.root))
+        self.assertEqual(got, [f"{self.root}/d/x/a", f"{self.root}/d/a"])
 
     def test_green_scp_sink_and_7z_case(self):
         self.assert_codes("HOOK_BYPASS", "scp -t .claude/hooks", "cd .claude/hooks && 7z X /tmp/a.7z")
@@ -1448,6 +1453,408 @@ class Review439Test(unittest.TestCase):
         self.assertEqual(self.cands("cd sub/up && echo")[1], [f"{r}/sub/up", f"{r}/sub2"])
         self.assertEqual(self.cands("cd sub && echo")[1], [f"{r}/sub"])
         self.assert_codes("NONE", "cd sub/up && ls", "cd sub/up && printf x > notes", "cd src && git commit -m x")
+
+
+class Debt439Test(unittest.TestCase):
+    """Nợ review #439: AUD-SEC-492…496 — mỗi ca chặn đỏ ở 739d02f (GNU tar 1.35, bash 5.3, coreutils 9.7 và uutils
+    0.8.0, git 2.53 xác nhận hành vi)."""
+
+    git_init = GitMetadataTest.git_init
+    policy = GitMetadataTest.policy
+    assert_code = GitMetadataTest.assert_code
+    assert_codes = OptionParse3673Test.assert_codes
+    cands = CwdUnion3674Test.cands
+
+    def setUp(self):
+        Review439Test.setUp(self)
+        (self.root / "env.sh").write_text("export A=1\n")
+        (self.root / ".autopilot" / "verified.json").write_text("{}")
+
+    def test_492_tape_env_is_archive_without_file_option(self):
+        """GNU tar/bsdtar dùng `TAPE` làm archive khi không có `-f`/`--file` (cả `TAR_OPTIONS`)."""
+        self.assert_codes(
+            "HOOK_BYPASS",
+            "TAPE=.git/hooks/pre-commit tar -c /tmp/p",
+            "TAPE=.claude/hooks/guard.py tar -c /tmp/p",
+            "env TAPE=.claude/hooks/guard.py tar -c src",
+            "export TAPE=.claude/hooks/guard.py; tar -c src",
+            "TAPE=.git/hooks/pre-commit tar -r src",
+            "TAPE=.claude/hooks/guard.py tar cv src",
+            "TAPE=.claude/hooks/guard.py bsdtar -c src",
+            "TAPE=.claude/hooks/guard.py TAR_OPTIONS=-v tar -c src",
+        )
+        self.assert_code("TAPE=.autopilot/verified.json tar -c src", "EVIDENCE_HANDWRITE")
+        self.assert_codes(
+            "NONE",
+            "tar -cf out.tar src",
+            "TAPE=out.tar tar -c src",
+            "TAPE=.claude/hooks/guard.py tar -cf out.tar src",
+            "TAPE=.claude/hooks/guard.py TAR_OPTIONS='-f out.tar' tar -c src",
+            "TAPE=.claude/hooks/guard.py tar -tv",
+            "TAPE=- tar -c src",
+        )
+        n = guard._with_env_opts(["tar", "cv", "src"], ["TAPE=a.tar", "tar", "cv", "src"], None)
+        self.assertEqual(n, ["tar", "--file=a.tar", "-c", "-v", "src"])
+        self.assertEqual(guard._with_env_opts(["tar", "-c"], ["tar", "-c"], {"TAPE": "b"}), ["tar", "--file=b", "-c"])
+        self.assertEqual(
+            guard._with_env_opts(["tar", "-cf", "x"], ["tar", "-cf", "x"], {"TAPE": "b"})[1:], ["-cf", "x"]
+        )
+
+    def test_493_source_of_unseen_text_moves_cwd(self):
+        """`.`/`source` chạy chữ từ stdin, fd, `<(…)` hay tệp không có lúc kiểm trong shell này: `cd` trong đó dời thư
+        mục — here-string giải như `eval`, còn lại thư mục không biết (D-106); `trap` chỉ lấy thân, không lấy tín hiệu."""
+        self.assert_codes(
+            "EVIDENCE_HANDWRITE",
+            ". /dev/stdin <<< 'cd sub'; printf x > ../.autopilot/x",
+            "source /dev/stdin <<< 'cd sub'; printf x > ../.autopilot/x",
+            "source -- /dev/fd/0 <<< 'cd sub' && printf x > ../.autopilot/x",
+            "trap 'cd sub' DEBUG; printf x > ../.autopilot/x",
+            "trap -- 'cd sub' EXIT; printf x > ../.autopilot/x",
+        )
+        self.assert_codes(
+            "HOOK_BYPASS",
+            "source /dev/stdin <<'EOF'\ncd .git/hooks\nEOF\nprintf x > pre-commit",
+            ". /dev/fd/3 3< /tmp/s; printf x > pre-commit",
+            ". /proc/self/fd/0 < /tmp/s; printf x > pre-commit",
+            ". ./nofile.sh; printf x > pre-commit",
+            ". -p /tmp ./env.sh; printf x > pre-commit",
+        )
+        self.assertIn(None, self.cands("source <(echo cd sub); echo")[-1])
+        self.assertIn(None, self.cands("source; echo")[-1])
+        self.assertIn(None, self.cands('source "$F"; echo')[-1])
+        self.assertIn(None, self.cands("source ./*.sh; echo")[-1])
+        self.assertIn(None, self.cands(". <<< 'cd x'; echo")[-1])
+        self.assertEqual(self.cands(". ./env.sh; echo")[-1], [str(self.root)])
+        # chữ có `$`: token đã bỏ nháy, không phân biệt `'…'` với `"…"` (bash mở rộng trước) → không thấy (AUD-SEC-512)
+        self.assertCountEqual(self.cands(". /dev/stdin <<< 'echo $A'; echo")[-1], [str(self.root), None])
+        self.assertEqual(
+            self.cands(". /dev/stdin <<< 'echo A'; echo")[-1], [str(self.root)]
+        )  # chữ nguyên văn, không `cd`
+        self.assertEqual(self.cands(f"source {self.root}/env.sh && echo")[-1], [str(self.root)])
+        self.assert_codes(
+            "NONE",
+            ". ./env.sh; printf x > out.txt",
+            ". ./env.sh && printf x > pre-commit",
+            ". /dev/stdin <<< 'cd sub'; printf x > out.txt",
+            ". /dev/stdin <<< 'echo hi'; printf x > pre-commit",
+            "trap 'cd sub' DEBUG; printf x > notes",
+        )
+
+    def test_494_env_options_reach_pending_and_fake_git_dirs(self):
+        """`TAR_OPTIONS`/`UNZIP`/`TAPE` và thư mục giải nén ngầm (`cd X && tar -x`) cũng là đích của luật repo trần đang
+        chờ và Git dir giả — không chỉ `_write_asks`."""
+        self.assert_codes(
+            "HOOK_BYPASS",
+            "git init --bare X && TAR_OPTIONS=-CX tar -xf /tmp/a.tar",
+            "git init --bare X && cd X && tar -xf /tmp/a.tar",
+            "git init --bare X && cd X && unzip /tmp/a.zip",
+            "git init --bare X && UNZIP=-dX unzip /tmp/a.zip",
+            "export TAR_OPTIONS=-CX; git init --bare X; tar -xf /tmp/a.tar",
+            "mkdir -p X/objects && TAR_OPTIONS=-CX tar -xf /tmp/a.tar",
+            "mkdir -p X/objects && cd X && tar -xf /tmp/a.tar",
+            "TAPE=X/HEAD tar -c src; printf x > X/config",
+            "TAR_OPTIONS='-f X/HEAD' tar -c src; printf x > X/config",
+        )
+        self.assert_codes(
+            "NONE",
+            "TAR_OPTIONS=-Cbuild tar -xf /tmp/a.tar",
+            "cd build && tar -xf /tmp/a.tar",
+            "git init --bare X && tar -tf /tmp/a.tar",
+            "git init --bare X && tar -xOf /tmp/a.tar",
+            "TAPE=out.tar tar -c src; printf x > config",
+        )
+
+    def test_495_coreutils_long_names_and_ambiguous_abbreviation(self):
+        """Bảng cờ theo coreutils 9.7 và uutils 0.8.0; tên viết tắt mơ hồ (bản/hiện thực khác nhận khác) → MỌI tên
+        khớp; `install -d` tạo mọi toán hạng."""
+        cp, mv, install = (guard.COPY_OPT_TABLES[k] for k in ("cp", "mv", "install"))
+        self.assertEqual(guard._getopt(["--keep"], cp), [("keep-directory-symlink", None)])
+        self.assertEqual(guard._getopt(["--exc", "a"], mv), [("exchange", None), ("", "a")])
+        self.assertEqual(guard._getopt(["--unp"], install), [("unprivileged", None)])
+        self.assertEqual(guard._getopt(["--d", "a"], install), [("debug", None), ("directory", None), ("", "a")])
+        self.assertEqual(
+            guard._getopt(["--s", "X", "a"], install),
+            [("suffix", "X"), ("strip", None), ("strip-program", "X"), ("", "X"), ("", "a")],
+        )
+        self.assertEqual(guard._getopt(["--s=X"], install), [("suffix", "X"), ("strip", "X"), ("strip-program", "X")])
+        self.assertEqual(guard._getopt(["--=x"], install), [("-", "x")])
+        self.assertEqual(guard._getopt(["--su", "X"], install), [("suffix", "X")])
+        self.assert_codes(
+            "HOOK_BYPASS",
+            "install --d .claude/hooks/x build",
+            "install -d .git/hooks/pre-commit",
+            "install -Dd build .claude/hooks/y",
+            "install --directory build .git/hooks/pre-push",
+        )
+        self.assert_codes("NONE", "install -d build/out", "install -m 644 src/a dist/a", "install --d build dist")
+
+    def test_496_object_directory_env_accepts_head_and_refs(self):
+        """`GIT_OBJECT_DIRECTORY` (kể cả thừa hưởng) làm git nhận thư mục có HEAD + `refs` thiếu `objects` là Git dir —
+        guard nhận diện để canh `config`/`hooks` của nó; miễn (`_git_dir_accepted`) giữ chặt như cũ."""
+        b = self.tmp / "B"
+        (b / "refs" / "heads").mkdir(parents=True)
+        (b / "HEAD").write_text("ref: refs/heads/main\n")
+        (b / "config").write_text("[core]\n\tfsmonitor = touch /tmp/pwn\n")
+        self.assertFalse(guard._git_metadata_dir(str(b)))
+        self.assertTrue(guard._git_metadata_dir(str(b), True))
+        self.assertEqual(guard._discover_bare_git_dir(str(b), "", ()), "")
+        self.assertEqual(guard._discover_bare_git_dir(str(b), "", (), True), str(b))
+        with patch.dict(os.environ, {"GIT_OBJECT_DIRECTORY": str(self.tmp / "objs")}):
+            self.assertTrue(guard._git_metadata_dir(str(b)))
+            self.assert_codes("HOOK_BYPASS", f"cd {b} && git status", f"printf x > {b}/config")
+            self.assert_code(f"cp -r {b} {self.tmp}/C; printf x > {self.tmp}/C/hooks/pre-commit", "HOOK_BYPASS")
+            self.assertFalse(guard._git_dir_accepted(str(b)))  # miễn không nới theo biến
+        self.assert_codes("NONE", f"cd {b} && git status", f"printf x > {b}/config")
+
+
+class Review441Test(unittest.TestCase):
+    """Review #441 (D-362): AUD-SEC-510…515 — mỗi ca chặn đỏ ở 25949b2 (bash 5.3, git 2.53 xác nhận hành vi)."""
+
+    git_init = GitMetadataTest.git_init
+    policy = GitMetadataTest.policy
+    assert_code = GitMetadataTest.assert_code
+    assert_codes = OptionParse3673Test.assert_codes
+    cands = CwdUnion3674Test.cands
+
+    def setUp(self):
+        Debt439Test.setUp(self)
+        (self.root / "docs" / "autopilot" / "STAGE.json").write_text("{}")
+        (self.root / "stdin_link").symlink_to("/dev/stdin")
+        (self.root / "devl").symlink_to("/dev")
+
+    def bare_with_sub(self, name, config):
+        """Repo trần `name` có `config` thêm vào, thư mục con `sub` có HEAD + `refs` (thiếu `objects`)."""
+        b = self.tmp / name
+        self.git_init(b, "--bare")
+        with (b / "config").open("a") as f:
+            f.write(config)
+        (b / "sub" / "refs" / "heads").mkdir(parents=True)
+        (b / "sub" / "HEAD").write_text("ref: refs/heads/main\n")
+        return b
+
+    def same_block(self, variant, canonical):
+        """`variant` bị chặn cùng mã với dạng chuẩn `canonical` (dạng chuẩn phải bị chặn)."""
+        want = self.policy(canonical)
+        self.assertNotIn(want["code"], ("NONE", None), canonical)
+        self.assert_code(variant, want["code"])
+
+    def test_510_object_directory_env_discovers_both_branches(self):
+        """`GIT_OBJECT_DIRECTORY` của guard có thể không tới git (`unset`, `env -u`, `env -i`): git khi đó dò lên repo
+        trần cha có khoá chạy lệnh — dò cả hai nhánh (có và không biến), nhánh nào gặp khoá nguy hiểm thì chặn."""
+        b = self.bare_with_sub("B2", "[diff]\n\texternal = /tmp/driver\n")
+        c = self.bare_with_sub("C2", "")
+        with patch.dict(os.environ, {"GIT_OBJECT_DIRECTORY": "/tmp"}):
+            self.assert_codes(
+                "HOOK_BYPASS",
+                f"cd {b}/sub && unset GIT_OBJECT_DIRECTORY; git diff HEAD^ HEAD",
+                f"cd {b}/sub && env -u GIT_OBJECT_DIRECTORY git diff HEAD^ HEAD",
+                f"cd {b}/sub && env -i PATH=/usr/bin git diff HEAD^ HEAD",
+                f"git -C {b}/sub diff HEAD^ HEAD",
+            )
+            self.assert_codes("NONE", f"cd {c}/sub && unset GIT_OBJECT_DIRECTORY; git log", f"git -C {c}/sub log")
+        self.assert_codes(
+            "HOOK_BYPASS",
+            f"export GIT_OBJECT_DIRECTORY=/tmp; unset GIT_OBJECT_DIRECTORY; cd {b}/sub && git diff HEAD^ HEAD",
+            f"GIT_OBJECT_DIRECTORY=/tmp env -u GIT_OBJECT_DIRECTORY git -C {b}/sub diff HEAD^ HEAD",
+        )
+        self.assert_codes("NONE", f"git -C {c}/sub log", f"cd {c} && git log")
+        self.assertEqual(guard._discover_bare_git_dir(f"{b}/sub", "", (), True), f"{b}/sub")
+        with patch.dict(os.environ, {"GIT_OBJECT_DIRECTORY": "/tmp"}):  # nhánh không biến không đọc môi trường guard
+            self.assertEqual(guard._discover_bare_git_dir(f"{b}/sub", "", ()), str(b))
+
+    def test_511_stdin_script_paths_are_normalized(self):
+        """`/dev/./stdin`, `//dev/stdin`, `/dev//fd/0`, `/proc/self/fd/./0` là stdin như dạng chuẩn; `/dev/../x` không
+        phải thiết bị."""
+        hook = "printf x > .git/hooks/pre-commit"
+        for path in ("/dev/./stdin", "//dev/stdin", "/dev//fd/0", "/proc/self/fd/./0", "///dev/stdin"):
+            for head in ("bash", "sh", ".", "source"):
+                self.assert_code(f"{head} {path} <<'EOF'\n{hook}\nEOF", "HOOK_BYPASS")
+            self.same_block(f"bash {path} < <(cat /tmp/x)", "bash /dev/stdin < <(cat /tmp/x)")
+            self.same_block(f". {path} < <(cat /tmp/x)", ". /dev/stdin < <(cat /tmp/x)")
+        g = f"{self.root}/.claude/hooks/guard.py"
+        for cmd in ("printf x > {}", "rm -f {}", "chmod 000 {}", "truncate -s0 {}"):
+            self.same_block(cmd.format("/dev/../" + g), cmd.format(g))
+        self.assertTrue(guard._dev_path("/dev/./stdin"))
+        self.assertTrue(guard._dev_path("//proc/self/fd/0"))
+        self.assertFalse(guard._dev_path("/dev/../tmp/x"))
+        self.assert_codes("NONE", "bash /dev/./stdin <<'EOF'\necho hi\nEOF", "printf x > /dev/./null")
+
+    def test_512_quoted_heredoc_and_here_string_with_redirects(self):
+        """Heredoc có nháy và here-string chữ nguyên văn vào `.`/`source` giải như `eval` dù có chuyển hướng thêm; thân
+        không thấy (heredoc không nháy, chữ có mở rộng, stdin cuối là tệp/fd) → thư mục không biết, và đích tương đối có
+        `..` hay khớp đường canh (`docs/autopilot`) vẫn được xét (D-106 mở rộng; AUD-SEC-520)."""
+        self.assert_codes(
+            "EVIDENCE_HANDWRITE",
+            "source /dev/stdin <<'EOF'\ncd docs\nEOF\nprintf x > autopilot/STAGE.json",
+            ". /dev/stdin <<< 'cd docs' >/dev/null; printf x > autopilot/STAGE.json",
+            ". /dev/stdin <<< 'cd sub' >/dev/null; printf x > ../.autopilot/x",
+            ". /dev/stdin 2>/dev/null <<< 'cd sub'; printf x > ../.autopilot/x",
+            ". /dev/stdin <<< 'cd sub' 2>&1; printf x > ../.autopilot/x",
+            "source /dev/stdin <<'EOF' 2>&1\ncd sub/deep\nEOF\nprintf x > ../../.autopilot/x",
+            ". /dev/stdin <<-'EOF'\n\tcd sub\n\tEOF\nprintf x > ../.autopilot/x",
+            "source /dev/stdin <<EOF\ncd sub\nEOF\nprintf x > ../.autopilot/x",
+            "source /dev/stdin <<EOF\ncd docs\nEOF\nprintf x > autopilot/STAGE.json",
+            'cd "$X"; printf x > ../.autopilot/x',
+            'cd "$X"; printf x > ../../.autopilot/verified.json',
+            'cd "$X"; printf x > autopilot/STAGE.json',
+            'cd "$X"; printf x > STAGE.json',
+        )
+        self.assert_code(". /dev/stdin <<< 'cd .git' >/dev/null; printf x > hooks/pre-commit", "HOOK_BYPASS")
+        self.assert_code('cd "$X"; printf x > ../hooks/pre-commit', "HOOK_BYPASS")
+        r = str(self.root)
+        self.assertCountEqual(self.cands("source /dev/stdin <<'EOF'\ncd docs\nEOF\necho")[-1], [r, f"{r}/docs", None])
+        self.assertCountEqual(self.cands(". /dev/stdin <<< 'cd sub' > /dev/null; echo")[-1], [r, f"{r}/sub", None])
+        self.assertCountEqual(self.cands(". /dev/stdin < /tmp/s <<< 'cd sub'; echo")[-1], [r, f"{r}/sub", None])
+        self.assertEqual(self.cands(". /dev/stdin <<'EOF'\necho hi\nEOF\necho")[-1], [r])
+        for unseen in (
+            '. /dev/stdin <<< "cd $D"; echo',
+            ". /dev/stdin <<< 'cd sub' < /tmp/s; echo",
+            ". /dev/stdin <<< 'cd sub' 0< /tmp/s; echo",
+            ". /dev/stdin 3<<< 'echo'; echo",
+            ". /dev/stdin <<EOF\necho hi\nEOF\necho",
+            "echo $((1<<2)); . /dev/stdin <<'EOF'\necho hi\nEOF\necho",
+        ):
+            self.assertCountEqual(self.cands(unseen)[-1], [r, None], unseen)
+        self.assertIn(
+            None, self.cands(". /dev/stdin <<'EOF'\ncd sub")[-1]
+        )  # không đóng: phần còn lại là lệnh, thân không gắn
+        self.assert_codes(
+            "NONE",
+            ". /dev/stdin <<< 'cd sub' >/dev/null; printf x > out.txt",
+            "source /dev/stdin <<'EOF'\necho hi\nEOF\nprintf x > pre-commit",
+            'cd "$X"; printf x > ../out.txt',
+            'cd "$X"; printf x > autopilot.txt',
+            'cd "$X"; printf x > ../../notes/STAGE.md',
+        )
+
+    def test_513_dev_and_proc_sources_never_probed(self):
+        """Đường dưới `/dev`/`/proc` (cả sau chuẩn hoá, qua symlink thư mục/tệp) không bao giờ `isfile`/đọc: quyết định
+        không phụ thuộc stdin của tiến trình guard (here-string > 64 KiB của bash là tệp tạm)."""
+        for src in (". /dev/./stdin", ". ./stdin_link", ". ./devl/stdin", "source /proc/self/fd/./0", ". /dev/fd/0"):
+            self.assert_code(f"{src} <<< 'cd .claude/hooks'; printf x > guard.py", "HOOK_BYPASS")
+        self.assert_code("cd /dev && . ./stdin <<< 'cd .git/hooks'; printf x > pre-commit", "HOOK_BYPASS")
+        cur = [str(self.root)]
+        with patch.object(guard.os.path, "isfile", return_value=True):  # stdin của guard là tệp thường
+            self.assertEqual(guard._source_text([".", "/dev/./stdin", "<<<", "cd x"], cur), "cd x")
+            for path in ("./stdin_link", "./devl/stdin", "/proc/self/fd/3", "//dev/stdin", "/dev/../dev/stdin"):
+                self.assertEqual(guard._source_text([".", path], cur), guard.UNSEEN_BODY, path)
+            self.assertEqual(guard._source_text([".", "/dev/./stdin"], [None]), guard.UNSEEN_BODY)
+        self.assertIsNone(guard._source_text([".", "./env.sh"], cur))
+        self.assertTrue(guard._via_dev(f"{self.root}/devl/x"))
+        self.assertFalse(guard._via_dev(f"{self.root}/sub/../env.sh"))
+        loop = self.root / "loop"
+        loop.symlink_to(loop)
+        self.assertFalse(guard._via_dev(f"{loop}/x"))  # vòng symlink: kernel báo ELOOP — tệp không đọc được
+        with patch.object(guard.os, "readlink", side_effect=OSError):
+            self.assertTrue(guard._via_dev(f"{self.root}/stdin_link"))  # đổi giữa chừng: không biết → coi là đặc biệt
+
+    def test_514_extract_only_into_real_pending_git_dir(self):
+        """Giải nén chỉ xét như ghi `hooks` của repo trần chờ/Git dir giả khi đích là, nằm trong hay chứa thư mục đó (hay
+        không biết) — không phải mọi thư mục khi chuỗi có tar/unzip."""
+        self.assert_codes(
+            "NONE",
+            "mkdir -p build/objects && tar -xzf /tmp/deps.tgz -C vendor",
+            "mkdir -p out/objects && unzip -o /tmp/a.zip -d vendor",
+            "mkdir -p build/objects && tar -xf /tmp/a.tar -C src/vendor",
+            "git init --bare /tmp/r.git && tar -xf /tmp/a.tar -C build",
+            f"git init --bare {self.tmp}/mirror.git && unzip -q /tmp/a.zip -d vendor",
+        )
+        self.assert_codes(
+            "HOOK_BYPASS",
+            "git init --bare X && tar -xf /tmp/a.tar -C X",
+            "git init --bare X && tar -xf /tmp/a.tar -C X/hooks",
+            "git init --bare sub/X && tar -xf /tmp/a.tar -C sub",
+            "git init --bare X && tar -xf /tmp/a.tar",
+            "mkdir -p build/objects && cd vendor && tar -xf /tmp/a.tar",  # `cd` sau lệnh khác: ứng viên gồm cả gốc (D-347)
+            "mkdir -p X/objects && unzip /tmp/a.zip -d X",
+            'git init --bare "$D" && tar -xf /tmp/a.tar -C vendor',
+            'git init --bare X && tar -xf /tmp/a.tar -C "$D"',
+            "git init --bare X && cd X && tar -xf /tmp/a.tar",
+            "git init --bare /tmp/r.git && tar -xf /tmp/a.tar -C /tmp/r.git",
+            "git init --bare /tmp/r.git && cd sub/up/.. && tar -xf /tmp/a.tar -C /tmp",
+        )
+
+    def test_517_cpio_ambiguous_listing_abbreviation_is_not_listing(self):
+        """Tập phủ định (chỉ liệt kê) lấy GIAO các tên mà viết tắt mơ hồ mở ra: `--li` = link/list không làm `-i` thành
+        liệt kê."""
+        self.assert_codes(
+            "HOOK_BYPASS",
+            "cd .claude/hooks && cpio -i --li < a.cpio",
+            "cd .claude/hooks && cpio -i --l < a.cpio",
+            "cd .claude/hooks && cpio -i --list --li < a.cpio",
+        )
+        self.assert_codes("NONE", "cd .claude/hooks && cpio -i --lis < a.cpio", "cd .claude/hooks && cpio -it < a.cpio")
+        self.assertEqual(
+            guard._ambiguous_longs(["--to", "--li", "-i", "--", "x"], guard.CPIO_OPTS, guard.CPIO_LISTING),
+            {"link", "list"},
+        )
+
+    def test_515_single_fd_script_pattern(self):
+        """Một định nghĩa `FD_SCRIPT_RE` (bản chặt: mọi `/proc/<tiến trình>/fd/N`)."""
+        source = Path(guard.__file__).read_text(encoding="utf-8")
+        self.assertEqual(source.count("\nFD_SCRIPT_RE = "), 1)
+        for cmd in (
+            "bash /proc/$$/fd/3 3< /tmp/s",
+            "bash /proc/thread-self/fd/3 3< /tmp/s",
+            ". /proc/1/fd/4 4< /tmp/s",
+        ):
+            self.assertEqual(guard._fd_script_why(cmd), guard.FD_SCRIPT_WHY, cmd)
+            self.assertNotEqual(self.policy(cmd)["code"], "NONE", cmd)
+        self.assertEqual(guard._fd_script_why("bash /dev/stdin <<'E'\necho\nE"), "")
+
+    def test_521_write_through_fd_opened_directory(self):
+        """AUD-SEC-521: `exec 3< d; printf x > /dev/fd/3/f` ghi vào `d/f` (bash 5.2, Linux) — đích `/dev/fd/N/…`,
+        `/dev/std*/…`, `/proc/<pid>/fd/N/…` là thư mục không biết (D-106) cộng mọi thư mục mở bằng `<` trong lệnh."""
+        (self.root / ".github" / "workflows").mkdir(parents=True)
+        (self.root / "d").mkdir()
+        hooks = "printf x > .claude/hooks/guard.py"
+        for variant in (
+            "printf x > /dev/fd/3/guard.py 3< .claude/hooks",
+            "exec 3< .claude/hooks; printf x > /dev/fd/3/guard.py",
+            "exec 3<.claude/hooks && echo x >> /dev/fd/3/guard.py",
+            "exec {fd}< .claude/hooks; printf x > /dev/fd/10/guard.py",
+            "printf x > /dev/stdin/guard.py < .claude/hooks",
+            "printf x > /dev/./fd/3/guard.py 3< .claude/hooks",
+            "printf x > //dev/fd/3/guard.py 3< .claude/hooks",
+            "printf x > /dev/../dev/fd/3/guard.py 3< .claude/hooks",
+            "printf x > /dev/fd/3/x/../guard.py 3< .claude/hooks",
+            "printf x > /dev/fd/3/hooks/guard.py 3< .claude",
+            "printf x > /dev/fd/3/../hooks/guard.py 3< .claude/agents",
+            "printf x > /proc/self/fd/3/guard.py 3< .claude/hooks",
+            "printf x > /proc/$$/fd/3/guard.py 3< .claude/hooks",
+            "cd /dev && printf x > fd/3/guard.py 3< .claude/hooks",
+            "printf x > /dev/fd/3/guard.py",
+            "chmod 000 /dev/fd/3/guard.py 3< .claude/hooks",
+            "rm -f /dev/fd/3/guard.py",
+        ):
+            self.same_block(variant, hooks)
+        self.same_block("printf x > /dev/fd/3/pre-commit 3< .git/hooks", "printf x > .git/hooks/pre-commit")
+        self.same_block("tee /proc/thread-self/fd/4/state.json 4< .autopilot", "printf x > .autopilot/state.json")
+        self.same_block("printf x > /dev/fd/3/STAGE.json 3< docs/autopilot", "printf x > docs/autopilot/STAGE.json")
+        self.same_block("printf x > /dev/fd/3/ci.yml 3< .github/workflows", "printf x > .github/workflows/ci.yml")
+        self.same_block(
+            "printf x > /dev/fd/3/../../dev/fd/4/ci.yml 3< d 4< .github/workflows",
+            "printf x > .github/workflows/ci.yml",
+        )
+        self.same_block("printf x > /dev/fd/3/.gitconfig 3< ~", "printf x > ~/.gitconfig")
+        self.assert_codes(
+            "NONE",
+            "printf x > /dev/fd/2",
+            "echo x > /dev/stdout",
+            "cat > /dev/null",
+            "echo x > /dev/stderr",
+            "printf x > /dev/fd/3 3> out.txt",
+            "exec 3< d; printf x > /dev/fd/3/notes.txt",
+            "printf x > /dev/fd/3/ 3< d",
+            "sort < d/in.txt > /dev/fd/1",
+        )
+        self.assertIsNone(guard._fd_dir_tail("/dev/fd/3"))
+        self.assertIsNone(guard._fd_dir_tail("dev/fd/3/x"))
+        self.assertEqual(guard._fd_dir_tail("/dev//fd/./3/./a/../b"), "a/../b")
+        self.assertEqual(
+            guard._fd_open_dirs("exec 3< 'a b'; x {fd}<\"c\" <d <<E <<<f 3<> g <(h) 4<&3 $(<i) $j<k"),
+            ("a b", "c", "d", "i", "k"),
+        )
 
 
 if __name__ == "__main__":

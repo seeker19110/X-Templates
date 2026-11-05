@@ -168,6 +168,9 @@ CWD_RELATIVE: Dict[str, str] = {
     "t405-336-tar-cumulative": "-C docs -C autopilot tương đối → /tmp/docs/autopilot (AUD-SEC-336)",
     "t405-336-tar-one-top-level": "docs/autopilot tương đối → /tmp/docs/autopilot (AUD-SEC-336)",
     "t405-336-rsync-exclude": "docs/autopilot tương đối → /tmp/docs/autopilot (AUD-SEC-336)",
+    # d439-493-source-stdin-here-string-cd, d439-493-trap-body-then-signal: gỡ — thân `cd` thêm thư mục không biết,
+    # `../.autopilot` từ đó xét cả gốc (AUD-SEC-512)
+    "r441-517-cpio-ambiguous-listing": ".claude/hooks tương đối → /tmp/.claude/hooks (AUD-SEC-517)",
     "t405-339-copytree-dest": "docs/autopilot tương đối trong script (AUD-SEC-339)",
     "guard-audit1020c-cd-autopilot-script": "cd .autopilot → /tmp/.autopilot",
     "guard-audit1020c-tilde-plus-evidence": "~+ là $PWD = /tmp sau cd",
@@ -262,7 +265,7 @@ CWD_RELATIVE: Dict[str, str] = {
             # 482-dotdot-in-loop: gỡ — `cd ..` trong vòng lặp nay thêm thư mục không biết (D-351), chặn ở mọi thư mục
             ("482-false-and-cd", "sub, .autopilot", "AUD-SEC-482"),
             ("483-cd-physical", "sub/.., .autopilot", "AUD-SEC-483"),
-            ("484-eval-cd", "sub, ../.autopilot", "AUD-SEC-484"),
+            # 484-eval-cd: gỡ — `eval cd` thêm thư mục không biết, `../.autopilot` từ đó xét cả gốc (AUD-SEC-512)
             ("486-dir-removed-by-other-tool", "w, .autopilot", "AUD-SEC-486"),
         )
     },
