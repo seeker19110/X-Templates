@@ -1439,10 +1439,14 @@ class TrialFlowTest(TmpRepoCase):
 
     @flow("FLOW-38", done="T-3701")
     def test_flow_38_merging_default_branch_starts_new_round(self) -> None:
-        """Given vòng ở gốc B có sự kiện `log` đã commit; `main` của máy chủ đi tiếp, agent merge `origin/main` vào nhánh
-        (merge-base đổi → vòng mới) · When `start` · Then exit 2: lần đầu vòng mới đòi `HEAD^{tree}` = cây gốc mới."""
+        """Given vòng ở gốc B có lần giữ và sự kiện `log` đã commit; `main` của máy chủ đi tiếp, agent merge `origin/main`
+        vào nhánh (vòng mới) · When `start` · Then exit 2: lần đầu vòng mới đòi `HEAD^{tree}` = cây gốc mới trừ sổ sách
+        (D-371: nhánh chỉ khác gốc mới ở PERF-LOG thì `start` nhận — FLOW-54; lần giữ chưa vào `main` thì không)."""
         self.started()
-        self.ok("abort", "--reason", "thử")
+        self.put("src/hot.py", HOT.replace("K = 3", "K = 2"))
+        rc, out, err = self.trial("finish")
+        self.assertEqual(rc, 0, out + err)
+        self.git("commit", "-q", "-am", "giữ")
         self.ok("log")
         self.git("commit", "-q", "-am", "PERF-LOG")
         self.maintain({"src/other.py": "EXTRA = 400\n"}, "main đi tiếp")

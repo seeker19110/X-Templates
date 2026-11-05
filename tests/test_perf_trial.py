@@ -342,7 +342,10 @@ class TrialBaseTest(TrialCase):
         """Máy chủ không với tới (URL hỏng) → `refs/remotes/origin/HEAD`; thiếu nó → exit 2 kèm cách đặt."""
         url = str(self.tmp / "không-có")
         self.git("remote", "set-url", "origin", url)
-        self.assertEqual(xt.trial_round_base(self.repo, url), (self.base, "refs/heads/main"))
+        with contextlib.redirect_stderr(io.StringIO()) as err:
+            self.assertEqual(xt.trial_round_base(self.repo, url), (self.base, "refs/heads/main", "local"))
+        self.assertIn("⚠ perf trial: `git ls-remote`", err.getvalue())
+        self.assertEqual(xt.trial_round_base(self.repo, str(self.origin))[2], "server")
         self.git("remote", "set-head", "origin", "-d")
         self.assertIn("set-head origin -a", self.refused("status"))
 
@@ -1550,10 +1553,7 @@ class TrialReview443Test(TrialCase):
 GATE = "python3 -I <(git cat-file blob refs/remotes/origin/HEAD:{} || echo 'raise SystemExit(2)') perf trial status --check"
 
 
-class TrialReview445Test(TrialCase):
-    """Review #445 (D-370): Gate mẫu fail-closed, ngắt sau đóng băng tiêu lần đo lại duy nhất, held-out gộp đạt `target`,
-    đầu ra chỉ số chính so gốc, không ghi `decide` trùng, `abort` sau `--no-apply` giữ. Mỗi ca tái hiện một kịch bản."""
-
+class TrialDecideCase(TrialCase):
     def decides(self, tid: str) -> list[dict[str, Any]]:
         return [r for r in self.rows() if r["event"] == "decide" and r["id"] == tid]
 
@@ -1565,6 +1565,11 @@ class TrialReview445Test(TrialCase):
         with kill:
             rc, out, err = self.tr("finish", *args)
         return rc, out + err
+
+
+class TrialReview445Test(TrialDecideCase):
+    """Review #445 (D-370): Gate mẫu fail-closed, ngắt sau đóng băng tiêu lần đo lại duy nhất, held-out gộp đạt `target`,
+    đầu ra chỉ số chính so gốc, không ghi `decide` trùng, `abort` sau `--no-apply` giữ. Mỗi ca tái hiện một kịch bản."""
 
     def test_gate_template_fails_closed(self) -> None:
         """🔴1: Gate mẫu (skill, optimization-loop.md, ADR §5) qua `run_gate_shell` — không đọc được công cụ (thiếu
@@ -1723,6 +1728,249 @@ class TrialReview445Test(TrialCase):
         self.put("src/hot.py", HOT.replace("K = 3", "K = 2") + "# x\n")
         rc, out, err = self.tr("finish", "--no-apply")
         self.assertIn("GIT_LITERAL_PATHSPECS=1 git stash push", out)
+
+
+GOOD = HOT.replace("K = 3", "K = 2")  # tối ưu thật: −33 % lệnh bench, held-out cũng giảm
+
+
+def _cmp(verdict: str) -> dict[str, Any]:
+    doc = {"verdict": verdict, "reason": "r", "runs_before": 3, "runs_after": 3, "p": None, "threshold": 0.02}
+    return doc | {"median_before": 3.0, "median_after": 2.0, "change": -0.33}
+
+
+class TrialAudit3557Test(TrialDecideCase):
+    """Audit delta T-3557 (D-371): sổ sách (PLAN/DECISIONS/PERF-LOG/PROGRESS) không làm lệch cây neo, Gate qua
+    squash-merge, file mới che mô-đun nhập được ở gốc, luật giữ cần `improved` so cả hai cây, `ls-remote` cô lập cấu
+    hình toàn cục, ngắt rồi đổi candidate, khối PERF-LOG theo dòng còn hiệu lực. Mỗi ca tái hiện kịch bản của auditor."""
+
+    def kept(self) -> str:
+        tid = self.started()
+        self.put("src/hot.py", GOOD)
+        rc, out, err = self.tr("finish")
+        self.assertEqual(rc, 0, out + err)
+        self.git("commit", "-q", "-am", "giữ")
+        return tid
+
+    @flow("FLOW-52")
+    def test_flow_52_ledger_commits_after_kept_keep_gate_green(self) -> None:
+        """F1 Given lần giữ đạt `target`, commit · When tick PLAN-opt/DECISIONS/PROGRESS (chưa commit, rồi commit), `log`
+        + commit, `start` kế · Then `status --check` 0 suốt, `start` 0; file ngoài sổ sách bẩn → 1 "cây bẩn", commit nó →
+        1 "commit lạ"."""
+        self.kept()
+        self.ok("status", "--check")
+        ledger = {"docs/autopilot/PLAN-opt.md": "- [x] `T-001`\n", "PROGRESS.md": "tiến độ\n"}
+        self.write_tree(self.repo, ledger | {"docs/autopilot/DECISIONS.md": "### D-001\n"})
+        self.ok("status", "--check")
+        self.git("add", "-A")
+        self.git("commit", "-q", "-m", "tick")
+        self.ok("status", "--check")
+        self.ok("log")
+        self.git("commit", "-q", "-am", "log")
+        self.ok("status", "--check")
+        self.started()
+        self.ok("abort", "--reason", "x")
+        self.put("src/notes.txt", "đổi\n")
+        self.assertIn("cây bẩn", self.refused("status", "--check", code=1))
+        self.git("commit", "-q", "-am", "lạ")
+        self.assertIn("commit lạ", self.refused("status", "--check", code=1))
+
+    @flow("FLOW-53")
+    def test_flow_53_squash_merge_keeps_gate_green(self) -> None:
+        """F1 Given lần giữ + `log` commit trên nhánh · When PR squash-merge vào `main` máy chủ (vòng mới, cùng cây) ·
+        Then `status --check` 0 ở nhánh cũ lẫn `main` (lần giữ vòng trước); `main` đi tiếp chỉ ở sổ sách → 0; đi tiếp ở mã
+        → 1 "chưa có lần giữ"."""
+        self.kept()
+        self.ok("log")
+        self.git("commit", "-q", "-am", "log")
+        sq = self.git("commit-tree", self.git("rev-parse", "HEAD^{tree}"), "-p", "origin/main", "-m", "squash (#1)")
+        self.git("push", "-q", "origin", f"{sq}:refs/heads/main")
+        self.git("fetch", "-q", "origin")
+        self.assertIn("vòng trước", self.ok("status", "--check"))
+        self.git("checkout", "-q", "-B", "main", "origin/main")
+        self.ok("status", "--check")
+        self.maintain({"PROGRESS.md": "đã merge\n"})
+        self.git("merge", "-q", "--ff-only", "origin/main")
+        self.ok("status", "--check")
+        self.maintain({"src/notes.txt": "người khác\n"})
+        self.git("merge", "-q", "--ff-only", "origin/main")
+        self.assertIn("chưa có lần giữ", self.refused("status", "--check", code=1))
+
+    @flow("FLOW-54")
+    def test_flow_54_plan_and_decision_committed_on_branch(self) -> None:
+        """F2 Given PLAN-opt + D-NNN (skill bước 2) · When chưa commit / commit trên nhánh rồi `start`, giữ · Then exit 2
+        "cây bẩn" / `start` 0, `finish` giữ (start_head khác gốc chỉ ở sổ sách), `status --check` 0."""
+        self.put("docs/autopilot/PLAN-opt.md", "# PLAN-opt\n")
+        self.assertIn("cây bẩn", self.refused("start", "--hotspot", "src/hot.py", *TRIAL_ARGS))
+        self.put("docs/autopilot/DECISIONS.md", "### D-001\n")
+        self.git("add", "-A")
+        self.git("commit", "-q", "-m", "PLAN-opt + D-001")
+        self.kept()
+        self.ok("status", "--check")
+
+    def test_start_refuses_config_pointing_at_ledger(self) -> None:
+        """F1 (D-371): lệnh/khoá của cấu hình gốc nhắc đường sổ sách, hay điểm nóng là sổ sách → `start` exit 2."""
+        cfg = trial_config(probe="cat PROGRESS.md", env={"path": "docs/autopilot/bin"})
+        cfg["secondary"][0]["cmd"] = "python3 mem.py docs/autopilot/x"
+        cfg["heldout"]["gen"] = "cat docs/autopilot/seeds"
+        cfg["locked"] += ["docs/**", "docs/autopilot/PERF-LOG.md"]
+        want = [
+            "probe",
+            "secondary.mem",
+            "heldout.gen",
+            "env.path",
+            "locked docs/**",
+            "locked docs/autopilot/PERF-LOG.md",
+        ]
+        self.assertEqual(xt.trial_ledger_problem(cfg), want)
+        self.assertEqual(xt.trial_ledger_problem(trial_config()), [])
+        self.republish({"perf/trial.json": json.dumps(trial_config(equiv="python3 equiv.py PROGRESS.md"))})
+        self.assertIn("trỏ vào đường sổ sách (equiv)", self.refused("start", "--hotspot", "src/hot.py", *TRIAL_ARGS))
+        for hot in ("PROGRESS.md", "docs/autopilot/PLAN.md"):
+            with self.subTest(hot):
+                self.assertIn("là sổ sách", self.refused("start", "--hotspot", hot, *TRIAL_ARGS))
+
+    def test_ledger_strip_compares_tree_objects(self) -> None:
+        """Cây trừ sổ sách dựng từ tree object: khác ở `docs/autopilot/`/PROGRESS → bằng; khác ở `docs/khác` → khác."""
+        a = self.git("rev-parse", "HEAD^{tree}")
+        self.write_tree(self.repo, {"docs/autopilot/PLAN.md": "x\n", "PROGRESS.md": "y\n"})
+        self.git("add", "-A")
+        self.git("commit", "-q", "-m", "sổ")
+        b = self.git("rev-parse", "HEAD^{tree}")
+        self.put("docs/other.md", "z\n")
+        self.git("add", "-A")
+        self.git("commit", "-q", "-m", "khác")
+        c = self.git("rev-parse", "HEAD^{tree}")
+        self.assertTrue(xt.trial_same_tree(self.repo, a, b))
+        self.assertFalse(xt.trial_same_tree(self.repo, a, c))
+        self.assertEqual(xt.trial_strip(self.repo, a), xt.trial_strip(self.repo, b))
+        self.assertTrue(xt.PERF_TRIAL_LOG_MD.startswith(xt.PERF_TRIAL_LEDGER[0] + "/"))
+
+    @flow("FLOW-55")
+    def test_flow_55_new_file_shadowing_importable_module_is_tampered(self) -> None:
+        """F3 Given candidate thêm `unittest.py` ở gốc (che runner `python3 -m unittest`) / gói `fakelib/__init__.py`
+        trùng mô-đun nhập được qua `env.pass` PYTHONPATH ở cây gốc · When `finish` · Then `tampered`, thu hồi; file mới
+        tên không nhập được (`fastpath.py`) → không `tampered`."""
+        lib = self.ctl / "lib"
+        lib.mkdir()
+        (lib / "fakelib.py").write_text("X = 1\n", encoding="utf-8")
+        self.republish({"perf/trial.json": json.dumps(trial_config(env={"pass": ["PYTHONPATH"]}))})
+        cases = {"unittest.py": "tampered", "fakelib/__init__.py": "tampered", "fastpath.py": "kept"}
+        with unittest.mock.patch.dict(os.environ, {"PYTHONPATH": str(lib)}):
+            for path, verdict in cases.items():
+                with self.subTest(path):
+                    tid = self.started("src/hot.py", path)
+                    self.put("src/hot.py", GOOD)
+                    self.put(path, "raise SystemExit(0)\n" if verdict == "tampered" else "")
+                    rc, out, err = self.tr("finish")
+                    self.assertEqual(self.decides(tid)[0]["verdict"], verdict, out + err)
+                    self.assertEqual(rc, 1 if verdict == "tampered" else 0)
+                    if verdict == "tampered":  # ca đối chứng `kept` chạy cuối: cây giữ candidate
+                        self.assertIn(f"trùng tên mô-đun nhập được ở cây gốc: {path}", self.decides(tid)[0]["reason"])
+
+    def test_module_names_and_no_interpreter(self) -> None:
+        names = {
+            "unittest.py": "unittest",
+            "x.cpython-311-x86_64-linux-gnu.so": "x",
+            "m.pyc": "m",
+            "pkg/__init__.py": "pkg",
+            "pkg/mod.py": "",
+            "src/a/__init__.py": "",
+            "README.md": "",
+            "pkg/sub/__init__.py": "",
+        }
+        self.assertEqual({p: xt._trial_module_name(p) for p in names}, names)
+        tree = xt.TrialTree("base", "c", self.repo, self.tmp)
+        run = xt.TrialRun(tree, {"PATH": "/không-có"}, {})
+        files = ["json.py", "nope_zz.py", "src/hot.py", "a-b.py", "bench.py"]
+        self.assertEqual(xt.trial_shadowed(run, files, 30), ["json.py"])  # không interpreter: chỉ stdlib
+        self.assertEqual(xt.trial_shadowed(run, ["src/x.py"], 30), [])
+
+    def test_runner_configs_locked_by_default(self) -> None:
+        ctx = xt.TrialCtx("b", "r", TOOL, "t", trial_config(), "c", [])
+        for p in (".pytest.ini", "sub/pytest.toml", "web/jest.config.ts", "vitest.config.mjs", ".mocharc.yml"):
+            with self.subTest(p):
+                self.assertTrue(ctx.locked(p))
+
+    def test_verdict_needs_improved_vs_base_and_head(self) -> None:
+        """F5: giữ ⇔ `improved` so gốc VÀ so `start_head`; còn lại verdict của phép so đầu tiên không `improved`."""
+        kinds = ("improved", "same", "insufficient", "regressed", "neutral")
+        for b in kinds:
+            for h in kinds:
+                with self.subTest(base=b, head=h):
+                    verdict, why = xt.trial_verdict({"base": _cmp(b), "head": _cmp(h)}, 0, [])
+                    want = "kept" if (b, h) == ("improved", "improved") else (b if b != "improved" else h)
+                    self.assertEqual(verdict, want)
+                    self.assertIn("so gốc" if b != "improved" else "start_head", why)
+        both = {"base": _cmp("improved"), "head": _cmp("improved")}
+        self.assertEqual(xt.trial_verdict(both, 3, [])[0], "inequivalent")
+        self.assertEqual(xt.trial_verdict(both, 0, [("heldout", "x", "")])[0], "heldout")
+
+    def test_ls_remote_ignores_home_gitconfig(self) -> None:
+        """M18: `.gitconfig` của HOME (passwd) có `url.<khác>.insteadOf = <origin>` không lái `ls-remote` sang máy chủ khác."""
+        other = self.tmp / "other.git"
+        self.run_git(self.tmp, "init", "-q", "--bare", "-b", "main", str(other))
+        self.git("commit", "-q", "--allow-empty", "-m", "khác")
+        self.git("push", "-q", str(other), "HEAD:main")
+        home = self.tmp / "home"
+        home.mkdir()
+        (home / ".gitconfig").write_text(f'[url "{other}"]\n\tinsteadOf = {self.origin}\n', encoding="utf-8")
+        with unittest.mock.patch.object(xt, "_trial_home", return_value=str(home)):
+            self.assertEqual(xt._trial_ls_remote(str(self.origin)), ("refs/heads/main", self.base))
+        self.assertEqual(self.run_git(self.tmp, "ls-remote", str(self.origin), "HEAD").split()[0], self.base)
+
+    def test_interrupt_then_changed_candidate_is_incomplete(self) -> None:
+        """G1: ngắt sau đóng băng rồi đổi candidate → `finish` kế `incomplete` (như `--resume`), thu hồi về `fp_start`;
+        không đổi → đo lại đúng candidate đã đóng băng (`rounds` 2)."""
+        fp0 = xt.tree_fingerprint(self.repo, xt._trial_genv())
+        for change, verdict, code in ((True, "incomplete", 1), (False, "kept", 0)):
+            with self.subTest(change=change):
+                tid = self.started()
+                self.put("src/hot.py", HOT.replace("K = 3", "K = 1") + f"# {change}\n")  # khác cây: không trùng lần thử
+                self.assertEqual(self.interrupted()[0], 2)
+                if change:
+                    self.put("src/hot.py", GOOD)
+                rc, out, err = self.tr("finish")
+                self.assertEqual((rc, self.decides(tid)[0]["verdict"]), (code, verdict), out + err)
+                if change:
+                    self.assertIn("candidate_fp", self.decides(tid)[0]["reason"])
+                    self.assertEqual(xt.tree_fingerprint(self.repo, xt._trial_genv()), fp0)
+                else:
+                    self.assertEqual(self.decides(tid)[0]["rounds"], 2)
+
+    def test_log_block_lists_live_rows_only(self) -> None:
+        """G2: `kept` chưa áp rồi `aborted` → khối PERF-LOG chỉ có dòng `aborted` của lần thử đó."""
+        ctx = xt.TrialCtx("b" * 40, "refs/heads/main", TOOL, "t", trial_config(), "c", [])
+        row = {"event": "decide", "id": "PT-0001", "base_sha": "b" * 40, "hotspot": ["a"]}
+        block = xt.trial_log_block([row | {"verdict": "kept"}, row | {"verdict": "aborted"}], ctx)
+        self.assertIn("| PT-0001 | aborted |", block)
+        self.assertNotIn("| kept |", block)
+
+    def test_offline_start_records_local_base(self) -> None:
+        """⚠: `ls-remote` lỗi → dòng `start` ghi `base_from: local`; có máy chủ → `server`."""
+        self.started()
+        self.ok("abort", "--reason", "x")
+        with unittest.mock.patch.object(xt, "_trial_ls_remote", return_value=None):
+            rc, out, err = self.start()
+        self.assertEqual(rc, 0, out + err)
+        self.assertIn("refs/remotes/origin/HEAD cục bộ", err)
+        self.assertEqual([r["base_from"] for r in self.rows() if r["event"] == "start"], ["server", "local"])
+
+    def test_trial_fingerprint_sees_submodule_despite_ignore_config(self) -> None:
+        """🟢: `diff.ignoreSubmodules=all` không giấu submodule bẩn khỏi vân tay của `perf trial` (fp_start/candidate_fp);
+        vân tay `loop verify` (không env) giữ hành vi mặc định (D-213)."""
+        sub = self.tmp / "sub"
+        self.run_git(self.tmp, "init", "-q", "-b", "main", str(sub))
+        (sub / "lib.py").write_text("X = 1\n", encoding="utf-8")
+        self.run_git(sub, "add", "lib.py")
+        self.run_git(sub, "commit", "-q", "-m", "sub")
+        self.run_git(self.repo, "submodule", "add", "-q", str(sub), "vendor/sub")
+        self.git("commit", "-q", "-m", "sub")
+        self.git("config", "diff.ignoreSubmodules", "all")
+        env = xt._trial_genv()
+        before = (xt.tree_fingerprint(self.repo, env), xt.tree_fingerprint(self.repo))
+        (self.repo / "vendor" / "sub" / "lib.py").write_text("X = 0\n", encoding="utf-8")
+        self.assertNotEqual(xt.tree_fingerprint(self.repo, env), before[0])
+        self.assertEqual(xt.tree_fingerprint(self.repo), before[1])
 
 
 class TrialParserTest(unittest.TestCase):
