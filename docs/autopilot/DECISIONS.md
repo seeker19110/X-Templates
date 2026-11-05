@@ -1,21 +1,7 @@
 # Nhật ký quyết định tự duyệt
 
 > Ghi bởi `xt.py loop decide`. Phiên chính tự duyệt điểm quyết định theo tiêu chí chất lượng cuối (`LOOP-STOP-018`, ADR-0008 của khung). Người xem lại bất cứ lúc nào; đổi ý → quyết định mới ghi "thay D-NNN", không sửa mục cũ.
-> Bản tháng trước: [`DECISIONS-2026-10.md`](DECISIONS-2026-10.md) (D-001…D-287), [`DECISIONS-2026-11.md`](DECISIONS-2026-11.md) (D-292…D-347) — máy đọc cả bản tháng (T-3651).
-
-### D-348 · 2026-11-04T14:31:31+00:00 · T-3673 (AUD-SEC-475): tệp archive do tar -c/zip/ar/jar/cpio -o/pax -w/7z a/python -m zipfile -c tạo ra vào write_targets kéo theo luật ADR-0066 — tạo archive rồi nhắc lại ở lệnh khác cùng lệnh Bash bị BUDGET (tar -czf a.tgz src && tar -tzf a.tgz) — giữ hay miễn?
-
-- Phương án: (1) Giữ chặt (A): như mọi tệp tự ghi theo ADR-0066; lý do chặn có câu viết lại (tách lệnh) · (2) Chỉ xét archive ở _write_asks (B) · (3) Giữ A + miễn khi lệnh sau chỉ đọc archive (C)
-- Chọn: Giữ chặt (A): như mọi tệp tự ghi theo ADR-0066; lý do chặn có câu viết lại (tách lệnh)
-- Lý do (tiêu chí chất lượng cuối): (1) archive vừa tạo có thể được chạy như script (tar -cf x p && sh x) — miễn theo kiểu lệnh đọc là bề mặt lách mới; (3) nhất quán ADR-0066, không thêm miễn trừ (ADR-0065); (4) chi phí: agent tách lệnh, đo trên lệnh/CI repo này không dùng dạng đó
-- Đường lùi: Phương án C với test cho từng lệnh chỉ đọc
-
-### D-351 · 2026-11-04T18:39:44+00:00 · Review #439 🔴 AUD-SEC-490: cd tương đối trong thân vòng lặp/hàm chỉ giải từ tập lúc gặp, không giải lại từ đích cd đứng sau (cuối thân vòng, nơi gọi hàm) — D-347 khai 'đúng cho mọi luồng điều khiển' là sai; sửa thế nào?
-
-- Phương án: (1) Đích cd tương đối (kể cả ..) trong thân vòng lặp/hàm/trap → thêm None (thư mục không biết, D-106); đích tuyệt đối giữ như cũ · (2) Lặp điểm bất động trên mọi lệnh cd của thân vòng/hàm cho tới khi tập ổn định, quá CWD_UNION_MAX thì None
-- Chọn: Đích cd tương đối (kể cả ..) trong thân vòng lặp/hàm/trap → thêm None (thư mục không biết, D-106); đích tuyệt đối giữ như cũ
-- Lý do (tiêu chí chất lượng cuối): (1) cả hai đều sound; (3) phương án 1 là một luật, không cần mô phỏng thêm, test được, khép cả nơi gọi hàm lẫn trap; (4) chặn oan thêm chỉ khi cd tương đối nguyên văn trong vòng/hàm rồi ghi đích nhạy cảm/chạy git — dạng hiếm (corpus review 10 815 lệnh không đổi quyết định nào ở head); (1) > (4). Đính chính D-347: câu 'đúng cho mọi luồng điều khiển' chỉ đúng khi đích cd trong vòng/hàm là tuyệt đối.
-- Đường lùi: Lặp điểm bất động (phương án 2) nếu đo thấy chặn oan trên lệnh thật
+> Bản tháng trước: [`DECISIONS-2026-10.md`](DECISIONS-2026-10.md) (D-001…D-287), [`DECISIONS-2026-11.md`](DECISIONS-2026-11.md) (D-292…D-351) — máy đọc cả bản tháng (T-3651).
 
 ### D-356 · 2026-11-04T22:53:05+00:00 · T-3551: chốt ADR-0071 perf trial — 14 điểm hở của bản nháp (ID FLOW, nơi đo candidate, nguồn cấu hình, kiểm trỏ đúng cây, start khi HEAD lệch cây giữ, held-out, falsifier, PERF-LOG, --resume, neo công cụ chấm, sửa file khoá, khoá điểm nóng, đo xen kẽ)
 
@@ -114,3 +100,10 @@
 - Chọn: Sửa hết 🟠 + 🟢 rẻ trong hai PR song song trước khi cắt 3.30.0: (A, xt.py perf trial) so cây neo ở start/log/status --check bỏ qua đường sổ sách docs/autopilot/**, PROGRESS.md, đường PERF-LOG (cấu hình không được trỏ lệnh đo/khoá vào các đường này — kiểm ở start), check nhận lần giữ của vòng trước khi cây neo == HEAD^{tree} trừ sổ sách; file mới của candidate trùng tên mô-đun nhập được ở cây gốc (unittest, pytest, …) → tampered, khoá mặc định thêm cấu hình runner (.pytest.ini, jest/vitest config, .mocharc*); test đơn vị trial_verdict + GIT_CONFIG cô lập; 🟢 interrupt ghim candidate_fp, log dùng trial_live, ⚠ khi ls-remote rơi về ref cục bộ, tree_fingerprint --ignore-submodules=none; đường lùi = gỡ skill khỏi perf trial, dùng perf compare/guard tay (bỏ lời hứa perf-gate.sh qua loop); đồng bộ ADR/README/skill/optimization-loop/CHANGELOG. (B, phần còn lại) harness-files.md theo #442, DEPENDENCIES.md thêm Gitleaks CLI, GlobCommandNameTest dùng thời gian CPU, dev-task coi pytest.py/conftest gốc là cấu hình cổng, PLAN-upgrade tick T-3670/T-3671; 🟢 nghi ngờ chưa tái hiện ghi sổ mở
 - Lý do (tiêu chí chất lượng cuối): (1) F1/F2 làm tính năng chính của bản (/optimize qua perf trial) không dùng được theo đúng tài liệu — phát hành như vậy là khai xong sai; F3/F5 là đường giữ oan/test không bắt; (2) miễn sổ sách chỉ cho đường không thuộc lệnh đo/khoá, kiểm ở start; (5) hai PR song song theo vùng file
 - Đường lùi: Bỏ miễn sổ sách, đòi PLAN-opt + D-NNN vào main trước start (tài liệu hoá F2) nếu miễn bị lách
+
+### D-372 · 2026-11-05T09:06:50+00:00 · Review #447: miễn sổ sách của D-371 (trọn thư mục docs/autopilot) bị lách — symlink từ cây mã vào docs/autopilot/fast.py, sửa file đó sau lần giữ, Gate xanh cho mã chưa đo (hồi quy so main); 🟠 F3 bỏ sót gói namespace; 🟠 Gate nhận lần giữ vòng trước khi main đã đổi mã
+
+- Phương án: (1) Thu hẹp miễn về đúng file sổ sách thường: docs/autopilot/PLAN*.md, DECISIONS*.md, PERF-LOG (đường cấu hình), PROGRESS.md — file thường, không symlink; cây candidate/HEAD có symlink trỏ vào đường sổ sách → tampered; candidate (diff start_head..candidate) nhắc chuỗi đường sổ sách (docs/autopilot, PROGRESS.md) ngoài chính các file sổ sách → tampered; F3 coi gói namespace là nhập được; check chỉ nhận lần giữ vòng trước khi cây gốc vòng mới == cây gốc vòng trước trừ sổ sách hoặc == HEAD^{tree} (squash-merge); ghi rủi ro còn lại (đường dựng lúc chạy, cùng uid) vào ADR §2 và optimization-loop.md · (2) Bỏ hẳn miễn sổ sách (đường lùi D-371): F1/F2 quay lại, /optimize không tới done
+- Chọn: Thu hẹp miễn về đúng file sổ sách thường: docs/autopilot/PLAN*.md, DECISIONS*.md, PERF-LOG (đường cấu hình), PROGRESS.md — file thường, không symlink; cây candidate/HEAD có symlink trỏ vào đường sổ sách → tampered; candidate (diff start_head..candidate) nhắc chuỗi đường sổ sách (docs/autopilot, PROGRESS.md) ngoài chính các file sổ sách → tampered; F3 coi gói namespace là nhập được; check chỉ nhận lần giữ vòng trước khi cây gốc vòng mới == cây gốc vòng trước trừ sổ sách hoặc == HEAD^{tree} (squash-merge); ghi rủi ro còn lại (đường dựng lúc chạy, cùng uid) vào ADR §2 và optimization-loop.md
+- Lý do (tiêu chí chất lượng cuối): (1) phương án 1 đóng cả R1, R1b (symlink → tampered; nhắc đường → tampered) và giữ được F1/F2; phần còn lại là đường dựng lúc chạy cùng lớp giới hạn đã chấp nhận (ADR-0067); (4) phương án 2 làm tính năng chính không dùng được theo tài liệu; thay D-371 ở phần phạm vi miễn
+- Đường lùi: Bỏ hẳn miễn (đường lùi D-371) nếu review sau lại lách được

@@ -15630,9 +15630,12 @@ PERF_TRIAL_LOCKED = tuple(
         *(".pytest.ini", "pytest.toml", "jest.config.*", "vitest.config.*", ".mocharc*"),  # cấu hình runner (D-371)
     )
 )
-# Đường sổ sách (D-371): PLAN/DECISIONS/PERF-LOG (`docs/autopilot/`) và PROGRESS.md — phép so cây neo (`start`, `log`,
-# `finish`, `status --check`) bỏ qua chúng; `start` từ chối cấu hình/điểm nóng trỏ vào chúng (số đo không phụ thuộc sổ).
-PERF_TRIAL_LEDGER = ("docs/autopilot", "PROGRESS.md")
+# File sổ sách (D-371, thu hẹp ở D-372): PLAN*/DECISIONS*/PERF-LOG ngay trong `docs/autopilot/` và PROGRESS.md ở gốc, là
+# file thường — phép so cây neo (`start`, `log`, `finish`, `status --check`) bỏ qua chúng. Vùng sổ sách (chữ, không phân
+# biệt hoa/thường): cấu hình nhắc nó → `start` từ chối; symlink trỏ vào nó, dòng mã thêm nhắc nó → `tampered`/Gate 1.
+PERF_TRIAL_LEDGER = ("docs/autopilot/PLAN*.md", "docs/autopilot/DECISIONS*.md", PERF_TRIAL_LOG_MD, "PROGRESS.md")
+PERF_TRIAL_LEDGER_AREA = ("docs/autopilot", "progress.md")  # so sau `casefold()`
+PERF_TRIAL_LINK_HOPS = 40  # bước symlink tối đa khi tìm đích trong cây (như `MAXSYMLINKS` của Linux)
 PERF_TRIAL_CFG: Dict[str, Tuple[Any, bool]] = {  # khoá → (kiểu, bắt buộc); khoá lạ = gõ sai → từ chối
     "schema": (int, True),
     "setup": (str, True),  # một chuỗi lệnh shell, chạy trong từng cây đo (D-363)
@@ -16115,8 +16118,68 @@ def trial_dirty(base: Path) -> List[str]:
 
 
 def _trial_ledger(path: str) -> bool:
-    """Đường sổ sách (D-371): `docs/autopilot/**`, `PROGRESS.md`."""
-    return any(path == p or path.startswith(p + "/") for p in PERF_TRIAL_LEDGER)
+    """Đường file sổ sách (D-372): khớp một mẫu `PERF_TRIAL_LEDGER` đúng chữ hoa/thường, `*` không qua `/` — mã khác
+    trong `docs/autopilot/` không được miễn."""
+    return any(fnmatch.fnmatchcase(path, g) and path.count("/") == g.count("/") for g in PERF_TRIAL_LEDGER)
+
+
+def _trial_mentions(text: str) -> bool:
+    """Chữ nhắc vùng sổ sách (`docs/autopilot`, `PROGRESS.md`, không phân biệt hoa/thường — FS không phân biệt)."""
+    low = text.casefold()
+    return any(a in low for a in PERF_TRIAL_LEDGER_AREA)
+
+
+def _trial_resolve(path: str, links: Dict[str, str]) -> str:
+    """Đích cuối của `path` trong cây theo symlink của cây (`links`: đường → đích), như `realpath` nhưng chỉ trong cây;
+    ra ngoài cây (đích tuyệt đối, `..` quá gốc) → ""; quá `PERF_TRIAL_LINK_HOPS` bước (vòng) → đường đang có."""
+    parts, hops = path.split("/"), 0
+    done: List[str] = []
+    while parts:
+        part = parts.pop(0)
+        if part in ("", "."):
+            continue
+        if part == "..":
+            if not done:
+                return ""
+            done.pop()
+            continue
+        cur = "/".join([*done, part])
+        if cur in links and hops < PERF_TRIAL_LINK_HOPS:
+            hops += 1
+            if links[cur].startswith("/"):
+                return ""
+            parts = links[cur].split("/") + parts
+            continue
+        done.append(part)
+    return "/".join(done)
+
+
+def _trial_ls_tree(base: Path, tree: str) -> List[Tuple[str, str, str]]:
+    """(mode, sha, đường) mọi mục của `tree` (`ls-tree -r`, gitlink không đi vào)."""
+    out = _trial_git(base, "ls-tree", "-r", "-z", "--full-tree", tree)
+    return [(m.split()[0], m.split()[2], p) for m, _, p in (e.partition("\t") for e in out.split("\0") if e)]
+
+
+def trial_ledger_links(base: Path, tree: str) -> List[str]:
+    """Symlink của `tree` trỏ vào vùng sổ sách (D-372): đích nhắc nó theo chữ, hoặc đích cuối trong cây (`_trial_resolve`,
+    cả symlink treo) nằm trong nó — sổ sách miễn so cây không được thành mã chạy qua symlink."""
+    links = {
+        p: _perf_git_raw(base, "cat-file", "blob", sha, env=_trial_genv()).decode("utf-8", "replace")
+        for mode, sha, p in _trial_ls_tree(base, tree)
+        if mode == "120000"
+    }
+    return sorted(p for p, t in links.items() if _trial_mentions(t) or _trial_mentions(_trial_resolve(p, links)))
+
+
+def trial_ledger_mentions(base: Path, a: str, b: str) -> List[str]:
+    """File KHÔNG phải sổ sách có dòng thêm/đổi (`diff a b`) nhắc vùng sổ sách (D-372: đọc sổ qua đường viết sẵn)."""
+    raw = _perf_git_raw(
+        base,
+        *("diff", "--unified=0", "--text", "--no-color", "--no-renames", *PERF_TRIAL_DIFF),
+        *("--src-prefix=a/", "--dst-prefix=b/", a, b),
+        env=_trial_genv(),
+    )
+    return sorted({f for f, line in _perf_diff_lines(raw) if not _trial_ledger(f) and _trial_mentions(line)})
 
 
 def _trial_clean(base: Path, ledger: bool = False) -> None:
@@ -16179,7 +16242,7 @@ def trial_ledger_problem(cfg: Dict[str, Any]) -> List[str]:
     texts |= {f"secondary.{s['name']}": s["cmd"] for s in cfg.get("secondary", [])}
     texts |= {f"heldout.{k}": v for k, v in cfg.get("heldout", {}).items()}
     texts["env.path"] = cfg.get("env", {}).get("path", "")
-    bad = [k for k, v in texts.items() if any(p in v for p in PERF_TRIAL_LEDGER)]
+    bad = [k for k, v in texts.items() if _trial_mentions(v)]
     hit = (g for g in cfg["locked"] if _trial_ledger(g) or any(perf_match(s, g) for s in PERF_TRIAL_LEDGER_SAMPLES))
     return bad + [f"locked {g}" for g in hit]
 
@@ -16364,10 +16427,12 @@ def trial_index_tree(base: Path, head: str, paths: List[str]) -> str:
 
 
 def trial_strip(base: Path, tree: str) -> str:
-    """SHA cây `tree` đã bỏ đường sổ sách (D-371) — index tạm: `read-tree`, `rm --cached` (`-f`: chỉ index tạm),
-    `write-tree`; so bằng SHA tree object, không `diff`."""
-    rm = ("rm", "--cached", "-r", "-f", "-q", "--ignore-unmatch", "--", *PERF_TRIAL_LEDGER)
-    return _trial_index(base, [("read-tree", tree), rm, ("write-tree",)], [])
+    """SHA cây `tree` đã bỏ file sổ sách thường (D-372: mode 100644/100755 ở đường `_trial_ledger`; symlink, gitlink ở
+    đó giữ lại) — index tạm: `read-tree`, `rm --cached` đúng danh sách (`-f`: chỉ index tạm), `write-tree`; so bằng SHA
+    tree object, không `diff`."""
+    gone = [p for mode, _, p in _trial_ls_tree(base, tree) if mode in ("100644", "100755") and _trial_ledger(p)]
+    rm = [("rm", "--cached", "-f", "-q")] if gone else []
+    return _trial_index(base, [("read-tree", tree), *rm, ("write-tree",)], gone)
 
 
 def trial_same_tree(base: Path, a: str, b: str) -> bool:
@@ -16380,13 +16445,14 @@ def trial_same_tree(base: Path, a: str, b: str) -> bool:
 
 
 def _trial_index(base: Path, steps: List[Tuple[str, ...]], paths: List[str]) -> str:
-    """Chạy `steps` git trên index tạm 0700 (bước `add` nhận `paths` qua stdin, `_trial_git_paths`); trả stdout bước
+    """Chạy `steps` git trên index tạm 0700 (bước `add`/`rm` nhận `paths` qua stdin, `_trial_git_paths`); trả stdout bước
     cuối (`write-tree`). Bước lỗi → RuntimeError."""
     d = _trial_mkdtemp(base, "xt-perf-idx-")
     try:
         env = {**_trial_genv(), "GIT_INDEX_FILE": str(d / "index")}
         for step in steps:
-            r = _trial_git_paths(base, *step, files=paths, env=env) if step[0] == "add" else _git(base, *step, env=env)
+            pathed = step[0] in ("add", "rm")
+            r = _trial_git_paths(base, *step, files=paths, env=env) if pathed else _git(base, *step, env=env)
             if r.returncode:
                 raise RuntimeError(f"git {step[0]} (index tạm) lỗi: {r.stderr.strip() or r.returncode}")
         return r.stdout.strip()
@@ -17097,11 +17163,11 @@ def trial_decide(
 
 
 PERF_TRIAL_MODULE_SUFFIXES = (".py", ".pyc", ".pyw", ".so", ".pyd")  # file mô-đun Python (gồm `X.cpython-…-linux.so`)
-PERF_TRIAL_FIND_SPEC = (  # in tên nhập được (không phải gói namespace): chạy ở cây gốc, file candidate chưa có (D-371)
+PERF_TRIAL_FIND_SPEC = (  # in tên nhập được, cả gói namespace (D-372): chạy ở cây gốc, file candidate chưa có (D-371)
     "import importlib.util, sys\n"
     "for n in sys.argv[1:]:\n"
     "    try:\n        s = importlib.util.find_spec(n)\n    except (ImportError, ValueError):\n        s = None\n"
-    "    if s is not None and s.origin is not None:\n        print(n)\n"
+    "    if s is not None:\n        print(n)\n"
 )
 
 
@@ -17119,7 +17185,8 @@ def _trial_module_name(path: str) -> str:
 
 def trial_shadowed(run: TrialRun, files: List[str], timeout: float) -> List[str]:
     """File candidate CHƯA có ở cây gốc mà trùng tên mô-đun cấp đầu nhập được ở đó (D-371: `unittest.py`, `pytest.py`,
-    gói có `__init__.py` ở gốc che runner của `equiv`/lệnh đo — `python3 -m unittest` chạy mô-đun giả, xanh giả): tên
+    gói có `__init__.py` ở gốc che runner của `equiv`/lệnh đo — `python3 -m unittest` chạy mô-đun giả, xanh giả; D-372:
+    cả gói namespace — thư mục `tests/` không `__init__.py`, file mới `tests.py`/`tests/__init__.py` che `tests.x`): tên
     thuộc `sys.stdlib_module_names`, hoặc `importlib.util.find_spec` tìm thấy khi chạy ở cây gốc (sau `setup`, trước khi
     file tồn tại) bằng interpreter lệnh đo của cây, môi trường của một lần chạy đo (`trial_fresh`). Trả đường file che."""
     names = {n: f for f in files if (n := _trial_module_name(f)).isidentifier()}
@@ -17177,9 +17244,20 @@ def trial_guard_warnings(base: Path, head: str, cand: str) -> List[str]:
     return [f"perf guard: {s}" for s in perf_guard(names, _perf_diff_lines(raw), [])[1]]
 
 
+def trial_ledger_tamper(base: Path, before: str, tree: str) -> str:
+    """Lý do (rỗng = không) cây `tree` dùng vùng sổ sách làm mã (D-372): symlink trỏ vào nó (`trial_ledger_links`), hay
+    `diff before tree` thêm dòng nhắc nó ở file không phải sổ sách (`trial_ledger_mentions`)."""
+    links = trial_ledger_links(base, tree)
+    if links:
+        return f"symlink vào vùng sổ sách: {', '.join(links[:10])} (D-372)"
+    said = trial_ledger_mentions(base, before, tree)
+    return f"nhắc đường sổ sách: {', '.join(said[:10])} (D-372)" if said else ""
+
+
 def trial_judge(base: Path, ctx: TrialCtx, cur: Dict[str, Any]) -> Dict[str, Any]:
-    """§4 bước 2–7: file khoá đổi `base_sha..start_head` hay trong candidate → `tampered`; file ngoài điểm nóng →
-    `off-hotspot`; cây candidate ≠ cây agent (submodule bẩn…) → `unbuildable`; còn lại đo ở ba cây dựng lại."""
+    """§4 bước 2–7: file khoá đổi `base_sha..start_head` hay trong candidate, candidate dùng vùng sổ sách làm mã (D-372)
+    → `tampered`; file ngoài điểm nóng → `off-hotspot`; cây candidate ≠ cây agent (submodule bẩn…) → `unbuildable`; còn
+    lại đo ở ba cây dựng lại."""
     files = cur["candidate_files"]
     since = _trial_git_names(
         base, "diff", "--name-only", "-z", "--no-renames", *PERF_TRIAL_DIFF, cur["base_sha"], cur["start_head"]
@@ -17190,6 +17268,9 @@ def trial_judge(base: Path, ctx: TrialCtx, cur: Dict[str, Any]) -> Dict[str, Any
     in_path = trial_path_files(ctx.cfg, files)
     if in_path:
         return {"verdict": "tampered", "reason": f"file trong thư mục PATH của cây đo: {', '.join(in_path)}"}
+    ledger = trial_ledger_tamper(base, cur["start_head"], cur["candidate_tree"])
+    if ledger:
+        return {"verdict": "tampered", "reason": ledger}
     off = [f for f in files if f not in cur["hotspot"]]
     if off:
         return {"verdict": "off-hotspot", "reason": f"file ngoài điểm nóng: {', '.join(off)}"}
@@ -17367,12 +17448,17 @@ def trial_exhausted(ctx: TrialCtx) -> bool:
 
 
 def _trial_check_tree(base: Path, want: str) -> Optional[str]:
-    """Số ở sổ chỉ nói về cây neo (D-368): cây bẩn ngoài `.autopilot/` và sổ sách, hay `HEAD^{tree}` ≠ cây neo `want`
-    trừ sổ sách (D-371: commit tick PLAN/PROGRESS/DECISIONS sau lần giữ không làm Gate đỏ) → lý do; khớp → None."""
+    """Số ở sổ chỉ nói về cây neo (D-368): cây bẩn ngoài `.autopilot/` và sổ sách, HEAD dùng vùng sổ sách làm mã (D-372:
+    symlink vào nó, commit sau lần giữ nhắc nó ở file mã), hay `HEAD^{tree}` ≠ cây neo `want` trừ sổ sách (D-371: commit
+    tick PLAN/PROGRESS/DECISIONS sau lần giữ không làm Gate đỏ) → lý do; khớp → None."""
     dirty = [p for p in trial_dirty(base) if not _trial_ledger(p)]
     if dirty:
         return f"✗ cây bẩn ngoài .autopilot/: {', '.join(dirty[:10])} — số của lần giữ không nói về cây này; commit/dọn"
-    if not trial_same_tree(base, _trial_git(base, "rev-parse", "HEAD^{tree}").strip(), want):
+    head = _trial_git(base, "rev-parse", "HEAD^{tree}").strip()
+    ledger = trial_ledger_tamper(base, want, head)
+    if ledger:
+        return f"✗ {ledger} — sổ sách được miễn khi so cây, không được là mã"
+    if not trial_same_tree(base, head, want):
         return (
             f"✗ commit lạ sau lần giữ: HEAD^{{tree}} ≠ cây {want[:12]} trừ sổ sách (lần giữ/`log` gần nhất) — số ở sổ "
             "không đo cây này; bỏ commit đó hoặc đo nó bằng một lần thử"
@@ -17382,8 +17468,10 @@ def _trial_check_tree(base: Path, want: str) -> Optional[str]:
 
 def trial_check_basis(base: Path, ctx: TrialCtx) -> Tuple[Optional[Dict[str, Any]], str]:
     """(lần giữ làm căn cứ Gate hay None, cây neo HEAD phải bằng): lần giữ còn hiệu lực gần nhất của vòng + cây neo của
-    vòng; vòng chưa có lần giữ → lần giữ gần nhất của vòng trước khi cây neo vòng đó = `HEAD^{tree}` trừ sổ sách (D-371:
-    squash-merge PR vào nhánh mặc định mở vòng mới mà cây không đổi); không có → (None, cây neo của vòng)."""
+    vòng; vòng chưa có lần giữ → lần giữ gần nhất của vòng trước khi cây neo vòng đó = `HEAD^{tree}` trừ sổ sách VÀ cây
+    gốc vòng mới = cây gốc vòng trước hoặc = `HEAD^{tree}` (trừ sổ sách — D-372: nhánh mặc định chỉ đi tiếp ở sổ sách,
+    hay squash-merge PR mở vòng mới mà cây không đổi; đổi mã thì số so gốc cũ không còn nói về nó); không có → (None, cây
+    neo của vòng)."""
     kept = [r for r in trial_live(ctx.rows) if r["event"] == "decide" and r["verdict"] == "kept"]
     now = [r for r in kept if r["base_sha"] == ctx.base_sha]
     want = trial_anchor_tree(base, ctx)
@@ -17391,9 +17479,10 @@ def trial_check_basis(base: Path, ctx: TrialCtx) -> Tuple[Optional[Dict[str, Any
         return now[-1], want
     if not kept:
         return None, want
-    prev = trial_anchor(ctx.rows, kept[-1]["base_sha"]) or want
-    same = trial_same_tree(base, _trial_git(base, "rev-parse", "HEAD^{tree}").strip(), prev)
-    return (kept[-1], prev) if same else (None, want)
+    row, head, new = kept[-1], _trial_git(base, "rev-parse", "HEAD^{tree}").strip(), f"{ctx.base_sha}^{{tree}}"
+    prev = trial_anchor(ctx.rows, row["base_sha"]) or want
+    moved = trial_same_tree(base, new, f"{row['base_sha']}^{{tree}}") or trial_same_tree(base, new, head)
+    return (row, prev) if moved and trial_same_tree(base, head, prev) else (None, want)
 
 
 def _trial_reached(row: Dict[str, Any], name: str, op: str, pct: float) -> Tuple[bool, str]:

@@ -7,6 +7,7 @@ ca luồng FLOW-22/37…40 ở `tests.test_flow`."""
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
 import contextlib
 import io
 import json
@@ -1554,6 +1555,15 @@ GATE = "python3 -I <(git cat-file blob refs/remotes/origin/HEAD:{} || echo 'rais
 
 
 class TrialDecideCase(TrialCase):
+    def kept(self) -> str:
+        """Lần giữ đạt `target` (`GOOD`), commit; trả id."""
+        tid = self.started()
+        self.put("src/hot.py", GOOD)
+        rc, out, err = self.tr("finish")
+        self.assertEqual(rc, 0, out + err)
+        self.git("commit", "-q", "-am", "giữ")
+        return tid
+
     def decides(self, tid: str) -> list[dict[str, Any]]:
         return [r for r in self.rows() if r["event"] == "decide" and r["id"] == tid]
 
@@ -1743,14 +1753,6 @@ class TrialAudit3557Test(TrialDecideCase):
     squash-merge, file mới che mô-đun nhập được ở gốc, luật giữ cần `improved` so cả hai cây, `ls-remote` cô lập cấu
     hình toàn cục, ngắt rồi đổi candidate, khối PERF-LOG theo dòng còn hiệu lực. Mỗi ca tái hiện kịch bản của auditor."""
 
-    def kept(self) -> str:
-        tid = self.started()
-        self.put("src/hot.py", GOOD)
-        rc, out, err = self.tr("finish")
-        self.assertEqual(rc, 0, out + err)
-        self.git("commit", "-q", "-am", "giữ")
-        return tid
-
     @flow("FLOW-52")
     def test_flow_52_ledger_commits_after_kept_keep_gate_green(self) -> None:
         """F1 Given lần giữ đạt `target`, commit · When tick PLAN-opt/DECISIONS/PROGRESS (chưa commit, rồi commit), `log`
@@ -1830,7 +1832,7 @@ class TrialAudit3557Test(TrialDecideCase):
                 self.assertIn("là sổ sách", self.refused("start", "--hotspot", hot, *TRIAL_ARGS))
 
     def test_ledger_strip_compares_tree_objects(self) -> None:
-        """Cây trừ sổ sách dựng từ tree object: khác ở `docs/autopilot/`/PROGRESS → bằng; khác ở `docs/khác` → khác."""
+        """Cây trừ sổ sách dựng từ tree object: khác ở PLAN/PROGRESS → bằng; khác ở `docs/khác` → khác."""
         a = self.git("rev-parse", "HEAD^{tree}")
         self.write_tree(self.repo, {"docs/autopilot/PLAN.md": "x\n", "PROGRESS.md": "y\n"})
         self.git("add", "-A")
@@ -1843,7 +1845,7 @@ class TrialAudit3557Test(TrialDecideCase):
         self.assertTrue(xt.trial_same_tree(self.repo, a, b))
         self.assertFalse(xt.trial_same_tree(self.repo, a, c))
         self.assertEqual(xt.trial_strip(self.repo, a), xt.trial_strip(self.repo, b))
-        self.assertTrue(xt.PERF_TRIAL_LOG_MD.startswith(xt.PERF_TRIAL_LEDGER[0] + "/"))
+        self.assertTrue(xt._trial_ledger(xt.PERF_TRIAL_LOG_MD))
 
     @flow("FLOW-55")
     def test_flow_55_new_file_shadowing_importable_module_is_tampered(self) -> None:
@@ -1971,6 +1973,198 @@ class TrialAudit3557Test(TrialDecideCase):
         (self.repo / "vendor" / "sub" / "lib.py").write_text("X = 0\n", encoding="utf-8")
         self.assertNotEqual(xt.tree_fingerprint(self.repo, env), before[0])
         self.assertEqual(xt.tree_fingerprint(self.repo), before[1])
+
+
+FAST = "def compute(n):\n    return n * (n - 1) // 2\n"
+FROM_FAST = GOOD + "\n\ntry:\n    from fast import compute\nexcept ImportError:\n    pass\n"  # R1b: fallback mã thật
+BAD = GOOD.replace("    total = 0\n    for i in range(n):\n        total += i\n    return total\n", "    return 0\n")
+
+
+class TrialReview447Test(TrialDecideCase):
+    """Review #447 (D-372, thay D-371 ở phạm vi miễn): miễn sổ sách chỉ cho file sổ sách thường; symlink/nhắc đường vào
+    vùng sổ sách → `tampered`/exit 1; gói namespace là tên nhập được; lần giữ vòng trước chỉ khi nhánh mặc định không
+    đổi mã. Mỗi ca tái hiện một kịch bản của reviewer (r1_ledger_swap, r1b_late_ledger, r4_namespace, r5_stale)."""
+
+    def tampered(self, hot: tuple[str, ...], files: dict[str, str], links: dict[str, str], why: str) -> None:
+        tid = self.started(*hot)
+        self.write_tree(self.repo, files)
+        for rel, target in links.items():
+            os.symlink(target, self.repo / rel)
+        rc, out, err = self.tr("finish")
+        self.assertEqual((rc, self.decides(tid)[0]["verdict"]), (1, "tampered"), out + err)
+        self.assertIn(why, self.decides(tid)[0]["reason"])
+
+    @flow("FLOW-56")
+    def test_flow_56_symlink_or_mention_into_ledger_is_tampered(self) -> None:
+        """🔴 R1/R1b Given mã ở `docs/autopilot/fast.py` (gốc) · When candidate thêm symlink vào đó / symlink treo +
+        fallback ImportError (r1b) / symlink vào `PLAN-x.md` (file sổ sách được miễn) / chuỗi symlink không nhắc chữ
+        (`src/d` → `../docs`) / dòng nhắc `Docs/AutoPilot`, `progress.md` · Then `tampered`, thu hồi."""
+        self.republish({"docs/autopilot/fast.py": FAST, "docs/autopilot/PLAN-x.md": FAST})
+        link = "symlink vào vùng sổ sách"
+        hot = ("src/hot.py", "src/fast.py")
+        cases = [
+            (("src/f1.py",), {}, {"src/f1.py": "../docs/autopilot/fast.py"}, link),
+            (hot, {"src/hot.py": FROM_FAST}, {"src/fast.py": "../docs/autopilot/late.py"}, link),
+            (("src/f3.py",), {}, {"src/f3.py": "../docs/autopilot/PLAN-x.md"}, link),
+            (("src/f4.py", "src/d"), {}, {"src/d": "../docs", "src/f4.py": "d/autopilot/fast.py"}, link),
+            (
+                ("src/hot.py",),
+                {"src/hot.py": GOOD + "# xem Docs/AutoPilot/PLAN.md\n"},
+                {},
+                "nhắc đường sổ sách: src/hot.py",
+            ),
+            (
+                ("src/other.py",),
+                {"src/other.py": "EXTRA = 500  # progress.md\n"},
+                {},
+                "nhắc đường sổ sách: src/other.py",
+            ),
+        ]
+        for paths, files, links, why in cases:
+            with self.subTest(paths):
+                self.tampered(paths, files, links, why)
+        self.assertEqual(self.git("status", "--porcelain"), "")
+
+    def test_ledger_is_plain_ledger_files_only(self) -> None:
+        """🔴 Miễn chỉ PLAN*/DECISIONS*/PERF-LOG trong `docs/autopilot/` và `PROGRESS.md` ở gốc, đúng chữ hoa/thường."""
+        yes = ["docs/autopilot/PLAN.md", "docs/autopilot/PLAN-opt.md", "docs/autopilot/DECISIONS.md", "PROGRESS.md"]
+        yes += ["docs/autopilot/DECISIONS-2026-10.md", xt.PERF_TRIAL_LOG_MD]
+        no = [
+            "docs/autopilot/fast.py",
+            "docs/autopilot/sub/PLAN.md",
+            "docs/autopilot/plan.md",
+            "docs/autopilot/PLAN.txt",
+        ]
+        no += ["sub/PROGRESS.md", "PROGRESS.mdx", "docs/autopilot", "docs/autopilot/PLAN.md/x.py", "progress.md"]
+        no += ["docs/autopilot/PERF-LOG.md.bak", "docs/autopilot2/PLAN.md", "Docs/autopilot/PLAN.md"]
+        no += ["docs/autopilot/PLAN-x/fast.md", "docs/autopilot/DECISIONS/x.md"]  # `*` không qua `/`
+        self.assertEqual([p for p in yes + no if xt._trial_ledger(p)], yes)
+
+    def test_strip_keeps_code_and_symlinks_in_ledger_area(self) -> None:
+        """🔴 So cây trừ sổ sách: PLAN thường đổi → bằng; `docs/autopilot/fast.py` đổi, PLAN thành symlink → khác."""
+        a = self.git("rev-parse", "HEAD^{tree}")
+
+        def commit(files: dict[str, str], links: dict[str, str] | None = None) -> str:
+            self.write_tree(self.repo, files)
+            for rel, target in (links or {}).items():
+                (self.repo / rel).unlink(missing_ok=True)
+                os.symlink(target, self.repo / rel)
+            self.git("add", "-A")
+            self.git("commit", "-q", "-m", "x")
+            return self.git("rev-parse", "HEAD^{tree}")
+
+        b = commit({"docs/autopilot/PLAN.md": "- [x]\n", "PROGRESS.md": "p\n"})
+        c = commit({"docs/autopilot/fast.py": FAST})
+        self.git("rm", "-q", "docs/autopilot/fast.py")
+        d = commit({}, {"docs/autopilot/PLAN.md": "../../src/hot.py"})
+        self.assertTrue(xt.trial_same_tree(self.repo, a, b))
+        self.assertFalse(xt.trial_same_tree(self.repo, a, c))
+        self.assertFalse(xt.trial_same_tree(self.repo, b, d))
+        self.assertEqual(xt.trial_strip(self.repo, a), xt.trial_strip(self.repo, b))
+        self.assertEqual(
+            xt.trial_strip(self.repo, "4b825dc642cb6eb9a060e54bf8d69288fbee4904"),
+            "4b825dc642cb6eb9a060e54bf8d69288fbee4904",
+        )  # không file sổ sách: cây giữ nguyên
+
+    def test_ledger_code_committed_after_kept_or_before_start(self) -> None:
+        """🔴 R1 (r1new): `docs/autopilot/fast.py` commit sau lần giữ → `status --check` 1 "commit lạ"; commit trên nhánh
+        trước `start` → `start` 2."""
+        self.kept()
+        self.ok("status", "--check")
+        self.put("docs/autopilot/fast.py", FAST)
+        self.assertIn("cây bẩn", self.refused("status", "--check", code=1))
+        self.git("add", "-A")
+        self.git("commit", "-q", "-m", "docs(autopilot): ghi chú")
+        self.assertIn("commit lạ", self.refused("status", "--check", code=1))
+        self.assertIn("HEAD^{tree}", self.refused("start", "--hotspot", "src/hot.py", *TRIAL_ARGS))
+
+    def test_status_check_refuses_ledger_link_or_mention_in_head(self) -> None:
+        """🔴 Gate: HEAD có symlink vào vùng sổ sách (lần giữ ghi bởi bản cũ) → 1; commit sau lần giữ thêm dòng nhắc
+        `docs/autopilot` ở file mã → 1 nêu file (trước "commit lạ"); file sổ sách nhắc chính nó → 0."""
+        os.symlink("../PROGRESS.md", self.repo / "src/fast.py")
+        self.git("add", "-A")
+        self.git("commit", "-q", "-m", "link")
+        self.append_kept(["src/hot.py"])
+        self.append_row(self.rows()[-1] | {"measures": {"primary": {"compare": {"base": {"change": -0.25}}}}})
+        self.assertIn("symlink vào vùng sổ sách: src/fast.py", self.refused("status", "--check", code=1))
+        self.git("rm", "-q", "src/fast.py")
+        self.git("commit", "-q", "-m", "bỏ link")
+        self.append_row(self.rows()[-1] | {"candidate_tree": self.git("rev-parse", "HEAD^{tree}")})
+        self.put("docs/autopilot/PLAN.md", "xem docs/autopilot/PLAN.md, PROGRESS.md\n")
+        self.git("add", "-A")
+        self.git("commit", "-q", "-m", "tick")
+        self.ok("status", "--check")
+        self.put("src/notes.txt", "đọc docs/autopilot/PLAN.md\n")
+        self.git("commit", "-q", "-am", "nhắc")
+        self.assertIn("nhắc đường sổ sách: src/notes.txt", self.refused("status", "--check", code=1))
+
+    def test_resolve_in_tree(self) -> None:
+        links = {"a": "b/c", "b": "docs", "loop": "loop", "abs": "/etc", "up": "../x", "dot": "./docs/./autopilot"}
+        cases = {
+            "a": "docs/c",
+            "x/../a": "docs/c",
+            "b/autopilot/f": "docs/autopilot/f",
+            "loop": "loop",
+            "abs/x": "",
+            "up": "",
+            "..": "",
+            "dot//p": "docs/autopilot/p",
+        }
+        self.assertEqual({p: xt._trial_resolve(p, links) for p in cases}, cases)
+
+    def test_shadow_only_new_files(self) -> None:
+        """F3 chỉ xét file CHƯA có ở cây gốc: sửa `json.py` đã có ở gốc không phải che mô-đun (đột biến N14)."""
+        root = self.tmp / "gốc"
+        root.mkdir()
+        (root / "json.py").write_text("X = 1\n", encoding="utf-8")
+        run = xt.TrialRun(xt.TrialTree("base", "c", root, self.tmp), {"PATH": "/không-có"}, {})
+        self.assertEqual(xt.trial_shadowed(run, ["json.py"], 30), [])
+        self.assertEqual(xt.trial_shadowed(run, ["csv.py"], 30), ["csv.py"])
+
+    def test_concurrent_strip_compares_are_independent(self) -> None:
+        """Đồng thời: nhiều phép so cây trừ sổ sách song song (index tạm riêng mỗi lần) cho cùng kết quả."""
+        a = self.git("rev-parse", "HEAD^{tree}")
+        self.put("PROGRESS.md", "p\n")
+        self.git("add", "-A")
+        self.git("commit", "-q", "-m", "p")
+        b = self.git("rev-parse", "HEAD^{tree}")
+        with concurrent.futures.ThreadPoolExecutor(6) as ex:
+            got = list(ex.map(lambda _: xt.trial_same_tree(self.repo, a, b), range(12)))
+        self.assertEqual(got, [True] * 12)
+
+    @flow("FLOW-57")
+    def test_flow_57_namespace_package_shadow_is_tampered(self) -> None:
+        """🟠 r4 Given `equiv` = `python3 -m unittest -q tests.equiv_test`, `tests/` không có `__init__.py` (gói
+        namespace) · When candidate sai + file mới `tests.py` / `tests/__init__.py` (`os._exit(0)`) / `src/zz.py` · Then
+        `tampered` / `tampered` / `inequivalent`."""
+        cfg = trial_config(equiv="python3 -m unittest -q tests.equiv_test")
+        cfg["locked"] += ["tests/equiv_test.py"]
+        test = "import sys, unittest\nsys.path.insert(0, 'src')\nimport hot\n\n\nclass T(unittest.TestCase):\n"
+        test += "    def test_compute(self):\n        self.assertEqual(hot.compute(10), 45)\n"
+        self.republish({"perf/trial.json": json.dumps(cfg), "tests/equiv_test.py": test})
+        for fake, verdict in (
+            ("tests.py", "tampered"),
+            ("tests/__init__.py", "tampered"),
+            ("src/zz.py", "inequivalent"),
+        ):
+            with self.subTest(fake):
+                tid = self.started("src/hot.py", fake)
+                self.write_tree(self.repo, {"src/hot.py": BAD, fake: "import os\nos._exit(0)\n"})
+                rc, out, err = self.tr("finish")
+                self.assertEqual((rc, self.decides(tid)[0]["verdict"]), (1, verdict), out + err)
+
+    @flow("FLOW-58")
+    def test_flow_58_previous_round_kept_needs_same_code_on_default_branch(self) -> None:
+        """🟠 r5 Given lần giữ + `log` commit trên nhánh (chưa merge) · When `main` máy chủ đi tiếp chỉ ở sổ sách / ở mã
+        (`src/other.py`), nhánh không gộp · Then `status --check` 0 "vòng trước" / 1 (số đo so gốc cũ không nói về mã
+        mới của nhánh mặc định)."""
+        self.kept()
+        self.ok("log")
+        self.git("commit", "-q", "-am", "log")
+        self.maintain({"PROGRESS.md": "người khác\n"})
+        self.assertIn("vòng trước", self.ok("status", "--check"))
+        self.maintain({"src/other.py": "EXTRA = 5000\n"})
+        self.refused("status", "--check", code=1)
 
 
 class TrialParserTest(unittest.TestCase):

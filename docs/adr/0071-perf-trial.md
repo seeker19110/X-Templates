@@ -3,7 +3,7 @@
 - **Trạng thái:** Đã chấp nhận (2026-11-05, phiên chính tự duyệt — D-356: nhận cả mười bốn đề xuất in đậm ở §Điểm đã chốt;
   chủ repo 2026-11-05 "làm hết đi"; sửa theo review #440 — D-360: baseline do máy tính, không lối ra `--base`, PERF-LOG dựng từ
   sổ, điểm nóng là danh sách file; sửa theo review #442 — D-366: gốc = đầu nhánh máy chủ, không merge-base; sửa theo review #443 — D-368: `status --check`
-  ràng `HEAD^{tree}`, pathspec theo nghĩa đen, môi trường mới mỗi lần chạy lệnh đo, khoá `.venv/`/`node_modules/`; sửa theo review #445 — D-370: ngắt tiêu lần đo lại, held-out gộp đạt `target`, đầu ra chỉ số chính so gốc, `abort` sau `--no-apply`; audit delta T-3557 — D-371: miễn đường sổ sách khi so cây neo, Gate nhận lần giữ vòng trước khi cây không đổi, file mới che mô-đun nhập được → `tampered`, khoá cấu hình runner, đường lùi = đo tay). Đã triển khai — T-3700…T-3707 (PLAN-harden-2026-10-27-loops); `/optimize` gọi từ T-3707.
+  ràng `HEAD^{tree}`, pathspec theo nghĩa đen, môi trường mới mỗi lần chạy lệnh đo, khoá `.venv/`/`node_modules/`; sửa theo review #445 — D-370: ngắt tiêu lần đo lại, held-out gộp đạt `target`, đầu ra chỉ số chính so gốc, `abort` sau `--no-apply`; audit delta T-3557 — D-371: miễn đường sổ sách khi so cây neo, Gate nhận lần giữ vòng trước khi cây không đổi, file mới che mô-đun nhập được → `tampered`, khoá cấu hình runner, đường lùi = đo tay; review #447 — D-372, thay D-371 ở phạm vi miễn: miễn chỉ file sổ sách thường, symlink/dòng nhắc vùng sổ sách → `tampered`, gói namespace là tên nhập được, lần giữ vòng trước chỉ khi nhánh mặc định không đổi mã). Đã triển khai — T-3700…T-3707 (PLAN-harden-2026-10-27-loops); `/optimize` gọi từ T-3707.
 - **Ngày:** 2026-11-05.
 - **Thực hiện:** [ADR-0052 §Quyết định 7](0052-loop-state-rev-progress-perf-v2-next-step.md#quyết-định) (D-203; ràng buộc đầu
   vào — bảng ở §Ràng buộc) và §3 (lần thử tối ưu không đi qua `loop record`), thêm `LOOP-OPT-007` (held-out) và `LOOP-OPT-004`
@@ -95,7 +95,7 @@ file khởi động trình chạy `sitecustomize.py`, `usercustomize.py`, `*.pth
 `.gitattributes`, `.gitmodules`, `setup.py`, `requirements*.txt` (D-366), `.venv/**`, `node_modules/**` (bin của cây đứng
 đầu PATH lệnh đo), `.gitignore` (D-368) và lockfile (`*.lock`, `package-lock.json`, `pnpm-lock.yaml`). Khoá lạ trong
 `perf/trial.json` (gõ sai) bị từ chối, exit 2; `unlock` chỉ gỡ được mục khoá mặc định. File **mới** của candidate trùng
-tên mô-đun cấp đầu nhập được ở cây gốc (`X.py`/`X.pyc`/`X.*.so` ở gốc repo, gói `X/__init__.*`) — tên thuộc
+tên mô-đun cấp đầu nhập được ở cây gốc (`X.py`/`X.pyc`/`X.*.so` ở gốc repo, gói `X/__init__.*`, kể cả khi `X/` đang là gói namespace — D-372) — tên thuộc
 `sys.stdlib_module_names` hoặc `importlib.util.find_spec` thấy khi chạy ở cây gốc sau `setup` (trước khi file tồn tại)
 bằng interpreter lệnh đo — → `tampered` (D-371: `unittest.py` giả ở gốc làm `python3 -m unittest` xanh giả). Đổi phụ thuộc/trình chạy không phải tối ưu thuần
 (`LOOP-OPT-014`): PR riêng, hoặc gỡ bằng `unlock` ở nhánh mặc định.
@@ -107,12 +107,14 @@ Mã thoát chung: **2** = máy từ chối **trước khi đụng cây agent** (
 
 | Lệnh | Việc | Exit |
 |---|---|---|
-| `perf trial start --hotspot PATH… --hypothesis TEXT --falsifier EXPR` | Tính `base_sha` (§1). Đòi: không có lần thử mở; cây sạch ngoài `.autopilot/` — không miễn file nào (`git status --porcelain --untracked-files=all --ignore-submodules=none`); `HEAD^{tree}` = cây của sự kiện `kept`/`log` gần nhất trong vòng, lần đầu vòng = cây `base_sha`, **trừ đường sổ sách** (`docs/autopilot/**`, `PROGRESS.md` — PLAN-opt/D-NNN commit trên nhánh được; so SHA tree object đã bỏ các đường đó, D-371); file khoá không đổi `base_sha..HEAD`; mỗi `PATH` (lặp `--hotspot`, một cờ mỗi file) là đường file chuẩn hoá — có ở gốc, chỉ có ở `HEAD` (lần giữ trước thêm, D-365) hoặc chưa có — không khớp khoá, không là sổ sách; lệnh/`locked` của cấu hình gốc không nhắc đường sổ sách (D-371); còn `budget`. Ngoại tuyến (`ls-remote` lỗi) → ⚠, dòng `start` ghi `base_from: local`. Ghi `start_head`, `fp_start`, giả thuyết, falsifier, điểm nóng vào state và dòng `start` vào sổ | 0 · 2 từ chối, không ghi gì · 3 một đường điểm nóng đã cạn (§8) hoặc hết `budget` |
+| `perf trial start --hotspot PATH… --hypothesis TEXT --falsifier EXPR` | Tính `base_sha` (§1). Đòi: không có lần thử mở; cây sạch ngoài `.autopilot/` — không miễn file nào (`git status --porcelain --untracked-files=all --ignore-submodules=none`); `HEAD^{tree}` = cây của sự kiện `kept`/`log` gần nhất trong vòng, lần đầu vòng = cây `base_sha`, **trừ file sổ sách thường** (`docs/autopilot/PLAN*.md`, `docs/autopilot/DECISIONS*.md`, PERF-LOG, `PROGRESS.md` ở gốc, mode 100644/100755 — PLAN-opt/D-NNN commit trên nhánh được; symlink/gitlink ở các đường đó và mã khác trong `docs/autopilot/` không miễn; so SHA tree object đã bỏ các file đó — D-371, thu hẹp ở D-372); file khoá không đổi `base_sha..HEAD`; mỗi `PATH` (lặp `--hotspot`, một cờ mỗi file) là đường file chuẩn hoá — có ở gốc, chỉ có ở `HEAD` (lần giữ trước thêm, D-365) hoặc chưa có — không khớp khoá, không là sổ sách; lệnh/`locked` của cấu hình gốc không nhắc đường sổ sách (D-371); còn `budget`. Ngoại tuyến (`ls-remote` lỗi) → ⚠, dòng `start` ghi `base_from: local`. Ghi `start_head`, `fp_start`, giả thuyết, falsifier, điểm nóng vào state và dòng `start` vào sổ | 0 · 2 từ chối, không ghi gì · 3 một đường điểm nóng đã cạn (§8) hoặc hết `budget` |
 | `perf trial prepare` | Dựng ba cây cho lần thử đang mở, chạy `setup`, kiểm trỏ đúng cây (§4 bước 3), in kết quả, dọn; không đổi phase — để dự án thử cấu hình trước vòng | 0 · 2 |
 | `perf trial finish [--resume] [--no-apply] [--json]` | Đóng băng, kiểm, đo, quyết, giữ hoặc thu hồi, ghi sổ (§4); `--no-apply` quyết và ghi dòng `decide` (pha `decided`, tính lượt), in lệnh thu hồi, không giữ/thu hồi | 0 giữ · 1 thu hồi xong (vân tay = `fp_start`) · 2 · 4 |
-| `perf trial status [--json] [--check]` | Pha, lần thử mở, đếm theo đường, lệnh kế (`finish`/`finish --resume`/`abort`). `--check` = Gate của task tối ưu: lần giữ gần nhất của vòng đạt `target` so với gốc (`target` trên chỉ số chính: cả tổng held-out khi cấu hình khai `heldout` — D-370), không có lần thử mở, cây sạch ngoài `.autopilot/` và `HEAD^{tree}` = cây `kept`/`log` gần nhất của vòng (lần đầu = gốc) — số ở sổ chỉ nói về cây đó; sai → 1 "commit lạ sau lần giữ"/"cây bẩn" (D-368, FLOW-46); cây neo và cây bẩn đều **trừ đường sổ sách** (tick PLAN/PROGRESS/DECISIONS sau lần giữ, D-371, FLOW-52); vòng chưa có lần giữ mà cây neo của vòng trước = `HEAD^{tree}` trừ sổ sách (PR squash-merge vào nhánh mặc định mở vòng mới) → dùng lần giữ đó (FLOW-53) | 0 · 1 `--check` chưa đạt · 2 state/sổ hỏng · 3 `--check` chưa đạt và mọi đường đã khai cạn hoặc hết `budget` (→ `loop defer`) |
+| `perf trial status [--json] [--check]` | Pha, lần thử mở, đếm theo đường, lệnh kế (`finish`/`finish --resume`/`abort`). `--check` = Gate của task tối ưu: lần giữ gần nhất của vòng đạt `target` so với gốc (`target` trên chỉ số chính: cả tổng held-out khi cấu hình khai `heldout` — D-370), không có lần thử mở, cây sạch ngoài `.autopilot/` và `HEAD^{tree}` = cây `kept`/`log` gần nhất của vòng (lần đầu = gốc) — số ở sổ chỉ nói về cây đó; sai → 1 "commit lạ sau lần giữ"/"cây bẩn" (D-368, FLOW-46); cây neo và cây bẩn đều **trừ đường sổ sách** (tick PLAN/PROGRESS/DECISIONS sau lần giữ, D-371, FLOW-52); HEAD có symlink trỏ vào vùng sổ sách (`docs/autopilot`, `PROGRESS.md` — theo chữ hay đích trong cây) hay commit sau lần giữ thêm dòng nhắc nó ở file không phải sổ sách → 1 (D-372); vòng chưa có lần giữ mà cây neo của vòng trước = `HEAD^{tree}` trừ sổ sách **và** cây gốc vòng mới = cây gốc vòng trước hoặc = `HEAD^{tree}` (trừ sổ sách: nhánh mặc định chỉ đi tiếp ở sổ sách, hay PR squash-merge vào nó) → dùng lần giữ đó (FLOW-53, FLOW-58) | 0 · 1 `--check` chưa đạt · 2 state/sổ hỏng · 3 `--check` chưa đạt và mọi đường đã khai cạn hoặc hết `budget` (→ `loop defer`) |
 | `perf trial abort --reason TEXT` | Lấy `perf-trial.lock`; thu hồi như `finish` thu hồi, ghi `aborted` (tính vào 3 lần); sau `finish --no-apply` giữ cũng ghi `aborted` — dòng `kept` chưa áp của lần thử mất hiệu lực (neo, đếm, Gate — D-370) | 0 · 2 không có lần thử, `HEAD ≠ start_head`, không lấy được khoá · 4 |
 | `perf trial log [--check]` | Dựng khối PERF-LOG của vòng (mốc `base_sha`) từ dòng `decide` của sổ, thay đúng khối đó trong `docs/autopilot/PERF-LOG.md`, phần còn lại giữ nguyên byte; ghi sự kiện `log` với cây = `HEAD^{tree}` + PERF-LOG mới (index tạm) — `start` kế đòi cây này sau khi commit. `--check`: so file với bản dựng | 0 · 1 `--check` lệch · 2 có lần thử mở, cây bẩn ngoài sổ sách, `HEAD^{tree}` ≠ cây giữ gần nhất trừ sổ sách |
+
+**Giới hạn còn lại của miễn sổ sách (D-372):** kiểm symlink và dòng nhắc là kiểm theo chữ/cây — mã đọc file sổ sách qua đường **dựng lúc chạy** (`'docs/' + 'auto' + 'pilot'`, biến môi trường), qua symlink tới thư mục cha của vùng sổ sách (`src/d` → `../docs`) rồi nối phần còn lại lúc chạy, hay qua mã có sẵn ở gốc đã nhắc sổ sách, vẫn đọc được file được miễn (PLAN/DECISIONS/PERF-LOG/PROGRESS) mà phép so cây không thấy; tiến trình cùng uid sửa thẳng cây — cùng lớp giới hạn đã chấp nhận ở ADR-0067. Đường lùi: bỏ hẳn miễn (đường lùi D-371) nếu review sau lách được.
 
 `finish`/`abort`/`start` không phải Gate và không đi qua `loop record` (ADR-0052 §3): thu hồi là kết quả bình thường, không
 phải lần đỏ của task. Gate của task tối ưu là `perf trial status --check` (§5).
@@ -145,7 +147,7 @@ phải lần đỏ của task. Gate của task tối ưu là `perf trial status 
    Phase `measuring`, `rounds += 1`.
 2. **Bộ chấm, điểm nóng:** `git diff --name-only --no-renames --no-ext-diff --no-textconv base_sha start_head` khớp `locked`
    → thu hồi, `verdict: tampered` (`start` đã chặn, đây là kiểm lại). `candidate_files` khớp `locked` → thu hồi, `tampered`
-   (FLOW-29, điểm 12). Có file ngoài danh sách điểm nóng → thu hồi, `off-hotspot` (§8).
+   (FLOW-29, điểm 12). Cây candidate có symlink trỏ vào vùng sổ sách, hay `diff start_head candidate` thêm dòng nhắc `docs/autopilot`/`PROGRESS.md` (không phân biệt hoa/thường) ở file không phải sổ sách → `tampered` (D-372, FLOW-56). Có file ngoài danh sách điểm nóng → thu hồi, `off-hotspot` (§8).
 3. **Dựng cây** (mỗi cây một thư mục tạm quyền 0700 riêng — không thấy cây khác qua `../`; thư mục tạm của tiến trình
    nằm trong cây agent → exit 2, D-366): `git clone --shared --no-checkout` của repo agent, rồi `remote remove origin` trong
    clone (cây đo không biết đường tới repo agent; còn `objects/info/alternates` trỏ kho object của repo agent — cần cho
@@ -242,7 +244,7 @@ một lần. Cây tạm mất sau reboot → dựng lại. Hai `finish` (hay `fi
 
 ### 10. Ca FLOW
 
-ID FLOW-20…23 giữ nghĩa nghiên cứu §10; FLOW-27…34 giữ nghĩa bản ADR trước review #440; ca review #440 cần thêm là FLOW-35…45; review #443 thêm FLOW-46 (D-368); review #445 thêm FLOW-47…51 (D-370); audit delta T-3557 thêm FLOW-52…55 (D-371).
+ID FLOW-20…23 giữ nghĩa nghiên cứu §10; FLOW-27…34 giữ nghĩa bản ADR trước review #440; ca review #440 cần thêm là FLOW-35…45; review #443 thêm FLOW-46 (D-368); review #445 thêm FLOW-47…51 (D-370); audit delta T-3557 thêm FLOW-52…55 (D-371); review #447 thêm FLOW-56…58 (D-372).
 
 | ID | Given / When | Then |
 |---|---|---|
@@ -280,6 +282,9 @@ ID FLOW-20…23 giữ nghĩa nghiên cứu §10; FLOW-27…34 giữ nghĩa bản
 | FLOW-53 | giữ + `log` commit; PR squash-merge vào `main` (vòng mới, cùng cây); `main` đi tiếp ở sổ sách / ở mã | `status --check` 0 ở nhánh cũ và `main` / 0 / 1 "chưa có lần giữ" |
 | FLOW-54 | PLAN-opt + D-NNN chưa commit / commit trên nhánh rồi `start`, giữ | exit 2 "cây bẩn" / `start` 0, `finish` giữ, `status --check` 0 |
 | FLOW-55 | candidate thêm `unittest.py` ở gốc / gói trùng mô-đun nhập được ở cây gốc / file tên không nhập được | `tampered`, thu hồi / `tampered` / không `tampered` |
+| FLOW-56 | mã ở `docs/autopilot/fast.py`; candidate thêm symlink vào đó / symlink treo + fallback ImportError / symlink vào `PLAN-x.md` / chuỗi `src/d` → `../docs` / dòng nhắc `Docs/AutoPilot`, `progress.md` | `tampered`, thu hồi |
+| FLOW-57 | `equiv` = `python3 -m unittest tests.equiv_test`, `tests/` là gói namespace; file mới `tests.py` / `tests/__init__.py` / `src/zz.py`, mã sai | `tampered` / `tampered` / `inequivalent` |
+| FLOW-58 | lần giữ + `log` trên nhánh chưa merge; `main` đi tiếp ở sổ sách / ở mã | `status --check` 0 "vòng trước" / 1 |
 
 ### Ràng buộc ADR-0052 §7 (và §3) → cách đáp ứng
 
