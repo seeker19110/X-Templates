@@ -1,0 +1,894 @@
+"""`xt.py perf trial` (ADR-0071) — đơn vị. T-3701: gốc vòng do máy tính (nhánh mặc định từ máy chủ, ngoại tuyến từ
+`refs/remotes/origin/HEAD` — D-361), công cụ chấm từ blob gốc (`exec` khi byte khác — D-363), cấu hình `perf/trial.json`
+ở gốc + khoá mặc định, sổ `.autopilot/perf-trial.json` (khoá `state.lock`, `rev`) + `perf-trials.jsonl` (chỉ nối, fsync),
+`start`/`status`/`abort`/`log`, đếm ba lần theo đường, `budget`. Repo git tạm thật (dự án đồ chơi của `tests.test_flow`);
+ca luồng FLOW-22/37…40 ở `tests.test_flow`."""
+
+from __future__ import annotations
+
+import argparse
+import contextlib
+import io
+import json
+import os
+import pwd
+import subprocess
+import sys
+import unittest
+import unittest.mock
+from pathlib import Path
+from typing import Any
+
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT / "scripts"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import xt
+from test_flow import GIT_ID, HOT, TOOL, TRIAL_ARGS, trial_config, trial_files
+from test_xt_cli import TmpRepoCase, run_main
+
+XT = ROOT / "scripts" / "xt.py"
+
+
+class TrialCase(TmpRepoCase):
+    """Dự án đồ chơi như `TrialFlowTest`: máy chủ `origin` (bare, `main`), cây agent ở nhánh `opt`; lệnh chạy trong tiến
+    trình (`run_main`) để coverage thấy từng nhánh."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.ctl = self.tmp / "ctl"
+        self.ctl.mkdir()
+        self.origin = self.tmp / "origin.git"
+        self.run_git(self.tmp, "init", "-q", "--bare", "-b", "main", str(self.origin))
+        self.init_repo()
+        self.write_tree(self.repo, {**trial_files(self.ctl), "perf/trial.json": json.dumps(trial_config())})
+        (self.repo / TOOL).parent.mkdir(parents=True)
+        (self.repo / TOOL).write_bytes(XT.read_bytes())
+        self.git("add", "-A")
+        self.git("commit", "-q", "-m", "gốc")
+        self.git("remote", "add", "origin", str(self.origin))
+        self.git("push", "-q", "-u", "origin", "main")
+        self.git("remote", "set-head", "origin", "-a")
+        self.git("checkout", "-q", "-b", "opt")
+        self.base = self.git("rev-parse", "HEAD")
+        self.enterContext(unittest.mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(self.repo)}))
+
+    def run_git(self, cwd: Path, *args: str) -> str:
+        cmd = ["git", "-C", str(cwd), *GIT_ID, "-c", "protocol.file.allow=always", *args]
+        return subprocess.run(cmd, capture_output=True, text=True, check=True).stdout.strip()
+
+    def write_tree(self, root: Path, files: dict[str, str]) -> None:
+        for rel, text in files.items():
+            (root / rel).parent.mkdir(parents=True, exist_ok=True)
+            (root / rel).write_text(text, encoding="utf-8")
+
+    def put(self, rel: str, text: str) -> Path:
+        self.write_tree(self.repo, {rel: text})
+        return self.repo / rel
+
+    def maintain(self, files: dict[str, str], gone: tuple[str, ...] = (), fetch: bool = True) -> str:
+        """Người bảo trì đổi `main` của máy chủ (`gone` = xoá); cây agent `fetch` khi `fetch`."""
+        maint = self.tmp / "maint"
+        if not maint.exists():
+            self.run_git(self.tmp, "clone", "-q", str(self.origin), str(maint))
+        self.write_tree(maint, files)
+        for rel in gone:
+            self.run_git(maint, "rm", "-q", "-r", rel)
+        self.run_git(maint, "add", "-A")
+        self.run_git(maint, "commit", "-q", "-m", "bảo trì")
+        self.run_git(maint, "push", "-q", "origin", "HEAD:main")
+        if fetch:
+            self.git("fetch", "-q", "origin")
+        return self.run_git(maint, "rev-parse", "HEAD")
+
+    def republish(self, files: dict[str, str], gone: tuple[str, ...] = ()) -> None:
+        self.maintain(files, gone)
+        self.git("checkout", "-q", "-B", "opt", "origin/main")
+        self.base = self.git("rev-parse", "HEAD")
+
+    def tr(self, *args: str) -> tuple[int, str, str]:
+        return run_main("perf", "trial", *args)
+
+    def ok(self, *args: str) -> str:
+        rc, out, err = self.tr(*args)
+        self.assertEqual(rc, 0, out + err)
+        return out
+
+    def refused(self, *args: str, code: int = 2) -> str:
+        before = self.ledger()
+        rc, out, err = self.tr(*args)
+        self.assertEqual((rc, self.ledger()), (code, before), out + err)
+        return out + err
+
+    def start(self, *hot: str, extra: tuple[str, ...] = TRIAL_ARGS) -> tuple[int, str, str]:
+        return self.tr("start", *(a for h in hot or ("src/hot.py",) for a in ("--hotspot", h)), *extra)
+
+    def started(self, *hot: str) -> str:
+        rc, out, err = self.start(*hot)
+        self.assertEqual(rc, 0, out + err)
+        return str(self.tstate()["id"])
+
+    def tstate(self) -> dict[str, Any]:
+        data = json.loads((self.repo / ".autopilot" / xt.PERF_TRIAL_FILE).read_text(encoding="utf-8"))
+        assert isinstance(data, dict)
+        return data
+
+    def rows(self) -> list[dict[str, Any]]:
+        path = self.repo / ".autopilot" / xt.PERF_TRIALS_LOG
+        return [json.loads(x) for x in path.read_text(encoding="utf-8").splitlines()] if path.exists() else []
+
+    def ledger(self) -> tuple[bytes | None, ...]:
+        files = (self.repo / ".autopilot" / n for n in (xt.PERF_TRIAL_FILE, xt.PERF_TRIALS_LOG))
+        return tuple(f.read_bytes() if f.exists() else None for f in files)
+
+    def append_row(self, row: dict[str, Any]) -> None:
+        (self.repo / ".autopilot").mkdir(exist_ok=True)
+        with (self.repo / ".autopilot" / xt.PERF_TRIALS_LOG).open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps({"schema": 1, **row}) + "\n")
+
+    def append_kept(self, files: list[str]) -> None:
+        """Dòng `decide kept` (như `finish` T-3703 sẽ ghi) với cây neo = `HEAD^{tree}` hiện tại."""
+        row = {"event": "decide", "id": "PT-0001", "base_sha": self.base, "hotspot": files, "verdict": "kept"}
+        self.append_row({**row, "candidate_tree": self.git("rev-parse", "HEAD^{tree}"), "candidate_files": files})
+
+    def ctx(self) -> xt.TrialCtx:
+        return xt.trial_context(self.repo, ["perf", "trial", "status"])
+
+
+class TrialConfigTest(unittest.TestCase):
+    def test_valid_config_and_unlock(self) -> None:
+        self.assertIsNone(xt.trial_config_problem(trial_config()))
+        self.assertIsNone(xt.trial_config_problem(trial_config(unlock=["pyproject.toml", "**/*.lock"])))
+
+    def test_problems(self) -> None:
+        """Từng lỗi một lý do: không phải object, khoá lạ/thiếu/sai kiểu (bool không là số), giá trị."""
+        sec = trial_config()["secondary"][0]
+        cases = {
+            "cần object JSON": [],
+            "lockd": trial_config(lockd=[]),
+            "budget": trial_config(budget=True),
+            "timeout": trial_config(timeout="1"),
+            "setup": {k: v for k, v in trial_config().items() if k != "setup"},
+            '"schema" phải là': trial_config(schema=2),
+            '"budget" phải ≥ 1': trial_config(budget=0),
+            '"metric.cmd"': trial_config(metric={"kind": "exact"}),
+            "danh sách glob": trial_config(locked=["bench.py", ""]),
+            "≠ primary": trial_config(secondary=[{**sec, "name": "primary"}]),
+            "trùng": trial_config(secondary=[sec, sec]),
+            '"unlock" ngoài': trial_config(unlock=["bench.py"]),
+        }
+        for want, cfg in cases.items():
+            with self.subTest(want):
+                self.assertIn(want, str(xt.trial_config_problem(cfg)))
+
+    def test_locks_default_minus_unlock_plus_config_and_tool(self) -> None:
+        ctx = xt.TrialCtx("b", "refs/heads/main", TOOL, "t", trial_config(unlock=["pyproject.toml"]), "c", [])
+        self.assertTrue(
+            all(ctx.locked(p) for p in ("bench.py", "a/b/x.pth", "pkg/package.json", TOOL, "perf/trial.json"))
+        )
+        self.assertFalse(ctx.locked("pyproject.toml") or ctx.locked("src/hot.py"))
+        self.assertTrue(xt.TrialCtx("b", "r", TOOL, "t", trial_config(), "c", []).locked("sub/pyproject.toml"))
+
+
+class TrialLedgerTest(unittest.TestCase):
+    def kept(self, **over: Any) -> dict[str, Any]:
+        row = {"schema": 1, "event": "decide", "id": "PT-0001", "base_sha": "b", "hotspot": ["a"], "verdict": "kept"}
+        return {**row, "candidate_tree": "t", "candidate_files": ["a"], **over}
+
+    def test_row_shapes(self) -> None:
+        start = {"schema": 1, "event": "start", "id": "PT-0001", "base_sha": "b", "default_ref": "r", "hotspot": ["a"]}
+        start |= {"origin_url": "u"}
+        start |= {"hypothesis": "h", "falsifier": "f", "start_head": "s"}
+        good = [start, self.kept(), {"schema": 1, "event": "log", "base_sha": "b", "tree": "t"}]
+        bad = [
+            [],
+            {**start, "schema": True},
+            {**start, "schema": 2},
+            {**start, "event": ["start"]},
+            {**start, "default_ref": None},
+            {k: v for k, v in start.items() if k != "origin_url"},
+            {**start, "hotspot": [1]},
+            self.kept(candidate_files="a"),
+            self.kept(candidate_tree=None),
+        ]
+        self.assertEqual([xt._trial_row_ok(r) for r in good], [True] * 3)
+        self.assertEqual([xt._trial_row_ok(r) for r in bad], [False] * len(bad))
+
+    def test_streaks_per_path_kept_resets_only_changed(self) -> None:
+        def no(*hot: str) -> dict[str, Any]:
+            return {"event": "decide", "verdict": "aborted", "hotspot": list(hot)}
+
+        rows = [no("a"), no("a", "b"), self.kept(hotspot=["a", "b"], candidate_files=["b", "x"]), {"event": "log"}]
+        self.assertEqual(xt.trial_streaks(rows), {"a": 2, "b": 0})
+
+    def test_anchor_latest_kept_or_log_of_round(self) -> None:
+        rows = [
+            self.kept(candidate_tree="k1"),
+            {"event": "log", "base_sha": "b", "tree": "l1"},
+            self.kept(base_sha="o"),
+        ]
+        self.assertEqual(xt.trial_anchor(rows, "b"), "l1")
+        self.assertEqual(xt.trial_anchor(rows[:1], "b"), "k1")
+        self.assertIsNone(xt.trial_anchor(rows, "z"))
+
+    def test_log_block_and_merge(self) -> None:
+        ctx = xt.TrialCtx("b" * 40, "refs/heads/main", TOOL, "t", trial_config(), "c", [])
+        rows = [{"event": "decide", "id": "PT-0009", "base_sha": "b" * 40, "hotspot": ["a|b"], "verdict": "aborted"}]
+        block = xt.trial_log_block(rows, ctx)
+        self.assertIn("| PT-0009 | aborted | a\\|b |  |  |  | 0 |", block)
+        self.assertEqual(xt.trial_log_merge("", block, ctx.base_sha), block)
+        self.assertEqual(xt.trial_log_merge("x", block, ctx.base_sha), "x\n\n" + block)
+        self.assertEqual(xt.trial_log_merge("x\n", block, ctx.base_sha), "x\n\n" + block)
+        old = "đầu\n" + block.replace("PT-0009", "PT-0001") + "cuối\r\n"
+        self.assertEqual(xt.trial_log_merge(old, block, ctx.base_sha), "đầu\n" + block + "cuối\r\n")
+        tail = "đầu\n" + block.rstrip("\n")
+        self.assertEqual(xt.trial_log_merge(tail, block, ctx.base_sha), "đầu\n" + block)
+        with self.assertRaisesRegex(xt.TrialRefused, "mốc đóng"):
+            xt.trial_log_merge(block.replace(xt.PERF_TRIAL_LOG_END, ""), block, ctx.base_sha)
+
+    def test_falsifier_and_path(self) -> None:
+        cfg = trial_config()
+        self.assertEqual(xt.trial_falsifier(" mem >= 5% ", cfg), "mem >= 5%")
+        for bad in ("primary > 5", "rss > 5%", "primary >5%"):
+            with self.subTest(bad), self.assertRaises(xt.TrialRefused):
+                xt.trial_falsifier(bad, cfg)
+        self.assertEqual(xt._trial_path(" ./src//hot.py "), "src/hot.py")
+        for bad in ("", ".", "..", "/etc/x", "../x", "a::f", ".autopilot", ".autopilot/x", "a/../../x"):
+            with self.subTest(bad), self.assertRaises(xt.TrialRefused):
+                xt._trial_path(bad)
+
+
+class TrialStartTest(TrialCase):
+    def test_start_records_state_and_row(self) -> None:
+        """`start` ghi state (`started`, `rev` 1) và một dòng `start` cùng trường; `status` in lần thử mở."""
+        tid = self.started("./src//hot.py", "src/new.py")
+        st, rows = self.tstate(), self.rows()
+        self.assertEqual(
+            (tid, st["phase"], st["rev"], st["hotspot"]), ("PT-0001", "started", 1, ["src/hot.py", "src/new.py"])
+        )
+        self.assertEqual(st["default_ref"], "refs/heads/main")
+        self.assertEqual(st["tool_sha"], self.git("rev-parse", f"{self.base}:{TOOL}"))
+        self.assertEqual([(r["event"], r["id"], r["fp_start"]) for r in rows], [("start", tid, st["fp_start"])])
+        out = self.ok("status")
+        self.assertIn(f"{tid} pha started", out)
+        self.assertIn("kế: `perf trial finish` · bỏ", out)
+        self.assertIn(f"lần thử {tid} đang mở", self.refused("start", "--hotspot", "src/hot.py", *TRIAL_ARGS))
+
+    def test_refusals_write_nothing(self) -> None:
+        """Mỗi điều kiện từ chối exit 2, sổ không đổi: giả thuyết rỗng, falsifier sai, điểm nóng là thư mục/khớp khoá,
+        cây bẩn."""
+        bad = {
+            "--hypothesis rỗng": ("--hotspot", "src/hot.py", "--hypothesis", " ", "--falsifier", "primary > -5%"),
+            "--falsifier": ("--hotspot", "src/hot.py", "--hypothesis", "h", "--falsifier", "x"),
+            "không phải file": ("--hotspot", "src", *TRIAL_ARGS),
+            "khớp khoá": ("--hotspot", "bench.py", "--hotspot", "pyproject.toml", *TRIAL_ARGS),
+        }
+        for want, args in bad.items():
+            with self.subTest(want):
+                self.assertIn(want, self.refused("start", *args))
+        self.put("src/x.py", "1\n")
+        self.assertIn("src/x.py", self.refused("start", "--hotspot", "src/hot.py", *TRIAL_ARGS))
+
+    def test_locked_change_since_base_refused_even_with_anchor(self) -> None:
+        """Lớp kiểm lại (§2): cây neo của sổ trùng HEAD nhưng `base..HEAD` đổi file khoá → exit 2."""
+        self.put("bench.py", "print(1)\n")
+        self.git("commit", "-q", "-am", "sửa bộ đo")
+        self.append_kept(["bench.py"])
+        self.assertIn("file khoá đổi so với gốc", self.refused("start", "--hotspot", "src/hot.py", *TRIAL_ARGS))
+
+    def test_strikes_budget_and_ids(self) -> None:
+        """Đếm theo đường (exit 3 nêu đường), `budget` của vòng (exit 3), `id` tăng theo sổ."""
+        self.republish({"perf/trial.json": json.dumps(trial_config(budget=4))})
+        for i in range(3):
+            self.started("src/hot.py")
+            self.ok("abort", "--reason", f"r{i}")
+        self.assertIn("src/hot.py: 3 lần", self.refused("start", "--hotspot", "src/hot.py", *TRIAL_ARGS, code=3))
+        self.assertEqual(self.started("src/other.py"), "PT-0004")
+        self.ok("abort", "--reason", "r")
+        self.assertIn("hết budget 4", self.refused("start", "--hotspot", "src/notes.txt", *TRIAL_ARGS, code=3))
+        doc = json.loads(self.ok("status", "--json"))
+        self.assertEqual(
+            (doc["budget"], doc["streaks"], doc["next"]),
+            ({"used": 4, "max": 4}, {"src/hot.py": 3, "src/other.py": 1}, "start"),
+        )
+        self.assertIn("src/hot.py: 3/3", self.ok("status"))
+
+    def test_concurrent_starts_one_wins(self) -> None:
+        """Hai `start` cùng lúc (hai tiến trình): đúng một exit 0, một exit 2 (đang mở) — một dòng `start`."""
+        cmd = [sys.executable, str(XT), "perf", "trial", "start", "--hotspot", "src/hot.py", *TRIAL_ARGS]
+        procs = [subprocess.Popen(cmd, cwd=self.repo, stdout=subprocess.PIPE, stderr=subprocess.PIPE) for _ in range(2)]
+        codes = sorted(p.wait(timeout=120) for p in procs)
+        for p in procs:
+            p.communicate()
+        self.assertEqual(codes, [0, 2])
+        self.assertEqual([r["event"] for r in self.rows()], ["start"])
+
+    def test_update_rev_conflict_writes_nothing(self) -> None:
+        """`rev` trên đĩa đổi giữa đọc và ghi (ghi ngoài khoá) → exit 2, không nối dòng sổ."""
+        self.started()
+        self.ok("abort", "--reason", "x")
+        before = self.ledger()
+        real = xt.trial_read
+        calls = iter([None, {"rev": 99}])
+        with unittest.mock.patch.object(xt, "trial_read", lambda b: next(calls, None) or real(b)):
+            rc, out, err = self.start()
+        self.assertEqual((rc, self.ledger()), (2, before), out + err)
+        self.assertIn("đổi ngoài khoá", err)
+
+
+class TrialBaseTest(TrialCase):
+    def test_offline_falls_back_to_local_origin_head(self) -> None:
+        """Máy chủ không với tới (URL hỏng) → `refs/remotes/origin/HEAD`; thiếu nó → exit 2 kèm cách đặt."""
+        url = str(self.tmp / "không-có")
+        self.git("remote", "set-url", "origin", url)
+        self.assertEqual(xt.trial_round_base(self.repo, url), (self.base, "refs/heads/main"))
+        self.git("remote", "set-head", "origin", "-d")
+        self.assertIn("set-head origin -a", self.refused("status"))
+
+    def test_server_without_head_symref_and_timeout(self) -> None:
+        """Máy chủ trả rc 0 mà không có symref (repo rỗng) hoặc `ls-remote` quá giờ → None (dùng ref cục bộ)."""
+        empty = self.tmp / "empty.git"
+        self.run_git(self.tmp, "init", "-q", "--bare", str(empty))
+        self.assertIsNone(xt._trial_ls_remote(str(empty)))
+        real = subprocess.run
+
+        def slow(cmd: Any, *a: Any, **k: Any) -> Any:
+            if "ls-remote" in cmd:
+                raise subprocess.TimeoutExpired(cmd, 1)
+            return real(cmd, *a, **k)
+
+        with unittest.mock.patch.object(xt.subprocess, "run", slow):
+            self.assertIsNone(xt._trial_ls_remote(str(self.origin)))
+
+    def test_unfetched_server_tip_refused(self) -> None:
+        self.maintain({"src/other.py": "EXTRA = 1\n"}, fetch=False)
+        self.assertIn("git fetch origin", self.refused("status"))
+
+    def test_default_branch_renamed_refused(self) -> None:
+        self.started()
+        self.ok("abort", "--reason", "x")
+        self.git("push", "-q", "origin", "opt:trunk")
+        self.run_git(self.origin, "symbolic-ref", "HEAD", "refs/heads/trunk")
+        self.assertIn("nhánh mặc định đổi refs/heads/main → refs/heads/trunk", self.refused("status"))
+
+    def test_config_missing_or_broken_refused(self) -> None:
+        self.republish({"perf/trial.json": "{không phải json"})
+        self.assertIn("hỏng: cần object JSON", self.refused("status"))
+        self.republish({}, gone=("perf",))
+        self.assertIn("không có perf/trial.json", self.refused("status"))
+
+    def test_framework_repo_tool_path_and_missing_tool(self) -> None:
+        """Repo khung: công cụ ở `scripts/xt.py`; gốc không có công cụ nào → exit 2."""
+        self.republish({"scripts/xt.py": XT.read_text(encoding="utf-8")}, gone=(".xtemplates",))
+        self.assertEqual(self.ctx().tool, "scripts/xt.py")
+        self.republish({}, gone=("scripts",))
+        self.assertIn("không có .xtemplates/scripts/xt.py hay scripts/xt.py", self.refused("status"))
+
+    def test_tool_bytes_differ_execs_base_blob(self) -> None:
+        """D-363/D-366: byte `xt.py` đang chạy ≠ blob ở gốc → tiến trình con `python3 -I <bản gốc> <đúng argv>` với
+        `CLAUDE_PROJECT_DIR` = gốc dự án (bản xuất nằm ngoài dự án — review #442 🟢a), thoát với mã của con, thư mục tạm
+        dọn sau khi con xong (🟢b); bằng nhau thì không."""
+        self.republish({TOOL: XT.read_text(encoding="utf-8") + "# bản gốc khác\n"})
+        tmp = self.tmp / "tmpdir"
+        tmp.mkdir()
+        real, seen = subprocess.run, {}
+
+        def spy(cmd: Any, *a: Any, **k: Any) -> Any:
+            if list(cmd[:2]) == [sys.executable, "-I"]:
+                seen.update(cmd=cmd, env=k["env"], text=Path(cmd[2]).read_text(encoding="utf-8"))
+                return real(cmd, *a, **{**k, "capture_output": True, "text": True, "cwd": self.tmp})
+            return real(cmd, *a, **k)
+
+        with (
+            unittest.mock.patch.object(xt.tempfile, "tempdir", str(tmp)),
+            unittest.mock.patch.object(xt.subprocess, "run", spy),
+            self.assertRaises(SystemExit) as ex,
+        ):
+            run_main("perf", "trial", "status", "--json")
+        self.assertEqual(ex.exception.code, 0)
+        self.assertEqual(seen["cmd"][3:], ["perf", "trial", "status", "--json"])
+        self.assertEqual(seen["env"]["CLAUDE_PROJECT_DIR"], str(self.repo))
+        self.assertTrue(seen["text"].endswith("# bản gốc khác\n"))
+        self.assertEqual(list(tmp.iterdir()), [])
+
+    def test_gate_process_substitution_runs_once_and_leaves_no_tmp(self) -> None:
+        """Review #442 🟢b: Gate `python3 -I <(git cat-file blob <gốc>:xt.py) perf trial status` — `__file__` là ống
+        `/dev/fd/N` đọc lại rỗng: chạy bản gốc một lần, exit 0, không để lại `xt-perf-tool-*`."""
+        tmp = self.tmp / "tmpdir"
+        tmp.mkdir()
+        gate = f"python3 -I <(git cat-file blob {self.base}:{TOOL}) perf trial status"
+        env = {**os.environ, "TMPDIR": str(tmp)}
+        r = subprocess.run(["bash", "-c", gate], cwd=self.repo, env=env, capture_output=True, text=True, check=False)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("perf trial: vòng", r.stdout)
+        self.assertEqual(list(tmp.iterdir()), [])
+
+    def test_git_error_is_exit_2_and_todo_commands(self) -> None:
+        with unittest.mock.patch.object(xt, "trial_context", side_effect=RuntimeError("git lỗi")):
+            self.assertEqual(self.tr("status")[0], 2)
+        for args, task in ((("finish",), "T-3703"), (("status", "--check"), "T-3704")):
+            with self.subTest(args):
+                self.assertIn(f"chưa triển khai ({task})", self.refused(*args))
+
+
+class TrialHeadTreeTest(TrialCase):
+    def test_first_start_of_round_needs_base_tree(self) -> None:
+        self.put("src/other.py", "EXTRA = 0\n")
+        self.git("commit", "-q", "-am", "commit lạ")
+        self.assertIn("HEAD^{tree} ≠ cây", self.refused("start", "--hotspot", "src/hot.py", *TRIAL_ARGS))
+
+    def test_hotspot_new_file_and_file_added_by_kept(self) -> None:
+        """Đường chưa có ở gốc và HEAD nhận được; file có ở HEAD (lần giữ trước thêm) nhận được; gitlink/thư mục thì không."""
+        self.put("src/added.py", "A = 1\n")
+        self.git("add", "src/added.py")
+        self.git("commit", "-q", "-m", "giữ")
+        self.append_kept(["src/added.py"])
+        self.assertEqual(self.started("src/added.py", "src/brand-new.py"), "PT-0002")
+
+
+class TrialAbortTest(TrialCase):
+    def test_abort_reverts_exact_files_once(self) -> None:
+        """`abort`: sửa + file mới + xoá trong danh sách → stash, vân tay = lúc start; `.autopilot/` và file bị ignore còn;
+        một dòng `decide aborted` có `reason`, `candidate_files`; pha `closed`; `abort` lần nữa → exit 2."""
+        fp0 = xt.tree_fingerprint(self.repo)
+        tid = self.started("src/hot.py", "src/new.py", "src/notes.txt")
+        self.put("src/hot.py", HOT + "# sửa\n")
+        self.put("src/new.py", "N = 1\n")
+        (self.repo / "src" / "notes.txt").unlink()
+        self.put(".autopilot/note.txt", "giữ\n")
+        self.put("scratch.log", "ignore\n")
+        out = self.ok("abort", "--reason", "  hướng sai ")
+        self.assertIn("3 file thu hồi vào stash", out)
+        self.assertEqual((xt.tree_fingerprint(self.repo), self.git("status", "--porcelain")), (fp0, ""))
+        self.assertTrue((self.repo / ".autopilot" / "note.txt").exists() and (self.repo / "scratch.log").exists())
+        dec = [r for r in self.rows() if r["event"] == "decide"]
+        self.assertEqual([(r["id"], r["verdict"], r["reason"]) for r in dec], [(tid, "aborted", "hướng sai")])
+        self.assertEqual(sorted(dec[0]["candidate_files"]), ["src/hot.py", "src/new.py", "src/notes.txt"])
+        st = self.tstate()
+        self.assertEqual(
+            (st["phase"], st["verdict"], st["stash"]), ("closed", "aborted", self.git("rev-parse", "refs/stash"))
+        )
+        self.assertIn("không có lần thử mở", self.refused("abort", "--reason", "x"))
+
+    def test_abort_clean_tree_and_guards(self) -> None:
+        """Không có candidate → đóng, không stash; lý do rỗng, HEAD ≠ start_head, khoá bận → exit 2."""
+        self.started()
+        self.assertIn("--reason rỗng", self.refused("abort", "--reason", " "))
+        with xt._trial_hold(self.repo):
+            self.assertIn("đang chạy", self.refused("abort", "--reason", "chen"))
+        self.git("commit", "-q", "--allow-empty", "-m", "lén")
+        self.assertIn("HEAD ≠ start_head", self.refused("abort", "--reason", "x"))
+        self.git("reset", "-q", "--soft", "HEAD~1")
+        self.assertIn("0 file thu hồi", self.ok("abort", "--reason", "x"))
+        self.assertIsNone(self.tstate()["stash"])
+
+    def test_abort_not_back_to_fp_is_exit_4_then_no_duplicate_decide(self) -> None:
+        """Thu hồi không đưa vân tay về lúc start → exit 4, pha `decided`, in SHA stash; `abort` lại không ghi `decide`
+        trùng; khi về được thì `closed`."""
+        tid = self.started()
+        self.put("src/hot.py", HOT + "# sửa\n")
+        with unittest.mock.patch.object(xt, "tree_fingerprint", return_value="lệch"):
+            rc, out, err = self.tr("abort", "--reason", "x")
+        self.assertEqual(rc, 4, out + err)
+        self.assertIn(self.git("rev-parse", "refs/stash"), err)
+        self.assertEqual(self.tstate()["phase"], "decided")
+        self.assertIn("perf trial finish --resume", self.ok("status"))
+        with unittest.mock.patch.object(xt, "tree_fingerprint", return_value="lệch"):
+            rc, out, err = self.tr("abort", "--reason", "y")
+        self.assertEqual(rc, 4, out + err)
+        self.assertIn("stash (không tạo)", err)
+        self.ok("abort", "--reason", "z")
+        self.assertEqual([r["id"] for r in self.rows() if r["event"] == "decide"], [tid])
+        self.assertEqual(self.tstate()["phase"], "closed")
+
+    def test_stash_failure_warns_and_returns_none(self) -> None:
+        self.put("src/hot.py", HOT + "# sửa\n")
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            sha = xt._trial_stash(self.repo, "PT-0001", ["src/hot.py", "không-có.txt"])
+        self.assertIn("git stash push exit 1", err.getvalue())
+        # git 2.53: exit 1 nhưng VẪN tạo mục stash (như spike V1) — trả SHA để `abort` in ra khi vân tay lệch (exit 4)
+        self.assertEqual(sha, self.git("rev-parse", "refs/stash"))
+        self.assertIsNone(xt._trial_stash(self.repo, "PT-0002", ["không-có.txt"]))
+
+    def test_hold_without_fcntl(self) -> None:
+        with (
+            unittest.mock.patch.object(xt, "_fcntl", return_value=None),
+            self.assertRaisesRegex(xt.TrialRefused, "fcntl"),
+        ):
+            with xt._trial_hold(self.repo):
+                pass
+
+
+class TrialLogTest(TrialCase):
+    def test_log_builds_block_and_anchors_tree(self) -> None:
+        """`log` thay khối của vòng (giữ chữ người), nối sự kiện `log` với cây = HEAD + PERF-LOG mới; `--check` 0 rồi 1
+        khi sổ có dòng mới; chạy lại khi PERF-LOG đã sửa (chưa commit) vẫn được."""
+        tid = self.started()
+        self.ok("abort", "--reason", "thử | một")
+        self.ok("log")
+        log = (self.repo / xt.PERF_TRIAL_LOG_MD).read_text(encoding="utf-8")
+        self.assertTrue(log.startswith("# PERF-LOG\n\nGhi chú của người.\n\n<!-- xt-perf-trial "))
+        self.assertIn(
+            f"| {tid} | aborted | src/hot.py | bỏ vòng thừa trong cost | primary > -5% | thử \\| một | 0 |", log
+        )
+        self.ok("log")  # PERF-LOG bẩn của chính `log` không chặn
+        self.git("commit", "-q", "-am", "PERF-LOG")
+        anchors = [r["tree"] for r in self.rows() if r["event"] == "log"]
+        self.assertEqual(anchors[-1], self.git("rev-parse", "HEAD^{tree}"))
+        self.assertIn("khớp", self.ok("log", "--check"))
+        self.started()
+        self.ok("abort", "--reason", "hai")
+        rc, out, _ = self.tr("log", "--check")
+        self.assertEqual((rc, "lệch" in out), (1, True))
+
+    def test_log_refusals(self) -> None:
+        """`log` từ chối khi: lần thử mở, cây bẩn ngoài PERF-LOG, HEAD lệch cây neo (ngoài PERF-LOG); `--check` khi chưa
+        có file → 1."""
+        (self.repo / xt.PERF_TRIAL_LOG_MD).unlink()
+        self.git("commit", "-q", "-am", "bỏ PERF-LOG")
+        self.assertEqual(self.tr("log", "--check")[0], 1)
+        self.git("reset", "-q", "--hard", self.base)
+        self.started()
+        self.assertIn("đang mở", self.refused("log"))
+        self.ok("abort", "--reason", "x")
+        self.put("src/x.py", "1\n")
+        self.assertIn("cây bẩn", self.refused("log"))
+        (self.repo / "src" / "x.py").unlink()
+        self.put("src/other.py", "EXTRA = 1\n")
+        self.git("commit", "-q", "-am", "lạ")
+        self.assertIn("HEAD^{tree} ≠ cây", self.refused("log"))
+
+    def test_log_creates_missing_file(self) -> None:
+        self.republish({}, gone=("docs",))
+        self.ok("log")
+        self.assertTrue(
+            (self.repo / xt.PERF_TRIAL_LOG_MD).read_text(encoding="utf-8").startswith("<!-- xt-perf-trial ")
+        )
+
+    def test_index_tree_error(self) -> None:
+        with self.assertRaisesRegex(RuntimeError, "read-tree"):
+            xt.trial_index_tree(self.repo, "không-có", [])
+        self.assertEqual(xt.trial_index_tree(self.repo, "HEAD", []), self.git("rev-parse", "HEAD^{tree}"))
+
+
+class TrialReadTest(TrialCase):
+    def test_broken_state_or_ledger_refused(self) -> None:
+        auto = self.repo / ".autopilot"
+        auto.mkdir()
+        for text in ("[]", '{"phase": "lạ", "id": "PT-0001"}', '{"phase": "closed", "id": "X"}'):
+            (auto / xt.PERF_TRIAL_FILE).write_text(text, encoding="utf-8")
+            with self.subTest(text):
+                self.assertIn("perf-trial.json hỏng", self.refused("start", "--hotspot", "src/hot.py", *TRIAL_ARGS))
+        (auto / xt.PERF_TRIAL_FILE).unlink()
+        (auto / xt.PERF_TRIALS_LOG).write_text('{"schema": 1, "event": "log", "base_sha": "b", "tree": "t"}', "utf-8")
+        self.assertIn("hỏng ở dòng 1", self.refused("status"))
+
+    def test_status_without_trial_text(self) -> None:
+        out = self.ok("status")
+        self.assertIn("budget 0/20", out)
+        self.assertIn("kế: `perf trial start`\n", out)
+        self.assertNotIn("bỏ:", out)
+
+
+class TrialPrepareTest(TrialCase):
+    """T-3702: ba cây dựng từ object (`clone --shared`), `setup` allowlist, kiểm trỏ đúng cây, dọn."""
+
+    def prepare(self, cfg: dict[str, Any], code: int = 0) -> str:
+        """Gốc mới với cấu hình `cfg` (lần thử mở trước đó bị `abort`), `start`, `prepare` phải exit `code`."""
+        if (self.repo / ".autopilot" / xt.PERF_TRIAL_FILE).exists() and self.tstate()["phase"] != "closed":
+            self.ok("abort", "--reason", "đổi cấu hình")
+        self.republish({"perf/trial.json": json.dumps(cfg)})
+        self.started()
+        rc, out, err = self.tr("prepare")
+        self.assertEqual(rc, code, out + err)
+        return out + err
+
+    def test_three_trees_env_and_cleanup(self) -> None:
+        """`setup` chạy ở ba cây (gốc, `start_head`, candidate) với `TMPDIR` riêng, `PATH` = bin cây + `env.path`, biến
+        `env.pass`; thư mục tạm bị dọn (cả thư mục chỉ đọc); sổ không đổi; mục PATH ghi được → ⚠."""
+        log, wd = self.ctl / "setup.log", self.ctl / "w"
+        wd.mkdir()
+        setup = (
+            f'echo "$PWD|$TMPDIR|$PATH|${{XT_KEEP:-}}|$(cat src/hot.py | wc -l)" >> {log}; mkdir -p ro && chmod 555 ro'
+        )
+        cfg = trial_config(setup=setup, env={"path": f"/bin:{wd}", "pass": ["XT_KEEP"], "allow_prefix": ["/opt"]})
+        self.republish({"perf/trial.json": json.dumps(cfg)})
+        self.started()
+        self.put("src/hot.py", HOT + "# a\n# b\n")
+        before = self.ledger()
+        with unittest.mock.patch.dict(os.environ, {"XT_KEEP": "1", "NODE_OPTIONS": "x"}):
+            rc, out, err = self.tr("prepare")
+        self.assertEqual((rc, self.ledger()), (0, before), out + err)
+        lines = [ln.split("|") for ln in log.read_text(encoding="utf-8").splitlines()]
+        self.assertEqual([Path(p).name for p, *_ in lines], ["base", "head", "cand"])
+        n = HOT.count("\n")
+        self.assertEqual([int(c) for *_, c in lines], [n, n, n + 2])
+        for here, tmp, path, keep, _ in lines:
+            self.assertEqual((tmp, keep), (here + ".tmp", "1"))
+            self.assertEqual(path, f"{here}/.venv/bin:{here}/node_modules/.bin:/bin:{wd}")
+            self.assertFalse(Path(here).exists())
+        self.assertIn(f"⚠ PATH có {wd}", out)
+
+    def test_symlink_pth_direct_url_and_file_dep_outside_refused(self) -> None:
+        """`setup` để đường phân giải ra ngoài cây đo (symlink, `.pth`, `direct_url.json` editable, `file:`) → exit 2 nêu
+        từng đường; FIFO tên `.pth` không bị mở; `allow_prefix` cho qua."""
+        out_dir = self.ctl / "ngoài"
+        out_dir.mkdir()
+        url = json.dumps({"url": f"file://{out_dir}", "dir_info": {"editable": True}})
+        pkg = json.dumps({"dependencies": {"a": f"file:{out_dir}", "b": "^1"}, "devDependencies": {"c": "link:./x"}})
+        setup = (
+            f"ln -s {out_dir} lnk && mkdir -p site/x.dist-info && echo '{out_dir}' > site/a.pth"
+            f" && echo 'import os; p = \"{out_dir}\"' > site/b.pth && echo '# chú thích' > site/c.pth"
+            f" && echo '{url}' > site/x.dist-info/direct_url.json && echo '{pkg}' > package.json && mkfifo site/f.pth"
+        )
+        text = self.prepare(trial_config(setup=setup), code=2)
+        for rel in ("lnk", "site/a.pth", "site/b.pth", "site/x.dist-info/direct_url.json", "package.json"):
+            self.assertIn(f"cand: {rel} → {out_dir}", text)
+        self.assertNotIn("c.pth", text)
+        self.assertNotIn("✗ cand:", self.prepare(trial_config(setup=setup, env={"allow_prefix": [str(self.ctl)]})))
+
+    def test_probe_and_venv_interpreter(self) -> None:
+        """`probe` in đường trong cây → qua; đường ngoài cây hoặc probe lỗi → exit 2; interpreter cây = `.venv/bin/python`."""
+        probe = "python3 -c 'import os; print(os.path.abspath(\"src/hot.py\"))'"
+        self.prepare(trial_config(setup="python3 -m venv --without-pip .venv", probe=probe))
+        self.assertIn("probe /etc/hostname (ngoài cây đo)", self.prepare(trial_config(probe="echo /etc/hostname"), 2))
+        self.assertIn("probe exit 3: lỗi", self.prepare(trial_config(probe="echo lỗi >&2; exit 3"), 2))
+
+    def test_setup_failure_and_dirty_submodule(self) -> None:
+        self.assertIn("base: setup exit 7: hỏng", self.prepare(trial_config(setup="echo hỏng; exit 7"), 2))
+        self.ok("abort", "--reason", "x")
+        self.republish({"perf/trial.json": json.dumps(trial_config())})
+        sub = self.tmp / "sub"
+        self.run_git(self.tmp, "init", "-q", "-b", "main", str(sub))
+        (sub / "f.txt").write_text("a\n", encoding="utf-8")
+        self.run_git(sub, "add", "f.txt")
+        self.run_git(sub, "commit", "-q", "-m", "f")
+        self.run_git(self.tmp / "maint", "submodule", "add", "-q", str(sub), "vendor/sub")
+        self.republish({})
+        self.run_git(self.repo, "submodule", "update", "--init", "-q")
+        self.started()
+        (self.repo / "vendor" / "sub" / "f.txt").write_text("b\n", encoding="utf-8")
+        rc, out, err = self.tr("prepare")
+        self.assertEqual(rc, 2, out + err)
+        self.assertIn("cand: vendor/sub (submodule: HEAD ≠ gitlink", out)
+
+    def test_no_open_trial_refused(self) -> None:
+        self.assertIn("không có lần thử mở", self.refused("prepare"))
+
+
+class TrialTreeUnitTest(TrialCase):
+    def test_tree_build_failures(self) -> None:
+        work = self.tmp / "w"
+        work.mkdir()
+        with self.assertRaisesRegex(xt.TrialRefused, "không dựng được cây x \\(ffffffffffff\\)"):
+            xt._trial_tree(self.repo, work, "x", "f" * 40, "t")
+        with self.assertRaisesRegex(xt.TrialRefused, "≠ cây mong đợi"):
+            xt._trial_tree(self.repo, work, "y", self.base, "0" * 40)
+
+    def test_candidate_problems_compare_agent_tree(self) -> None:
+        """Cây candidate khác cây agent (file đổi sau khi dựng, file thêm, symlink) → vấn đề; không file → không gì."""
+        self.started()
+        self.put("src/hot.py", HOT + "# a\n")
+        (self.repo / "src" / "l").symlink_to("hot.py")
+        files = xt.trial_dirty(self.repo)
+        with xt.trial_trees(self.repo, self.tstate(), files) as trees:
+            cand = trees[2]
+            self.assertEqual(xt.trial_candidate_problems(self.repo, cand, files), [])
+            self.assertEqual(xt.trial_candidate_problems(self.repo, cand, []), [])
+            self.put("src/hot.py", HOT + "# b\n")
+            (self.repo / "src" / "l").unlink()
+            (self.repo / "src" / "l").symlink_to("other.py")
+            (self.repo / "src" / "d").mkdir()
+            got = xt.trial_candidate_problems(self.repo, cand, [*files, "src/d"])
+        self.assertEqual(got, [f"cand: {p} khác cây agent" for p in ("src/hot.py", "src/l", "src/d")])
+
+    def test_scan_digest_and_run(self) -> None:
+        root = self.tmp / "t"
+        (root / ".git").mkdir(parents=True)
+        (root / ".git" / "x").write_text("bỏ qua\n", encoding="utf-8")
+        (root / "a" / "__pycache__").mkdir(parents=True)
+        (root / "a" / "__pycache__" / "m.pyc").write_bytes(b"x")
+        (root / "big").write_bytes(b"0" * (xt.PERF_TRIAL_HASH_MAX + 1))
+        (root / "f").write_text("f\n", encoding="utf-8")
+        (root / "ld").symlink_to("a")
+        tree = xt.TrialTree("t", "c", root, self.tmp)
+        files, bad = xt.trial_scan(tree, [str(root)], list(xt.PERF_TRIAL_SCRATCH))
+        self.assertEqual(sorted(files), ["a/__pycache__/m.pyc", "big", "f", "ld"])
+        self.assertEqual([files[k][3] for k in ("a/__pycache__/m.pyc", "big", "ld")], [None, None, "->a"])
+        self.assertEqual(files["f"][3], xt.hashlib.sha256(b"f\n").hexdigest())
+        self.assertEqual(bad, [])
+        self.assertEqual(xt.trial_run("sleep 5", root, {"PATH": "/bin:/usr/bin"}, 0.2), (124, "", "quá 0.2 s"))
+        self.assertEqual(xt._trial_refs(self._write("x.json", "[]")), [])
+        cfg = trial_config(env={"path": str(self.tmp), "allow_prefix": ["/opt/x"]})
+        self.assertEqual(xt._trial_allowed(tree, cfg, {"PATH": str(self.tmp)}), [str(root), "/opt/x"])
+        self.assertEqual(xt._trial_refs(self._write("direct_url.json", '{"url": "file:///a"}')), [])
+
+    def _write(self, name: str, text: str) -> Path:
+        p = self.tmp / name
+        p.write_text(text, encoding="utf-8")
+        return p
+
+    def test_env_config_problems(self) -> None:
+        cases = {
+            '"env" = {': [{"x": 1}, {"path": 1}, {"pass": "A"}, {"pass": [""]}, {"allow_prefix": [1]}],
+            "đường tuyệt đối": [{"allow_prefix": ["rel"]}],
+        }
+        for want, envs in cases.items():
+            for env in envs:
+                with self.subTest(env):
+                    self.assertIn(want, str(xt.trial_config_problem(trial_config(env=env))))
+        self.assertIn('"timeout" phải > 0', str(xt.trial_config_problem(trial_config(timeout=0))))
+        self.assertIsNone(
+            xt.trial_config_problem(trial_config(env={"path": "/bin", "pass": ["A"], "allow_prefix": ["/o"]}))
+        )
+
+
+class TrialReview442Test(TrialCase):
+    """Review #442 (D-366): gốc vòng từ đầu nhánh máy chủ thật, cấu hình/môi trường của phiên không lái được git hay
+    lệnh đo, quét/dọn không bỏ sót vì quyền, cây đo cô lập. Mỗi ca tái hiện một đường của bộ tái hiện review."""
+
+    def fake_server(self) -> Path:
+        """Máy chủ giả agent kiểm soát: `main` = commit nới cấu hình + sửa bộ đo (nhánh `evil`); cây agent về `opt`."""
+        self.git("checkout", "-q", "-b", "evil")
+        self.put("perf/trial.json", json.dumps(trial_config(locked=[], budget=999)))
+        self.put("bench.py", "print(1)\n")
+        self.git("commit", "-q", "-am", "nới cấu hình + bộ đo")
+        fake = self.tmp / "fake.git"
+        self.run_git(self.tmp, "init", "-q", "--bare", "-b", "main", str(fake))
+        self.git("push", "-q", str(fake), "evil:main")
+        self.git("checkout", "-q", "opt")
+        return fake
+
+    def prepared(self, cfg: dict[str, Any], tmp: Path | None = None) -> tuple[int, str]:
+        """Gốc mới với `cfg`, `start`, `prepare` (thư mục tạm của tiến trình = `tmp` nếu có): (exit, out + err)."""
+        self.republish({"perf/trial.json": json.dumps(cfg)})
+        self.started()
+        with unittest.mock.patch.object(xt.tempfile, "tempdir", str(tmp) if tmp else xt.tempfile.gettempdir()):
+            rc, out, err = self.tr("prepare")
+        return rc, out + err
+
+    def test_url_pinned_after_first_start(self) -> None:
+        """🔴 AUD-SEC-523: URL origin ghi ở dòng `start`; đổi sang máy chủ giả sau đó (`set-url`) → exit 2 trước khi hỏi
+        máy chủ hay chạy công cụ gốc."""
+        self.started()
+        self.ok("abort", "--reason", "x")
+        self.assertEqual(self.rows()[0]["origin_url"], str(self.origin))
+        self.git("remote", "set-url", "origin", str(self.fake_server()))
+        self.assertIn("URL origin đổi", self.refused("status"))
+
+    def test_insteadof_refused_and_session_git_config_ignored(self) -> None:
+        """🔴 AUD-SEC-523: `url.<giả>.insteadOf <URL origin>` qua `GIT_CONFIG_*` của phiên bị bỏ (allowlist) — gốc vẫn là
+        đầu nhánh máy chủ thật; đặt cục bộ → exit 2; thiếu URL origin → exit 2."""
+        fake = self.fake_server()
+        env = {
+            "GIT_CONFIG_COUNT": "1",
+            "GIT_CONFIG_KEY_0": f"url.{fake}.insteadOf",
+            "GIT_CONFIG_VALUE_0": str(self.origin),
+        }
+        with unittest.mock.patch.dict(os.environ, env):
+            self.assertEqual(self.ctx().base_sha, self.base)
+        self.git("config", f"url.{fake}.insteadOf", str(self.origin))
+        self.assertIn("viết lại URL origin", self.refused("status"))
+        self.git("config", "--unset", f"url.{fake}.insteadOf")
+        self.git("config", "--unset", "remote.origin.url")
+        self.assertIn("remote `origin` chưa có URL", self.refused("status"))
+
+    def test_downgraded_base_refused(self) -> None:
+        """🟠 AUD-SEC-524: nhánh tách từ tổ tiên cũ của `main` (cấu hình cũ) → gốc vẫn = đầu `main` máy chủ; `start` → 2."""
+        tip = self.maintain({"perf/trial.json": json.dumps(trial_config(budget=2))})
+        self.assertEqual(self.ctx().base_sha, tip)
+        self.assertIn("gộp nhánh mặc định trước", self.refused("start", "--hotspot", "src/hot.py", *TRIAL_ARGS))
+
+    def test_submodule_shortcut_hidden_by_config_refused(self) -> None:
+        """🟠 AUD-SEC-525: commit lạ đổi gitlink (đường tắt trong submodule) + `diff.ignoreSubmodules=all` → vẫn exit 2."""
+        sub = self.tmp / "sub"
+        self.run_git(self.tmp, "init", "-q", "-b", "main", str(sub))
+        (sub / "lib.py").write_text("X = 1\n", encoding="utf-8")
+        self.run_git(sub, "add", "lib.py")
+        self.run_git(sub, "commit", "-q", "-m", "sub")
+        self.republish({"src/x.txt": "1\n"})
+        self.run_git(self.tmp / "maint", "submodule", "add", "-q", str(sub), "vendor/sub")
+        self.republish({})
+        self.run_git(self.repo, "submodule", "update", "--init", "-q")
+        (self.repo / "vendor" / "sub" / "lib.py").write_text("X = 0  # đường tắt\n", encoding="utf-8")
+        self.run_git(self.repo / "vendor" / "sub", "commit", "-q", "-am", "đường tắt")
+        self.git("add", "vendor/sub")
+        self.git("commit", "-q", "-m", "bump sub")
+        self.git("config", "diff.ignoreSubmodules", "all")
+        self.assertIn("HEAD^{tree} ≠ cây", self.refused("start", "--hotspot", "src/hot.py", *TRIAL_ARGS))
+
+    def test_home_from_passwd_and_no_user_site(self) -> None:
+        """🟠 AUD-SEC-526: HOME giả của phiên (mang `usercustomize.py`) không tới `setup`: HOME = passwd, PYTHONNOUSERSITE=1;
+        uid không có trong passwd → exit 2."""
+        log = self.ctl / "home.log"
+        with unittest.mock.patch.dict(os.environ, {"HOME": str(self.tmp / "giả")}):
+            rc, out = self.prepared(trial_config(setup=f'echo "$HOME|${{PYTHONNOUSERSITE:-}}" >> {log}'))
+        self.assertEqual(rc, 0, out)
+        home = pwd.getpwuid(os.getuid()).pw_dir
+        self.assertEqual(log.read_text(encoding="utf-8").splitlines(), [f"{home}|1"] * 3)
+        with unittest.mock.patch("pwd.getpwuid", side_effect=KeyError(0)):
+            self.assertIn("không có trong passwd", self.refused("status"))
+
+    def test_unreadable_dir_refused_and_trees_cleaned(self) -> None:
+        """🟠 AUD-SEC-527: `setup` để thư mục `000` (lồng nhau) chứa symlink ra ngoài → exit 2 "không đọc được" thay vì bỏ
+        qua; mọi thư mục tạm được dọn."""
+        tmp = self.tmp / "tmpdir"
+        tmp.mkdir()
+        setup = f"mkdir -p d/e && ln -s {self.ctl} d/e/l && chmod 000 d/e && chmod 000 d"
+        rc, out = self.prepared(trial_config(setup=setup), tmp)
+        self.assertEqual(rc, 2, out)
+        self.assertIn("không đọc được", out)
+        self.assertEqual(list(tmp.iterdir()), [])
+
+    def test_trees_isolated_from_agent_repo_and_each_other(self) -> None:
+        """🟢 AUD-SEC-528: cây đo không có remote `origin` (trỏ repo agent), không thấy cây khác qua `../`."""
+        log = self.ctl / "iso.log"
+        setup = "echo \"$(git remote | tr '\\n' ,)|$(ls -A .. | tr '\\n' ,)\" >> " + str(log)
+        rc, out = self.prepared(trial_config(setup=setup))
+        self.assertEqual(rc, 0, out)
+        want = [f"|{n},{n}.tmp," for n in ("base", "head", "cand")]
+        self.assertEqual(log.read_text(encoding="utf-8").splitlines(), want)
+
+    def test_tmpdir_inside_agent_tree_refused(self) -> None:
+        """🟢 AUD-SEC-528: TMPDIR trong cây agent → exit 2, không dựng cây nào ở đó."""
+        inner = self.repo / ".venv" / "tmp"
+        inner.mkdir(parents=True)
+        rc, out = self.prepared(trial_config(budget=19), inner)
+        self.assertEqual(rc, 2, out)
+        self.assertIn("nằm trong cây agent", out)
+        self.assertEqual(list(inner.iterdir()), [])
+
+    def test_log_marker_in_reason_escaped(self) -> None:
+        """🟢 AUD-SEC-528: mốc đóng PERF-LOG trong `--reason` không chẻ khối — dựng lại hai lần ra cùng nội dung."""
+        sha = "b" * 40
+        ctx = xt.TrialCtx(sha, "refs/heads/main", TOOL, "t", trial_config(), "c", [])
+        rows = [
+            {"event": "decide", "id": "PT-0001", "base_sha": sha, "hotspot": ["a"], "verdict": "aborted"}
+            | {"reason": f"thử {xt.PERF_TRIAL_LOG_END} <!-- xt-perf-trial {sha} --> xong"}
+        ]
+        v1 = xt.trial_log_merge("# PERF-LOG\n", xt.trial_log_block(rows, ctx), sha)
+        self.assertEqual(xt.trial_log_merge(v1, xt.trial_log_block(rows, ctx), sha), v1)
+        self.assertIn("&lt;!-- /xt-perf-trial -->", v1)
+
+    def test_setup_py_and_requirements_locked(self) -> None:
+        """AUD-SEC-529: khoá mặc định gồm `setup.py`, `requirements*.txt` ở mọi độ sâu."""
+        ctx = xt.TrialCtx("b", "r", TOOL, "t", trial_config(), "c", [])
+        for path in ("setup.py", "pkg/setup.py", "requirements.txt", "a/requirements-dev.txt"):
+            with self.subTest(path):
+                self.assertTrue(ctx.locked(path))
+
+    def test_rmtree_nested_unreadable_dirs_and_symlink(self) -> None:
+        """Dọn thư mục `000` lồng nhau; symlink tới thư mục ngoài không bị đổi quyền theo."""
+        out_dir = self.tmp / "ngoài"
+        out_dir.mkdir(mode=0o500)
+        root = self.tmp / "w"
+        (root / "a" / "b").mkdir(parents=True)
+        (root / "a" / "b" / "f").write_text("x", encoding="utf-8")
+        (root / "a" / "lnk").symlink_to(out_dir)
+        (root / "a" / "b").chmod(0)
+        (root / "a").chmod(0)
+        xt._trial_rmtree(root)
+        self.assertFalse(root.exists())
+        self.assertEqual(out_dir.stat().st_mode & 0o777, 0o500)
+        out_dir.chmod(0o700)
+
+
+class TrialParserTest(unittest.TestCase):
+    def test_every_trial_command_has_example_and_exit_codes(self) -> None:
+        sub = next(a for a in xt.build_parser()._actions if isinstance(a, argparse._SubParsersAction))
+        perf = next(a for a in sub.choices["perf"]._actions if isinstance(a, argparse._SubParsersAction))
+        trial = next(a for a in perf.choices["trial"]._actions if isinstance(a, argparse._SubParsersAction))
+        self.assertEqual(sorted(trial.choices), ["abort", "finish", "log", "prepare", "start", "status"])
+        for name, p in trial.choices.items():
+            with self.subTest(name):
+                self.assertIn("ví dụ:", p.epilog or "")
+                self.assertIn("mã thoát:", p.epilog or "")
+
+    def test_no_base_flag(self) -> None:
+        with self.assertRaises(SystemExit) as cm, unittest.mock.patch("sys.stderr"):
+            xt.build_parser().parse_args(["perf", "trial", "start", "--hotspot", "a", *TRIAL_ARGS, "--base", "HEAD"])
+        self.assertEqual(cm.exception.code, 2)
+
+
+if __name__ == "__main__":
+    unittest.main()

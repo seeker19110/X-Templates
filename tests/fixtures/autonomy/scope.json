@@ -382,6 +382,15 @@
     "AUD-HAR-243",
     "AUD-HAR-244"
    ]
+  },
+  {
+   "reason": "Hành vi của `xt.py perf trial` (review #442, D-366): gốc từ đầu nhánh máy chủ, diff không theo `diff.ignoreSubmodules`, HOME theo passwd, quét không nuốt lỗi quyền — không phải quyết định cho/chặn của guard, PR hay CI mà bench mô phỏng (phần guard của review #442 là AUD-SEC-523, có ca r442-*). Khoá bằng tests/test_perf_trial.TrialReview442Test và FLOW-28.",
+   "ids": [
+    "AUD-SEC-524",
+    "AUD-SEC-525",
+    "AUD-SEC-526",
+    "AUD-SEC-527"
+   ]
   }
  ]
 }
