@@ -1,28 +1,7 @@
 # Nhật ký quyết định tự duyệt
 
 > Ghi bởi `xt.py loop decide`. Phiên chính tự duyệt điểm quyết định theo tiêu chí chất lượng cuối (`LOOP-STOP-018`, ADR-0008 của khung). Người xem lại bất cứ lúc nào; đổi ý → quyết định mới ghi "thay D-NNN", không sửa mục cũ.
-> Bản tháng trước: [`DECISIONS-2026-10.md`](DECISIONS-2026-10.md) (D-001…D-287), [`DECISIONS-2026-11.md`](DECISIONS-2026-11.md) (D-292…D-340) — máy đọc cả bản tháng (T-3651).
-
-### D-341 · 2026-11-04T05:34:12+00:00 · Nhận 90 bài học stored XT-H-027…116 (chủ dự án yêu cầu 2026-11-04): mức và phạm vi?
-
-- Phương án: (1) Một PR nội dung: bổ sung vào ID có sẵn giữ mức; ID mới mặc định SHOULD; đổi mức chỉ khi đề xuất có và module còn chỗ (WF-CI-016 SHOULD→MUST@L vì ci-cd-pipeline đủ 4 MUST@M; CMP-AI-017 MAY→SHOULD; mới MUST@L: SEC-SUPPLY-033, AI-AGENTIC-020); công cụ (ci-check agent-action, bước actionlint/zizmor trong templates/ci.yml, release-check provenance, baseline.json) tách task T-3669 · (2) Áp đúng mức đề xuất (WF-CI-016 MUST@M, nhiều MUST@L) và làm công cụ cùng PR
-- Chọn: Một PR nội dung: bổ sung vào ID có sẵn giữ mức; ID mới mặc định SHOULD; đổi mức chỉ khi đề xuất có và module còn chỗ (WF-CI-016 SHOULD→MUST@L vì ci-cd-pipeline đủ 4 MUST@M; CMP-AI-017 MAY→SHOULD; mới MUST@L: SEC-SUPPLY-033, AI-AGENTIC-020); công cụ (ci-check agent-action, bước actionlint/zizmor trong templates/ci.yml, release-check provenance, baseline.json) tách task T-3669
-- Lý do (tiêu chí chất lượng cuối): (1) MUST@M vượt trần 4 MUST/module (ADR-0004) và mục MUST cần Kiểm máy có thật — công cụ chưa có thì không nâng; (2) mỗi đổi mức một dòng CHANGELOG, đường lùi rõ; (3) nội dung và công cụ tách lát, PR nội dung dễ review; dữ kiện xác minh nguồn sống trước khi ghép (P2)
-- Đường lùi: Hạ các mức đã nâng về mức cũ ở PR sau; ID mới đổi MAY + Ngừng dùng
-
-### D-342 · 2026-11-04T08:39:09+00:00 · T-3671 lỗ 5 (AUD-SEC-457): cd tới thư mục không có nối bằng ; / xuống dòng / || — đích ghi sau đó giải thế nào?
-
-- Phương án: (1) Xét cả hai nhánh: đường đã giải và thư mục không biết (D-106), lấy kết quả chặt hơn · (2) Chỉ coi thư mục là không biết (None) như spec ban đầu
-- Chọn: Xét cả hai nhánh: đường đã giải và thư mục không biết (D-106), lấy kết quả chặt hơn
-- Lý do (tiêu chí chất lượng cuối): (1) phương án 2 mở lỗ mới đo được: mkdir .autopilot; cd .autopilot; echo x > v (lúc kiểm chưa có thư mục, lúc chạy có) và đỏ 3 test cũ; xét cả hai nhánh giữ mọi chặn cũ và thêm chặn mới; cd X && … giữ nguyên
-- Đường lùi: Gỡ _failed_cd_scan
-
-### D-343 · 2026-11-04T08:39:10+00:00 · T-3671 lỗ 4 (AUD-SEC-456): git config --rename-section — chặn mọi rename hay chỉ khi đích ngoài danh sách section an toàn?
-
-- Phương án: (1) Chặn khi nguồn là section bảo vệ (core/include/includeIf/alias/biến) hoặc đích có tên con hay ngoài danh sách an toàn (user, author, committer, color, push, pull, status, log, i18n, column, advice, rerere, gc, pack, tag, fetch) · (2) Chặn mọi --rename-section
-- Chọn: Chặn khi nguồn là section bảo vệ (core/include/includeIf/alias/biến) hoặc đích có tên con hay ngoài danh sách an toàn (user, author, committer, color, push, pull, status, log, i18n, column, advice, rerere, gc, pack, tag, fetch)
-- Lý do (tiêu chí chất lượng cuối): (1) đổi tên vào section bảo vệ (vd user→core) hay từ section bảo vệ đều bị chặn; (4) không chặn oan đổi tên section vô hại; danh sách chặt theo git-config(1), thêm section mới cần quyết định mới
-- Đường lùi: Chặn mọi --rename-section
+> Bản tháng trước: [`DECISIONS-2026-10.md`](DECISIONS-2026-10.md) (D-001…D-287), [`DECISIONS-2026-11.md`](DECISIONS-2026-11.md) (D-292…D-343) — máy đọc cả bản tháng (T-3651).
 
 ### D-344 · 2026-11-04T08:39:11+00:00 · Thay D-123 (AUD-CI-031, review PR 435): mẫu secret-scan dùng gitleaks-action hay CLI?
 
@@ -149,3 +128,10 @@
 - Chọn: Unittest trở về discover tuần tự như cũ (bỏ bộ chia); chỉ pytest + xdist song song: python3 -m pytest -q -n <JOBS>, dò bằng importlib.util.find_spec('xdist'), bỏ -n khi PYTEST_DISABLE_PLUGIN_AUTOLOAD đặt hoặc cấu hình pytest (pytest.ini/pyproject/setup.cfg/tox.ini) có 'no:xdist'; XT_JOBS có trần 4×nproc; README thêm XT_JOBS; BASE-GATE-020 chỉ giữ ý song song, trỏ QA-STRAT-007 cho độc lập thứ tự, sửa '→ Kiểm'; CHANGELOG ghi cwd vào sys.path; sửa hàm phụ tests_dir bị gom thành test
 - Lý do (tiêu chí chất lượng cuối): (1) bộ chia tự viết sai ở 7 dạng hợp lệ của unittest — xanh giả là lỗi nặng nhất của một cổng; discover tuần tự đúng sẵn; (3) pytest-xdist là công cụ chuẩn, đã kiểm; (4) dự án Python muốn song song dùng pytest-xdist (BASE-GATE-020 nói cách); (5) tốc độ chỉ phá hoà
 - Đường lùi: Mở task riêng cho bộ chia unittest có TestLoader ghi module nếu dự án đích unittest-thuần cần tốc độ
+
+### D-370 · 2026-11-05T07:03:50+00:00 · Review #445 (perf trial T-3705…T-3707): 🔴 Gate mẫu <(git cat-file …) xanh khi không đọc được công cụ (pipefail không áp cho process substitution); 🔴 SIGTERM sau đóng băng đưa pha về started không tốn lượt → rút lại hạt giống held-out vô hạn; 🟠 held-out chỉ đòi improved còn target chỉ xét chỉ số chính; 🟠 chưa so đầu ra chỉ số chính với gốc (atexit print); 🟠 chết giữa dòng decide và state decided → --resume ghi decide trùng; 🟠 --no-apply kept rồi abort làm vòng kẹt
+
+- Phương án: (1) Sửa hết trong #445: Gate mẫu fail-closed '<(git cat-file blob refs/remotes/origin/HEAD:… || echo raise SystemExit\(2\))' + test qua run_gate_shell khi thiếu origin/HEAD và sai đường; ngắt sau đóng băng tiêu lần đo lại duy nhất (chung bộ đếm resumes), ngắt/chết lần hai → incomplete, sửa ADR §9; target đòi cả held-out gộp đạt; chỉ số chính gom đầu ra và so với gốc như held-out (khác → inequivalent); finish/--resume kiểm dòng decide đã có trước khi ghi; abort sau --no-apply kept ghi dòng aborted và thu hồi nhất quán (không kẹt); 🟢 lý do kept không nhắc held-out khi không khai, lệnh stash in ra theo pathspec nghĩa đen · (2) Chỉ sửa hai 🔴, ghi nợ 🟠
+- Chọn: Sửa hết trong #445: Gate mẫu fail-closed '<(git cat-file blob refs/remotes/origin/HEAD:… || echo raise SystemExit\(2\))' + test qua run_gate_shell khi thiếu origin/HEAD và sai đường; ngắt sau đóng băng tiêu lần đo lại duy nhất (chung bộ đếm resumes), ngắt/chết lần hai → incomplete, sửa ADR §9; target đòi cả held-out gộp đạt; chỉ số chính gom đầu ra và so với gốc như held-out (khác → inequivalent); finish/--resume kiểm dòng decide đã có trước khi ghi; abort sau --no-apply kept ghi dòng aborted và thu hồi nhất quán (không kẹt); 🟢 lý do kept không nhắc held-out khi không khai, lệnh stash in ra theo pathspec nghĩa đen
+- Lý do (tiêu chí chất lượng cuối): (1) bốn 🟠 là đường giữ oan/kẹt đã tái hiện trên chính Gate sắp phát hành ở 3.30.0 — nợ sẽ chặn release-check; (3) mỗi điểm có kịch bản tái hiện chuyển thành test; ADR §9 đã hứa 'đo lại tới khi may không làm được quá một lần'
+- Đường lùi: Tách 🟠 sang PR sau nếu PR quá lớn để review

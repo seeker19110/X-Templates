@@ -17,7 +17,7 @@ Luật và công cụ: `<FW>/11-autonomous-loop/optimization-loop.md` (LOOP-OPT,
 Mỗi mục: `perf/trial.json` (`setup`, `metric`, `secondary[]`, `target`, `budget`, `equiv`, `heldout`, `locked` — ADR-0071 §1), harness đo, test tương đương, bộ sinh held-out — **đã commit ở nhánh mặc định** trước khi sửa (PR riêng nếu chưa có). Máy đọc chúng và `xt.py` từ commit gốc, tự khoá trình chạy/manifest/lockfile. Ưu tiên `kind: exact` (`LOOP-OPT-009`).
 
 ## Bước 2 — PLAN-opt (tự duyệt)
-`docs/autopilot/PLAN-opt-<ngày>.md` theo mẫu `<FW>/templates/PLAN.md`: **mỗi mục một task**, dòng task ghi mục tiêu số + điều kiện đo + nguồn (`perf`/`FIELD-…`; (c): nhánh, baseline, D-NNN); Gate: ``python3 -I <(git cat-file blob origin/HEAD:<đường xt.py>) perf trial status --check`` (đạt `target`; held-out, chỉ số phụ do `finish` quyết — `LOOP-OPT-007`/`-008`). Tóm tắt ≤ 20 dòng → `<XT> loop decide --question "Duyệt PLAN-opt …"` → làm tiếp.
+`docs/autopilot/PLAN-opt-<ngày>.md` theo mẫu `<FW>/templates/PLAN.md`: **mỗi mục một task**, dòng task ghi mục tiêu số + điều kiện đo + nguồn (`perf`/`FIELD-…`; (c): nhánh, baseline, D-NNN); Gate: ``python3 -I <(git cat-file blob refs/remotes/origin/HEAD:<đường xt.py> || echo 'raise SystemExit(2)') perf trial status --check`` (đạt `target`, cả held-out gộp). Tóm tắt ≤ 20 dòng → `<XT> loop decide --question "Duyệt PLAN-opt …"` → làm tiếp.
 
 ## Bước 3 — vòng cho mỗi task (`optimization-loop.md` §Vòng)
 `<XT> loop verify --all` rồi `<XT> loop init --plan docs/autopilot/PLAN-opt-<ngày>.md --blueprint BLUEPRINT.md --single-session`; mỗi lần thử:
