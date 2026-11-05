@@ -120,6 +120,22 @@ class SchemaTest(unittest.TestCase):
         self.assertEqual(self.errors({"schema": 1, "products": {}}), ["products: phải là mảng"])
         self.assertEqual(self.errors({"schema": 1, "products": [], "x\x1b": 1}), ["khoá lạ ở gốc 'x\\x1b'"])
 
+    def test_version_digits_bounded_ascii(self) -> None:
+        """Review lát E: số rất dài từng làm `int()` văng (exit 1, API 500); chữ số không ASCII, 0 đứng đầu bị nhận."""
+        for bad in ("9" * 5000 + ".0.0", "٣.٢٩.٢", "３.２９.２", "03.029.002", "1234567890.0.0"):
+            with self.subTest(core=bad):
+                self.assertEqual(
+                    self.errors(registry(product(core=bad))), ["products[0].core: phải là X.Y.Z hoặc null"]
+                )
+        self.assertEqual(self.errors(registry(product(core="0.10.999999999"))), [])
+
+    def test_text_fields_printable(self) -> None:
+        for bad in ("\ud800", "a\x1bb", "a\nb"):
+            with self.subTest(owner=bad):
+                self.assertEqual(
+                    self.errors(registry(product(owner=bad))), ["products[0].owner: phải là chuỗi không rỗng"]
+                )
+
     def test_product_shape(self) -> None:
         self.assertEqual(self.errors(registry("x")), ["products[0]: phải là object"])
         p = product()
@@ -232,7 +248,8 @@ class DriftTest(unittest.TestCase):
             sb.write(registry(p))
             rc, out, err = sb.run()
         self.assertEqual((rc, out), (2, ""))
-        self.assertIn("✗ products[0].pack.id: không có gói 'khong-co'", err)
+        self.assertIn("✗ products[0].pack.id: không có gói 'khong-co' (cần templates/packs/khong-co/pack.json)", err)
+        self.assertNotIn(str(sb.base), err)  # không lộ đường tuyệt đối (API `xt.py app` dùng cùng thông điệp)
 
     def test_expired_exceptions(self) -> None:
         exc = [

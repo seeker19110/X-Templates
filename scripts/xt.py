@@ -11444,14 +11444,18 @@ def cmd_merge_check(args: argparse.Namespace) -> int:
 # --------------------------------------------------------------------------- registry (lát E, ADR-0068)
 REGISTRY_FILE = "docs/ops/registry.json"  # sản phẩm đích: core/gói/release/ngoại lệ — mở rộng TARGETS.md
 REGISTRY_REPO_RE = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+")
-REGISTRY_SEMVER_RE = re.compile(r"\d+\.\d+\.\d+")
+# Chữ số ASCII, không 0 đứng đầu, ≤ 9 chữ số mỗi phần: số rất dài từng làm `int()` văng (giới hạn 4300 chữ số) —
+# exit 1 thay vì 2, API trả 500 (review lát E).
+_REG_NUM = r"(?:0|[1-9][0-9]{0,8})"
+REGISTRY_SEMVER_RE = re.compile(rf"{_REG_NUM}\.{_REG_NUM}\.{_REG_NUM}")
 REGISTRY_SLUG_RE = re.compile(r"[a-z0-9][a-z0-9-]*")  # id gói = tên thư mục: không `/`, không `..`
 REGISTRY_EXC_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]*")  # in ra terminal: không ký tự điều khiển
 RegSpec = Dict[str, Tuple[Callable[[Any], bool], str]]
 
 
 def _reg_text(v: Any) -> bool:
-    return isinstance(v, str) and bool(v.strip())
+    """Chuỗi khác rỗng, in được (không ký tự điều khiển, không surrogate lẻ — từng làm API trả 500 khi mã hoá UTF-8)."""
+    return isinstance(v, str) and bool(v.strip()) and v.isprintable()
 
 
 def _reg_date(v: Any) -> Optional[_dt.date]:
@@ -11535,7 +11539,8 @@ def _reg_pack_errors(products: List[Dict[str, Any]], packs: Path) -> List[str]:
     if not packs.is_dir():
         return []
     return [
-        f"products[{i}].pack.id: không có gói {p['pack']['id']!r} (cần {p['pack']['id']}/pack.json trong {packs})"
+        # đường tương đối của khung — không lộ đường tuyệt đối qua API `xt.py app` (review lát E)
+        f"products[{i}].pack.id: không có gói {p['pack']['id']!r} (cần templates/packs/{p['pack']['id']}/pack.json)"
         for i, p in enumerate(products)
         if p["pack"] is not None and not (packs / p["pack"]["id"] / "pack.json").is_file()
     ]
