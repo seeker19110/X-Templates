@@ -15699,8 +15699,18 @@ def trial_config_problem(cfg: Any) -> Optional[str]:
             all(_trial_unlock_key(str(u)) in PERF_TRIAL_LOCKED for u in cfg.get("unlock", [])),
             '"unlock" ngoài khoá mặc định',
         ),
+        (cfg.get("timeout", 1) > 0, '"timeout" phải > 0 (giây)'),
     )
-    return next((msg for ok, msg in checks if not ok), None)
+    return next((msg for ok, msg in checks if not ok), None) or _trial_env_problem(cfg.get("env", {}))
+
+
+def _trial_env_problem(env: Dict[str, Any]) -> Optional[str]:
+    """`env` = {path: chuỗi PATH, pass: [tên biến], allow_prefix: [đường tuyệt đối]} (§4 bước 3); hợp lệ → None."""
+    lists = [env.get(k, []) for k in ("pass", "allow_prefix")]
+    shape = not set(env) - {"path", "pass", "allow_prefix"} and isinstance(env.get("path", ""), str)
+    if not shape or not all(isinstance(v, list) and all(isinstance(x, str) and x for x in v) for v in lists):
+        return '"env" = {path: chuỗi, pass: [tên biến], allow_prefix: [đường tuyệt đối]}'
+    return None if all(os.path.isabs(p) for p in lists[1]) else '"env.allow_prefix" phải là đường tuyệt đối'
 
 
 def _trial_ls_remote(base: Path) -> Optional[Tuple[str, str]]:
@@ -16031,17 +16041,23 @@ def _trial_stash(base: Path, tid: str, files: List[str]) -> Optional[str]:
     return after if after != before else None
 
 
+def _trial_open_at_head(base: Path) -> Dict[str, Any]:
+    """State lần thử đang mở; không có → TrialRefused(2); `HEAD ≠ start_head` (commit giữa lần thử) → TrialRefused(2)."""
+    cur = trial_read(base)
+    if cur.get("phase") not in PERF_TRIAL_NEXT:
+        raise TrialRefused(2, "không có lần thử mở — `perf trial start` trước")
+    if _perf_git(base, "rev-parse", "HEAD").strip() != cur["start_head"]:
+        raise TrialRefused(2, f"HEAD ≠ start_head {cur['start_head'][:12]} — commit giữa lần thử; không đụng cây")
+    return cur
+
+
 def _trial_abort(base: Path, ctx: TrialCtx, args: argparse.Namespace) -> int:
     """§2 `abort`: giữ `perf-trial.lock`; ghi `decide aborted` (một lần mỗi `id`) TRƯỚC khi thu hồi; thu hồi rồi đòi vân
     tay = `fp_start` — lệch → pha giữ `decided`, exit 4, in SHA stash, không thử cách khác (LOOP-STOP-025)."""
     if not args.reason.strip():
         raise TrialRefused(2, "--reason rỗng")
     with _trial_hold(base):
-        cur = trial_read(base)
-        if cur.get("phase") not in PERF_TRIAL_NEXT:
-            raise TrialRefused(2, "không có lần thử mở — `perf trial start` trước")
-        if _perf_git(base, "rev-parse", "HEAD").strip() != cur["start_head"]:
-            raise TrialRefused(2, f"HEAD ≠ start_head {cur['start_head'][:12]} — commit giữa lần thử; không thu hồi")
+        cur = _trial_open_at_head(base)
         files = trial_dirty(base)
 
         def decide(st: Dict[str, Any]) -> Tuple[Dict[str, Any], Optional[Dict[str, Any]]]:
@@ -16135,6 +16151,251 @@ def _trial_log(base: Path, ctx: TrialCtx, args: argparse.Namespace) -> int:
     return 0
 
 
+# ---- môi trường đo (§4 bước 3, T-3702): cây tạm từ object, `setup` với môi trường allowlist, kiểm trỏ đúng cây, dọn
+PERF_TRIAL_ENV_KEEP = ("HOME", "LANG", "LC_ALL", "TZ", "TERM")  # + `env.pass[]`; mọi biến khác bị bỏ
+PERF_TRIAL_PATH = "/usr/local/bin:/usr/bin:/bin"  # `env.path` mặc định, sau bin của chính cây
+PERF_TRIAL_SCRATCH = ("**/__pycache__/**",)  # `scratch` mặc định: file lệnh đo được phép sinh
+PERF_TRIAL_HASH_MAX = 1 << 20  # sha256 file ≤ 1 MiB trong danh sách file của cây
+PERF_TRIAL_TIMEOUT = 600  # giây mỗi lệnh (`setup`/`probe`) khi cấu hình không đặt `timeout`
+PERF_TRIAL_DEPS = ("dependencies", "devDependencies", "optionalDependencies", "peerDependencies")
+PERF_TRIAL_IDENT = {  # danh tính của commit treo candidate (`commit-tree`, không ref) — không cần cấu hình người dùng
+    f"GIT_{who}_{k}": v
+    for who in ("AUTHOR", "COMMITTER")
+    for k, v in (("NAME", "xt-perf-trial"), ("EMAIL", "xt@localhost"))
+}
+TrialEntry = Tuple[int, int, int, Optional[str]]  # cỡ, mode, mtime_ns, sha256 (None: thư mục rác/lớn) | đích symlink
+
+
+@dataclass
+class TrialTree:
+    """Một cây đo: `clone --shared --no-checkout` của repo agent ở `commit` (không đăng ký worktree ở cây agent)."""
+
+    name: str
+    commit: str
+    root: Path
+    tmp: Path
+
+
+def _trial_rmtree(path: Path) -> None:
+    """Dọn thư mục tạm kể cả thư mục chỉ đọc (cache gói) — không bỏ sót vì quyền."""
+    for d, _, _ in os.walk(path):
+        os.chmod(d, 0o700)
+    shutil.rmtree(path, ignore_errors=True)
+
+
+def _trial_tree(base: Path, work: Path, name: str, commit: str, want: str) -> TrialTree:
+    """Dựng cây `name` ở `commit` trong `work`; `HEAD^{tree}` phải bằng `want` (cây mong đợi) — lệch → TrialRefused(2).
+    Hook của clone tắt (`core.hooksPath=/dev/null`); `.git` cây agent không biết cây này (đo T-3702: ≈ `worktree add`)."""
+    root, tmp = work / name, work / f"{name}.tmp"
+    tmp.mkdir()
+    steps: List[Tuple[Path, Tuple[str, ...]]] = [
+        (work, ("clone", "--shared", "--no-checkout", "-q", str(base), str(root))),
+        (root, ("-c", "core.hooksPath=/dev/null", "checkout", "-q", "--detach", commit)),
+    ]
+    for cwd, step in steps:
+        r = _git(cwd, *step, env=_perf_env())
+        if r.returncode:
+            raise TrialRefused(2, f"không dựng được cây {name} ({commit[:12]}): {r.stderr.strip()}")
+    got = _perf_git(root, "rev-parse", "HEAD^{tree}").strip()
+    if got != want:
+        raise TrialRefused(2, f"cây {name}: HEAD^{{tree}} {got[:12]} ≠ cây mong đợi {want[:12]}")
+    return TrialTree(name, commit, root, tmp)
+
+
+@contextlib.contextmanager
+def trial_trees(base: Path, cur: Dict[str, Any], files: List[str]) -> Iterator[List[TrialTree]]:
+    """Ba cây đo trong thư mục tạm 0700 ngoài cây agent: gốc, `start_head`, candidate = `commit-tree <cây index tạm> -p
+    start_head` (commit treo; không dựng từ patch — §4 bước 3); luôn dọn khi ra."""
+    head = cur["start_head"]
+    tree = trial_index_tree(base, head, files)
+    env = {**_perf_env(), **PERF_TRIAL_IDENT}
+    cand = _git(
+        base, "commit-tree", tree, "-p", head, "-m", f"xt-perf-trial {cur['id']} candidate", env=env
+    ).stdout.strip()
+    want = {c: _perf_git(base, "rev-parse", f"{c}^{{tree}}").strip() for c in (cur["base_sha"], head)}
+    work = Path(tempfile.mkdtemp(prefix="xt-perf-trial-"))
+    try:
+        specs = (("base", cur["base_sha"]), ("head", head), ("cand", cand))
+        yield [_trial_tree(base, work, n, c, want.get(c, tree)) for n, c in specs]
+    finally:
+        _trial_rmtree(work)
+
+
+def _trial_fsig(p: Path) -> Tuple[Any, ...]:
+    """Chữ ký so một đường giữa cây agent và cây candidate: symlink (đích), file (byte, bit chạy), không có, khác."""
+    if p.is_symlink():
+        return ("link", os.readlink(p))
+    if p.is_file():
+        return ("file", p.read_bytes(), bool(p.stat().st_mode & stat.S_IXUSR))
+    return ("none",) if not os.path.lexists(p) else ("dir",)
+
+
+def trial_candidate_problems(base: Path, cand: TrialTree, files: List[str]) -> List[str]:
+    """Cây candidate = cây agent trên `files` (§4 bước 3): file/symlink trùng byte và mode; gitlink = `HEAD` submodule ở
+    cây agent và submodule sạch (không thì không đo được đúng candidate — `unbuildable` ở `finish`)."""
+    out = _perf_git(cand.root, "ls-tree", "-z", "HEAD", "--", *files) if files else ""
+    links = {e.split("\t", 1)[1]: e.split()[2] for e in out.split("\0") if e.startswith("160000 ")}
+    bad = [f for f in files if f.rstrip("/") not in links and _trial_fsig(base / f) != _trial_fsig(cand.root / f)]
+    for path, sha in links.items():
+        head = _git(base / path, "rev-parse", "HEAD", env=_perf_env())
+        dirty = _git(base / path, "status", "--porcelain", "--untracked-files=all", env=_perf_env())
+        if head.stdout.strip() != sha or dirty.returncode or dirty.stdout:
+            bad.append(f"{path} (submodule: HEAD ≠ gitlink {sha[:12]} hoặc bẩn)")
+    return [f"cand: {p} khác cây agent" for p in bad]
+
+
+def trial_env(cfg: Dict[str, Any], tree: TrialTree) -> Dict[str, str]:
+    """Môi trường allowlist (§4 bước 3): `HOME`, `LANG`, `LC_ALL`, `TZ`, `TERM`, `env.pass[]`; `TMPDIR` riêng cây; `PATH`
+    = bin của chính cây rồi `env.path`. `NODE_OPTIONS`, `BASH_ENV`, `LD_PRELOAD`, `PYTHON*`… bị bỏ."""
+    keep = (*PERF_TRIAL_ENV_KEEP, *cfg.get("env", {}).get("pass", []))
+    env = {k: os.environ[k] for k in keep if k in os.environ}
+    own = [str(tree.root / ".venv" / "bin"), str(tree.root / "node_modules" / ".bin")]
+    return env | {"TMPDIR": str(tree.tmp), "PATH": ":".join([*own, cfg.get("env", {}).get("path", PERF_TRIAL_PATH)])}
+
+
+def trial_path_warnings(cfg: Dict[str, Any]) -> List[str]:
+    """Mục `env.path` mà uid này ghi được (vd `~/.local/bin`) — lệnh đo tìm được công cụ do agent thay (⚠, không chặn)."""
+    path = cfg.get("env", {}).get("path", PERF_TRIAL_PATH)
+    return [p for p in path.split(":") if p and os.access(p, os.W_OK)]
+
+
+def trial_run(cmd: str, cwd: Path, env: Dict[str, str], timeout: float) -> Tuple[int, str, str]:
+    """(exit, stdout, stderr) của `/bin/sh -c cmd` (một chuỗi lệnh shell — D-363) trong nhóm tiến trình riêng; quá
+    `timeout` → dừng cả nhóm, exit 124."""
+    with subprocess.Popen(
+        ["/bin/sh", "-c", cmd],
+        cwd=cwd,
+        env=env,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        errors="replace",
+        start_new_session=True,
+    ) as proc:
+        try:
+            out, err = proc.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            _stop_group(proc)
+            return 124, "", f"quá {timeout:g} s"
+        return proc.returncode, out, err
+
+
+def _trial_allowed(tree: TrialTree, cfg: Dict[str, Any], env: Dict[str, str]) -> List[str]:
+    """Gốc được phép phân giải tới: chính cây, `sys.base_prefix` của interpreter cây (`.venv/bin/python`, không thì
+    `python3` trên PATH allowlist), `env.allow_prefix[]` — đều realpath."""
+    py = tree.root / ".venv" / "bin" / "python"
+    exe = str(py) if py.exists() else shutil.which("python3", path=env["PATH"])
+    pre = (
+        trial_run(f"{shlex.quote(exe)} -I -c 'import sys; print(sys.base_prefix)'", tree.root, env, 60) if exe else None
+    )
+    extra = [pre[1].strip()] if pre and pre[0] == 0 and pre[1].strip() else []
+    return [os.path.realpath(p) for p in (tree.root, *extra, *cfg.get("env", {}).get("allow_prefix", []))]
+
+
+def _trial_outside(path: str, allowed: List[str]) -> bool:
+    real = os.path.realpath(path)
+    return not any(real == a or real.startswith(a.rstrip("/") + "/") for a in allowed)
+
+
+def _trial_refs(p: Path) -> List[str]:
+    """Đường một file trỏ tới (§4 bước 3): dòng `.pth` (đường, hay chuỗi tuyệt đối trong dòng `import`), `direct_url.json`
+    editable (`file://`), phụ thuộc `file:`/`link:` của `package.json` ngoài `node_modules/`."""
+    text = p.read_bytes()[:PERF_TRIAL_HASH_MAX].decode("utf-8", "replace")
+    if p.suffix == ".pth":
+        lines = [s.strip() for s in text.splitlines() if s.strip() and not s.lstrip().startswith("#")]
+        refs = [x for s in lines for x in (re.findall(r"['\"](/[^'\"]+)['\"]", s) if s.startswith("import") else [s])]
+        return [str(p.parent / r) for r in refs]
+    data = _perf_json(text)
+    if not isinstance(data, dict):
+        return []
+    if p.name == "direct_url.json":
+        url = urllib.parse.urlparse(str(data.get("url", "")))
+        editable = isinstance(data.get("dir_info"), dict) and data["dir_info"].get("editable") is True
+        return [urllib.parse.unquote(url.path)] if editable and url.scheme == "file" else []
+    deps = [v for k in PERF_TRIAL_DEPS if isinstance(data.get(k), dict) for v in data[k].values() if isinstance(v, str)]
+    return [str(p.parent / v.split(":", 1)[1]) for v in deps if v.startswith(("file:", "link:"))]
+
+
+def _trial_scanned(rel: str, st: os.stat_result) -> bool:
+    """File thường cần đọc tìm đường trỏ ra ngoài (không mở FIFO/thiết bị)."""
+    parts = rel.split("/")
+    named = parts[-1].endswith(".pth") or parts[-1] == "direct_url.json"
+    return stat.S_ISREG(st.st_mode) and (named or (parts[-1] == "package.json" and "node_modules" not in parts))
+
+
+def trial_scan(tree: TrialTree, allowed: List[str], scratch: List[str]) -> Tuple[Dict[str, TrialEntry], List[str]]:
+    """Danh sách ĐẦY ĐỦ file của cây (cả file bị ignore, trừ `.git`): đường → (cỡ, mode, mtime_ns, sha256 với file ≤ 1 MiB
+    ngoài `scratch`, symlink: `->đích`); kèm đường phân giải ra ngoài `allowed` (symlink, `.pth`, `direct_url.json`,
+    `file:`) — FLOW-32."""
+    files: Dict[str, TrialEntry] = {}
+    bad: List[str] = []
+    for d, dirs, names in os.walk(tree.root):
+        dirs[:] = [x for x in dirs if not (d == str(tree.root) and x == ".git")]
+        links = [x for x in dirs if Path(d, x).is_symlink()]  # symlink tới thư mục: walk không đi vào, vẫn ghi + kiểm
+        for p in (Path(d, x) for x in [*links, *names]):
+            rel, st = p.relative_to(tree.root).as_posix(), p.lstat()
+            files[rel] = (st.st_size, st.st_mode, st.st_mtime_ns, _trial_digest(p, st, rel, scratch))
+            refs = [str(p)] if stat.S_ISLNK(st.st_mode) else _trial_refs(p) if _trial_scanned(rel, st) else []
+            bad += [
+                f"{tree.name}: {rel} → {os.path.realpath(r)} (ngoài cây đo)" for r in refs if _trial_outside(r, allowed)
+            ]
+    return files, bad
+
+
+def _trial_digest(p: Path, st: os.stat_result, rel: str, scratch: List[str]) -> Optional[str]:
+    if stat.S_ISLNK(st.st_mode):
+        return "->" + os.readlink(p)
+    if not stat.S_ISREG(st.st_mode) or st.st_size > PERF_TRIAL_HASH_MAX or any(perf_match(rel, g) for g in scratch):
+        return None
+    return hashlib.sha256(p.read_bytes()).hexdigest()
+
+
+def _trial_probe(tree: TrialTree, cfg: Dict[str, Any], env: Dict[str, str], allowed: List[str]) -> List[str]:
+    """`probe` (tuỳ chọn) in mỗi dòng một đường mô-đun đã phân giải; đường ra ngoài `allowed` hoặc probe lỗi → vấn đề."""
+    if "probe" not in cfg:
+        return []
+    rc, out, err = trial_run(cfg["probe"], tree.root, env, cfg.get("timeout", PERF_TRIAL_TIMEOUT))
+    if rc:
+        return [f"{tree.name}: probe exit {rc}: {err.strip()[-300:]}"]
+    lines = [s.strip() for s in out.splitlines() if s.strip()]
+    return [f"{tree.name}: probe {s} (ngoài cây đo)" for s in lines if _trial_outside(str(tree.root / s), allowed)]
+
+
+def trial_setup(tree: TrialTree, cfg: Dict[str, Any]) -> Tuple[List[str], Dict[str, TrialEntry], float]:
+    """`setup` của cấu hình gốc trong cây với môi trường allowlist, rồi `probe` + quét (§4 bước 3): (vấn đề, danh sách
+    file, giây `setup`). `setup` lỗi → vấn đề, không quét."""
+    env = trial_env(cfg, tree)
+    t0 = time.monotonic()
+    rc, out, err = trial_run(cfg["setup"], tree.root, env, cfg.get("timeout", PERF_TRIAL_TIMEOUT))
+    secs = time.monotonic() - t0
+    if rc:
+        return [f"{tree.name}: setup exit {rc}: {(out + err).strip()[-300:]}"], {}, secs
+    allowed = _trial_allowed(tree, cfg, env)
+    files, bad = trial_scan(tree, allowed, cfg.get("scratch", list(PERF_TRIAL_SCRATCH)))
+    return _trial_probe(tree, cfg, env, allowed) + bad, files, secs
+
+
+def _trial_prepare(base: Path, ctx: TrialCtx, args: argparse.Namespace) -> int:
+    """§2 `prepare`: dựng ba cây cho lần thử mở, `setup` + kiểm trỏ đúng cây, in kết quả, dọn; không đổi sổ/pha."""
+    with _trial_hold(base):
+        cur = _trial_open_at_head(base)
+        files = trial_dirty(base)
+        with trial_trees(base, cur, files) as trees:
+            bad = trial_candidate_problems(base, trees[2], files)
+            for tree in trees:
+                probs, listing, secs = trial_setup(tree, ctx.cfg)
+                bad += probs
+                print(
+                    f"{'✗' if probs else '✓'} {tree.name} {tree.commit[:12]}: setup {secs:.1f} s · {len(listing)} file"
+                )
+    for w in trial_path_warnings(ctx.cfg):
+        print(f"⚠ PATH có {w} — uid này ghi được (công cụ trong đó agent thay được)")
+    for b in bad:
+        print(f"✗ {b}")
+    return 2 if bad else 0
+
+
 def trial_status_doc(ctx: TrialCtx, cur: Dict[str, Any]) -> Dict[str, Any]:
     """Pha, lần thử mở (không có → None), gốc vòng, đếm theo đường, `budget` đã dùng, lệnh kế."""
     phase = cur.get("phase")
@@ -16186,7 +16447,7 @@ def _perf_trial_cmd(args: argparse.Namespace) -> int:
         "status": _trial_status,
         "abort": _trial_abort,
         "log": _trial_log,
-        "prepare": _trial_todo("T-3702"),
+        "prepare": _trial_prepare,
         "finish": _trial_todo("T-3703"),
     }
     base = project_dir()

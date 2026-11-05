@@ -1303,7 +1303,7 @@ class TrialFlowTest(TmpRepoCase):
         self.assertEqual(self.fp(), fp0)
         self.assertIn("falsifier", self.why(self.decided(tid)[0]))
 
-    @flow("FLOW-32")
+    @flow("FLOW-32", done="T-3702")
     def test_flow_32_setup_resolving_outside_tree_refused(self) -> None:
         """Given `setup` (từ gốc) symlink `node_modules` của cây đo về cây agent · When `perf trial prepare` · Then exit 2
         trước khi đo, nêu `node_modules`; candidate còn nguyên, không dòng `decide`."""
@@ -1523,7 +1523,7 @@ class TrialFlowTest(TmpRepoCase):
         self.assertEqual(self.fp(), fp0)
         self.assertFalse((self.repo / "src" / "extra.py").exists())
 
-    @flow("FLOW-42")
+    @flow("FLOW-42", done="T-3702")
     def test_flow_42_setup_and_probe_get_allowlisted_env(self) -> None:
         """Given `setup` ghi `env` ra ngoài cây, `probe` ghi `os.environ`; phiên agent có `NODE_OPTIONS`, `LD_PRELOAD`,
         `PYTHONPATH` (về `src/` cây agent), `BASH_ENV` (script để lại dấu) · When `perf trial prepare` · Then exit 0;
@@ -1546,7 +1546,7 @@ class TrialFlowTest(TmpRepoCase):
             self.assertEqual([v for v in leak if f"\n{v}=" in seen], [], name)
         self.assertFalse((self.ctl / "bashenv-ran").exists())
 
-    @flow("FLOW-43")
+    @flow("FLOW-43", done="T-3702")
     def test_flow_43_candidate_tree_from_objects_not_patch(self) -> None:
         """Given candidate: commit mới trong submodule (gitlink đổi), đổi tên `src/notes.txt` → `src/notes2.txt`, sửa
         `src/hot.py`; repo agent có `diff.external` và textconv qua `.git/info/attributes` · When `perf trial prepare`

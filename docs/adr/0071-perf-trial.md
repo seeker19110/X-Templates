@@ -127,12 +127,14 @@ phải lần đỏ của task. Gate của task tối ưu là `perf trial status 
    → thu hồi, `verdict: tampered` (`start` đã chặn, đây là kiểm lại). `candidate_files` khớp `locked` → thu hồi, `tampered`
    (FLOW-29, điểm 12). Có file ngoài danh sách điểm nóng → thu hồi, `off-hotspot` (§8).
 3. **Dựng cây** (thư mục tạm quyền 0700 ngoài cây agent): `git clone --shared --no-checkout` của repo agent (không đăng ký
-   worktree trong `.git` của cây agent, nên `git worktree list` của cây agent không lộ cây đo; chưa đo — T-3702 đo, không chạy
-   được thì lùi `worktree add` và ghi giới hạn), checkout `base_sha`, `start_head` và `commit-tree <candidate_tree> -p
+   worktree trong `.git` của cây agent, nên `git worktree list` của cây agent không lộ cây đo; T-3702 đo 2026-11-05 trên repo
+   khung 581 file, 7 lần, git 2.53: `clone --shared --no-checkout` + `checkout --detach` trung vị 0,065 s, `worktree add
+   --detach` 0,059 s — giữ `clone --shared`; hook của clone tắt bằng `core.hooksPath=/dev/null`), checkout `base_sha`,
+   `start_head` và `commit-tree <candidate_tree> -p
    start_head` (commit treo, không ref). Đòi `HEAD^{tree}` của từng cây = cây mong đợi; với candidate, mỗi file trong
    `candidate_files` trùng byte và mode với cây agent, gitlink submodule = `HEAD` của submodule ở cây agent và submodule không
    bẩn — lệch → thu hồi, `verdict: unbuildable` (submodule bẩn: FLOW-33). Không dựng bằng patch: `git apply` bỏ lặng đổi
-   gitlink, `git diff` theo driver ngoài/textconv. Rồi `setup` của cấu hình gốc chạy trong từng cây với **môi trường
+   gitlink, `git diff` theo driver ngoài/textconv. Rồi `setup` của cấu hình gốc (`/bin/sh -c`, T-3702) chạy trong từng cây với **môi trường
    allowlist**: chỉ `HOME`, `LANG`, `LC_ALL`, `TZ`, `TERM` và `env.pass[]`; `TMPDIR` riêng từng cây; `PATH` = bin của chính
    cây (`.venv/bin`, `node_modules/.bin`) rồi `env.path` (mặc định `/usr/local/bin:/usr/bin:/bin`). Mọi biến khác (`NODE_OPTIONS`,
    `BASH_ENV`, `ENV`, `LD_PRELOAD`, `PYTHON*`, `VIRTUAL_ENV`, `NODE_PATH`, `PIP_*`, `UV_*`, `npm_config_*`…) bị bỏ. Mục `PATH`
