@@ -61,8 +61,12 @@ def group_token(specs: "tuple[str, ...]") -> str:
 
 
 def declares_mark(text: str, token: str, day: str, size: int) -> bool:
-    """Một dòng của `text` chứa đủ đường nhóm, ngày và số byte của mốc (review #448: rải rác trong file không tính)."""
-    return any(token in ln and day in ln and mentions_size(ln, size) for ln in text.splitlines())
+    """Một dòng của `text` chứa đường nhóm, và ngày cùng số byte của mốc nằm chung MỘT ô bảng (review #448: rải rác
+    trong file không tính; review #449: hàng bảng còn số 2×/trần/số đo khác — ngày và byte phải cùng ô)."""
+    return any(
+        token in ln and any(day in cell and mentions_size(cell, size) for cell in ln.split("|"))
+        for ln in text.splitlines()
+    )
 
 
 def tracked_bytes(specs: "tuple[str, ...]") -> int:
@@ -113,6 +117,8 @@ class DocsBudgetTest(unittest.TestCase):
         adr = next((ROOT / "docs/adr").glob("0072-*.md")).read_text(encoding="utf-8")
         self.assertFalse(declares_mark(adr, "scripts/", "2026-11-05", 1164066))  # byte có, ngày ở dòng khác
         self.assertFalse(declares_mark(adr, ".claude/hooks/", "2026-11-05", 1417969))  # trần, không phải mốc
+        self.assertFalse(declares_mark(adr, "scripts/", "2026-10-26", 1164066))  # số đo cùng hàng, khác ô (review #449)
+        self.assertFalse(declares_mark(adr, "scripts/", "2026-10-26", 1760431))  # trần cùng hàng
         self.assertTrue(declares_mark(adr, ".claude/hooks/", "2026-11-05", 843817))
         self.assertTrue(declares_mark("a `docs/ops/` 771538 (2026-11-02)", "docs/ops/", "2026-11-02", 771538))
         self.assertFalse(declares_mark("`docs/ops/` 2026-11-02\n771 538", "docs/ops/", "2026-11-02", 771538))

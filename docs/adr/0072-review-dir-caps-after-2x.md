@@ -5,6 +5,7 @@
 - **Trạng thái triển khai:** Đã triển khai — `tests/test_docs_budget.py` `SIZE_MARKS`, `test_dir_totals_within_double_latest_mark`;
   đo chi phí compile `guard.py` giao `T-3709` (PLAN-upgrade-2026-11-02, hạn 2027-01-21).
 - **Ngày:** 2026-11-05.
+- **Đính chính:** 2026-11-05 (#449) — bảng số đo ghi rõ ngày + ADR của mốc từng hàng để cổng `tests/test_docs_budget.py` đọc được; không đổi quyết định.
 - **Xét lại:** [ADR-0050](0050-raise-dir-size-caps.md) §Hệ quả ("Nếu một nhóm vượt 2× kích thước 2026-10-26 trước mốc đó
   thì phải có ADR xét lại"). **Giữ:** ADR-0043 (đóng băng bề mặt 3.x), trần `DIR_CAPS` của ADR-0050 (không nới số).
 - **Liên quan:** ADR-0065/0066/0067 (bản vá guard gây tăng), AUD-PERF-013 + D-307 (không cache bytecode khi khoá không ràng

@@ -7,7 +7,7 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
 ## [Unreleased]
 
 ### Fixed
-- `tests/test_docs_budget.py` mốc kích thước (ADR-0072, review #448): một dòng của ADR phải ghi đủ đường nhóm + ngày + byte (trước: mỗi thứ ở đâu đó trong file — mốc giả 1 164 066/1 417 969 B vẫn qua); mốc 2026-10-26 trỏ bảng số đo ADR-0072 (thêm ngày, nguồn ADR-0050); GO-NO-GO 3.30.0 §4 bỏ ngoặc `evidence_fp` lỗi thời.
+- `tests/test_docs_budget.py` mốc kích thước (ADR-0072, review #448): một dòng của ADR phải ghi đường nhóm, ngày và byte cùng một ô bảng (review #449) (trước: mỗi thứ ở đâu đó trong file — mốc giả 1 164 066/1 417 969 B vẫn qua); mốc 2026-10-26 trỏ bảng số đo ADR-0072 (thêm ngày, nguồn ADR-0050); GO-NO-GO 3.30.0 §4 bỏ ngoặc `evidence_fp` lỗi thời.
 
 ## [3.30.0] - 2026-11-05
 

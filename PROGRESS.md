@@ -3,7 +3,7 @@
 > Giai đoạn hiện tại: G8 Vận hành & tiến hoá (khung 3.30.0, pha `harden` — D-136) · Cập nhật: 2026-11-05 · Nhánh: chore/post-3.30.0
 
 ## Đang làm
-- 2026-11-05 **3.30.0 đã cắt**: #448 merge `454d146`, tag `v3.30.0` → `454d146`; `release-check` GO, chờ người: [GO-NO-GO](docs/ops/GO-NO-GO-2026-11-05-v3.30.0.md) §5 ký, `prod_switch` D-126. PR dọn sau phát hành (nhánh `chore/post-3.30.0`): sổ audit 11 nhóm lên `454d146` (phủ bởi review sạch #448, ADR-0057) → T-3557 xong; 🟢 review #448 lượt 2; lưu trữ đợt 18.
+- 2026-11-05 **3.30.0 đã cắt**: #448 merge `454d146`, tag `v3.30.0` → `454d146`; `release-check` GO, chờ người: [GO-NO-GO](docs/ops/GO-NO-GO-2026-11-05-v3.30.0.md) §5 ký, `prod_switch` D-126. PR dọn sau phát hành (nhánh `chore/post-3.30.0`): sổ audit 11 nhóm lên `454d146` (phủ bởi review sạch #448, ADR-0057) → T-3557 Gate xanh ở `82e7afa`, tick khi sổ lên SHA merge của #449 (review #449); 🟢 review #448 lượt 2; lưu trữ đợt 18.
 - PR nâng 3.30.0 ở 4 dự án đích đang mở (hotel-manager, X-Company, dhcb, xboss) — chờ `pr-steward` của từng dự án merge.
 - Phép đo `LOOP-ORCH-020` tích luỹ; tăng số agent chỉ khi có số (ADR-0061). Phản hồi dự án đích: 10 nhóm `cong-cu` chờ phân loại ([TARGETS](docs/ops/TARGETS.md)).
 - Hoãn tới harden: T-1690/T-1691 (quét lại SEC-091…099). Rà `seeker19110/stored`: chờ chủ repo (HAR-036/041, SEC-026, CI-006/7/9, SEC-043; hạn xét: 2026-12-31).
