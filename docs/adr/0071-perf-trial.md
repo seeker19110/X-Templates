@@ -58,12 +58,13 @@ nới cổng/trần, skill `/optimize` còn 8 B dư (đổi chữ, không nối)
 
 ### 1. Baseline và cấu hình do máy chọn (D-360)
 
-**Baseline:** `base_sha = git merge-base HEAD <nhánh mặc định>`, nhánh mặc định = đích của `refs/remotes/origin/HEAD`
-(thiếu → exit 2 kèm cách đặt). Không cờ `--base`, không đọc `XT_PROGRESS_BASE`. **Vòng** = các lần thử cùng `base_sha`;
+**Baseline:** `base_sha = git merge-base HEAD <nhánh mặc định>`; nhánh mặc định lấy từ máy chủ
+(`git ls-remote --symref origin HEAD`), ngoại tuyến mới dùng đích của `refs/remotes/origin/HEAD` (D-361 — bản cục bộ agent đổi
+được bằng `remote set-head`); không xác định được → exit 2 kèm cách đặt. Không cờ `--base`, không đọc `XT_PROGRESS_BASE`. **Vòng** = các lần thử cùng `base_sha`;
 lần `start` đầu ghi `base_sha` và tên nhánh mặc định vào sổ, lần sau tính lại và so: nhánh mặc định đổi tên → exit 2;
 merge-base đổi (đã merge nhánh mặc định vào) → vòng mới. `fetch` dời nhánh mặc định không đổi merge-base. Giả định nhánh
 mặc định được bảo vệ (đổi qua PR có review); guard chặn ghi ref dưới `refs/remotes/` (T-3563) — `remote set-head` T-3701 kiểm,
-chưa bị chặn thì thêm luật guard. Dự án không có nhánh bảo vệ → đường lùi của D-360.
+chưa bị chặn thì thêm luật guard kèm test (D-361). Dự án không có nhánh bảo vệ → đường lùi của D-360.
 
 **Cấu hình:** JSON ở đường cố định `perf/trial.json`, đọc bằng `git cat-file blob <base_sha>:perf/trial.json` (không cờ
 `--config`, không đọc cây agent): `schema`; `setup` (lệnh chạy trong mỗi cây); `probe` (tuỳ chọn, in đường mô-đun đã phân
