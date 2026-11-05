@@ -1069,7 +1069,7 @@ class TrialFlowTest(TmpRepoCase):
         (self.ctl / marker).unlink(missing_ok=True)
 
     # ---- ca
-    @flow("FLOW-20")
+    @flow("FLOW-20", done="T-3703")
     def test_flow_20_neutral_candidate_is_reverted_exactly(self) -> None:
         """Given lần thử mở (điểm nóng `src/hot.py`, `src/extra.py`); candidate `neutral` (chú thích + file mới chưa
         track); file người dùng ngoài danh sách: `.autopilot/note.txt`, `scratch.log` bị ignore · When `finish` · Then
@@ -1130,7 +1130,7 @@ class TrialFlowTest(TmpRepoCase):
         self.assertIn("src/hot.py", self.refused(*self.start_args("src/hot.py"), code=3))
         self.started("src/other.py")
 
-    @flow("FLOW-23")
+    @flow("FLOW-23", done="T-3704")
     def test_flow_23_secondary_over_ceiling_reverts(self) -> None:
         """Given `mem` trần 1000 (mức lùi nới 10000 % để cô lập trần), candidate `improved` ở chỉ số chính nhưng `BUF =
         2000` · When `finish` · Then thu hồi (exit 1), vân tay = lúc start, lý do nêu `mem`."""
@@ -1149,7 +1149,7 @@ class TrialFlowTest(TmpRepoCase):
     def test_flow_27_improved_candidate_is_kept_and_next_start_accepts(self) -> None:
         """Given candidate K = 2 (`improved` so với gốc và `start_head`), tương đương + held-out xanh · When `finish` ·
         Then exit 0, candidate còn trong cây; commit nó → `candidate_tree` của dòng `decide` = `HEAD^{tree}` (cây giữ);
-        `start` kế nhận — đường giữ."""
+        dòng `decide` mang hạt giống held-out đã dùng (không giữ khi held-out chưa chạy); `start` kế nhận — đường giữ."""
         tid = self.started()
         self.hot(k=2)
         rc, out, err = self.trial("finish")
@@ -1157,10 +1157,11 @@ class TrialFlowTest(TmpRepoCase):
         self.assertIn("K = 2", (self.repo / "src" / "hot.py").read_text(encoding="utf-8"))
         self.git("commit", "-q", "-am", "giữ")
         row = self.decided(tid)[0]
+        self.assertIn((self.ctl / "seeds.log").read_text(encoding="utf-8").split()[-1], json.dumps(row))
         self.assertEqual((row["verdict"], row["candidate_tree"]), ("kept", self.git("rev-parse", "HEAD^{tree}")))
         self.started()
 
-    @flow("FLOW-28")
+    @flow("FLOW-28", done="T-3703")
     def test_flow_28_commit_mid_trial_refused_untouched(self) -> None:
         """Given lần thử mở, candidate đã commit (`HEAD ≠ start_head`) · When `finish` · Then exit 2, HEAD/cây/sổ không
         đổi, không mục stash — baseline bị lái bằng commit giữa chừng."""
@@ -1185,7 +1186,7 @@ class TrialFlowTest(TmpRepoCase):
         self.started()
         self.assertEqual(self.tstate()["base_sha"], tip)
 
-    @flow("FLOW-28")
+    @flow("FLOW-28", done="T-3703")
     def test_flow_28_measured_base_tree_dirtied_refused(self) -> None:
         """Given candidate K = 2; bộ đo (khoá, từ gốc) sửa `src/hot.py` của cây nó chạy khi K = 3 (cây gốc và
         `start_head`) · When `finish` · Then exit 2 (danh sách file cây gốc khác sau lượt), candidate còn nguyên, không
@@ -1198,7 +1199,7 @@ class TrialFlowTest(TmpRepoCase):
         self.assertIn("K = 2", (self.repo / "src" / "hot.py").read_text(encoding="utf-8"))
         self.assertEqual(self.rows(), [])
 
-    @flow("FLOW-29")
+    @flow("FLOW-29", done="T-3703")
     def test_flow_29_candidate_edits_locked_file_is_tampered(self) -> None:
         """Given candidate K = 2 kèm sửa `bench.py` (khoá) để in số nhỏ · When `finish` · Then thu hồi (exit 1),
         `verdict: tampered`, vân tay = lúc start (`bench.py` về như gốc)."""
@@ -1211,7 +1212,7 @@ class TrialFlowTest(TmpRepoCase):
         self.assertEqual(self.decided(tid)[0]["verdict"], "tampered")
         self.assertEqual(self.fp(), fp0)
 
-    @flow("FLOW-29")
+    @flow("FLOW-29", done="T-3703")
     def test_flow_29_sitecustomize_outside_glob_is_tampered(self) -> None:
         """Given candidate thêm `src/sitecustomize.py` (ngoài glob `locked` của dự án — review #440 lách test tương đương
         bằng nó) · When `finish` · Then `tampered` nhờ khoá mặc định `**/sitecustomize.py`, thu hồi (exit 1)."""
@@ -1224,7 +1225,7 @@ class TrialFlowTest(TmpRepoCase):
         self.assertEqual(self.decided(tid)[0]["verdict"], "tampered")
         self.assertEqual(self.fp(), fp0)
 
-    @flow("FLOW-29")
+    @flow("FLOW-29", done="T-3703")
     def test_flow_29_ignored_pth_in_agent_venv_does_not_fool_measure(self) -> None:
         """Given mọi lệnh đo dùng `.venv/bin/python`, `setup` dựng `.venv` trong từng cây; `.pth` bị ignore trong `.venv`
         cây agent nạp `hot` giả (đo tại chỗ in 19 — bẫy kiểm có thật) · When `finish` với candidate `neutral` · Then không
@@ -1323,7 +1324,7 @@ class TrialFlowTest(TmpRepoCase):
         self.assertIn("K = 2", (self.repo / "src" / "hot.py").read_text(encoding="utf-8"))
         self.assertEqual(self.rows(), [])
 
-    @flow("FLOW-33")
+    @flow("FLOW-33", done="T-3703")
     def test_flow_33_submodule_edit_stops_after_stash(self) -> None:
         """Given candidate sửa `src/hot.py` (chú thích) và nội dung submodule `vendor/sub` · When `finish` · Then stash
         không đưa cây về `fp_start` → exit 4, in SHA stash, pha giữ `decided`, submodule vẫn bị sửa (không thử cách khác,
@@ -1338,7 +1339,7 @@ class TrialFlowTest(TmpRepoCase):
         self.assertEqual(self.tstate()["phase"], "decided")
         self.assertEqual((sub / "f.txt").read_text(encoding="utf-8"), "b\n")
 
-    @flow("FLOW-34")
+    @flow("FLOW-34", done="T-3703")
     def test_flow_34_concurrent_finish_or_abort_refused(self) -> None:
         """Given candidate K = 2, một `finish` đang đo (bộ đo treo — chồng lấn chắc chắn, mạnh hơn barrier) · When `finish`
         và `abort` khác chen vào · Then cả hai exit 2 ngay (`perf-trial.lock`), sổ/cây không đổi; `finish` đầu đo xong,
@@ -1499,7 +1500,7 @@ class TrialFlowTest(TmpRepoCase):
         self.git("commit", "-q", "-am", "PERF-LOG")
         self.started()
 
-    @flow("FLOW-41")
+    @flow("FLOW-41", done="T-3703")
     def test_flow_41_keep_resets_only_changed_paths(self) -> None:
         """AUD-HAR-233 — Given `src/hot.py` 2 lần `abort`; khai `src/hot.py` + `src/other.py`, lần giữ chỉ đổi
         `src/other.py` (EXTRA 500 → 0), commit; thêm 1 lần `abort` trên `src/hot.py` · When `start --hotspot src/hot.py`
@@ -1513,7 +1514,7 @@ class TrialFlowTest(TmpRepoCase):
         self.refused(*self.start_args("src/hot.py"), code=3)
         self.started("src/other.py")
 
-    @flow("FLOW-41")
+    @flow("FLOW-41", done="T-3703")
     def test_flow_41_file_outside_hotspots_is_off_hotspot(self) -> None:
         """Given khai `src/hot.py`, candidate K = 2 kèm file mới `src/extra.py` ngoài danh sách · When `finish` · Then
         thu hồi (exit 1), `verdict: off-hotspot`, vân tay = lúc start (file mới bị gỡ)."""
@@ -1584,7 +1585,7 @@ class TrialFlowTest(TmpRepoCase):
         self.assertIn("\tsrc/notes2.txt\n", listing)
         self.assertNotIn("\tsrc/notes.txt\n", listing)
 
-    @flow("FLOW-44")
+    @flow("FLOW-44", done="T-3704")
     def test_flow_44_secondary_regress_under_ceiling_reverts(self) -> None:
         """Given candidate K = 2 (`improved`) kèm `BUF` 100 → 140 (+40 %, dưới trần 1000), `regress` 0 · When `finish` ·
         Then thu hồi (exit 1), lý do nêu `mem`, vân tay = lúc start."""
@@ -1596,7 +1597,7 @@ class TrialFlowTest(TmpRepoCase):
         self.assertEqual(self.fp(), fp0)
         self.assertIn("mem", self.why(self.decided(tid)[0]))
 
-    @flow("FLOW-45")
+    @flow("FLOW-45", done="T-3704")
     def test_flow_45_status_check_follows_target_without_loop_record(self) -> None:
         """Given `target: primary <= -20%` · When thu hồi (`neutral`) → `status --check`; giữ EXTRA 500 → 0 (3500 → 3000,
         −14 %), commit → `status --check`; giữ K = 2 (→ 2000, −43 %), commit → `status --check` · Then exit 1, 1, 0;
@@ -1619,6 +1620,25 @@ class TrialFlowTest(TmpRepoCase):
         self.assertEqual(codes, [1, 1, 0])
         auto = self.repo / ".autopilot"
         self.assertEqual([(auto / n).exists() for n in ("evidence", "state.json")], [False, False])
+
+    @flow("FLOW-46")
+    def test_flow_46_status_check_bound_to_kept_tree(self) -> None:
+        """Given giữ K = 2 (−29 %, đạt `target`), commit · When commit lạ K = 9 (chậm gấp ba gốc) → `status --check`;
+        commit trả cây về K = 2 → `status --check`; sửa file chưa commit → `status --check` · Then exit 0 lúc đầu, 1
+        "commit lạ sau lần giữ", 0 (cây trùng cây giữ), 1 "cây bẩn" — Gate không xanh nhờ số của cây khác (D-368)."""
+        self.started()
+        self.hot(k=2)
+        self.ok("finish")
+        self.git("commit", "-q", "-am", "giữ K=2")
+        self.ok("status", "--check")
+        self.hot(k=9)
+        self.git("commit", "-q", "-am", "commit lạ: K=9")
+        self.assertIn("commit lạ sau lần giữ", self.refused("status", "--check", code=1))
+        self.hot(k=2)
+        self.git("commit", "-q", "-am", "về K=2")
+        self.ok("status", "--check")
+        self.put("src/other.py", "EXTRA = 99999\n")
+        self.assertIn("cây bẩn", self.refused("status", "--check", code=1))
 
 
 class FlowRegistryTest(unittest.TestCase):

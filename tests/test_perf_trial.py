@@ -12,8 +12,10 @@ import io
 import json
 import os
 import pwd
+import signal
 import subprocess
 import sys
+import time
 import unittest
 import unittest.mock
 from pathlib import Path
@@ -155,6 +157,17 @@ class TrialConfigTest(unittest.TestCase):
             "≠ primary": trial_config(secondary=[{**sec, "name": "primary"}]),
             "trùng": trial_config(secondary=[sec, sec]),
             '"unlock" ngoài': trial_config(unlock=["bench.py"]),
+            '"metric" = {': trial_config(metric={"cmd": "x", "kind": "cpu"}),
+            "runs: số nguyên": trial_config(metric={"cmd": "x", "kind": "exact", "runs": 0}),
+            "higher_is_better: bool": trial_config(metric={"cmd": "x", "kind": "exact", "higher_is_better": 1}),
+            "kind wall": trial_config(metric={"cmd": "x", "kind": "wall", "runs": 3}),
+            "unit: chuỗi": trial_config(metric={"cmd": "x", "kind": "exact", "rnus": 3}),
+            '"secondary[]" = {': trial_config(secondary=[{**sec, "ceiling": "1"}]),
+            "regress: số ≥ 0": trial_config(secondary=[{**sec, "regress": -1}]),
+            "ceiling: số": trial_config(secondary=[{**sec, "ceiling": float("inf")}]),
+            "có chỉ số kind wall": trial_config(secondary=[{**sec, "kind": "wall"}]),
+            '"target" =': trial_config(target="primary giảm 20%"),
+            "chỉ số = primary": trial_config(target="rss <= -5%"),
         }
         for want, cfg in cases.items():
             with self.subTest(want):
@@ -405,7 +418,11 @@ class TrialBaseTest(TrialCase):
     def test_git_error_is_exit_2_and_todo_commands(self) -> None:
         with unittest.mock.patch.object(xt, "trial_context", side_effect=RuntimeError("git lỗi")):
             self.assertEqual(self.tr("status")[0], 2)
-        for args, task in ((("finish",), "T-3703"), (("status", "--check"), "T-3704")):
+        todo = (
+            (("finish", "--resume"), "T-3706"),
+            (("finish", "--no-apply"), "T-3706"),
+        )
+        for args, task in todo:
             with self.subTest(args):
                 self.assertIn(f"chưa triển khai ({task})", self.refused(*args))
 
@@ -871,6 +888,378 @@ class TrialReview442Test(TrialCase):
         self.assertFalse(root.exists())
         self.assertEqual(out_dir.stat().st_mode & 0o777, 0o500)
         out_dir.chmod(0o700)
+
+
+class TrialFinishTest(TrialCase):
+    """T-3703: `finish` lõi (ADR-0071 §4) — kiểm/đóng băng, đo xen kẽ, kiểm cây sau lượt, tương đương, quyết, giữ/thu
+    hồi, dòng `decide`. Ca luồng FLOW-20/28/29/33/34/41 ở `tests.test_flow`; đây là các nhánh còn lại."""
+
+    def finish(self, *args: str) -> tuple[int, dict[str, Any], str]:
+        """`finish` → (exit, dòng `decide` cuối, out + err)."""
+        rc, out, err = self.tr("finish", *args)
+        dec = [r for r in self.rows() if r["event"] == "decide"]
+        return rc, dec[-1] if dec else {}, out + err
+
+    def regrounded(self, **over: Any) -> None:
+        self.republish({"perf/trial.json": json.dumps(trial_config(**over))})
+
+    def test_keep_json_records_interleaved_samples(self) -> None:
+        """Giữ (exit 0): `--json` in dòng `decide`; mẫu v2 của ba cây (`exact` 3 lần), hai phép so, `pending-T-3705` cho
+        held-out/falsifier, ⚠ PATH; pha `closed`, `kept_tree` = `candidate_tree`; candidate còn trong cây."""
+        wd = self.ctl / "w"
+        wd.mkdir()
+        self.regrounded(env={"path": f"/usr/bin:/bin:{wd}"})
+        self.started("src/hot.py", "src/other.py")
+        self.put("src/other.py", "EXTRA = 0\n")
+        rc, out, _ = self.tr("finish", "--json")
+        self.assertEqual(rc, 0, out)
+        row = json.loads(out)
+        self.assertEqual((row["verdict"], row["rounds"], row["candidate_files"]), ("kept", 1, ["src/other.py"]))
+        prim = row["measures"]["primary"]
+        self.assertEqual([prim[t]["samples"] for t in ("base", "head", "cand")], [[3500.0] * 3] * 2 + [[3000.0] * 3])
+        self.assertEqual((prim["base"]["schema"], prim["cand"]["kind"]), (2, "exact"))
+        self.assertEqual([prim["compare"][t]["verdict"] for t in ("base", "head")], ["improved"] * 2)
+        self.assertEqual((row["heldout"], row["falsifier_hit"]), ("pending-T-3705",) * 2)
+        self.assertEqual(row["warnings"], [f"PATH có {wd} — uid này ghi được"])
+        st = self.tstate()
+        self.assertEqual((st["phase"], st["kept_tree"]), ("closed", row["candidate_tree"]))
+        self.assertIn("EXTRA = 0", (self.repo / "src" / "other.py").read_text(encoding="utf-8"))
+
+    def test_empty_candidate_closes_without_stash(self) -> None:
+        tid = self.started()
+        rc, row, out = self.finish()
+        self.assertEqual((rc, row["id"], row["verdict"]), (1, tid, "empty"), out)
+        self.assertEqual((self.tstate()["phase"], self.tstate()["stash"]), ("closed", None))
+
+    def test_refusals_before_measuring(self) -> None:
+        """Pha khác `started` → `--resume`; gốc/cấu hình lệch lúc start, dòng `start` lệch state, `start_head^{tree}` ≠
+        cây giữ gần nhất → exit 2, sổ không đổi."""
+        self.started()
+        self.put("src/hot.py", HOT + "# a\n")
+        edits = {
+            "config_sha": lambda st: {**st, "config_sha": "x"},
+            "dòng start": lambda st: {**st, "hypothesis": "khác"},
+        }
+        for want, fn in edits.items():
+            with self.subTest(want):
+                old = self.tstate()
+                xt.trial_update(self.repo, lambda st, fn=fn: (fn(st), None))
+                self.assertIn(want, self.refused("finish"))
+                xt.trial_update(self.repo, lambda st, old=old: ({**old, "rev": st["rev"]}, None))
+        row = {"event": "decide", "id": "PT-0009", "base_sha": self.base, "hotspot": ["a"], "verdict": "kept"}
+        self.append_row({**row, "candidate_tree": "f" * 40, "candidate_files": ["a"]})
+        self.assertIn("start_head^{tree} ≠ cây giữ", self.refused("finish"))
+        (self.repo / ".autopilot" / xt.PERF_TRIALS_LOG).write_text(
+            "".join(json.dumps(r) + "\n" for r in self.rows()[:-1]), encoding="utf-8"
+        )
+        xt.trial_update(self.repo, lambda st: ({**st, "phase": "measuring"}, None))
+        self.assertIn("finish --resume", self.refused("finish"))
+
+    def test_same_candidate_twice_refused(self) -> None:
+        self.started()
+        self.put("src/hot.py", HOT + "# a\n")
+        self.assertEqual(self.finish()[0], 1)
+        self.started()
+        self.put("src/hot.py", HOT + "# a\n")
+        self.assertIn("đã thử ở PT-0001", self.refused("finish"))
+
+    def test_broken_inequivalent_and_tampered_by_measure(self) -> None:
+        """Lệnh đo lỗi ở candidate → `broken`; `equiv` đỏ ở candidate → `inequivalent`; candidate ghi file vào cây đo của
+        nó lúc đo → `tampered`; mỗi lần thu hồi về vân tay lúc start (exit 1)."""
+        cases = {
+            "broken": HOT + "raise SystemExit(3)\n",
+            "inequivalent": HOT.replace("K = 3", "K = 2").replace("total += i", "total += 2 * i"),
+            "tampered": HOT.replace("K = 3", "K = 2") + "open('leak.txt', 'w').close()\n",
+        }
+        for verdict, text in cases.items():
+            with self.subTest(verdict):
+                fp0 = xt.tree_fingerprint(self.repo)
+                self.started()
+                self.put("src/hot.py", text)
+                rc, row, out = self.finish()
+                self.assertEqual((rc, row["verdict"], xt.tree_fingerprint(self.repo)), (1, verdict, fp0), out)
+
+    def test_base_command_or_equiv_or_setup_broken_is_exit_2(self) -> None:
+        for over in ({"metric": {"cmd": "exit 5", "kind": "exact"}}, {"equiv": "exit 1"}, {"setup": "exit 7"}):
+            with self.subTest(over):
+                if (self.repo / ".autopilot" / xt.PERF_TRIAL_FILE).exists():
+                    self.ok("abort", "--reason", "đổi cấu hình")
+                self.regrounded(**over)
+                self.started()
+                self.put("src/hot.py", HOT.replace("K = 3", "K = 2"))
+                self.assertEqual(self.tr("finish")[0], 2)
+                self.assertEqual([r for r in self.rows() if r["event"] == "decide" and r["verdict"] != "aborted"], [])
+
+    def test_unbuildable_and_tree_changed_while_measuring(self) -> None:
+        self.started()
+        self.put("src/hot.py", HOT.replace("K = 3", "K = 2"))
+        with unittest.mock.patch.object(xt, "trial_candidate_problems", return_value=["cand: x khác cây agent"]):
+            self.assertEqual(self.finish()[:2][1]["verdict"], "unbuildable")
+        real, calls = xt.tree_fingerprint, []
+
+        def fp(base: Path, env: dict[str, str] | None = None) -> str | None:
+            calls.append(1)
+            return "đổi" if len(calls) == 2 else real(base, env)
+
+        self.started()
+        self.put("src/hot.py", HOT.replace("K = 3", "K = 2") + "# b\n")
+        with unittest.mock.patch.object(xt, "tree_fingerprint", fp):
+            rc, row, out = self.finish()
+        self.assertEqual((rc, row["verdict"]), (1, "incomplete"), out)
+
+    def test_sample_compare_units(self) -> None:
+        root = self.tmp / "t"
+        root.mkdir()
+        run = xt.TrialRun(xt.TrialTree("cand", "c", root, self.tmp), {"PATH": "/usr/bin:/bin"}, {})
+        self.assertGreater(xt.trial_sample(run, {"cmd": "true", "kind": "wall"}, 10), 0)
+        self.assertEqual(xt.trial_sample(run, {"cmd": "echo a 42", "kind": "exact"}, 10), 42.0)
+        for cmd in ("echo abc", "echo inf", "true"):
+            with self.subTest(cmd), self.assertRaisesRegex(xt.TrialBroken, "không phải số hữu hạn"):
+                xt.trial_sample(run, {"cmd": cmd, "kind": "exact"}, 10)
+        got = xt.trial_compare({"base": [1, 1, 1], "head": [2, 1, 2], "cand": [1, 1, 1]}, {"kind": "exact"})
+        self.assertEqual([got[t]["verdict"] for t in ("base", "head")], ["insufficient"] * 2)
+        self.assertIn("lệch giữa các lần ở head", got["base"]["reason"])
+
+
+class TrialSecondaryTest(TrialCase):
+    """T-3704: chỉ số phụ (trần + mức lùi), `env.cmd_python`, ⚠ heuristic `perf guard` vào `decide`, `status --check`."""
+
+    def test_secondary_ceiling_and_regress(self) -> None:
+        """Trần ở phía tệ (`higher_is_better` → sàn); `exact` lùi quá `regress` theo số; `wall` chỉ khi `regressed`; mẫu
+        `exact` lệch → lý do; trong trần và mức lùi → không lý do."""
+        mem = {"name": "mem", "kind": "exact", "unit": "B"}
+        fast = {"name": "qps", "kind": "exact", "higher_is_better": True}
+        noise = [1.0 + i / 1000 for i in range(10)]
+
+        def why(m: dict[str, Any], base: list[float], cand: list[float]) -> str:
+            return xt.trial_secondary(m, {"base": base, "head": base, "cand": cand})[1]
+
+        cases = [
+            (mem | {"ceiling": 1000}, [100.0] * 3, [2000.0] * 3, "vượt trần 1000"),
+            (fast | {"ceiling": 50}, [60.0] * 3, [40.0] * 3, "vượt trần 50"),
+            (mem | {"regress": 5}, [100.0] * 3, [104.0] * 3, ""),
+            (mem | {"regress": 3}, [100.0] * 3, [104.0] * 3, "mem so gốc: lùi +4.00% > regress 3%"),
+            (fast, [100.0] * 3, [96.0] * 3, "qps so start_head: lùi +4.00% > regress 0%"),
+            (mem, [100.0] * 3, [100.0, 101.0, 100.0], "thiếu mẫu"),
+            ({"name": "t", "kind": "wall"}, noise, [x * 2 for x in noise], "t so gốc: lùi +"),
+            ({"name": "t", "kind": "wall", "regress": 200}, noise, [x * 2 for x in noise], ""),
+            ({"name": "t", "kind": "wall"}, noise, [x * 1.001 for x in noise], ""),
+        ]
+        for m, base, cand, want in cases:
+            with self.subTest(m=m, cand=cand[:1]):
+                got = why(m, base, cand)
+                self.assertIn(want, got) if want else self.assertEqual(got, "")
+
+    def test_cmd_python_and_guard_warnings_in_decide(self) -> None:
+        """Chỉ cây candidate có `.venv` (do `setup`) → `env.cmd_python` khác giữa các cây (⚠); dòng thêm `lru_cache` →
+        ⚠ `perf guard` trên diff `start_head` → candidate; vẫn giữ (⚠ không chặn)."""
+        setup = "if grep -q 'K = 2' src/hot.py; then python3 -m venv --without-pip .venv; fi"
+        self.republish({"perf/trial.json": json.dumps(trial_config(setup=setup))})
+        self.started()
+        self.put("src/hot.py", HOT.replace("K = 3", "K = 2") + "# functools.lru_cache để sau\n")
+        rc, out, err = self.tr("finish", "--json")
+        self.assertEqual(rc, 0, out + err)
+        row = json.loads(out)
+        pys = {t: row["measures"]["mem"][t]["env"]["cmd_python"] for t in ("base", "cand")}
+        self.assertTrue(pys["cand"].startswith(".venv/bin/python 3."), pys)
+        self.assertFalse(pys["base"].startswith(".venv"), pys)
+        self.assertTrue(any(w.startswith("perf guard: src/hot.py: ") and "lru_cache" in w for w in row["warnings"]))
+        self.assertTrue(any(w.startswith("interpreter lệnh đo khác giữa các cây") for w in row["warnings"]))
+
+    def test_cmd_python_missing_or_broken(self) -> None:
+        root = self.tmp / "t"
+        (root / ".venv" / "bin").mkdir(parents=True)
+        tree = xt.TrialTree("cand", "c", root, self.tmp)
+        self.assertIsNone(xt.trial_cmd_python(tree, {"PATH": str(self.tmp / "không-có")}))
+        (root / ".venv" / "bin" / "python").write_text("#!/bin/sh\nexit 1\n", encoding="utf-8")
+        (root / ".venv" / "bin" / "python").chmod(0o755)
+        self.assertIsNone(xt.trial_cmd_python(tree, {"PATH": "/usr/bin:/bin"}))
+
+    def test_status_check_codes(self) -> None:
+        """Chưa có lần giữ → 1; lần thử mở → 1; lần giữ thiếu số → 1; lần giữ đạt `target` → 0 (`--json`); lần giữ gần
+        nhất chưa đạt và hết `budget` → 3."""
+        self.assertIn("chưa có lần giữ", self.refused("status", "--check", code=1))
+        self.started()
+        self.assertIn("đang mở", self.refused("status", "--check", code=1))
+        self.ok("abort", "--reason", "x")
+        row = {"event": "decide", "id": "PT-0002", "base_sha": self.base, "hotspot": ["src/hot.py"], "verdict": "kept"}
+        row |= {"candidate_tree": self.git("rev-parse", "HEAD^{tree}"), "candidate_files": ["src/hot.py"]}
+        self.append_row(row)
+        self.assertIn("primary None", self.refused("status", "--check", code=1))
+        self.append_row(row | {"measures": {"primary": {"compare": {"base": {"change": -0.25}}}}})
+        self.assertEqual(json.loads(self.ok("status", "--check", "--json"))["code"], 0)
+        self.put("src/notes.txt", "khác\n")
+        self.assertIn("cây bẩn ngoài .autopilot/: src/notes.txt", self.refused("status", "--check", code=1))
+        self.git("commit", "-q", "-am", "commit lạ")
+        self.assertIn("commit lạ sau lần giữ", self.refused("status", "--check", code=1))
+        self.git("revert", "--no-edit", "HEAD")
+        self.append_row(row | {"measures": {"primary": {"compare": {"base": {"change": -0.1}}}}})
+        self.assertIn("primary -10.00%", self.refused("status", "--check", code=1))
+        self.republish({"perf/trial.json": json.dumps(trial_config(budget=1))})
+        self.started()
+        self.ok("abort", "--reason", "y")
+        self.assertIn("loop defer", self.refused("status", "--check", code=3))
+
+
+class TrialReview443Test(TrialCase):
+    """Review #443 (D-368): pathspec theo nghĩa đen, môi trường lệnh đo mới mỗi mẫu, bin của cây đo không do candidate
+    đặt, ⚠ mã chạy lúc thoát, SIGTERM giữa lượt đo, thứ tự đo xen kẽ. Mỗi ca tái hiện một kịch bản của bộ tái hiện."""
+
+    def stash_files(self) -> list[str]:
+        """File chưa theo dõi trong mục stash mới nhất (commit cha thứ ba)."""
+        return self.git("show", "--name-only", "--format=", "refs/stash^3").splitlines()
+
+    def test_glob_named_candidate_does_not_sweep_ledger(self) -> None:
+        """🟠 F2: candidate bỏ `.autopilot/` khỏi `.gitignore` và tạo file tên `*` → thu hồi (`finish` lẫn `abort`) chỉ
+        stash đúng hai đường; sổ còn nguyên, lệnh kế đọc được sổ."""
+        for cmd in (("finish",), ("abort", "--reason", "glob")):
+            with self.subTest(cmd[0]):
+                self.started()
+                self.put(".gitignore", ".cache/\n.venv/\nnode_modules/\n__pycache__/\nscratch.log\n")
+                self.put("*", "x\n")
+                rc, out, err = self.tr(*cmd)
+                self.assertEqual(rc, 1 if cmd[0] == "finish" else 0, out + err)
+                self.assertEqual(self.stash_files(), ["*"])
+                self.assertEqual(self.tstate()["phase"], "closed")
+                self.assertEqual(self.rows()[-1]["event"], "decide")
+                self.ok("status")
+
+    def test_many_candidate_files_beyond_arg_max(self) -> None:
+        """🟢 F7: danh sách file vượt ARG_MAX (≈ 2,3 MB tên) → index tạm, so cây candidate, stash vẫn chạy (pathspec
+        qua stdin, không qua argv)."""
+        d = self.repo / "vendor_pkg"
+        d.mkdir()
+        files = [f"vendor_pkg/{'m' * 200}_{i:05d}.py" for i in range(11000)]
+        for f in files:
+            (self.repo / f).write_bytes(b"")
+        self.assertEqual(len(xt.trial_index_tree(self.repo, "HEAD", files)), 40)
+        tree = xt.TrialTree("cand", "c", self.repo, self.tmp)
+        self.assertEqual(xt.trial_candidate_problems(self.repo, tree, files), [])
+        # Mục stash đủ mọi file; dọn cây làm việc thì chính git chuyển pathspec qua argv cho tiến trình con (`add`) —
+        # có thể không xong: vân tay ≠ `fp_start` → exit 4 kèm SHA stash (giới hạn ghi ở ADR §4 bước 8).
+        with contextlib.redirect_stderr(io.StringIO()):
+            self.assertIsNotNone(xt._trial_stash(self.repo, "PT-0001", files))
+        self.assertEqual(len(self.stash_files()), len(files))
+
+    def test_fresh_home_tmp_and_scratch_every_sample(self) -> None:
+        """🟠 F3: lệnh đo đếm dấu vết lần chạy trước ở `HOME`, `XDG_CACHE_HOME`, `TMPDIR`, `src/__pycache__/` (khớp
+        `scratch`) rồi để lại dấu mới → mọi mẫu ở mọi cây đều 0 dấu (không cache nào đi qua giữa các mẫu); file
+        `scratch` do `setup` sinh còn nguyên ở mọi mẫu."""
+        count = (
+            'n=$(find "$HOME" "$XDG_CACHE_HOME" "$TMPDIR" src/__pycache__ -name \'mark*\' 2>/dev/null | wc -l); '
+            'touch "$HOME/mark1" "$XDG_CACHE_HOME/mark2" "$TMPDIR/mark3"; mkdir -p src/__pycache__; '
+            "touch src/__pycache__/mark4; echo $((n * 10 + $(ls src/__pycache__/keep | wc -l)))"
+        )
+        setup = "mkdir -p src/__pycache__ && echo k > src/__pycache__/keep"  # file `scratch` do `setup` sinh: giữ
+        cfg = trial_config(setup=setup, metric={"cmd": count, "kind": "exact", "runs": 3})
+        self.republish({"perf/trial.json": json.dumps(cfg)})
+        self.started()
+        self.put("src/hot.py", HOT.replace("K = 3", "K = 2"))
+        rc, out, err = self.tr("finish", "--json")
+        self.assertEqual(rc, 1, out + err)
+        prim = json.loads(out)["measures"]["primary"]
+        self.assertEqual([prim[t]["samples"] for t in ("base", "head", "cand")], [[1.0] * 3] * 3)
+
+    def test_default_locks_venv_node_modules_gitignore(self) -> None:
+        """🟠 F4: khoá mặc định gồm `.venv/`, `node_modules/` (bin của cây đứng đầu PATH lệnh đo) và `.gitignore`."""
+        ctx = xt.TrialCtx("b", "r", TOOL, "t", trial_config(), "c", [])
+        for path in (".venv/bin/python3", "a/.venv/lib/x.py", "node_modules/.bin/node", "web/node_modules/p/i.js"):
+            with self.subTest(path):
+                self.assertTrue(ctx.locked(path))
+        self.assertTrue(ctx.locked(".gitignore") and ctx.locked("src/.gitignore"))
+
+    def test_candidate_in_tree_path_dir_tampered(self) -> None:
+        """🟠 F4: dự án gỡ khoá `.venv/` (không ignore nó), candidate thêm `.venv/bin/python3` giả in 1 cho bộ đo →
+        `tampered` (file trong thư mục PATH của cây đo), thu hồi — không `kept`."""
+        cfg = trial_config(unlock=[".venv/**"])
+        self.republish({".gitignore": ".autopilot/\n__pycache__/\n", "perf/trial.json": json.dumps(cfg)})
+        self.started("src/hot.py", ".venv/bin/python3")
+        real = f'exec {sys.executable} "$@"\n'  # không `python3`: PATH của cây trỏ lại chính shim
+        shim = self.put(".venv/bin/python3", '#!/bin/sh\n[ "$1" = bench.py ] && { echo 1; exit 0; }\n' + real)
+        shim.chmod(0o755)
+        rc, out, err = self.tr("finish", "--json")
+        row = json.loads(out)
+        self.assertEqual((rc, row["verdict"]), (1, "tampered"), out + err)
+        self.assertIn("thư mục PATH của cây đo: .venv/bin/python3", row["reason"])
+
+    def test_path_dirs_of_tree(self) -> None:
+        """Thư mục PATH trong cây đo: bin của cây + mục `env.path` tương đối (rỗng/`.` = gốc cây — chỉ file ở gốc)."""
+        cfg = trial_config(env={"path": "tools/bin::/usr/bin:./x/../t"})
+        files = ["tools/bin/py", "a.sh", "src/a.py", "t/run", "node_modules/.bin/tsc", ".venv/bin/python", "/usr/bin/x"]
+        self.assertEqual(
+            xt.trial_path_files(cfg, files),
+            ["tools/bin/py", "a.sh", "t/run", "node_modules/.bin/tsc", ".venv/bin/python"],
+        )
+        self.assertEqual(xt.trial_path_files(trial_config(), ["src/a.py", "a.sh"]), [])
+
+    def test_exit_time_output_hooks_warned(self) -> None:
+        """🟢 F5: `exact` lấy số cuối stdout — mã đăng ký in lúc thoát (`atexit`), ghi thẳng `sys.stdout`, vá `builtins`
+        → ⚠ heuristic (so toàn stdout với gốc: T-3705)."""
+        for line in ("import atexit as _a", "sys.stdout.write('1')", "import builtins; builtins.print = f"):
+            with self.subTest(line):
+                self.assertIsNotNone(xt.PERF_SUSPECT_RE.search(line))
+
+    def test_sigterm_mid_measure_cleans_up(self) -> None:
+        """🟢 F6: SIGTERM giữa lượt đo → exit 2, tiến trình đo bị dừng (cả nhóm), không còn cây tạm, pha về `started` kèm
+        dòng `interrupt` trong sổ; `finish` lại đo được."""
+        tmp, pid, mark = self.tmp / "tmpdir", self.ctl / "pid", self.ctl / "hang"
+        tmp.mkdir()
+        cmd = f"echo $$ > {pid}; exec python3 bench.py"
+        self.republish({"perf/trial.json": json.dumps(trial_config(metric={"cmd": cmd, "kind": "exact", "runs": 3}))})
+        self.started()
+        self.put("src/hot.py", HOT.replace("K = 3", "K = 2"))
+        mark.write_text("1", encoding="utf-8")
+        self.addCleanup(mark.unlink, missing_ok=True)
+        proc = subprocess.Popen(
+            [sys.executable, str(XT), "perf", "trial", "finish"],
+            cwd=self.repo,
+            env={**os.environ, "TMPDIR": str(tmp)},
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+        )
+        self.addCleanup(lambda: proc.poll() is None and proc.kill())
+        for _ in range(1200):
+            if (self.ctl / "hanging").exists() or proc.poll() is not None:
+                break
+            time.sleep(0.05)
+        proc.send_signal(signal.SIGTERM)
+        out = proc.communicate(timeout=60)[0].decode("utf-8", "replace")
+        child = int(pid.read_text(encoding="utf-8"))
+        with contextlib.suppress(ProcessLookupError):
+            os.kill(child, 0)
+            self.addCleanup(os.kill, child, signal.SIGKILL)
+            self.fail(f"tiến trình đo {child} còn sống")
+        self.assertEqual(proc.returncode, 2, out)
+        self.assertEqual(list(tmp.iterdir()), [])
+        self.assertEqual((self.tstate()["phase"], self.rows()[-1]["event"]), ("started", "interrupt"))
+        mark.unlink()
+        self.assertEqual(self.tr("finish")[0], 0)
+
+    def test_interrupt_in_process_restores_started(self) -> None:
+        """SIGINT/SIGTERM trong tiến trình (nhánh xử lý tín hiệu): exit 2, pha `started`, bộ xử lý cũ được trả lại."""
+        self.started()
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            with self.subTest(sig.name):
+                self.put("src/hot.py", HOT + f"# {sig.name}\n")
+                old = signal.getsignal(sig)
+                with unittest.mock.patch.object(xt, "trial_measure", side_effect=lambda *a: os.kill(os.getpid(), sig)):
+                    rc, out, err = self.tr("finish")
+                self.assertEqual((rc, self.tstate()["phase"]), (2, "started"), out + err)
+                self.assertIn("ngắt giữa lượt đo", err)
+                self.assertIs(signal.getsignal(sig), old)
+
+    def test_interleaved_round_robin_order(self) -> None:
+        """🟢 F9: vòng i chạy ba cây theo thứ tự xoay B K C → K C B → C B K, mỗi cây chỉ số chính rồi chỉ số phụ."""
+        log = self.ctl / "order"
+        sec = trial_config()["secondary"][0] | {"cmd": f"echo S $(basename $PWD) >> {log}; python3 mem.py"}
+        m = {"cmd": f"echo P $(basename $PWD) >> {log}; python3 bench.py", "kind": "exact", "runs": 3}
+        self.republish({"perf/trial.json": json.dumps(trial_config(metric=m, secondary=[sec]))})
+        self.started()
+        self.put("src/hot.py", HOT.replace("K = 3", "K = 2"))
+        self.assertEqual(self.tr("finish")[0], 0)
+        trees = ["base", "head", "cand", "head", "cand", "base", "cand", "base", "head"]
+        want = [f"{k} {t}" for t in trees for k in "PS"]
+        self.assertEqual(log.read_text(encoding="utf-8").splitlines(), want)
 
 
 class TrialParserTest(unittest.TestCase):

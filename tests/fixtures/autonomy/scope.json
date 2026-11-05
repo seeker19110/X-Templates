@@ -402,6 +402,15 @@
     "AUD-TEST-074",
     "AUD-TEST-075"
    ]
+  },
+  {
+   "reason": "Hành vi của `xt.py perf trial` (review #443, D-368): `status --check` ràng `HEAD^{tree}` với cây neo, pathspec theo nghĩa đen qua stdin, môi trường lệnh đo mới mỗi lần chạy, khoá `.venv/`/`node_modules/` và thu hồi file trong thư mục PATH của cây đo — không phải quyết định cho/chặn của guard, PR hay CI mà bench mô phỏng. Khoá bằng FLOW-46 (tests/test_flow.py) và tests/test_perf_trial.TrialReview443Test.",
+   "ids": [
+    "AUD-HAR-260",
+    "AUD-HAR-261",
+    "AUD-HAR-262",
+    "AUD-HAR-263"
+   ]
   }
  ]
 }

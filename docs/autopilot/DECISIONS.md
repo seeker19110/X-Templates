@@ -1,14 +1,7 @@
 # Nhật ký quyết định tự duyệt
 
 > Ghi bởi `xt.py loop decide`. Phiên chính tự duyệt điểm quyết định theo tiêu chí chất lượng cuối (`LOOP-STOP-018`, ADR-0008 của khung). Người xem lại bất cứ lúc nào; đổi ý → quyết định mới ghi "thay D-NNN", không sửa mục cũ.
-> Bản tháng trước: [`DECISIONS-2026-10.md`](DECISIONS-2026-10.md) (D-001…D-287), [`DECISIONS-2026-11.md`](DECISIONS-2026-11.md) (D-292…D-338) — máy đọc cả bản tháng (T-3651).
-
-### D-340 · 2026-11-04T01:05:06+00:00 · Audit delta 2026-11-04: xử lý nợ Git guard sau #434 thế nào?
-
-- Phương án: (1) Sửa các đường lách Git guard tái hiện được, giữ test hồi quy có đối chứng và chạy cổng đầy đủ trước PR · (2) Giữ các phát hiện mở và hoãn sang đợt sandbox
-- Chọn: Sửa các đường lách Git guard tái hiện được, giữ test hồi quy có đối chứng và chạy cổng đầy đủ trước PR
-- Lý do (tiêu chí chất lượng cuối): Hai ca scratch cho Git đọc cấu hình đổi hook hoặc chạy alias mà guard cho qua. Chặn ở đầu đọc và ghi theo phạm vi hẹp, giữ đường lùi bằng một lát PR. Chạy phiên tương tác.
-- Đường lùi: Revert commit sửa guard và mở lại phát hiện với bằng chứng tái hiện.
+> Bản tháng trước: [`DECISIONS-2026-10.md`](DECISIONS-2026-10.md) (D-001…D-287), [`DECISIONS-2026-11.md`](DECISIONS-2026-11.md) (D-292…D-340) — máy đọc cả bản tháng (T-3651).
 
 ### D-341 · 2026-11-04T05:34:12+00:00 · Nhận 90 bài học stored XT-H-027…116 (chủ dự án yêu cầu 2026-11-04): mức và phạm vi?
 
@@ -142,6 +135,13 @@
 - Chọn: dev-task tự dò: pytest → 'pytest -q -n auto' khi import được xdist (không thì 'pytest -q' kèm gợi ý cài pytest-xdist), unittest → mỗi module test một tiến trình qua xargs -P; số tiến trình = XT_JOBS nếu đặt, mặc định nproc; Go/Rust/Node giữ (đã song song mặc định); thêm mục SHOULD ở quality-gates.md (test chạy song song theo số nhân + test độc lập thứ tự) và CHANGELOG 'Dự án đích'; dự án đích đã khai lệnh test trong xt.yaml: không đè, PR nâng bản đề xuất cờ song song phù hợp
 - Lý do (tiêu chí chất lượng cuối): (4) dự án dùng lệnh tự dò được lợi ngay; (2) chỉ đổi lệnh tự dò, lệnh khai báo trong xt.yaml giữ nguyên, XT_JOBS=1 trả về tuần tự; (1) test phụ thuộc thứ tự lộ ra là lỗi thật (frontend-testing.md đã nêu) — mục SHOULD đòi test độc lập
 - Đường lùi: XT_JOBS=1 hoặc khai lệnh test tường minh trong xt.yaml
+
+### D-368 · 2026-11-05T05:06:07+00:00 · Review #443 (perf trial finish): 🔴 status --check không ràng HEAD (commit lạ sau lần giữ vẫn exit 0); 🟠 candidate_files thành pathspec glob cuốn sổ .autopilot vào stash; 🟠 cache đĩa (HOME/XDG/TMPDIR một lần mỗi cây, kênh scratch) tính thành tăng tốc; 🟠 candidate tự mang interpreter (.venv/bin, node_modules/.bin đầu PATH không khoá); 6 🟢
+
+- Phương án: (1) Sửa hết trong #443: check đòi cây sạch ngoài .autopilot và HEAD^{tree} == cây neo (sai → exit 1 'commit lạ sau lần giữ'); mọi pathspec qua --pathspec-from-file=- --pathspec-file-nul + GIT_LITERAL_PATHSPECS=1 (sửa luôn Argument list too long); HOME/XDG_*/TMPDIR tạo mới MỖI mẫu, file khớp scratch xoá giữa các mẫu wall; khoá mặc định thêm **/.venv/**, **/node_modules/**, .gitignore và thu hồi khi file candidate nằm dưới thư mục PATH của cây; 🟢: PERF_SUSPECT_RE thêm atexit/sys.stdout/builtins (so toàn stdout với gốc để T-3705), SIGTERM dọn cây + giết nhóm tiến trình + pha về started, README mô tả finish/status --check và sửa 'merge-base' theo D-366, test thứ tự xen kẽ, thông báo --no-apply trỏ T-3706 · (2) Chỉ sửa 🔴, ghi nợ 🟠/🟢
+- Chọn: Sửa hết trong #443: check đòi cây sạch ngoài .autopilot và HEAD^{tree} == cây neo (sai → exit 1 'commit lạ sau lần giữ'); mọi pathspec qua --pathspec-from-file=- --pathspec-file-nul + GIT_LITERAL_PATHSPECS=1 (sửa luôn Argument list too long); HOME/XDG_*/TMPDIR tạo mới MỖI mẫu, file khớp scratch xoá giữa các mẫu wall; khoá mặc định thêm **/.venv/**, **/node_modules/**, .gitignore và thu hồi khi file candidate nằm dưới thư mục PATH của cây; 🟢: PERF_SUSPECT_RE thêm atexit/sys.stdout/builtins (so toàn stdout với gốc để T-3705), SIGTERM dọn cây + giết nhóm tiến trình + pha về started, README mô tả finish/status --check và sửa 'merge-base' theo D-366, test thứ tự xen kẽ, thông báo --no-apply trỏ T-3706
+- Lý do (tiêu chí chất lượng cuối): (1) ba 🟠 là đường giữ oan/hỏng sổ đã tái hiện — lệnh này sắp thành Gate thật ở T-3707 cùng bản 3.30.0, nợ sẽ chặn release-check anyway; (3) mỗi điểm có ca tái hiện chuyển thành test; (5) sửa một lần rẻ hơn ghi nợ rồi PR riêng
+- Đường lùi: Tách 🟢 sang PR sau nếu PR quá lớn để review
 
 ### D-369 · 2026-11-05T05:08:03+00:00 · Review #444 (T-3708): bộ chia unittest theo module tự viết gây xanh giả (lớp định nghĩa ở module khác bị bỏ), đỏ giả (setUpClass/setUpModule skip → zero_tests_red exit 5; load_tests/doctest, FunctionTestCase, stdout lúc import lẫn vào danh sách); pytest -n ép cả khi cấu hình tắt xdist; BASE-GATE-020 chép QA-STRAT-007; CI đỏ BASE-CFG-003 (XT_JOBS thiếu README)
 
