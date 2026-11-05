@@ -33,4 +33,4 @@
 ### Lát F — sổ
 - [ ] `T-3635` AUD-DOC-159; 🟢 nợ review: sửa nhóm tài liệu rẻ, còn lại `chấp nhận` (chủ + hạn, lý do từng dòng); 🔴/🟠 lát A–E `đã sửa` (sau: T-3634; files: docs/, CHANGELOG.md) — Gate: `python3 scripts/xt.py audit check docs/ops/AUDIT-STATUS.md --strict`
 ### Lát G — phát hành
-- [ ] `T-3636` `loop verify --all` xanh, `release-check` chỉ còn hàng chờ người (`prod_switch`, chữ ký GO-NO-GO) (sau: T-3635; topo: audit) — Gate: `python3 scripts/xt.py audit check docs/ops/AUDIT-STATUS.md --strict && python3 scripts/xt.py blueprint-status BLUEPRINT.md --strict`
+- [x] `T-3636` `loop verify --all` xanh, `release-check` chỉ còn hàng chờ người (`prod_switch`, chữ ký GO-NO-GO) (sau: T-3635; topo: audit) — Gate: `python3 scripts/xt.py audit check docs/ops/AUDIT-STATUS.md --strict && python3 scripts/xt.py blueprint-status BLUEPRINT.md --strict`

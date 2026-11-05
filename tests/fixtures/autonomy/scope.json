@@ -248,13 +248,14 @@
    ]
   },
   {
-   "reason": "Hiệu năng quyết định guard (thời gian, không phải cho/chặn) — đỡ bằng Gate unittest `cpu_budget.assert_not_quadratic` trong tests.test_guard_audit1019 (AuditPhase1101GuardTest.test_quote_like_repeat_not_cubic); sed (AUD-PERF-005): AuditRescan1101GuardTest.test_sed_distinct_delimiters_bounded; `GH_POST_RE` (AUD-PERF-012): tests.test_guard_strict -k gh_post_re_linear",
+   "reason": "Hiệu năng quyết định guard (thời gian, không phải cho/chặn) — đỡ bằng Gate unittest `cpu_budget.assert_not_quadratic` trong tests.test_guard_audit1019 (AuditPhase1101GuardTest.test_quote_like_repeat_not_cubic); sed (AUD-PERF-005): AuditRescan1101GuardTest.test_sed_distinct_delimiters_bounded; `GH_POST_RE` (AUD-PERF-012): tests.test_guard_strict -k gh_post_re_linear; glob tên lệnh (AUD-TEST-084, review #446): tests.test_guard_d155 GlobCommandNameTest — thời gian CPU, `ratio` mặc định 10",
    "ids": [
     "AUD-PERF-004",
     "AUD-PERF-005",
     "AUD-TEST-044",
     "AUD-SEC-320",
-    "AUD-PERF-012"
+    "AUD-PERF-012",
+    "AUD-TEST-084"
    ]
   },
   {
@@ -361,6 +362,92 @@
     "AUD-DOC-246",
     "AUD-DOC-247",
     "AUD-DOC-248"
+   ]
+  },
+  {
+   "reason": "Thiết kế ADR-0071 `perf trial` (review #440) — lệnh chưa có mã, các mục sửa chữ ADR/PLAN/nghiên cứu; không phải quyết định cho/chặn của guard, PR hay CI mà bench mô phỏng. Hành vi được khoá bằng ca FLOW-20…23, 27…45 của tests/test_flow.py khi triển khai T-3700…T-3707 (Gate T-3552 STRICT cả các ID đó).",
+   "ids": [
+    "AUD-HAR-230",
+    "AUD-HAR-231",
+    "AUD-HAR-232",
+    "AUD-HAR-233",
+    "AUD-HAR-234",
+    "AUD-HAR-235",
+    "AUD-HAR-236",
+    "AUD-HAR-237",
+    "AUD-HAR-238",
+    "AUD-HAR-239",
+    "AUD-HAR-240",
+    "AUD-HAR-241",
+    "AUD-HAR-242",
+    "AUD-HAR-243",
+    "AUD-HAR-244"
+   ]
+  },
+  {
+   "reason": "Hành vi của `xt.py perf trial` (review #442, D-366): gốc từ đầu nhánh máy chủ, diff không theo `diff.ignoreSubmodules`, HOME theo passwd, quét không nuốt lỗi quyền — không phải quyết định cho/chặn của guard, PR hay CI mà bench mô phỏng (phần guard của review #442 là AUD-SEC-523, có ca r442-*). Khoá bằng tests/test_perf_trial.TrialReview442Test và FLOW-28.",
+   "ids": [
+    "AUD-SEC-524",
+    "AUD-SEC-525",
+    "AUD-SEC-526",
+    "AUD-SEC-527"
+   ]
+  },
+  {
+   "reason": "Hành vi lệnh test tự dò của `scripts/dev-task.sh` (review #444, D-369): unittest về `discover` tuần tự, pytest-xdist tôn trọng cấu hình tắt, `XT_JOBS` có trần, README và BASE-GATE-020 — không phải quyết định cho/chặn của guard, PR hay CI mà bench mô phỏng. Khoá bằng tests/test_dev_task_parallel và lệnh kiểm BASE-CFG-003/`xt.py validate`. AUD-TEST-085 (`python3 -P -m pytest`, khoá bằng tests/test_dev_task_parallel) cùng loại — review #446.",
+   "ids": [
+    "AUD-TEST-070",
+    "AUD-TEST-071",
+    "AUD-TEST-072",
+    "AUD-TEST-073",
+    "AUD-TEST-074",
+    "AUD-TEST-075",
+    "AUD-TEST-085"
+   ]
+  },
+  {
+   "reason": "Hành vi của `xt.py perf trial` (review #443, D-368): `status --check` ràng `HEAD^{tree}` với cây neo, pathspec theo nghĩa đen qua stdin, môi trường lệnh đo mới mỗi lần chạy, khoá `.venv/`/`node_modules/` và thu hồi file trong thư mục PATH của cây đo — không phải quyết định cho/chặn của guard, PR hay CI mà bench mô phỏng. Khoá bằng FLOW-46 (tests/test_flow.py) và tests/test_perf_trial.TrialReview443Test.",
+   "ids": [
+    "AUD-HAR-260",
+    "AUD-HAR-261",
+    "AUD-HAR-262",
+    "AUD-HAR-263"
+   ]
+  },
+  {
+   "reason": "Hành vi của `xt.py perf trial` (review #445, D-370): Gate mẫu fail-closed khi không đọc được công cụ, ngắt sau đóng băng tiêu lần đo lại duy nhất, `status --check` đòi held-out gộp đạt `target`, đầu ra chỉ số chính so gốc, không ghi `decide` trùng sau khi chết, `abort` sau `finish --no-apply` giữ — không phải quyết định cho/chặn của guard, PR hay CI mà bench mô phỏng. Khoá bằng tests/test_perf_trial.TrialReview445Test (FLOW-47…51).",
+   "ids": [
+    "AUD-HAR-270",
+    "AUD-HAR-271",
+    "AUD-HAR-272",
+    "AUD-HAR-273",
+    "AUD-HAR-274",
+    "AUD-HAR-275"
+   ]
+  },
+  {
+   "reason": "Hành vi của `xt.py perf trial` và tài liệu đường lùi (audit delta T-3557, D-371): so cây neo trừ đường sổ sách, Gate qua squash-merge, `start` khi PLAN-opt/D-NNN commit trên nhánh, file mới che mô-đun nhập được ở gốc → `tampered`, đường lùi đo tay thay Gate `bash <(…)`, test luật giữ — không phải quyết định cho/chặn của guard, PR hay CI mà bench mô phỏng. Khoá bằng tests/test_perf_trial.TrialAudit3557Test (FLOW-52…55) và tests/test_perf.PerfGateExampleTest.",
+   "ids": [
+    "AUD-HAR-280",
+    "AUD-HAR-281",
+    "AUD-HAR-282",
+    "AUD-HAR-283",
+    "AUD-HAR-284"
+   ]
+  },
+  {
+   "reason": "Hành vi của `xt.py perf trial` theo review #447 (D-372): miễn sổ sách chỉ file sổ sách thường, symlink/dòng nhắc vùng sổ sách → `tampered`/Gate 1, gói namespace là tên nhập được, lần giữ vòng trước chỉ khi nhánh mặc định không đổi mã — không phải quyết định cho/chặn của guard, PR hay CI mà bench mô phỏng. Khoá bằng tests/test_perf_trial.TrialReview447Test (FLOW-56…58).",
+   "ids": [
+    "AUD-HAR-290",
+    "AUD-HAR-291",
+    "AUD-HAR-292",
+    "AUD-HAR-293"
+   ]
+  },
+  {
+   "reason": "Trần kích thước thư mục của chính repo khung (ADR-0072, D-373): nhóm vượt 2× mốc gần nhất mà chưa có ADR khai mốc mới — đo byte file git theo dõi, không phải quyết định cho/chặn của guard, PR hay CI mà bench mô phỏng. Khoá bằng tests/test_docs_budget.DocsBudgetTest (test_dir_totals_within_double_latest_mark, test_size_marks_are_declared_by_existing_adr).",
+   "ids": [
+    "AUD-ARCH-009"
    ]
   },
   {

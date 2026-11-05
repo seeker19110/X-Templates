@@ -1,6 +1,7 @@
 """Trần kích thước file hướng dẫn nạp đầu phiên (PLAN-3.12-lean Lát 1, D-111): giữ lâu dài sau khi PLAN đóng — review #190
 chỉ ra Gate của PLAN không còn chạy khi task đã tick. Vượt trần → cắt chữ, chuyển nội dung về "nhà", không nới trần."""
 
+import re
 import subprocess
 import unittest
 from pathlib import Path
@@ -27,6 +28,45 @@ DIR_CAPS = {  # nhóm → (pathspec git, trần byte); đo: `git ls-files -z -- 
     "docs/ops": (("docs/ops/", ":(exclude)docs/ops/*-ARCHIVE.md"), 810114),  # 771538 B
     "docs/autopilot": (("docs/autopilot/", ":(exclude)docs/autopilot/DECISIONS-*.md"), 352345),  # 335567 B
 }
+# Mốc kích thước (ADR-0050 §Hệ quả, ADR-0072): mỗi nhóm ≤ 2× mốc mới nhất. Vượt → ADR xét lại khai mốc mới ở đây (máy bắt,
+# không chờ audit). Mốc = (ngày, byte theo pathspec của nhóm ở commit ghi trong ADR, ADR ghi mốc); không xoá mốc cũ. MỘT
+# dòng của ADR phải ghi đủ đường nhóm + ngày + byte (review #448). Mốc 2026-10-26 do ADR-0050 khai; ADR-0050 tách nhóm và
+# số qua hai dòng nên trỏ bảng số đo ADR-0072 (ghi nguồn). Chỉ nhóm đã vượt 2× mới có mốc mới (scripts giữ mốc 2026-10-26).
+SIZE_MARKS = {
+    "scripts (xt.py, install.py, xt_app)": (("2026-10-26", 711824, "ADR-0072"),),
+    ".claude/hooks": (("2026-10-26", 369274, "ADR-0072"), ("2026-11-05", 843817, "ADR-0072")),
+    "framework/11-autonomous-loop": (("2026-10-26", 232297, "ADR-0072"),),
+    "docs/ops": (("2026-11-02", 771538, "ADR-0072"),),  # số đo D-314 (T-3651), ADR-0072 nhận làm mốc
+    "docs/autopilot": (("2026-11-02", 335567, "ADR-0072"),),  # như trên
+}
+
+
+def double_mark_breach(size: int, marks: "tuple[tuple[str, int, str], ...]") -> "tuple[str, int, str] | None":
+    """Mốc mới nhất (theo ngày, không theo thứ tự khai) khi `size` > 2× mốc đó; None khi còn trong 2×."""
+    latest = max(marks)
+    return latest if size > 2 * latest[1] else None
+
+
+def mentions_size(text: str, size: int) -> bool:
+    """`text` ghi `size` dạng liền ("843817") hoặc tách nghìn bằng khoảng trắng ("843 817"), không dính chữ số bên cạnh."""
+    groups = f"{size:,}".split(",")
+    body = "[   ]?".join(groups)
+    return re.search(rf"(?<![\d.,])(?<!\d[   ]){body}(?![   ]?\d)", text) is not None
+
+
+def group_token(specs: "tuple[str, ...]") -> str:
+    """Đường nhóm ADR ghi: pathspec đầu cắt tới `/` cuối trước ký tự glob ("scripts/*.py" → "scripts/")."""
+    head = re.split(r"[*?\[]", specs[0], maxsplit=1)[0]
+    return head[: head.rfind("/") + 1] or head
+
+
+def declares_mark(text: str, token: str, day: str, size: int) -> bool:
+    """Một dòng của `text` chứa đường nhóm, và ngày cùng số byte của mốc nằm chung MỘT ô bảng (review #448: rải rác
+    trong file không tính; review #449: hàng bảng còn số 2×/trần/số đo khác — ngày và byte phải cùng ô)."""
+    return any(
+        token in ln and any(day in cell and mentions_size(cell, size) for cell in ln.split("|"))
+        for ln in text.splitlines()
+    )
 
 
 def tracked_bytes(specs: "tuple[str, ...]") -> int:
@@ -43,6 +83,73 @@ class DocsBudgetTest(unittest.TestCase):
                 self.assertLessEqual(
                     size, cap, f"{group}: {size} B > {cap} B — cắt chỗ khác (ADR-0043), không nới trần"
                 )
+
+    def test_dir_totals_within_double_latest_mark(self):
+        for group, (specs, _cap) in DIR_CAPS.items():
+            with self.subTest(group):
+                self.assertIn(group, SIZE_MARKS, f"{group}: chưa khai mốc kích thước (ADR-0072)")
+                size = tracked_bytes(specs)
+                hit = double_mark_breach(size, SIZE_MARKS[group])
+                self.assertIsNone(
+                    hit,
+                    f"{group}: {size} B > 2× mốc {hit} — cần ADR xét lại khai mốc mới (ADR-0050 §Hệ quả, ADR-0072)",
+                )
+
+    def test_size_marks_are_declared_by_existing_adr(self):
+        self.assertEqual(set(SIZE_MARKS), set(DIR_CAPS), "mỗi nhóm DIR_CAPS đúng một bộ mốc")
+        for group, marks in SIZE_MARKS.items():
+            for day, size, adr in marks:
+                with self.subTest(group=group, day=day):
+                    self.assertRegex(day, r"^\d{4}-\d{2}-\d{2}$")
+                    self.assertGreater(size, 0)
+                    self.assertRegex(adr, r"^ADR-\d{4}$")
+                    files = list((ROOT / "docs/adr").glob(adr[4:] + "-*.md"))
+                    self.assertEqual(len(files), 1, f"{adr}: cần đúng một file ADR")
+                    text = files[0].read_text(encoding="utf-8")
+                    token = group_token(DIR_CAPS[group][0])
+                    self.assertTrue(token, f"{group}: pathspec đầu không có thư mục")
+                    self.assertTrue(
+                        declares_mark(text, token, day, size),
+                        f"{adr}: không dòng nào ghi đủ {token} + {day} + {size} B",
+                    )
+
+    def test_declares_mark_needs_one_line(self):
+        adr = next((ROOT / "docs/adr").glob("0072-*.md")).read_text(encoding="utf-8")
+        self.assertFalse(declares_mark(adr, "scripts/", "2026-11-05", 1164066))  # byte có, ngày ở dòng khác
+        self.assertFalse(declares_mark(adr, ".claude/hooks/", "2026-11-05", 1417969))  # trần, không phải mốc
+        self.assertFalse(declares_mark(adr, "scripts/", "2026-10-26", 1164066))  # số đo cùng hàng, khác ô (review #449)
+        self.assertFalse(declares_mark(adr, "scripts/", "2026-10-26", 1760431))  # trần cùng hàng
+        self.assertTrue(declares_mark(adr, ".claude/hooks/", "2026-11-05", 843817))
+        self.assertTrue(declares_mark("a `docs/ops/` 771538 (2026-11-02)", "docs/ops/", "2026-11-02", 771538))
+        self.assertFalse(declares_mark("`docs/ops/` 2026-11-02\n771 538", "docs/ops/", "2026-11-02", 771538))
+        self.assertFalse(declares_mark("`docs/autopilot/` 771 538 (2026-11-02)", "docs/ops/", "2026-11-02", 771538))
+        self.assertFalse(declares_mark("", "docs/ops/", "2026-11-02", 771538))
+
+    def test_group_token(self):
+        self.assertEqual(group_token(("scripts/*.py", "scripts/xt_app/")), "scripts/")
+        self.assertEqual(group_token((".claude/hooks/",)), ".claude/hooks/")
+        self.assertEqual(group_token(("docs/ops/", ":(exclude)docs/ops/*-ARCHIVE.md")), "docs/ops/")
+        self.assertEqual(group_token(("*.md",)), "")  # không có thư mục: rỗng (khớp mọi dòng — đừng khai nhóm như vậy)
+
+    def test_mentions_size_forms(self):
+        self.assertTrue(mentions_size("hooks 843 817 B", 843817))
+        self.assertTrue(mentions_size("843817", 843817))
+        self.assertTrue(mentions_size("a 843 817.", 843817))
+        self.assertTrue(mentions_size("(1 417 969 B)", 1417969))
+        self.assertFalse(mentions_size("1 843 817", 843817))  # chữ số dính trước
+        self.assertFalse(mentions_size("1843817", 843817))
+        self.assertFalse(mentions_size("843 8170", 843817))  # chữ số dính sau
+        self.assertFalse(mentions_size("843 817 1", 843817))
+        self.assertFalse(mentions_size("843 816", 843817))
+        self.assertFalse(mentions_size("", 843817))
+        self.assertTrue(mentions_size("x 999 y", 999))  # dưới 1000: một nhóm
+
+    def test_double_mark_breach_boundaries(self):
+        marks = (("2026-11-05", 100, "ADR-0072"), ("2026-10-26", 10, "ADR-0050"))  # khai lệch thứ tự: lấy theo ngày
+        self.assertIsNone(double_mark_breach(200, marks))  # đúng 2× vẫn đạt
+        self.assertEqual(double_mark_breach(201, marks), marks[0])
+        self.assertIsNone(double_mark_breach(0, marks))
+        self.assertEqual(double_mark_breach(21, (("2026-10-26", 10, "ADR-0050"),)), ("2026-10-26", 10, "ADR-0050"))
 
     def test_guidance_files_stay_under_caps(self):
         for rel, cap in CAPS.items():

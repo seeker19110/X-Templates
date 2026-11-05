@@ -1,0 +1,54 @@
+{
+ "V1 ignored + exclude pathspec": {
+  "exit": 1,
+  "msg": "hint: Disable this message with \"git config set advice.addIgnoredFile false\"",
+  "status_after": [
+   "M  a.py",
+   "A  new.py"
+  ],
+  "a.py": "x = 2",
+  "autopilot_kept": true,
+  "cache_kept": true,
+  "stash_list": "stash@{0}: On main: xt-perf-trial"
+ },
+ "V2 ignored + no pathspec": {
+  "exit": 0,
+  "msg": "Saved working directory and index state On main: xt-perf-trial",
+  "status_after": [],
+  "a.py": "x = 1",
+  "autopilot_kept": true,
+  "cache_kept": true,
+  "stash_list": "stash@{0}: On main: xt-perf-trial"
+ },
+ "V3 not-ignored + exclude pathspec": {
+  "exit": 0,
+  "msg": "Saved working directory and index state On main: xt-perf-trial",
+  "status_after": [
+   "?? .autopilot/state.json"
+  ],
+  "a.py": "x = 1",
+  "autopilot_kept": true,
+  "cache_kept": true,
+  "stash_list": "stash@{0}: On main: xt-perf-trial"
+ },
+ "V4 ignored + explicit file list": {
+  "exit": 0,
+  "msg": "Saved working directory and index state On main: xt-perf-trial",
+  "status_after": [],
+  "a.py": "x = 1",
+  "autopilot_kept": true,
+  "cache_kept": true,
+  "stash_list": "stash@{0}: On main: xt-perf-trial"
+ },
+ "V5 not-ignored + explicit file list": {
+  "exit": 0,
+  "msg": "Saved working directory and index state On main: xt-perf-trial",
+  "status_after": [
+   "?? .autopilot/state.json"
+  ],
+  "a.py": "x = 1",
+  "autopilot_kept": true,
+  "cache_kept": true,
+  "stash_list": "stash@{0}: On main: xt-perf-trial"
+ }
+}

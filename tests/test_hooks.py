@@ -340,6 +340,9 @@ class CommitGateFastConfigChangeTest(CommitGateFastHookBase):
             "pyproject.toml",
             "pkg/pyproject.toml",
             ".coveragerc",
+            "pytest.py",  # D-371: `python3 -m pytest` (dev-task) thêm cwd vào sys.path → pytest.py gốc giả lệnh test tự dò
+            "conftest.py",
+            "tests/conftest.py",
             "requirements-dev.txt",
             "requirements.txt",
             "scripts/dev-task.sh",
@@ -379,6 +382,27 @@ class CommitGateFastConfigChangeTest(CommitGateFastHookBase):
                 self.assertIn("FULL-RAN", err)
                 self.assertIn("đụng cấu hình cổng", err)
                 subprocess.run([*self.git, "reset", "-q", "--hard"], check=True)
+
+
+class CommitGatePytestConfigChangeTest(CommitGateFastHookBase):
+    """Review #446: cấu hình pytest ở gốc mà `dev-task.sh` đọc (`pytest_xdist_off`: `no:xdist`) và pytest đọc — đổi chúng
+    đổi lệnh/kết quả test, nên là cấu hình cổng như `pyproject.toml`. Lớp riêng để `CommitGateFastConfigChangeTest` không
+    vượt ngân sách thời gian shard."""
+
+    def test_pytest_config_change_forces_full_gate(self):
+        for change in ("pytest.ini", ".pytest.ini", "pytest.toml", ".pytest.toml", "tox.ini", "setup.cfg"):
+            with self.subTest(change=change):
+                code, out, err = self.commit("commit_gate: fast\n", fast="echo FAST-RAN", change=change)
+                self.assertEqual((code, decision(out)), (0, None), err)
+                self.assertIn("FULL-RAN", err)
+                self.assertNotIn("FAST-RAN", err)
+                self.assertIn("đụng cấu hình cổng nên cổng nhanh chạy MỌI lớp test", err)
+                subprocess.run([*self.git, "reset", "-q", "--hard"], check=True)
+                subprocess.run([*self.git, "clean", "-qfd"], check=True)
+        # Chỉ ở gốc (dev-task đọc `$ROOT/<tệp>`; pytest tìm từ thư mục chạy): tên tương tự ở thư mục con → cổng nhanh.
+        code, out, err = self.commit("commit_gate: fast\n", fast="echo FAST-RAN", change="docs/setup.cfg")
+        self.assertIn("FAST-RAN", err)
+        self.assertNotIn("FULL-RAN", err)
 
 
 class CommitGateFastHookTest(CommitGateFastHookBase):
@@ -5162,7 +5186,7 @@ class GuardStored1018Test(unittest.TestCase):
             'git config core.pager "less -R"',
             "git config pager.log false",
             'git config core.sshCommand "ssh -i ~/.ssh/deploy -o IdentitiesOnly=yes"',
-            "git config remote.origin.url git@github.com:a/b.git",
+            "git config remote.origin.prune true",  # `remote.origin.url` chặn từ D-366 (AUD-SEC-523)
             "git config protocol.version 2",
             "git config protocol.https.allow always",
             "git config submodule.a.update rebase",
@@ -6756,6 +6780,111 @@ class GuardRemoteRefTest(unittest.TestCase):
         ):
             with self.subTest(cmd):
                 self.assert_forged(cmd)
+
+    def test_guard_remote_set_head(self):
+        """ADR-0071 §1, D-361: `perf trial` ngoại tuyến đọc nhánh mặc định từ `refs/remotes/origin/HEAD` — `remote set-head
+        <r> <nhánh>`/`-d` (cả sau cờ của `remote`, qua alias, đặt alias) bị chặn; `-a` hỏi máy chủ và lệnh `remote` khác
+        thì qua."""
+        for cmd in (
+            "git remote set-head origin opt",
+            "git remote set-head origin -d",
+            "git remote set-head origin --delete",
+            "git remote set-head origin -a -d",
+            "git remote set-head fork evil",
+            "git remote -v set-head origin opt",
+            "git remote set-head",
+            "git -c alias.sh=remote sh set-head origin opt",
+            "git config alias.sh 'remote set-head origin opt'",
+        ):
+            with self.subTest(cmd=cmd):
+                self.assert_forged(cmd)
+        for cmd in (
+            "git remote set-head origin -a",
+            "git remote set-head origin --auto",
+            "git remote",
+            "git remote -v",
+            "git remote show origin",
+        ):
+            with self.subTest(cmd=cmd):
+                self.assert_allowed(cmd)
+
+    def test_guard_remote_config_change_denied(self):
+        """D-366 (review #442 🔴, AUD-SEC-523): `perf trial` lấy gốc vòng từ máy chủ `origin` — đổi URL/pushurl/refspec/
+        insteadOf của remote (lệnh `remote`, `git config` mọi phạm vi, xoá/đổi tên section, một lần qua `-c`/
+        `GIT_CONFIG_*` đặt cho BẤT KỲ lệnh nào, qua alias) bị chặn ở mọi chính sách; đọc cấu hình, `fetch`, remote khác
+        `origin` (thêm/xoá) thì qua."""
+        for cmd in (
+            "git remote set-url origin /tmp/fake.git",
+            "git remote set-url --push origin /tmp/fake.git",
+            "git remote set-url fork /tmp/fake.git",
+            "git remote add origin /tmp/fake.git",
+            "git remote add -f -t main Origin /tmp/fake.git",
+            "git remote rename origin old",
+            "git remote rename fork origin",
+            "git remote remove origin",
+            "git remote rm origin",
+            "git remote set-branches origin main",
+            "git config remote.origin.url /tmp/fake.git",
+            "git config --global url./tmp/fake.git.insteadOf /tmp/srv.git",
+            "git config url./tmp/f.pushInsteadOf /tmp/srv.git",
+            "git config set remote.origin.pushurl /tmp/fake.git",
+            "git config --unset remote.origin.fetch",
+            "git config unset remote.origin.url",
+            "git config --add remote.origin.fetch +refs/heads/*:refs/remotes/origin/*",
+            "git config --remove-section remote.origin",
+            "git config --remove-sec url./tmp/f",
+            "git config remove-section remote.origin",
+            "git -c url./tmp/fake.git.insteadOf=/tmp/srv.git fetch",
+            "git -c remote.origin.url=/tmp/fake.git ls-remote origin",
+            "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=url./f.insteadOf GIT_CONFIG_VALUE_0=/s python3 xt.py perf trial start",
+            "env GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=remote.origin.url GIT_CONFIG_VALUE_0=/f python3 xt.py perf trial",
+            "export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=url./f.insteadOf GIT_CONFIG_VALUE_0=/s; python3 xt.py perf trial",
+            "GIT_CONFIG_PARAMETERS=\"'remote.origin.url'='/tmp/f'\" python3 xt.py perf trial status",
+            "git -c alias.su='remote set-url origin /tmp/f' su",
+        ):
+            with self.subTest(cmd=cmd):
+                self.assert_forged(cmd)
+        for cmd in (
+            "git fetch origin",
+            "git remote -v",
+            "git remote get-url origin",
+            "git remote add upstream https://example.invalid/u.git",
+            "git remote remove fork",
+            "git remote prune origin",
+            "git config --get remote.origin.url",
+            "git config remote.origin.url",
+            "git config --get-regexp '^url\\.'",
+            "git config --remove-section user",
+            "git ls-remote --symref origin HEAD",
+            "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=user.name GIT_CONFIG_VALUE_0=t python3 xt.py perf trial status",
+        ):
+            with self.subTest(cmd=cmd):
+                self.assert_allowed(cmd)
+
+    def test_guard_remote_ref_files_denied(self):
+        """D-366 (AUD-SEC-523): ghi thẳng `.git/packed-refs`, `.git/refs/remotes/**` (chuyển hướng, cp/mv/tee/sed -i,
+        Edit/Write; cả kho chung của worktree) bị chặn; đọc và ghi ref nhánh cục bộ qua Edit thì không bị luật này chặn."""
+        git = self.root / ".git"
+        for cmd in (
+            "printf x > .git/packed-refs",
+            "echo deadbeef > .git/refs/remotes/origin/main",
+            "cp /tmp/x .git/refs/remotes/origin/HEAD",
+            "sed -i s/a/b/ .git/packed-refs",
+            "tee .git/refs/remotes/origin/main < /tmp/x",
+            "mv /tmp/x .git/packed-refs",
+            f"printf x > {git}/refs/remotes/origin/main",
+        ):
+            with self.subTest(cmd=cmd):
+                self.assertEqual(self.g.apply_policy(self.raw(cmd))["decision"], "deny", cmd)
+        for path in (git / "packed-refs", git / "refs" / "remotes" / "origin" / "main", git / "refs" / "remotes"):
+            with self.subTest(path=path):
+                d, r = self.g.edit_decision(str(path), str(self.root))
+                self.assertEqual(self.g.apply_policy({"decision": d, "reason": r})["decision"], "deny", path)
+        for cmd in ("cat .git/packed-refs", "git pack-refs --all", "ls .git/refs/remotes/origin"):
+            with self.subTest(cmd=cmd):
+                self.assert_allowed(cmd)
+        d, r = self.g.edit_decision(str(git / "refs" / "heads" / "x"), str(self.root))
+        self.assertEqual(self.g.apply_policy({"decision": d, "reason": r})["decision"], "")
 
     def test_guard_replace_ref_denied(self):
         """`git replace` thay đối tượng mà Gate/`pr debt` đọc (`origin/main`, SHA review) — ghi `refs/replace/` bị chặn

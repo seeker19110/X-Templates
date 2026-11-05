@@ -1,0 +1,8 @@
+{
+ "cmd": "python3 -I aa.py <thư mục xt.py của commit gốc> <cây dự án có .venv> 30",
+ "date": "2026-11-05",
+ "runs": [
+  {"block": {"verdicts": {"improved": 5, "neutral": 22, "regressed": 3}, "max_abs_change": 0.1118, "secs": 14.9}, "interleaved": {"verdicts": {"neutral": 30}, "max_abs_change": 0.0565, "secs": 15.0}},
+  {"block": {"verdicts": {"neutral": 19, "regressed": 5, "improved": 6}, "max_abs_change": 0.1126, "secs": 15.0}, "interleaved": {"verdicts": {"neutral": 29, "regressed": 1}, "max_abs_change": 0.08, "secs": 15.9}}
+ ]
+}
