@@ -11528,7 +11528,14 @@ def _reg_product_errors(p: Any, where: str) -> List[str]:
         return errs
     nested = [(p["pack"], ".pack", _REG_PACK), (p["release"], ".release", _REG_RELEASE)]
     nested += [(e, f".exceptions[{i}]", _REG_EXCEPTION) for i, e in enumerate(p["exceptions"])]
-    return [m for obj, suf, spec in nested if obj is not None for m in _reg_fields(obj, where + suf, spec)]
+    errs = [m for obj, suf, spec in nested if obj is not None for m in _reg_fields(obj, where + suf, spec)]
+    # id ngoại lệ trùng trong một sản phẩm: màn Registry đánh dấu hết hạn theo id → dòng còn hạn hiện hết hạn (AUD-HAR-228)
+    return errs or [f"{where}.exceptions: id trùng {i!r}" for i in _reg_dups(e["id"] for e in p["exceptions"])]
+
+
+def _reg_dups(values: Iterable[Any]) -> List[str]:
+    """Chuỗi xuất hiện ≥ 2 lần, sắp xếp — đếm bằng `Counter` (O(n); `list.count` từng O(n²) — AUD-CODE-050)."""
+    return sorted(v for v, n in Counter(v for v in values if isinstance(v, str)).items() if n > 1)
 
 
 def registry_errors(data: Any) -> List[str]:
@@ -11541,8 +11548,7 @@ def registry_errors(data: Any) -> List[str]:
         return ["products: phải là mảng"]
     errs = [f"khoá lạ ở gốc {k!r}" for k in data if k not in ("schema", "products")]
     errs += [m for i, p in enumerate(products) for m in _reg_product_errors(p, f"products[{i}]")]
-    repos = [p.get("repo") for p in products if isinstance(p, dict)]
-    return errs + [f"repo trùng {r!r}" for r in sorted({r for r in repos if isinstance(r, str) and repos.count(r) > 1})]
+    return errs + [f"repo trùng {r!r}" for r in _reg_dups(p.get("repo") for p in products if isinstance(p, dict))]
 
 
 def _reg_pack_errors(products: List[Dict[str, Any]], packs: Path) -> List[str]:

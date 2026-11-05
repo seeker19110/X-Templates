@@ -53,10 +53,21 @@ function responseBreaks(prev: Schema | null, next: Schema | null, at: string): s
   return out;
 }
 
+// Request: client cũ gửi theo `prev` phải còn hợp lệ với `next` — không thêm trường bắt buộc, không đổi kiểu trường đã
+// có (kể cả trường tuỳ chọn, đệ quy theo thuộc tính và phần tử mảng).
 function requestBreaks(prev: Schema | null, next: Schema | null, at: string): string[] {
   if (!next) return [];
-  const added = (next.required ?? []).filter((k) => !(prev?.required ?? []).includes(k));
-  return added.map((k) => `${at}.${k}: request thêm trường bắt buộc`);
+  const n = resolve(current, next);
+  const p = prev ? resolve(baseline, prev) : null;
+  if (p && p.type !== n.type) return [`${at}: request đổi kiểu ${p.type} → ${n.type}`];
+  const added = (n.required ?? []).filter((k) => !(p?.required ?? []).includes(k));
+  const out = added.map((k) => `${at}.${k}: request thêm trường bắt buộc`);
+  for (const [key, sub] of Object.entries(p?.properties ?? {})) {
+    const nextSub = n.properties?.[key];
+    if (nextSub) out.push(...requestBreaks(sub, nextSub, `${at}.${key}`));
+  }
+  if (p?.items && n.items) out.push(...requestBreaks(p.items, n.items, `${at}[]`));
+  return out;
 }
 
 function breakingChanges(): string[] {

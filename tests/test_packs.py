@@ -126,6 +126,14 @@ class MutantsTest(unittest.TestCase):
                 self.assertNotEqual((app / m["file"]).read_text(encoding="utf-8"), before)
                 self.assertTrue(m["expect_fail"] and m["why"])
 
+    def test_ci_matrix_runs_every_mutant(self):
+        """Ca thêm vào `mutants.json` mà quên ma trận CI thì không bao giờ chạy (AUD-SEC-502): ma trận = clean + mọi ca."""
+        wf = (ROOT / ".github" / "workflows" / "pack-web-api.yml").read_text(encoding="utf-8")
+        rows = [ln.split(":", 1)[1].strip() for ln in wf.splitlines() if ln.strip().startswith("case: [")]
+        self.assertEqual(len(rows), 1, rows)
+        cases = [c.strip() for c in rows[0].strip("[]").split(",")]
+        self.assertEqual(cases, ["clean", *pack_mutants.load(PACK)])
+
     def test_apply_twice_fails(self):
         app = str(self.tmp / "app")
         self.assertEqual(self.run_main("apply", str(PACK), "tenant-leak", app)[0], 0)

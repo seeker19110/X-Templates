@@ -33,6 +33,14 @@
       "find": "\"Session\": { \"type\": \"object\", \"required\": [\"token\"]",
       "replace": "\"Session\": { \"type\": \"object\", \"required\": []",
       "expect_fail": "không thay đổi không tương thích so với baseline"
+    },
+    {
+      "id": "contract-request-type",
+      "why": "contract đổi kiểu trường request (NoteInput.body string → integer) so với baseline — client cũ gửi chuỗi bị từ chối",
+      "file": "contract/openapi.json",
+      "find": "\"NoteInput\": { \"type\": \"object\", \"required\": [\"body\"], \"properties\": { \"body\": { \"type\": \"string\" } } }",
+      "replace": "\"NoteInput\": { \"type\": \"object\", \"required\": [\"body\"], \"properties\": { \"body\": { \"type\": \"integer\" } } }",
+      "expect_fail": "không thay đổi không tương thích so với baseline"
     }
   ]
 }

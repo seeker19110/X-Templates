@@ -194,6 +194,36 @@ class SchemaTest(unittest.TestCase):
         got = self.errors(registry(product(), product(repo="o/b"), product()))
         self.assertEqual(got, ["repo trùng 'o/a'"])
 
+    def test_duplicate_repo_check_is_linear(self) -> None:
+        """Kiểm repo trùng không so từng cặp (AUD-CODE-050: `repos.count` O(n²), 20 000 sản phẩm 6,1 s): đếm phép `==`."""
+        calls = [0]
+
+        class Counted(str):
+            __hash__ = str.__hash__
+
+            def __eq__(self, other: object) -> bool:
+                calls[0] += 1
+                return str.__eq__(self, other)
+
+        n = 300
+        data = registry(*(product(repo=Counted(f"o/r{i}")) for i in range(n)))
+        self.assertEqual(self.errors(data), [])
+        self.assertLessEqual(calls[0], 2 * n, "kiểm repo trùng so từng cặp")
+        dup = registry(product(repo=Counted("o/a")), product(repo=Counted("o/a")))
+        self.assertEqual(self.errors(dup), ["repo trùng 'o/a'"])
+
+    def test_duplicate_exception_id_in_product(self) -> None:
+        """Id ngoại lệ trùng trong một sản phẩm là lỗi (AUD-HAR-228: màn Registry đánh dấu hết hạn theo id); khác sản
+        phẩm thì được."""
+        exc = {"id": "EX-1", "until": "2026-01-01", "why": "a"}
+        later = {**exc, "until": "2099-01-01"}
+        got = self.errors(registry(product(exceptions=[exc, later, {**exc, "id": "EX-2"}])))
+        self.assertEqual(got, ["products[0].exceptions: id trùng 'EX-1'"])
+        ok = registry(product(exceptions=[exc]), product(repo="o/b", exceptions=[later]))
+        self.assertEqual(self.errors(ok), [])
+        bad_inner = registry(product(exceptions=[exc, {**later, "why": ""}]))
+        self.assertEqual(self.errors(bad_inner), ["products[0].exceptions[1].why: phải là chuỗi không rỗng"])
+
 
 class DriftTest(unittest.TestCase):
     def test_each_core_class(self) -> None:
@@ -372,6 +402,19 @@ class CliTest(unittest.TestCase):
         self.assertTrue(out.startswith("registry khác.json — khung 3.29.2"))
 
 
+def target_repos(text: str) -> List[str]:
+    """Repo ở mục `## Danh sách` của TARGETS.md (dòng `- owner/repo — …`); mục khác (`Đã xét, không đưa vào`) bỏ qua."""
+    section = text.split("\n## Danh sách\n", 1)[-1].split("\n## ", 1)[0] if "\n## Danh sách\n" in text else ""
+    return [ln[2:].split(" — ", 1)[0] for ln in section.splitlines() if ln.startswith("- ")]
+
+
+class TargetReposTest(unittest.TestCase):
+    def test_only_list_section(self) -> None:
+        text = "# T\n\n## Danh sách\n\n- o/a — có\n- o/b — có\nchữ\n\n## Đã xét, không đưa vào\n\n- o/c — không\n"
+        self.assertEqual(target_repos(text), ["o/a", "o/b"])
+        self.assertEqual(target_repos("# T\n- o/a — x\n"), [])
+
+
 class RealRegistryTest(unittest.TestCase):
     """`docs/ops/registry.json` của repo khung hợp lệ và chỉ chứa dữ kiện đọc được (không bịa digest/SLO)."""
 
@@ -382,6 +425,8 @@ class RealRegistryTest(unittest.TestCase):
         repos = [p["repo"] for p in data["products"]]
         self.assertIn("seeker19110/hotel-manager", repos)
         targets = (ROOT / "docs" / "ops" / "TARGETS.md").read_text(encoding="utf-8")
+        # hai chiều (AUD-TEST-064): repo thêm vào TARGETS.md mà quên registry cũng đỏ
+        self.assertEqual(sorted(target_repos(targets)), sorted(repos))
         for p in data["products"]:
             with self.subTest(repo=p["repo"]):
                 self.assertIn(f"- {p['repo']} — có `.xtemplates/` ({p['core']})", targets)

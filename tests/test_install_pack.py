@@ -6,6 +6,7 @@ from __future__ import annotations
 import io
 import json
 import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -401,6 +402,35 @@ class PackYamlTest(unittest.TestCase):
         self.assertEqual(install.yaml_set_keys("", {"b": "c"}), 'b: "c"\n')
 
 
+class PackGitRootTest(PackBase):
+    """`--pack` có file managed dưới `.github/` vào thư mục con của repo git: GitHub không chạy workflow ở đó (AUD-HAR-227,
+    như `--with-github` — AUD-CI-012) → từ chối trước khi ghi; gói không có `.github/` hoặc ở gốc repo → cài như cũ."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.mono = self.tmp / "mono"
+        self.target = self.mono / "apps" / "web"
+        self.target.mkdir(parents=True)
+        subprocess.run(["git", "init", "-q", str(self.mono)], check=True)
+        self.gh = make_src(self.tmp, "khung-gh", managed={**MANAGED_V1, ".github/workflows/pack.yml": "on: push\n"})
+
+    def test_subdir_with_github_files_refused(self) -> None:
+        for mode in ("--plan", "--label"):
+            with self.subTest(mode=mode):
+                args = (mode, "p1") if mode == "--label" else (mode,)
+                code, out, err = self.run_main(self.gh, *args, "--no-git-hooks", "--pack", PACK)
+                self.assertEqual((code, out), (2, ""), err)
+                self.assertIn("không phải gốc repo git", err)
+                self.assertIn(str(self.mono / ".github"), err)
+        self.assertEqual(list(self.target.iterdir()), [])  # từ chối trước khi ghi gì
+
+    def test_subdir_without_github_files_or_at_root_installs(self) -> None:
+        self.install(self.v1)  # gói không ghi .github/: thư mục con được
+        self.target = self.mono
+        self.install(self.gh)
+        self.assertTrue((self.mono / ".github" / "workflows" / "pack.yml").is_file())
+
+
 class PackArgsTest(PackBase):
     def assert_rejected(self, src: Path, pack_id: str, reason: str) -> None:
         for mode in ("--plan", "--no-git-hooks"):
@@ -432,6 +462,10 @@ class PackArgsTest(PackBase):
             (pack_doc(xt_yaml={"lint": "a\nrm: x"}), "xt_yaml"),
             (pack_doc(xt_yaml={"lint": "a\rb"}), "xt_yaml"),
             (pack_doc(xt_yaml={"a b": "x"}), "xt_yaml"),
+            # ghi bằng nháy JSON mà `yaml_get`/`yaml_scalar` không giải escape (AUD-HAR-227) → chặn ở pack.json
+            (pack_doc(xt_yaml={"lint": 'pnpm "lint"'}), "xt_yaml"),
+            (pack_doc(xt_yaml={"lint": "a\\b"}), "xt_yaml"),
+            (pack_doc(xt_yaml={"lint": "a\tb"}), "xt_yaml"),
         ]
         for i, (doc, reason) in enumerate(cases):
             with self.subTest(reason=reason):

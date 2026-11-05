@@ -659,6 +659,20 @@ def github_root_error(target: Path) -> str | None:
     )
 
 
+def pack_root_error(target: Path, pack: dict[str, Any] | None) -> str | None:
+    """`--pack` có file managed dưới `.github/` vào thư mục con của repo git: như `--with-github` (AUD-CI-012), workflow
+    ghi ở đó không bao giờ chạy (AUD-HAR-227) → từ chối trước khi ghi."""
+    if pack is None or not any(rel.startswith(".github/") for rel, _src in pack_tree(pack["id"], "managed")):
+        return None
+    top = git_subdir_of(target)
+    if top is None:
+        return None
+    return (
+        f"✗ --pack {pack['id']}: {target} không phải gốc repo git ({top}) — gói ghi .github/ mà GitHub chỉ chạy workflow "
+        f"ở {top / '.github'}; cài gói ở gốc repo, hoặc chép/gộp workflow vào gốc và đặt `working-directory`"
+    )
+
+
 def install_framework(xt_dir: Path, label: str | None) -> str:
     """Bước 1: framework + research + scripts + VERSION + README vào .xtemplates/ — thay thế toàn bộ (bản chỉ đọc).
     Trả nhãn đã ghi vào VERSION."""
@@ -1106,7 +1120,9 @@ def _pack_yaml_pair(key: object, value: object) -> bool:
     """Một khoá `xt_yaml` hợp lệ: khoá YAML cấp 1, giá trị chuỗi MỘT dòng — không chen được dòng lạ vào xt.yaml."""
     if not isinstance(key, str) or not isinstance(value, str):
         return False
-    return PACK_YAML_KEY_RE.fullmatch(key) is not None and "\n" not in value and "\r" not in value
+    # `yaml_set_keys` ghi nháy JSON; `yaml_get` (dev-task.sh)/`yaml_scalar` (xt.py) không giải escape → chỉ nhận giá trị
+    # mà nháy JSON giữ nguyên chữ: in được, không `"`, không `\` (AUD-HAR-227).
+    return PACK_YAML_KEY_RE.fullmatch(key) is not None and value.isprintable() and not set(value) & {'"', "\\"}
 
 
 def pack_problem(pack_id: str, doc: object) -> str | None:
@@ -1909,7 +1925,7 @@ def install_plan(
     """`--plan`: in JSON kế hoạch (quyền/hook/file/git hook/adapter; gói khi `--pack`) ra stdout, KHÔNG ghi gì vào dự án.
     Thoát 0; 2 nếu đích không hợp lệ."""
     target = target.resolve()
-    error = target_error(target, with_github)
+    error = target_error(target, with_github) or pack_root_error(target, pack)
     if error:
         log(error)
         return 2
@@ -1963,7 +1979,7 @@ def install(
     pack: dict[str, Any] | None = None,
 ) -> int:
     target = target.resolve()
-    error = target_error(target, with_github)
+    error = target_error(target, with_github) or pack_root_error(target, pack)
     if error:
         log(error)
         return 2

@@ -38,7 +38,7 @@ jobs:
       fail-fast: false
       matrix:
         # `clean` = repo sạch phải XANH; các ca còn lại phải ĐỎ ở đúng test (mutants.json).
-        case: [clean, tenant-leak, broken-down, contract-runtime, contract-static]
+        case: [clean, tenant-leak, broken-down, contract-runtime, contract-static, contract-request-type]
     services:
       postgres:
         # Cùng tag + digest với dự án đích hotel-manager (BASE-DEP-008: ghim digest).

@@ -28,13 +28,14 @@ riêng). Không có `DATABASE_URL` → test đỏ, không bỏ qua.
 ## Ca sai cố ý (`mutants.json`)
 
 `tenant-leak` (policy RLS `true`) · `broken-down` (`down` không xoá bảng) · `contract-runtime` (phản hồi thiếu trường bắt buộc) ·
-`contract-static` (contract bỏ trường bắt buộc) — mỗi ca phải làm đỏ đúng test ghi ở `expect_fail`.
+`contract-static` (contract bỏ trường bắt buộc) · `contract-request-type` (contract đổi kiểu trường request) — mỗi ca
+phải làm đỏ đúng test ghi ở `expect_fail`.
 
 ## Giới hạn đã biết
 
 - Kết nối ứng dụng dùng một vai trò có quyền `SET ROLE app_rw`; triển khai thật: vai trò đăng nhập riêng chỉ là thành viên
   `app_rw` + vai trò migration riêng (sở hữu bảng) — chưa có trong gói.
-- Contract tĩnh: chưa bắt đổi kiểu trường của request; `baseline.json` sửa được trong cùng PR (đổi không tương thích kèm
-  chép đè baseline lọt — review xem diff `contract/`). `job_effects.job_id` có FK không kèm tenant (RLS vẫn lọc theo tenant).
+- Contract tĩnh: `baseline.json` sửa được trong cùng PR (đổi không tương thích kèm chép đè baseline lọt — review xem diff
+  `contract/`). `job_effects.job_id` có FK không kèm tenant (RLS vẫn lọc theo tenant).
 - Phiên đăng nhập không có thu hồi/giới hạn tần suất; không có MFA; không UI; không staging/deploy thật (promote = digest +
   chữ ký GO-NO-GO §5 của khung).
