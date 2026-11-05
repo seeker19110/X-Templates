@@ -163,3 +163,10 @@
 - Chọn: Gọi ROOT/scripts/xt.py; luật ADR §5 'exec công cụ chấm từ blob gốc' chỉ exec khi byte của file đang chạy KHÁC blob ở base (bằng nhau thì chạy tiếp, không exec) — không có cờ/biến môi trường riêng cho test; T-3701 chốt tên trường perf-trials.jsonl (event, reason), schema 1, setup là chuỗi shell và ghi vào ADR §3; vế held-out so cả gốc của AUD-HAR-231 thêm test đơn vị ở T-3705
 - Lý do (tiêu chí chất lượng cuối): (1) không thêm cửa sau tắt exec (biến môi trường tắt bộ chấm là bề mặt lách); so byte với blob gốc là điều kiện đúng nghĩa: cùng byte thì chính là công cụ gốc; (3) coverage 100 % giữ được qua coverage subprocess sẵn có; (3) tên trường chốt một nơi (ADR §3)
 - Đường lùi: Gọi bản sao (phương án 2) nếu so byte gây sai khi dự án đích sửa dòng cuối file (CRLF)
+
+### D-365 · 2026-11-05T01:46:16+00:00 · T-3701/T-3702 perf trial: duyệt sáu quyết định nhỏ của người viết và chọn thời điểm gỡ ID FLOW khỏi XFAIL
+
+- Phương án: (1) Nhận cả sáu (done= cho ca đã xanh; log đòi HEAD^{tree} = cây giữ/log gần nhất; điểm nóng nhận file có ở HEAD do lần giữ trước thêm; khoá mặc định **/ và từ chối khoá lạ; đếm ba lần qua mọi vòng, base từ SHA máy chủ; setup qua /bin/sh -c) — thư mục tạm của exec blob gốc phải dọn ở T-3703; gỡ ID khỏi XFAIL ở T-3707 cùng lúc sửa Gate T-3700 · (2) Giữ cơ chế done= vĩnh viễn
+- Chọn: Nhận cả sáu (done= cho ca đã xanh; log đòi HEAD^{tree} = cây giữ/log gần nhất; điểm nóng nhận file có ở HEAD do lần giữ trước thêm; khoá mặc định **/ và từ chối khoá lạ; đếm ba lần qua mọi vòng, base từ SHA máy chủ; setup qua /bin/sh -c) — thư mục tạm của exec blob gốc phải dọn ở T-3703; gỡ ID khỏi XFAIL ở T-3707 cùng lúc sửa Gate T-3700
+- Lý do (tiêu chí chất lượng cuối): (1) năm điểm chặt hơn hoặc trung tính; điểm nóng do lần giữ thêm đã qua máy kiểm; (3) XFAIL không còn ca là rác — gỡ ở task cuối giữ Gate T-3700 đúng nghĩa; (2) rò thư mục tạm có task chủ
+- Đường lùi: Giữ done= nếu sửa Gate T-3700 làm loop verify lịch sử đỏ
