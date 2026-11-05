@@ -12,6 +12,8 @@
 | 🔴 | review #446/#447 | 3 | AUD-TEST-084, AUD-HAR-290, AUD-HAR-291 | đã sửa trong PR |
 | 🟠 | review #446/#447 | 3 | AUD-TEST-085, AUD-HAR-292, AUD-HAR-293 | đã sửa trong PR |
 | 🟢 | review #447, rà sau | 4 | AUD-HAR-294…297 | mở |
+| 🟠 | audit ARCH (D-373) | 1 | AUD-ARCH-009 | đã sửa #448 (ADR-0072) |
+| 🟢 | audit ARCH | 5 | AUD-ARCH-010…014 | mở |
 
 Năm 🟠 đều nằm ở `perf trial` (ADR-0071) và đều tái hiện được trước khi sửa:
 
@@ -25,7 +27,7 @@ Review #447 tìm thêm hai 🔴 lách phần miễn sổ sách của bản sửa
 
 ## 2. Phạm vi
 
-`audit plan` nhận diện 578 tệp, 65 tệp test và 11 workflow. Có 12 nhóm áp dụng. Nhóm DATA là N/A vì repo không có migration, SQL hay schema CSDL. Mười nhóm của ba auditor nay có SHA quét `0a2583f`, là `main` sau #447. Phần `23447d8` trở về trước được phủ bởi delta 2026-11-04 và review PR sạch (ADR-0057). ARCH và A11Y giữ SHA cũ vì không có auditor riêng trong lượt này.
+`audit plan` nhận diện 578 tệp, 65 tệp test và 11 workflow. Có 12 nhóm áp dụng. Nhóm DATA là N/A vì repo không có migration, SQL hay schema CSDL. Mười nhóm của ba auditor nay có SHA quét `0a2583f`, là `main` sau #447. Phần `23447d8` trở về trước được phủ bởi delta 2026-11-04 và review PR sạch (ADR-0057). ARCH được quét sau, riêng một lượt (`9f123b1..0a2583f`), nay cũng ở `0a2583f`. A11Y giữ SHA cũ vì lượt này không đổi UI.
 
 ## 3. Lệnh đã chạy ở cây cắt bản
 
@@ -42,6 +44,11 @@ Review #447 tìm thêm hai 🔴 lách phần miễn sổ sách của bản sửa
 |---|---|---|
 | AUD-HAR-294…297 · che mô-đun ngoài Python và src-layout, test điểm nóng thoát sớm, symlink tuyệt đối ra ngoài cây | `perf trial` | audit kế |
 | AUD-TEST-082 · `-n 0` trong cấu hình chưa được coi là tắt xdist; AUD-TEST-083 · test phụ thuộc đường venv | `dev-task.sh`, bộ test | audit kế |
+| AUD-ARCH-010…014 · `xt.py` một file bị ADR-0071 khoá, cờ chế độ ngầm và flock thiếu dịch errno, danh sách tên biến lệch trong guard, sổ `perf trial` chưa có đường nâng schema, adapter gọi API private của guard | kiến trúc | audit kế |
 | AUD-PERF-020…023 · chi phí duyệt cây, lỗi candidate ra exit 2, thư mục tạm sót, chỉ số phụ không có held-out; AUD-PERF-025 · CI chậm hơn 28 % | `perf trial`, CI | audit kế |
 
 AUD-HAR-296 là suy luận từ cách F3 xét tên ở gốc cây. AUD-HAR-297 có từ trước D-371 và đã được nêu ở review #447. Cả hai chưa tái hiện.
+
+## 5. Nhóm ARCH (D-373)
+
+`.claude/hooks/` đạt 843 817 B, gấp 2,28 lần mốc 2026-10-26 (369 274 B). Nhóm vượt 2× từ `024ee79` (#433). ADR-0050 đòi ADR xét lại khi điều đó xảy ra, nhưng chưa có ADR và cũng không có cổng máy nào bắt (AUD-ARCH-009 🟠). Bản sửa ở #448 gồm [ADR-0072](../adr/0072-review-dir-caps-after-2x.md) và cổng `SIZE_MARKS` trong `tests/test_docs_budget.py`. ADR-0072 giữ trần, đặt mốc 2026-11-05 cho `.claude/hooks` và `scripts`. Cổng đỏ khi một nhóm vượt 2× mốc gần nhất. Chi phí compile `guard.py` mỗi lệnh Bash chưa đo, giao T-3709.
