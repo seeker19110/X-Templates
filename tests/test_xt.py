@@ -2371,6 +2371,20 @@ class RebaseLinksAnchorTest(unittest.TestCase):
         self.assertIn("(.xtemplates/framework/06-design-ux/other.md#a)", out)
         self.assertIn("(https://x.invalid/#b)", out)
 
+    def test_compose_anchor_keeps_md_suffix(self):
+        """3.30.0: `Doc.rel` không có `.md` → `(#quyết-định)` của UX-DS-022 thành `…/design-system-and-tokens#…` (gãy)."""
+        root = Path(xt.__file__).resolve().parent.parent / "framework"
+        docs, errors = xt.load_docs(root)
+        self.assertEqual(errors, [])
+        doc = next(d for d in docs if d.rel == "06-design-ux/design-system-and-tokens")
+        with unittest.mock.patch.dict(os.environ, {"XT_FRAMEWORK_LINK": "FW"}):
+            sections, _counts = xt._compose_sections(root, [doc], "L", True)
+        targets = re.findall(r"\]\((FW/[^)\s]+)\)", "\n".join(sections))
+        self.assertIn("FW/06-design-ux/design-system-and-tokens.md#quyết-định", targets)
+        for target in targets:
+            path = target[3:].partition("#")[0]
+            self.assertTrue((root / path).exists(), target)
+
 
 if __name__ == "__main__":
     unittest.main()

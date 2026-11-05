@@ -1,28 +1,7 @@
 # Nhật ký quyết định tự duyệt
 
 > Ghi bởi `xt.py loop decide`. Phiên chính tự duyệt điểm quyết định theo tiêu chí chất lượng cuối (`LOOP-STOP-018`, ADR-0008 của khung). Người xem lại bất cứ lúc nào; đổi ý → quyết định mới ghi "thay D-NNN", không sửa mục cũ.
-> Bản tháng trước: [`DECISIONS-2026-10.md`](DECISIONS-2026-10.md) (D-001…D-287), [`DECISIONS-2026-11.md`](DECISIONS-2026-11.md) (D-292…D-351) — máy đọc cả bản tháng (T-3651).
-
-### D-356 · 2026-11-04T22:53:05+00:00 · T-3551: chốt ADR-0071 perf trial — 14 điểm hở của bản nháp (ID FLOW, nơi đo candidate, nguồn cấu hình, kiểm trỏ đúng cây, start khi HEAD lệch cây giữ, held-out, falsifier, PERF-LOG, --resume, neo công cụ chấm, sửa file khoá, khoá điểm nóng, đo xen kẽ)
-
-- Phương án: (1) Nhận cả 14 đề xuất của bản nháp: FLOW giữ nghĩa nghiên cứu §10 cho 20…23, ca mới FLOW-27…34; candidate đo ở worktree dựng lại; cấu hình JSON đọc từ commit gốc; kiểm trỏ đúng cây bằng probe + quét .pth/symlink; từ chối start khi HEAD^{tree} ≠ kept_tree; held-out hạt giống lúc finish, phải improved; falsifier trúng → thu hồi; PERF-LOG miễn khi chỉ nối thêm; --resume R1 rơi về R2; công cụ chấm neo cả exec blob gốc lẫn Gate <(git show); sửa file khoá → thu hồi + tính lượt; khoá điểm nóng theo đường file + kiểm diff; luôn đo xen kẽ · (2) Giữ phương án B cho ID FLOW (đổi nghĩa FLOW-20…23 theo PLAN) và đo candidate tại chỗ cho rẻ hơn
-- Chọn: Nhận cả 14 đề xuất của bản nháp: FLOW giữ nghĩa nghiên cứu §10 cho 20…23, ca mới FLOW-27…34; candidate đo ở worktree dựng lại; cấu hình JSON đọc từ commit gốc; kiểm trỏ đúng cây bằng probe + quét .pth/symlink; từ chối start khi HEAD^{tree} ≠ kept_tree; held-out hạt giống lúc finish, phải improved; falsifier trúng → thu hồi; PERF-LOG miễn khi chỉ nối thêm; --resume R1 rơi về R2; công cụ chấm neo cả exec blob gốc lẫn Gate <(git show); sửa file khoá → thu hồi + tính lượt; khoá điểm nóng theo đường file + kiểm diff; luôn đo xen kẽ
-- Lý do (tiêu chí chất lượng cuối): (1) spike đo được: đo theo khối 18 % improved sai trong A/A, đo tại chỗ bị .pth bị ignore lừa — các phương án chặt hơn chặn cả hai; (3) ID ổn định theo conventions (không đổi nghĩa ID đã dùng); (2) mỗi task một PR, perf trial là lệnh mới, Gate mẫu cũ giữ nguyên làm đường lùi; chi phí +0,8 s/cây chỉ phá hoà (5)
-- Đường lùi: Gỡ skill /optimize khỏi perf trial, quay về Gate mẫu perf-gate.sh; finish --no-apply là lối tạm
-
-### D-357 · 2026-11-04T22:54:48+00:00 · T-3680…T-3687 (perf trial, ADR-0071): mỗi task một PR (8 PR) hay gộp?
-
-- Phương án: (1) 4 PR, mỗi PR hai task liền kề (3680+3681, 3682+3683, 3684+3685, 3686+3687), mỗi task một commit, nhánh xếp chồng, gộp origin/main sau mỗi merge (không force-push) · (2) 8 PR, mỗi task một PR như PLAN
-- Chọn: 4 PR, mỗi PR hai task liền kề (3680+3681, 3682+3683, 3684+3685, 3686+3687), mỗi task một commit, nhánh xếp chồng, gộp origin/main sau mỗi merge (không force-push)
-- Lý do (tiêu chí chất lượng cuối): (3) mỗi PR ~300–400 dòng vẫn review trọn được (review #439 ~1100 dòng chạm trần lượt); tiền lệ D-244 gộp T-3548…T-3550; (2) mỗi task một commit nên revert từng task được; (5) giảm nửa số vòng CI + review
-- Đường lùi: Tách lại theo task nếu reviewer báo PR quá lớn (INCONCLUSIVE)
-
-### D-360 · 2026-11-04T23:33:14+00:00 · Review #440 (ADR-0071) 4 🔴: (1) agent tự chọn baseline qua --base/vòng mới; (2) start bỏ qua kiểm cây, held-out chỉ so start_head; (3) PERF-LOG miễn ở start nhưng nằm trong candidate_files/vân tay → kẹt sau 2 lần thu hồi; (4) điểm nóng mồi reset bộ đếm ba lần. Kèm đính chính D-357 (repo squash-merge nên không revert được theo task).
-
-- Phương án: (1) Sửa chặt: (1) base = merge-base(HEAD, nhánh mặc định được bảo vệ) do máy tính, bỏ --base, vòng mới chỉ khi merge-base đổi; (2) bỏ 'hoặc bỏ qua', finish kiểm file khoá không đổi base..start_head và held-out so cả với base; (3) PERF-LOG dựng từ perf-trials.jsonl bằng 'perf trial log', start/finish không ghi cây, bỏ miễn; (4) điểm nóng là danh sách đường chuẩn hoá (bỏ ::SYM), file candidate ngoài điểm nóng → thu hồi off-hotspot, start exit 3 nếu bất kỳ đường nào đã cạn · (2) Giữ --base nhưng ghim lúc loop init của PLAN-opt; PERF-LOG loại nhất quán khỏi candidate_files/vân tay/kept_tree; đếm ba lần theo hợp các điểm nóng
-- Chọn: Sửa chặt: (1) base = merge-base(HEAD, nhánh mặc định được bảo vệ) do máy tính, bỏ --base, vòng mới chỉ khi merge-base đổi; (2) bỏ 'hoặc bỏ qua', finish kiểm file khoá không đổi base..start_head và held-out so cả với base; (3) PERF-LOG dựng từ perf-trials.jsonl bằng 'perf trial log', start/finish không ghi cây, bỏ miễn; (4) điểm nóng là danh sách đường chuẩn hoá (bỏ ::SYM), file candidate ngoài điểm nóng → thu hồi off-hotspot, start exit 3 nếu bất kỳ đường nào đã cạn
-- Lý do (tiêu chí chất lượng cuối): (1) phương án 1 đóng cả bốn đường lách bằng dữ kiện agent không sửa được (nhánh bảo vệ cần review để đổi; sổ jsonl do máy ghi) — phương án 2 còn phụ thuộc state agent đọc/ghi được và loại trừ đặc biệt dễ sót; (3) ít luật hơn, test được. D-357 đính chính: mỗi task một commit chỉ giúp đọc/bisect trên nhánh, squash-merge làm revert theo PR; lý do giữ gộp 4 PR là (3)/(5) cỡ review và số vòng CI
-- Đường lùi: Giữ --base với ghim lúc loop init (phương án 2) nếu dự án đích không có nhánh mặc định được bảo vệ
+> Bản tháng trước: [`DECISIONS-2026-10.md`](DECISIONS-2026-10.md) (D-001…D-287), [`DECISIONS-2026-11.md`](DECISIONS-2026-11.md) (D-292…D-360) — máy đọc cả bản tháng (T-3651).
 
 ### D-361 · 2026-11-05T00:00:58+00:00 · ADR-0071 sau review #440: sáu chi tiết ngoài D-360 — lệnh prepare, mã thoát 4, Gate status --check, cây đo bằng clone --shared, khoá cả pyproject.toml/package.json, nhánh mặc định lấy từ origin/HEAD
 
@@ -121,3 +100,38 @@
 - Chọn: Sửa HẾT 3 🟠 + 4 🟢 trong một commit trên PR, rồi review lượt 2 cả PR ở head mới bằng reviewer-alt (effort max)
 - Lý do (tiêu chí chất lượng cuối): (1) các phát hiện đều nhỏ, sửa được ngay, có tái hiện; (3) tách PR làm báo cáo/ARCH lệch khỏi bản đang cắt; (5) một lượt sửa + một review rẻ hơn hai PR
 - Đường lùi: Tách ADR-0072 sang PR riêng nếu review lượt 2 vẫn chặn ở phần đó
+
+### D-375 · 2026-11-05T12:47:31+00:00 · AUD-HAR-301 (xboss nâng 3.30.0): harness_permissions: own đổi 11 lệnh hook dạng ${CLAUDE_PROJECT_DIR} sang tương đối — đúng giao ước đã ghi (harness-files.md, test own_permissions_keeps_project_permissions_and_relative_hooks, chủ repo duyệt 2026-10-22 cho dhcb); sửa trong 3.30.1?
+
+- Phương án: (1) 3.30.1 giữ giao ước, ghi chú ở harness-files.md + CHANGELOG 'Dự án đích': dự án cần lệnh hook tuyệt đối thì không dùng own (hoặc gộp tay); 3.31.0 xét own giữ dạng lệnh sẵn có của dự án (ADR mới) · (2) Đổi giao ước ngay trong 3.30.1
+- Chọn: 3.30.1 giữ giao ước, ghi chú ở harness-files.md + CHANGELOG 'Dự án đích': dự án cần lệnh hook tuyệt đối thì không dùng own (hoặc gộp tay); 3.31.0 xét own giữ dạng lệnh sẵn có của dự án (ADR mới)
+- Lý do (tiêu chí chất lượng cuối): (2) bản vá không đổi giao ước đã được chủ repo duyệt; (1) xboss hiện chạy đúng (PR #706 xanh, hook tuyệt đối giữ ở lần cài này) — rủi ro chỉ ở lần cài sau, đã ghi; (3) đổi giao ước cần ADR và test mới
+- Đường lùi: Đổi trong 3.30.x nếu dự án đích nào hỏng hook vì dạng tương đối trước 3.31.0
+
+### D-376 · 2026-11-05T13:13:38+00:00 · PR #450 (cắt 3.30.1): review lượt 1 chặn — 🔴 trần docs/ops vượt 970 B (GO-NO-GO §2 khai test_docs_budget exit 0 khi file mới chưa vào index); 🟠 cổng ký tự vô hình bỏ sót research/ (install.py cài vào dự án đích), PROGRESS.md, xt.yaml, .github/; 🟠 mẫu xt.yaml nói own giữ dạng lệnh hook — ngược giao ước D-375; 5 🟢 (regex code span thiếu lookbehind/escape, test dán ký tự vô hình thật, PROGRESS, harness-files lặp ý, chuỗi VS dài vô hạn)
+
+- Phương án: (1) Sửa HẾT trong một commit: lưu trữ dòng đã sửa đủ chỗ + đo lại sau git add; cổng quét mọi file tracked trừ tests/ (lỗi UTF-8 → báo, không bỏ qua); sửa chú thích mẫu xt.yaml + docstring install.py theo giao ước; 🟢: regex code span theo CommonMark tối thiểu (lookbehind backtick, \` escape) + test, test dùng escape, PROGRESS 3.30.1, harness-files một câu, giới hạn chuỗi selector ≤ 1 liên tiếp; rồi review lượt 2 cả PR · (2) Tách cổng ký tự vô hình mở rộng sang PR sau
+- Chọn: Sửa HẾT trong một commit: lưu trữ dòng đã sửa đủ chỗ + đo lại sau git add; cổng quét mọi file tracked trừ tests/ (lỗi UTF-8 → báo, không bỏ qua); sửa chú thích mẫu xt.yaml + docstring install.py theo giao ước; 🟢: regex code span theo CommonMark tối thiểu (lookbehind backtick, \` escape) + test, test dùng escape, PROGRESS 3.30.1, harness-files một câu, giới hạn chuỗi selector ≤ 1 liên tiếp; rồi review lượt 2 cả PR
+- Lý do (tiêu chí chất lượng cuối): (1) research/ được cài vào dự án đích — đúng lớp lỗi bản vá nhắm tới; (1) tài liệu own sai là gốc lỗi xboss; (3) đều nhỏ, có tái hiện; PR cắt bản không mang nợ (ADR-0059 §6)
+- Đường lùi: Tách cổng mở rộng nếu quét mọi file chặn oan nội dung hợp lệ
+
+### D-378 · 2026-11-05T14:28:05+00:00 · PR #450 (cắt 3.30.1): review lượt 2 còn 3 🟢 — F1 hồi quy so main (che code span theo cả dòng ghép backtick lẻ của hai ô bảng → link hỏng ở ô giữa không báo), F2 danh sách số vắng thiếu D-352…355, F3 lookbehind sai với backtick sau backtick đã escape; trần rethink đã dùng
+
+- Phương án: (1) Thu hẹp: rút phần sửa check-links (AUD-CODE-061, FB-115) khỏi 3.30.1 — trả scripts/check-links.py và test về main, AUD-CODE-061 về mở (sửa ở 3.31.0 bằng bộ quét backtick theo CommonMark + tách ô GFM), CHANGELOG bỏ dòng; sửa F2; review lượt 3 chỉ delta · (2) Sửa F1/F3 bằng bộ quét mới ngay trong 3.30.1
+- Chọn: Thu hẹp: rút phần sửa check-links (AUD-CODE-061, FB-115) khỏi 3.30.1 — trả scripts/check-links.py và test về main, AUD-CODE-061 về mở (sửa ở 3.31.0 bằng bộ quét backtick theo CommonMark + tách ô GFM), CHANGELOG bỏ dòng; sửa F2; review lượt 3 chỉ delta
+- Lý do (tiêu chí chất lượng cuối): (1) bản vá không được mang hồi quy (F1); regex che code span đã hai lượt lộ ca sai — viết bộ quét đúng là việc của bản thường; (2) mục tiêu chính 3.30.1 (AI-GUARD-018, compose, cổng ký tự vô hình) đã sạch qua hai lượt review; FB-115 là báo oan có từ trước, giữ thêm một bản không tệ hơn
+- Đường lùi: Đưa lại phần check-links vào 3.30.x nếu bộ quét mới xong trước khi dự án đích cần
+
+### D-379 · 2026-11-05T14:57:43+00:00 · PR #450: review lượt 3 chặn vì phần sót của D-378 (CHANGELOG còn hứa check-links bỏ code span; GO-NO-GO số đo cũ)
+
+- Phương án: (1) Đã sửa ở 31dbad4; review delta lượt 4 · (2) Tách PR
+- Chọn: Đã sửa ở 31dbad4; review delta lượt 4
+- Lý do (tiêu chí chất lượng cuối): (1) chỉ là chữ sót của D-378, đã sửa và đo lại sau git add; (5) tách PR không thêm an toàn
+- Đường lùi: Tách PR nếu lượt 4 còn chặn
+
+### D-381 · 2026-11-05T15:30:38+00:00 · PR #450: lượt 4 còn chữ sai (tiêu đề/thân PR khai check-links; GO-NO-GO số đo; PROGRESS)
+
+- Phương án: (1) Sửa chữ tại chỗ, review lượt 5 · (2) Tách PR
+- Chọn: Sửa chữ tại chỗ, review lượt 5
+- Lý do (tiêu chí chất lượng cuối): (1) chỉ là chữ; (5) tách không thêm an toàn
+- Đường lùi: Tách PR
