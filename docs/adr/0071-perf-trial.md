@@ -2,7 +2,8 @@
 
 - **Trạng thái:** Đã chấp nhận (2026-11-05, phiên chính tự duyệt — D-356: nhận cả mười bốn đề xuất in đậm ở §Điểm đã chốt;
   chủ repo 2026-11-05 "làm hết đi"; sửa theo review #440 — D-360: baseline do máy tính, không lối ra `--base`, PERF-LOG dựng từ
-  sổ, điểm nóng là danh sách file; sửa theo review #442 — D-366: gốc = đầu nhánh máy chủ, không merge-base). Chưa triển khai — T-3700…T-3707 (PLAN-harden-2026-10-27-loops).
+  sổ, điểm nóng là danh sách file; sửa theo review #442 — D-366: gốc = đầu nhánh máy chủ, không merge-base; sửa theo review #443 — D-368: `status --check`
+  ràng `HEAD^{tree}`, pathspec theo nghĩa đen, môi trường mới mỗi lần chạy lệnh đo, khoá `.venv/`/`node_modules/`). Chưa triển khai — T-3700…T-3707 (PLAN-harden-2026-10-27-loops).
 - **Ngày:** 2026-11-05.
 - **Thực hiện:** [ADR-0052 §Quyết định 7](0052-loop-state-rev-progress-perf-v2-next-step.md#quyết-định) (D-203; ràng buộc đầu
   vào — bảng ở §Ràng buộc) và §3 (lần thử tối ưu không đi qua `loop record`), thêm `LOOP-OPT-007` (held-out) và `LOOP-OPT-004`
@@ -90,7 +91,8 @@ unit, higher_is_better, ceiling, regress}` (`ceiling` trần tuyệt đối, `re
 `GATE_FILE_PATTERNS`): chính file cấu hình, đường `xt.py` của khung; file khởi động trình chạy `**/sitecustomize.py`,
 `**/usercustomize.py`, `**/*.pth`, `**/conftest.py`, `pytest.ini`, `tox.ini`, `setup.cfg`, `pyproject.toml`, `noxfile.py`,
 `**/package.json`, `.npmrc`, `.yarnrc*`, `.pnpmfile.cjs`, `.python-version`, `.nvmrc`, `.tool-versions`, `.gitattributes`,
-`.gitmodules`, `setup.py`, `requirements*.txt` (D-366) và lockfile (`*.lock`, `package-lock.json`, `pnpm-lock.yaml`). Đổi phụ thuộc/trình chạy không phải tối ưu thuần
+`.gitmodules`, `setup.py`, `requirements*.txt` (D-366), `**/.venv/**`, `**/node_modules/**` (bin của cây đứng đầu PATH
+lệnh đo), `**/.gitignore` (D-368) và lockfile (`*.lock`, `package-lock.json`, `pnpm-lock.yaml`). Đổi phụ thuộc/trình chạy không phải tối ưu thuần
 (`LOOP-OPT-014`): PR riêng, hoặc gỡ bằng `unlock` ở nhánh mặc định.
 
 ### 2. Hợp đồng CLI
@@ -103,7 +105,7 @@ Mã thoát chung: **2** = máy từ chối **trước khi đụng cây agent** (
 | `perf trial start --hotspot PATH… --hypothesis TEXT --falsifier EXPR` | Tính `base_sha` (§1). Đòi: không có lần thử mở; cây sạch ngoài `.autopilot/` — không miễn file nào (`git status --porcelain --untracked-files=all --ignore-submodules=none`); `HEAD^{tree}` = cây của sự kiện `kept`/`log` gần nhất trong vòng, lần đầu vòng = cây `base_sha` (không ngoại lệ); file khoá không đổi `base_sha..HEAD`; mỗi `PATH` là đường file chuẩn hoá (có ở gốc hoặc chưa có ở `HEAD`), không khớp khoá; còn `budget`. Ghi `start_head`, `fp_start`, giả thuyết, falsifier, điểm nóng vào state và dòng `start` vào sổ | 0 · 2 từ chối, không ghi gì · 3 một đường điểm nóng đã cạn (§8) hoặc hết `budget` |
 | `perf trial prepare` | Dựng ba cây cho lần thử đang mở, chạy `setup`, kiểm trỏ đúng cây (§4 bước 3), in kết quả, dọn; không đổi phase — để dự án thử cấu hình trước vòng | 0 · 2 |
 | `perf trial finish [--resume] [--no-apply] [--json]` | Đóng băng, kiểm, đo, quyết, giữ hoặc thu hồi, ghi sổ (§4); `--no-apply` chỉ in quyết định và lệnh thu hồi | 0 giữ · 1 thu hồi xong (vân tay = `fp_start`) · 2 · 4 |
-| `perf trial status [--json] [--check]` | Pha, lần thử mở, đếm theo đường, lệnh kế (`finish`/`finish --resume`/`abort`). `--check` = Gate của task tối ưu: lần giữ gần nhất của vòng đạt `target` so với gốc và không có lần thử mở | 0 · 1 `--check` chưa đạt · 2 state/sổ hỏng · 3 `--check` chưa đạt và mọi đường đã khai cạn hoặc hết `budget` (→ `loop defer`) |
+| `perf trial status [--json] [--check]` | Pha, lần thử mở, đếm theo đường, lệnh kế (`finish`/`finish --resume`/`abort`). `--check` = Gate của task tối ưu: lần giữ gần nhất của vòng đạt `target` so với gốc, không có lần thử mở, cây sạch ngoài `.autopilot/` và `HEAD^{tree}` = cây `kept`/`log` gần nhất của vòng (lần đầu = gốc) — số ở sổ chỉ nói về cây đó; sai → 1 "commit lạ sau lần giữ"/"cây bẩn" (D-368, FLOW-46) | 0 · 1 `--check` chưa đạt · 2 state/sổ hỏng · 3 `--check` chưa đạt và mọi đường đã khai cạn hoặc hết `budget` (→ `loop defer`) |
 | `perf trial abort --reason TEXT` | Lấy `perf-trial.lock`; thu hồi như `finish` thu hồi, ghi `aborted` (tính vào 3 lần) | 0 · 2 không có lần thử, `HEAD ≠ start_head`, không lấy được khoá · 4 |
 | `perf trial log [--check]` | Dựng khối PERF-LOG của vòng (mốc `base_sha`) từ dòng `decide` của sổ, thay đúng khối đó trong `docs/autopilot/PERF-LOG.md`, phần còn lại giữ nguyên byte; ghi sự kiện `log` với cây = `HEAD^{tree}` + PERF-LOG mới (index tạm) — `start` kế đòi cây này sau khi commit. `--check`: so file với bản dựng | 0 · 1 `--check` lệch · 2 có lần thử mở, cây bẩn |
 
@@ -123,7 +125,8 @@ phải lần đỏ của task. Gate của task tối ưu là `perf trial status 
   `default_ref`, `origin_url` (D-366), `config_sha`, `tool_sha`, `hotspot[]`, `hypothesis`, `falsifier`, `start_head`, `fp_start`; `decide` thêm
   `id`, `hotspot[]`, `verdict`, `reason` (lý do — chữ hoặc JSON; `<` ghi thành `&lt;` trong PERF-LOG để chữ không mở/đóng
   được mốc khối — D-366), `candidate_files[]`, `rounds` (`kept` bắt buộc
-  `candidate_tree`); `log` thêm `tree`. Dòng hỏng (kể cả dòng cuối thiếu xuống dòng) → mọi lệnh exit 2, không đoán.
+  `candidate_tree`); `log` thêm `tree`; `interrupt` (lượt đo bị ngắt, §9 — không tính vào ba lần) thêm `id`, `hotspot[]`,
+  `rounds`, `signal` (D-368). Dòng hỏng (kể cả dòng cuối thiếu xuống dòng) → mọi lệnh exit 2, không đoán.
   `setup` của cấu hình là **một chuỗi lệnh shell**.
 
 ### 4. Máy trạng thái của `finish`
@@ -154,7 +157,9 @@ phải lần đỏ của task. Gate của task tối ưu là `perf trial status 
    phiên — HOME giả mang `usercustomize.py`), `PYTHONNOUSERSITE=1` (D-366); `TMPDIR` riêng từng cây; `PATH` = bin của chính
    cây (`.venv/bin`, `node_modules/.bin`) rồi `env.path` (mặc định `/usr/local/bin:/usr/bin:/bin`). Mọi biến khác (`NODE_OPTIONS`,
    `BASH_ENV`, `ENV`, `LD_PRELOAD`, `PYTHON*`, `VIRTUAL_ENV`, `NODE_PATH`, `PIP_*`, `UV_*`, `npm_config_*`…) bị bỏ. Mục `PATH`
-   ghi được bởi uid hiện tại (vd `~/.local/bin`) → ⚠ vào sổ. **Kiểm trỏ đúng cây** (điểm 4): `probe` + quét `.pth`, symlink,
+   ghi được bởi uid hiện tại (vd `~/.local/bin`) → ⚠ vào sổ. File candidate nằm trong thư mục PATH của cây đo (bin của cây,
+   mục `env.path` tương đối; rỗng/`.` = gốc cây) → thu hồi, `tampered` — candidate không được thay bộ chạy của bộ đo kể cả
+   khi dự án `unlock` `.venv/` (D-368). **Kiểm trỏ đúng cây** (điểm 4): `probe` + quét `.pth`, symlink,
    `direct_url.json` editable, phụ thuộc `file:`/`link:` của manifest — đường phân giải ra ngoài cây đo và ngoài
    `sys.base_prefix` của interpreter cây/`env.allow_prefix[]` → exit 2 trước khi đo (FLOW-32). Chụp danh sách **đầy đủ** file
    mỗi cây (cả file bị ignore, trừ `.git`): đường, cỡ, mode, `mtime_ns`, sha256 (file ≤ 1 MiB ngoài `scratch`); thư mục
@@ -162,9 +167,12 @@ phải lần đỏ của task. Gate của task tối ưu là `perf trial status 
    theo symlink, rồi xoá. So cây (`HEAD^{tree}` với cây neo) bằng SHA `rev-parse`; mọi `diff` thêm `--ignore-submodules=none
    --no-ext-diff --no-textconv` (review #442: `diff.ignoreSubmodules=all` giấu đổi gitlink).
 4. **Đo cùng lượt, xen kẽ:** chỉ số chính ở ba cây, vòng tròn đổi thứ tự (B K C, K C B, C B K…), `runs` mỗi cây; `exact` chạy
-   ≥ 3 lần và đòi trùng nhau (lệch → `insufficient`); chỉ số phụ cùng lượt. Lệnh đo, `equiv`, held-out chạy với `HOME`,
-   `XDG_*_HOME`, `TMPDIR` là thư mục tạm riêng từng cây, mới mỗi lượt (`setup` dùng `HOME` thật cho cache gói) — cache đĩa
-   ngoài cây giữa các lần chạy không đi qua đường này. Mẫu ghi theo v2 (ADR-0052 §4), thêm `kind` và **trường mới**
+   ≥ 3 lần và đòi trùng nhau (lệch → `insufficient`; chỉ lấy **số cuối** stdout — mã in lúc thoát (`atexit`, `sys.stdout`,
+   vá `builtins`) chỉ ⚠ heuristic; so toàn stdout với gốc: T-3705); chỉ số phụ cùng lượt. **Mỗi lần chạy** lệnh đo, `equiv`,
+   held-out có `HOME`, `XDG_*_HOME`, `TMPDIR` là thư mục tạm MỚI cạnh cây, dọn ngay sau lần chạy (`setup` dùng `HOME` thật cho
+   cache gói), và trước mỗi lần chạy xoá file khớp `scratch` khác danh sách sau `setup` (vd kết quả cache trong
+   `__pycache__/`) — cache đĩa trong lẫn ngoài cây không đi qua giữa các mẫu (D-368: một lần mỗi cây cho cả lượt từng giữ
+   oan candidate cache kết quả). Mẫu ghi theo v2 (ADR-0052 §4), thêm `kind` và **trường mới**
    `env.cmd_python` (interpreter của lệnh đo; `env.python` giữ nghĩa cũ). Sau lượt so lại danh sách file của ba cây: khác
    ngoài `scratch` ở gốc/`start_head` → exit 2 (FLOW-28); ở candidate → thu hồi, `tampered`.
 5. **Tương đương:** `equiv` exit 0 trên cây candidate (và trên cây gốc — đỏ ở gốc = cấu hình hỏng, exit 2).
@@ -175,8 +183,12 @@ phải lần đỏ của task. Gate của task tối ưu là `perf trial status 
    giống, phụ, `rounds`, `candidate_tree`, các ⚠ của heuristic `perf guard` trên diff `start_head`→candidate, ⚠ `PATH`) vào
    sổ; phase `decided`.
 8. **Hành động:** giữ → để candidate trong cây, `kept_tree = candidate_tree` (spike: bằng `HEAD^{tree}` sau commit). Thu hồi →
-   `git stash push --include-untracked -m "xt-perf-trial <id>" -- <candidate_files>` rồi đòi `tree_fingerprint == fp_start`;
-   lệch (vd submodule) → phase giữ `decided`, exit 4, in SHA stash (FLOW-33). Không `checkout -- .`/`reset --hard`/`clean`;
+   `git stash push --include-untracked -m "xt-perf-trial <id>"` trên đúng `candidate_files` rồi đòi `tree_fingerprint ==
+   fp_start`; lệch (vd submodule) → phase giữ `decided`, exit 4, in SHA stash (FLOW-33). Mọi lệnh git nhận danh sách file
+   (stash, `add` của index tạm) đọc nó từ stdin (`--pathspec-from-file=- --pathspec-file-nul`) với `GIT_LITERAL_PATHSPECS=1`:
+   tên `*` hay `:(…)` là chính nó (glob từng cuốn sổ `.autopilot/` vào stash), không vướng ARG_MAX (D-368). Giới hạn đã
+   biết: chính `git stash` chuyển pathspec qua argv cho tiến trình con dọn cây — danh sách vượt ARG_MAX (≈ 2 MB tên) thì mục
+   stash đủ nhưng cây chưa dọn → exit 4. Không `checkout -- .`/`reset --hard`/`clean`;
    không `stash drop` (guard hỏi).
 9. **Đóng:** dọn cây tạm, phase `closed`. `finish` không ghi PERF-LOG và không đụng file theo dõi nào ngoài thu hồi (D-360).
 
@@ -220,11 +232,12 @@ danh sách (không thì thu hồi, `verdict: off-hotspot`).
 tay khác **hoặc** đã resume một lần → thu hồi, `verdict: incomplete` (FLOW-21); `decided` → làm nốt bước 8–9, không ghi
 `decide` trùng (FLOW-36). Mỗi lượt đo tăng `rounds` (ghi vào `decide` và PERF-LOG) — đo lại tới khi may không làm được quá
 một lần. Cây tạm mất sau reboot → dựng lại. Hai `finish` (hay `finish` và `abort`) cùng lúc: `perf-trial.lock` không lấy
-được → exit 2 ngay.
+được → exit 2 ngay. SIGTERM/SIGINT giữa lượt đo (D-368): dừng cả nhóm tiến trình lệnh đo, dọn cây tạm, nối dòng
+`interrupt`, pha về `started`, exit 2 — `finish` kế đo lại (`rounds` tăng); tín hiệu thứ hai trong lúc dọn bị bỏ qua.
 
 ### 10. Ca FLOW
 
-ID FLOW-20…23 giữ nghĩa nghiên cứu §10; FLOW-27…34 giữ nghĩa bản ADR trước review #440; ca review #440 cần thêm là FLOW-35…45.
+ID FLOW-20…23 giữ nghĩa nghiên cứu §10; FLOW-27…34 giữ nghĩa bản ADR trước review #440; ca review #440 cần thêm là FLOW-35…45; review #443 thêm FLOW-46 (D-368).
 
 | ID | Given / When | Then |
 |---|---|---|
@@ -252,6 +265,7 @@ ID FLOW-20…23 giữ nghĩa nghiên cứu §10; FLOW-27…34 giữ nghĩa bản
 | FLOW-43 | candidate đổi gitlink submodule (đã commit trong submodule) / đổi tên file / repo có `diff.external` | cây candidate có gitlink mới / `candidate_files` có cả hai đường / cây candidate trùng cây agent |
 | FLOW-44 | chỉ số chính `improved`, bộ nhớ +40 % dưới trần, `regress` 0 | thu hồi, exit 1 |
 | FLOW-45 | thu hồi rồi giữ một lần chưa đạt `target`, rồi giữ đạt | không dòng `loop record` nào cho task; `status --check` exit 1, rồi 0 |
+| FLOW-46 | giữ đạt `target`, commit; rồi commit lạ (chậm hơn gốc) / commit trả cây về cây giữ / sửa file chưa commit | `status --check` exit 0 → 1 "commit lạ sau lần giữ" → 0 → 1 "cây bẩn" |
 
 ### Ràng buộc ADR-0052 §7 (và §3) → cách đáp ứng
 
