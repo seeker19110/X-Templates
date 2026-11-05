@@ -1,28 +1,7 @@
 # Nhật ký quyết định tự duyệt
 
 > Ghi bởi `xt.py loop decide`. Phiên chính tự duyệt điểm quyết định theo tiêu chí chất lượng cuối (`LOOP-STOP-018`, ADR-0008 của khung). Người xem lại bất cứ lúc nào; đổi ý → quyết định mới ghi "thay D-NNN", không sửa mục cũ.
-> Bản tháng trước: [`DECISIONS-2026-10.md`](DECISIONS-2026-10.md) (D-001…D-287), [`DECISIONS-2026-11.md`](DECISIONS-2026-11.md) (D-292…D-330) — máy đọc cả bản tháng (T-3651).
-
-### D-331 · 2026-11-03T15:49:52+00:00 · Hai 🔴 mở AUD-SEC-406 (tên dựng/ngầm) và AUD-SEC-414 (HOME/CDPATH trước cd, patch) thuộc lớp lách guard bằng tên/mã dựng lúc chạy — vá tiếp, chặn rộng, bật sandbox bắt buộc, hay chấp nhận có hạn?
-
-- Phương án: (1) Vá tiếp từng dạng · (2) Chặn mọi mở rộng/tệp ghi trong lệnh chạy mã · (3) Bật sandbox bắt buộc trong settings của khung · (4) ADR-0067: chấp nhận có hạn 2027-01-21 lớp lách bằng tên/mã dựng lúc chạy khi mọi dạng nguyên văn đã chặn; ranh giới cứng ở ruleset GitHub/CI/review; đánh giá sandbox opt-in trước hạn
-- Chọn: ADR-0067: chấp nhận có hạn 2027-01-21 lớp lách bằng tên/mã dựng lúc chạy khi mọi dạng nguyên văn đã chặn; ranh giới cứng ở ruleset GitHub/CI/review; đánh giá sandbox opt-in trước hạn
-- Lý do (tiêu chí chất lượng cuối): (3) phân tích tĩnh shell không đầy đủ theo nguyên lý — vá tiếp là vòng không điểm dừng kèm hồi quy (#426/#427); (1) không nới luật, không khai đóng, force-push/xoá nhánh chính bị ruleset máy chủ chặn; (2) chỉ đổi trạng thái sổ; chặn rộng/sandbox bắt buộc gây chặn oan lớn hoặc chưa chạy được ở cloud
-- Đường lùi: Đổi AUD-SEC-406/414/410/413 về mở
-
-### D-332 · 2026-11-03T16:19:32+00:00 · Review #428 chặn: ADR-0067 chấp nhận quá phạm vi (AUD-SEC-414 và phần nguyên văn của 406 — sponge/tar/unzip/openssl/xxd, tệp nạp ngầm — vẫn lọt dù nguyên văn; nói quá lớp ngoài; đảo ADR-0065 không ghi) — sửa thế nào?
-
-- Phương án: (1) Giữ chấp nhận, sửa câu chữ · (2) Thu hẹp ADR-0067 về ĐÚNG lớp tên dựng lúc chạy (điều kiện a/b/c), ghi Thay một phần ADR-0065; 414 về mở; tách 2 ID 🔴 mở mới (trình ghi chưa liệt kê; tệp nạp ngầm); task T-3663 sửa luật tĩnh; T-3635 bỏ tick; sửa mô tả lớp ngoài (review không là ranh giới máy chủ; tắt hook cục bộ không có lớp cứng khi sandbox tắt)
-- Chọn: Thu hẹp ADR-0067 về ĐÚNG lớp tên dựng lúc chạy (điều kiện a/b/c), ghi Thay một phần ADR-0065; 414 về mở; tách 2 ID 🔴 mở mới (trình ghi chưa liệt kê; tệp nạp ngầm); task T-3663 sửa luật tĩnh; T-3635 bỏ tick; sửa mô tả lớp ngoài (review không là ranh giới máy chủ; tắt hook cục bộ không có lớp cứng khi sandbox tắt)
-- Lý do (tiêu chí chất lượng cuối): (1) cách hiểu chặt: dạng nguyên văn sửa được bằng luật tĩnh nên không được chấp nhận; cổng --strict không xanh giả; (3) giữ điểm dừng cho đúng lớp không giải được tĩnh
-- Đường lùi: Đổi các dòng sổ về trạng thái trước #428
-
-### D-333 · 2026-11-03T17:43:50+00:00 · T-3663: luật AUD-SEC-415 chặn lệnh Kiểm PRF-CLI-004 (git ls-files --error-unmatch scripts/xt.py … && python3 scripts/xt.py --help) — viết lại lệnh Kiểm hay miễn git ls-files?
-
-- Phương án: (1) Viết lại lệnh Kiểm: bỏ scripts/xt.py khỏi git ls-files (CI chỉ có tệp đã track), theo tiền lệ UX-DS-021 · (2) Thêm git ls-files vào danh sách đọc REUSE_GIT_READS
-- Chọn: Viết lại lệnh Kiểm: bỏ scripts/xt.py khỏi git ls-files (CI chỉ có tệp đã track), theo tiền lệ UX-DS-021
-- Lý do (tiêu chí chất lượng cuối): (1) không thêm miễn trừ mới vào guard (bài học hồi quy #426/#427); lệnh Kiểm lỏng hơn chút ở máy dev nhưng CI giữ nguyên ý (tệp tồn tại = đã track); (3) đơn giản
-- Đường lùi: Trả lệnh Kiểm cũ và thêm miễn ls-files bằng ADR
+> Bản tháng trước: [`DECISIONS-2026-10.md`](DECISIONS-2026-10.md) (D-001…D-287), [`DECISIONS-2026-11.md`](DECISIONS-2026-11.md) (D-292…D-333) — máy đọc cả bản tháng (T-3651).
 
 ### D-334 · 2026-11-03T19:08:57+00:00 · Nợ #429 (PR #430): AUD-SEC-419 — duyệt 2 lệnh chặn→qua có chủ đích (shellcheck, git log là lệnh đọc; mất miễn khi GIT_*/-C/-c/*PAGER=) và chấp nhận phần (b) git apply/patch từ tệp diff vẫn BUDGET?
 
@@ -184,3 +163,10 @@
 - Chọn: Nhận cả sáu (done= cho ca đã xanh; log đòi HEAD^{tree} = cây giữ/log gần nhất; điểm nóng nhận file có ở HEAD do lần giữ trước thêm; khoá mặc định **/ và từ chối khoá lạ; đếm ba lần qua mọi vòng, base từ SHA máy chủ; setup qua /bin/sh -c) — thư mục tạm của exec blob gốc phải dọn ở T-3703; gỡ ID khỏi XFAIL ở T-3707 cùng lúc sửa Gate T-3700
 - Lý do (tiêu chí chất lượng cuối): (1) năm điểm chặt hơn hoặc trung tính; điểm nóng do lần giữ thêm đã qua máy kiểm; (3) XFAIL không còn ca là rác — gỡ ở task cuối giữ Gate T-3700 đúng nghĩa; (2) rò thư mục tạm có task chủ
 - Đường lùi: Giữ done= nếu sửa Gate T-3700 làm loop verify lịch sử đỏ
+
+### D-366 · 2026-11-05T02:10:21+00:00 · Review #442 🔴: 'máy chủ' của D-361 là URL origin cục bộ — agent đổi set-url/config remote.*.url/insteadOf/GIT_CONFIG_*/packed-refs/.git/refs/remotes để tự chọn gốc vòng; 🟠 hạ cấp gốc bằng nhánh từ tổ tiên cũ; 🟠 diff.ignoreSubmodules lách luật HEAD^{tree}; 🟠 HOME từ env (usercustomize); 🟠 os.walk nuốt lỗi quyền; 5 🟢
+
+- Phương án: (1) Hai lớp: (guard) deny mọi đổi URL/pushurl/refspec/insteadOf của remote kể cả -c và GIT_CONFIG_* đi kèm xt.py, và mọi ghi thẳng .git/packed-refs, .git/refs/remotes/** (Bash lẫn Edit/Write); (xt.py) perf trial lọc env git theo allowlist, bỏ cấu hình git toàn cục/hệ thống khi gọi ls-remote (GIT_CONFIG_NOSYSTEM, GIT_CONFIG_GLOBAL=/dev/null), từ chối khi có insteadOf áp lên URL origin, ghi URL origin vào sổ ở start đầu và từ chối khi đổi. Gốc = ĐẦU nhánh mặc định do máy chủ báo (start đòi HEAD chứa đầu nhánh, không còn merge-base tuỳ tổ tiên) — chặn hạ cấp. So HEAD^{tree} bằng SHA rev-parse, mọi diff thêm --ignore-submodules=none --no-ext-diff --no-textconv. HOME = pwd.getpwuid, PYTHONNOUSERSITE=1. os.walk onerror → exit 2; dọn chmod. Sửa cả 5 🟢 (exec giữ gốc dự án qua CLAUDE_PROJECT_DIR; đọc __file__ /dev/fd → không exec sai; mỗi cây một mkdtemp + remote remove origin trong clone; cây đo phải ngoài cây agent; escape mốc PERF-LOG) và khoá mặc định thêm setup.py, requirements*.txt. ADR §1/§4 ghi giới hạn còn lại: cùng uid sửa trực tiếp file trong .git ngoài guard (lớp hai: sandbox, ADR-0067) · (2) Chỉ ghi giới hạn vào ADR, giữ mã
+- Chọn: Hai lớp: (guard) deny mọi đổi URL/pushurl/refspec/insteadOf của remote kể cả -c và GIT_CONFIG_* đi kèm xt.py, và mọi ghi thẳng .git/packed-refs, .git/refs/remotes/** (Bash lẫn Edit/Write); (xt.py) perf trial lọc env git theo allowlist, bỏ cấu hình git toàn cục/hệ thống khi gọi ls-remote (GIT_CONFIG_NOSYSTEM, GIT_CONFIG_GLOBAL=/dev/null), từ chối khi có insteadOf áp lên URL origin, ghi URL origin vào sổ ở start đầu và từ chối khi đổi. Gốc = ĐẦU nhánh mặc định do máy chủ báo (start đòi HEAD chứa đầu nhánh, không còn merge-base tuỳ tổ tiên) — chặn hạ cấp. So HEAD^{tree} bằng SHA rev-parse, mọi diff thêm --ignore-submodules=none --no-ext-diff --no-textconv. HOME = pwd.getpwuid, PYTHONNOUSERSITE=1. os.walk onerror → exit 2; dọn chmod. Sửa cả 5 🟢 (exec giữ gốc dự án qua CLAUDE_PROJECT_DIR; đọc __file__ /dev/fd → không exec sai; mỗi cây một mkdtemp + remote remove origin trong clone; cây đo phải ngoài cây agent; escape mốc PERF-LOG) và khoá mặc định thêm setup.py, requirements*.txt. ADR §1/§4 ghi giới hạn còn lại: cùng uid sửa trực tiếp file trong .git ngoài guard (lớp hai: sandbox, ADR-0067)
+- Lý do (tiêu chí chất lượng cuối): (1) phương án 1 đóng mọi đường đã tái hiện bằng hai lớp độc lập; đòi HEAD chứa đầu nhánh chặt hơn merge-base và bỏ lựa chọn tổ tiên của agent; phần còn lại là giới hạn cùng uid đã được ADR-0067 chấp nhận — ghi rõ, sửa tiền đề D-361; (3) mỗi điểm có test tái hiện
+- Đường lùi: Trở về merge-base nếu đòi HEAD chứa đầu nhánh làm vòng tối ưu phải gộp main quá thường

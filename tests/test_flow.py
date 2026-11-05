@@ -1171,15 +1171,19 @@ class TrialFlowTest(TmpRepoCase):
         self.assertEqual(self.git("stash", "list"), "")
 
     @flow("FLOW-28", done="T-3701")
-    def test_flow_28_moved_default_branch_keeps_merge_base(self) -> None:
-        """Given `start` + `abort` ở gốc B, rồi `main` của máy chủ đi tiếp và cây agent `fetch` (`origin/main` dời) ·
-        When `start` · Then exit 0, `base_sha` vẫn B — `fetch` không đổi merge-base, vòng không đổi."""
+    def test_flow_28_moved_default_branch_needs_merge(self) -> None:
+        """Given `start` + `abort` ở gốc B, rồi `main` của máy chủ đi tiếp tới C và cây agent `fetch` · When `start` ·
+        Then exit 2 "gộp nhánh mặc định trước" (gốc = đầu nhánh máy chủ, không merge-base — D-366, nhánh cũ không hạ gốc
+        về B); gộp C rồi `start` → exit 0, `base_sha` = C (vòng mới)."""
         self.started()
         self.ok("abort", "--reason", "thử ghim")
-        self.maintain({"src/other.py": "EXTRA = 400\n"}, "main đi tiếp")
-        self.assertNotEqual(self.git("rev-parse", "origin/main"), self.base)
+        tip = self.maintain({"src/other.py": "EXTRA = 400\n"}, "main đi tiếp")
+        rc, out, err = self.start()
+        self.assertEqual(rc, 2, out + err)
+        self.assertIn("gộp nhánh mặc định trước", err)
+        self.git("merge", "-q", "--ff-only", "origin/main")
         self.started()
-        self.assertEqual(self.tstate()["base_sha"], self.base)
+        self.assertEqual(self.tstate()["base_sha"], tip)
 
     @flow("FLOW-28")
     def test_flow_28_measured_base_tree_dirtied_refused(self) -> None:

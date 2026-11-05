@@ -2,7 +2,7 @@
 
 - **Trạng thái:** Đã chấp nhận (2026-11-05, phiên chính tự duyệt — D-356: nhận cả mười bốn đề xuất in đậm ở §Điểm đã chốt;
   chủ repo 2026-11-05 "làm hết đi"; sửa theo review #440 — D-360: baseline do máy tính, không lối ra `--base`, PERF-LOG dựng từ
-  sổ, điểm nóng là danh sách file). Chưa triển khai — T-3700…T-3707 (PLAN-harden-2026-10-27-loops).
+  sổ, điểm nóng là danh sách file; sửa theo review #442 — D-366: gốc = đầu nhánh máy chủ, không merge-base). Chưa triển khai — T-3700…T-3707 (PLAN-harden-2026-10-27-loops).
 - **Ngày:** 2026-11-05.
 - **Thực hiện:** [ADR-0052 §Quyết định 7](0052-loop-state-rev-progress-perf-v2-next-step.md#quyết-định) (D-203; ràng buộc đầu
   vào — bảng ở §Ràng buộc) và §3 (lần thử tối ưu không đi qua `loop record`), thêm `LOOP-OPT-007` (held-out) và `LOOP-OPT-004`
@@ -58,13 +58,24 @@ nới cổng/trần, skill `/optimize` còn 8 B dư (đổi chữ, không nối)
 
 ### 1. Baseline và cấu hình do máy chọn (D-360)
 
-**Baseline:** `base_sha = git merge-base HEAD <nhánh mặc định>`; nhánh mặc định lấy từ máy chủ
-(`git ls-remote --symref origin HEAD`), ngoại tuyến mới dùng đích của `refs/remotes/origin/HEAD` (D-361 — bản cục bộ agent đổi
-được bằng `remote set-head`); không xác định được → exit 2 kèm cách đặt. Không cờ `--base`, không đọc `XT_PROGRESS_BASE`. **Vòng** = các lần thử cùng `base_sha`;
-lần `start` đầu ghi `base_sha` và tên nhánh mặc định vào sổ, lần sau tính lại và so: nhánh mặc định đổi tên → exit 2;
-merge-base đổi (đã merge nhánh mặc định vào) → vòng mới. `fetch` dời nhánh mặc định không đổi merge-base. Giả định nhánh
-mặc định được bảo vệ (đổi qua PR có review); guard chặn ghi ref dưới `refs/remotes/` (T-3563) — `remote set-head` T-3701 kiểm,
-chưa bị chặn thì thêm luật guard kèm test (D-361). Dự án không có nhánh bảo vệ → đường lùi của D-360.
+**Baseline (D-366 sửa tiền đề D-361):** `base_sha` = **đầu** nhánh mặc định do máy chủ báo (`git ls-remote --symref --
+<URL origin> HEAD` chạy ngoài repo, trong thư mục tạm rỗng, không cấu hình git hệ thống/toàn cục/cục bộ — `insteadOf`,
+`core.sshCommand`, `remote.*` của repo agent không áp được); ngoại tuyến mới dùng đích của `refs/remotes/origin/HEAD`; không xác
+định được, hay đầu nhánh chưa fetch → exit 2 kèm cách làm. Không merge-base: review #442 tái hiện nhánh tách từ tổ tiên cũ của
+nhánh mặc định làm gốc = tổ tiên (cấu hình cũ, lỏng). `start` đòi `git merge-base --is-ancestor <đầu nhánh> HEAD` — không thì
+exit 2 "gộp nhánh mặc định trước". Không cờ `--base`, không đọc `XT_PROGRESS_BASE`. Mọi lệnh git của `perf trial` chạy với
+môi trường allowlist (`PATH`, locale, `TZ`, `SSH_AUTH_SOCK`, danh tính commit; `HOME` của tài khoản theo passwd) —
+`GIT_CONFIG_*`, `GIT_DIR`, `GIT_SSH_COMMAND` của phiên bị bỏ. **"Máy chủ" là URL origin cục bộ** (review #442): `start` ghi
+`origin_url` vào dòng sổ; URL khác lần `start` trước → exit 2 trước khi hỏi máy chủ hay chạy công cụ gốc;
+`url.<x>.insteadOf` cục bộ có giá trị là tiền tố của URL origin → exit 2. **Vòng** = các lần thử cùng `base_sha`; lần `start`
+đầu ghi `base_sha`, tên nhánh mặc định và URL origin vào sổ, lần sau tính lại và so: nhánh mặc định đổi tên → exit 2; nhánh
+mặc định đi tiếp (máy chủ có commit mới) → vòng mới, `start` đòi gộp nó trước. Giả định nhánh mặc định được bảo vệ (đổi qua
+PR có review). Guard (deny, D-361/D-366) chặn: ghi ref dưới `refs/remotes/` bằng lệnh git (T-3563), `remote set-head`, đổi
+URL/pushurl/refspec/insteadOf của remote (`remote set-url|set-branches`, `remote add|rename|remove` đụng `origin`, `git config`
+mọi phạm vi, `-c`/`GIT_CONFIG_*` đặt cho BẤT KỲ lệnh nào kể cả `xt.py`), ghi thẳng `.git/packed-refs`, `.git/refs/remotes/**`
+(Bash lẫn Edit/Write). **Giới hạn còn lại:** tiến trình cùng uid sửa trực tiếp file trong `.git` (cấu hình, ref) ngoài mọi
+kênh guard thấy (script đã có, chương trình biên dịch) — lớp hai là sandbox (ADR-0067); ngoại tuyến thì gốc chỉ dựa trên ref
+cục bộ guard canh. Dự án không có nhánh bảo vệ → đường lùi của D-360.
 
 **Cấu hình:** JSON ở đường cố định `perf/trial.json`, đọc bằng `git cat-file blob <base_sha>:perf/trial.json` (không cờ
 `--config`, không đọc cây agent): `schema`; `setup` (lệnh chạy trong mỗi cây); `probe` (tuỳ chọn, in đường mô-đun đã phân
@@ -79,7 +90,7 @@ unit, higher_is_better, ceiling, regress}` (`ceiling` trần tuyệt đối, `re
 `GATE_FILE_PATTERNS`): chính file cấu hình, đường `xt.py` của khung; file khởi động trình chạy `**/sitecustomize.py`,
 `**/usercustomize.py`, `**/*.pth`, `**/conftest.py`, `pytest.ini`, `tox.ini`, `setup.cfg`, `pyproject.toml`, `noxfile.py`,
 `**/package.json`, `.npmrc`, `.yarnrc*`, `.pnpmfile.cjs`, `.python-version`, `.nvmrc`, `.tool-versions`, `.gitattributes`,
-`.gitmodules` và lockfile (`*.lock`, `package-lock.json`, `pnpm-lock.yaml`). Đổi phụ thuộc/trình chạy không phải tối ưu thuần
+`.gitmodules`, `setup.py`, `requirements*.txt` (D-366) và lockfile (`*.lock`, `package-lock.json`, `pnpm-lock.yaml`). Đổi phụ thuộc/trình chạy không phải tối ưu thuần
 (`LOOP-OPT-014`): PR riêng, hoặc gỡ bằng `unlock` ở nhánh mặc định.
 
 ### 2. Hợp đồng CLI
@@ -109,15 +120,16 @@ phải lần đỏ của task. Gate của task tối ưu là `perf trial status 
 - `perf-trials.jsonl` — chỉ nối, mỗi sự kiện một dòng (`start`, `decide`, `log`), `fsync`; nguồn của đếm ba lần, chống thử
   trùng (khoá `hotspot` + `candidate_tree`) và của PERF-LOG. Bền qua restart vì là file, không phải bộ nhớ phiên. Tên trường
   (D-363, T-3701): mọi dòng có `event` (`start`|`decide`|`log`), `schema: 1`, `base_sha`, `at`; `start` thêm `id`,
-  `default_ref`, `config_sha`, `tool_sha`, `hotspot[]`, `hypothesis`, `falsifier`, `start_head`, `fp_start`; `decide` thêm
-  `id`, `hotspot[]`, `verdict`, `reason` (lý do — chữ hoặc JSON), `candidate_files[]`, `rounds` (`kept` bắt buộc
+  `default_ref`, `origin_url` (D-366), `config_sha`, `tool_sha`, `hotspot[]`, `hypothesis`, `falsifier`, `start_head`, `fp_start`; `decide` thêm
+  `id`, `hotspot[]`, `verdict`, `reason` (lý do — chữ hoặc JSON; `<` ghi thành `&lt;` trong PERF-LOG để chữ không mở/đóng
+  được mốc khối — D-366), `candidate_files[]`, `rounds` (`kept` bắt buộc
   `candidate_tree`); `log` thêm `tree`. Dòng hỏng (kể cả dòng cuối thiếu xuống dòng) → mọi lệnh exit 2, không đoán.
   `setup` của cấu hình là **một chuỗi lệnh shell**.
 
 ### 4. Máy trạng thái của `finish`
 
 1. **Kiểm và đóng băng:** lấy `perf-trial.lock` (không được → exit 2, FLOW-34). Kiểm lại trường do `start` ghi: `base_sha`
-   = merge-base tính lại, `config_sha`/`tool_sha` = blob ở gốc, dòng `start` trong sổ trùng state, `HEAD == start_head`
+   = đầu nhánh máy chủ tính lại (D-366), `config_sha`/`tool_sha` = blob ở gốc, dòng `start` trong sổ trùng state, `HEAD == start_head`
    (khác → exit 2, FLOW-28), `start_head^{tree}` = cây giữ gần nhất; lệch → exit 2. `candidate_files` = `git status
    --porcelain=v1 -z --untracked-files=all --no-renames --ignore-submodules=none` trừ `.autopilot/` (đổi tên = xoá + thêm, cả
    hai đường); rỗng → `verdict: empty`, đóng, exit 1. `candidate_tree` = index tạm (`GIT_INDEX_FILE`) `read-tree start_head` + `add -A
@@ -126,7 +138,10 @@ phải lần đỏ của task. Gate của task tối ưu là `perf trial status 
 2. **Bộ chấm, điểm nóng:** `git diff --name-only --no-renames --no-ext-diff --no-textconv base_sha start_head` khớp `locked`
    → thu hồi, `verdict: tampered` (`start` đã chặn, đây là kiểm lại). `candidate_files` khớp `locked` → thu hồi, `tampered`
    (FLOW-29, điểm 12). Có file ngoài danh sách điểm nóng → thu hồi, `off-hotspot` (§8).
-3. **Dựng cây** (thư mục tạm quyền 0700 ngoài cây agent): `git clone --shared --no-checkout` của repo agent (không đăng ký
+3. **Dựng cây** (mỗi cây một thư mục tạm quyền 0700 riêng — không thấy cây khác qua `../`; thư mục tạm của tiến trình
+   nằm trong cây agent → exit 2, D-366): `git clone --shared --no-checkout` của repo agent, rồi `remote remove origin` trong
+   clone (cây đo không biết đường tới repo agent; còn `objects/info/alternates` trỏ kho object của repo agent — cần cho
+   `--shared`, chỉ đọc object, không cây làm việc: giới hạn đã biết) (không đăng ký
    worktree trong `.git` của cây agent, nên `git worktree list` của cây agent không lộ cây đo; T-3702 đo 2026-11-05 trên repo
    khung 581 file, 7 lần, git 2.53: `clone --shared --no-checkout` + `checkout --detach` trung vị 0,065 s, `worktree add
    --detach` 0,059 s — giữ `clone --shared`; hook của clone tắt bằng `core.hooksPath=/dev/null`), checkout `base_sha`,
@@ -135,13 +150,17 @@ phải lần đỏ của task. Gate của task tối ưu là `perf trial status 
    `candidate_files` trùng byte và mode với cây agent, gitlink submodule = `HEAD` của submodule ở cây agent và submodule không
    bẩn — lệch → thu hồi, `verdict: unbuildable` (submodule bẩn: FLOW-33). Không dựng bằng patch: `git apply` bỏ lặng đổi
    gitlink, `git diff` theo driver ngoài/textconv. Rồi `setup` của cấu hình gốc (`/bin/sh -c`, T-3702) chạy trong từng cây với **môi trường
-   allowlist**: chỉ `HOME`, `LANG`, `LC_ALL`, `TZ`, `TERM` và `env.pass[]`; `TMPDIR` riêng từng cây; `PATH` = bin của chính
+   allowlist**: chỉ `LANG`, `LC_ALL`, `TZ`, `TERM` và `env.pass[]`, `HOME` của tài khoản theo passwd (không theo biến của
+   phiên — HOME giả mang `usercustomize.py`), `PYTHONNOUSERSITE=1` (D-366); `TMPDIR` riêng từng cây; `PATH` = bin của chính
    cây (`.venv/bin`, `node_modules/.bin`) rồi `env.path` (mặc định `/usr/local/bin:/usr/bin:/bin`). Mọi biến khác (`NODE_OPTIONS`,
    `BASH_ENV`, `ENV`, `LD_PRELOAD`, `PYTHON*`, `VIRTUAL_ENV`, `NODE_PATH`, `PIP_*`, `UV_*`, `npm_config_*`…) bị bỏ. Mục `PATH`
    ghi được bởi uid hiện tại (vd `~/.local/bin`) → ⚠ vào sổ. **Kiểm trỏ đúng cây** (điểm 4): `probe` + quét `.pth`, symlink,
    `direct_url.json` editable, phụ thuộc `file:`/`link:` của manifest — đường phân giải ra ngoài cây đo và ngoài
    `sys.base_prefix` của interpreter cây/`env.allow_prefix[]` → exit 2 trước khi đo (FLOW-32). Chụp danh sách **đầy đủ** file
-   mỗi cây (cả file bị ignore, trừ `.git`): đường, cỡ, mode, `mtime_ns`, sha256 (file ≤ 1 MiB ngoài `scratch`).
+   mỗi cây (cả file bị ignore, trừ `.git`): đường, cỡ, mode, `mtime_ns`, sha256 (file ≤ 1 MiB ngoài `scratch`); thư mục
+   không đọc được (`chmod 000` do `setup`) → exit 2, không bỏ qua (D-366). Dọn: `u+rwx` từng thư mục trước khi đi vào, không
+   theo symlink, rồi xoá. So cây (`HEAD^{tree}` với cây neo) bằng SHA `rev-parse`; mọi `diff` thêm `--ignore-submodules=none
+   --no-ext-diff --no-textconv` (review #442: `diff.ignoreSubmodules=all` giấu đổi gitlink).
 4. **Đo cùng lượt, xen kẽ:** chỉ số chính ở ba cây, vòng tròn đổi thứ tự (B K C, K C B, C B K…), `runs` mỗi cây; `exact` chạy
    ≥ 3 lần và đòi trùng nhau (lệch → `insufficient`); chỉ số phụ cùng lượt. Lệnh đo, `equiv`, held-out chạy với `HOME`,
    `XDG_*_HOME`, `TMPDIR` là thư mục tạm riêng từng cây, mới mỗi lượt (`setup` dùng `HOME` thật cho cache gói) — cache đĩa
@@ -164,9 +183,10 @@ phải lần đỏ của task. Gate của task tối ưu là `perf trial status 
 ### 5. Công cụ chấm và Gate từ commit gốc
 
 **Mọi** lệnh `perf trial` (cả `start`/`status`/`prepare`/`log`) tính `base_sha` rồi so sha256 của chính file với blob
-`git cat-file blob <base_sha>:<đường xt.py>`; khác → xuất blob ra thư mục tạm và `exec python3 -I <tạm>/xt.py perf trial …`
-(spike: `xt.py` một file, chạy được qua blob). Gate của task tối ưu trong PLAN-opt: ``python3 -I <(git cat-file blob
-"$(git merge-base HEAD origin/HEAD)":<đường xt.py>) perf trial status --check`` — đầu vào không lấy từ cây candidate;
+`git cat-file blob <base_sha>:<đường xt.py>`; khác (kể cả `__file__` là ống `/dev/fd/N` đọc lại rỗng) → xuất blob ra thư mục tạm, chạy `python3 -I <tạm>/xt.py perf
+trial …` ở tiến trình con với `CLAUDE_PROJECT_DIR` = gốc dự án, dọn thư mục khi con xong, thoát bằng mã của con (D-366;
+spike: `xt.py` một file, chạy được qua blob). Gate của task tối ưu trong PLAN-opt: ``python3 -I <(git cat-file blob
+origin/HEAD:<đường xt.py>) perf trial status --check`` — đầu vào không lấy từ cây candidate;
 `--check` đọc số từ dòng `decide`, không đo lại. Can thiệp cùng uid trong lúc đo vẫn là giới hạn đã biết (§Hệ quả).
 
 ### 6. Held-out (`LOOP-OPT-007`)
@@ -237,7 +257,7 @@ ID FLOW-20…23 giữ nghĩa nghiên cứu §10; FLOW-27…34 giữ nghĩa bản
 
 | Ràng buộc | Cách đáp ứng | Bằng chứng/ca |
 |---|---|---|
-| Baseline ghim một lần cho cả vòng, không `XT_PROGRESS_BASE`, không theo HEAD agent chọn | `base_sha` = merge-base với nhánh mặc định do máy tính, ghi sổ ở `start` đầu; không cờ `--base`, không biến môi trường; vòng mới chỉ khi merge-base đổi và khi đó đòi cây gốc (D-360) | spike: dời ref sau ghim, SHA không đổi · FLOW-28, FLOW-37, FLOW-38 |
+| Baseline ghim một lần cho cả vòng, không `XT_PROGRESS_BASE`, không theo HEAD agent chọn | `base_sha` = đầu nhánh mặc định do máy chủ báo, URL origin ghi sổ ở `start`; không cờ `--base`, không biến môi trường; `start` đòi HEAD chứa đầu nhánh và cây gốc (D-360, D-366) | spike: dời ref sau ghim, SHA không đổi · FLOW-28, FLOW-37, FLOW-38 |
 | Candidate = phần chưa commit trên `start_head`; `finish` đòi `HEAD == start_head` | §4 bước 1 | FLOW-28 |
 | Máy tự đo gốc/`start_head`/candidate cùng lượt, cùng môi trường | §4 bước 3 + 4: ba cây dựng từ object, đo xen kẽ | A/A 18 % → 0 % · FLOW-43 |
 | `--setup` ghim từ gốc; editable/`node_modules`/submodule không trỏ về cây candidate | `setup` từ cấu hình gốc, chạy trong từng cây, môi trường allowlist, kiểm trỏ đúng cây, danh sách file đầy đủ trước/sau lượt | spike §2: hiểm hoạ tái hiện, 4/4 đúng sau setup · FLOW-32, FLOW-42 |
@@ -263,7 +283,7 @@ ID FLOW-20…23 giữ nghĩa nghiên cứu §10; FLOW-27…34 giữ nghĩa bản
 | 2 | Candidate đo ở đâu | C1 tại chỗ · C2 cây dựng lại | `.pth` bị ignore: C1 19 lệnh (bị lừa), C2 đúng; C2 +0,85 s | **C2**, dựng từ tree object, không từ patch (review #440) |
 | 3 | Nguồn cấu hình | JSON ở đường khoá đọc từ gốc · khoá phẳng `xt.yaml` · cờ CLI lúc `start` | `xt.yaml` phẳng không chứa được danh sách chỉ số phụ; cờ CLI do agent chọn | **JSON từ gốc** ở đường cố định, không `--config`/`--budget` (review #440) |
 | 4 | Kiểm "trỏ đúng cây" | `probe` dự án khai · quét `.pth` + symlink tìm đường cây agent · cả hai | `.pth` editable ghi đường tuyệt đối; npm tạo symlink tương đối | **cả hai** (quét bắt buộc, rẻ), thêm manifest `file:` và môi trường allowlist (review #440) |
-| 5 | `HEAD^{tree}` ≠ `kept_tree` lúc `start` | từ chối · đo thêm cây giữ (4 cây) | 4 cây: +0,8 s; nhưng commit lạ giữa hai lần thử được tính công cho candidate | **từ chối**, không lối ra `--base` — **D-360 bỏ** "vòng mới (`--base` mới)"; vòng mới chỉ khi merge-base đổi (§1) |
+| 5 | `HEAD^{tree}` ≠ `kept_tree` lúc `start` | từ chối · đo thêm cây giữ (4 cây) | 4 cây: +0,8 s; nhưng commit lạ giữa hai lần thử được tính công cho candidate | **từ chối**, không lối ra `--base` — **D-360 bỏ** "vòng mới (`--base` mới)"; vòng mới chỉ khi đầu nhánh mặc định đổi (§1, D-366) |
 | 6 | Nguồn held-out | hạt giống lúc finish · file của chủ dự án ngoài repo · file khoá trong repo | file trong repo agent đọc được; hạt giống lúc finish bắt được đường tắt ở spike | **hạt giống lúc finish**, mới mỗi lượt đo, không ghi state trước khi đo xong (review #440); file ngoài repo là tuỳ chọn thêm |
 | 7 | Ngưỡng held-out | `improved` so với `start_head` · `--no-regress` | đường tắt ở spike +4 lệnh → cả hai đều thu hồi; tối ưu thật đúng một dải input sẽ bị chặn bởi `improved` | **`improved`** (chặt hơn), so cả `start_head` lẫn gốc (D-360) |
 | 8 | Falsifier trúng | thu hồi · chỉ ghi sổ | `optimization-loop.md` bước 5: "số nào thì bỏ" | **thu hồi** |

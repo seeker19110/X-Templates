@@ -346,8 +346,14 @@ GIT_HOOK_PATTERNS = (
     ".git/config",
     ".git/config.worktree",
     ".git/worktrees/*/config.worktree",
+    # D-366 (AUD-SEC-523): ref theo dõi remote — `perf trial` ngoại tuyến đọc `refs/remotes/origin/HEAD` làm gốc vòng
+    ".git/packed-refs",
+    ".git/refs/remotes",
+    ".git/refs/remotes/*",
 )
-GIT_HOOK_WHY = "ghi {} — git hook/cấu hình git không vào commit, sửa là bỏ qua hook của dự án; người làm tay"
+GIT_HOOK_WHY = (
+    "ghi {} — git hook/cấu hình git/ref theo dõi remote không vào commit, sửa là bỏ qua hook của dự án; người làm tay"
+)
 # AUD-SEC-424: cấu hình git toàn cục/hệ thống mang cùng khoá chạy lệnh/hooksPath như `.git/config` (`diff.external`,
 # `core.hooksPath`, `alias.x = !…`, `core.fsmonitor`) — git đọc `$HOME/.gitconfig`, `$XDG_CONFIG_HOME/git/config`
 # (mặc định `~/.config/git/config`), `/etc/gitconfig` (git-config(1) FILES). Ghi thô (chuyển hướng/trình ghi) vào MỌI tệp
@@ -589,7 +595,8 @@ def _git_config_links(commands: List[Tuple[List[str], Optional[str]]], root: str
 
 REPO_GIT_CONFIG_RE = re.compile(r"(?:^|/)\.git/(?:config|config\.worktree|worktrees/[^/]+/config\.worktree)$")
 GIT_METADATA_TAIL_RE = re.compile(
-    r"/(?=(?:config(?:\.worktree)?|commondir|hooks(?:/.*)?|worktrees/[^/]+/config\.worktree)$)"
+    r"/(?=(?:config(?:\.worktree)?|commondir|hooks(?:/.*)?|worktrees/[^/]+/config\.worktree|packed-refs"
+    r"|refs/remotes(?:/.*)?)$)"
 )
 GIT_KEYED_TAIL_RE = re.compile(r"/(?:config(?:\.worktree)?|worktrees/[^/]+/config\.worktree)")  # tệp cấu hình
 
@@ -5138,9 +5145,9 @@ def _git_branch(args: List[str]) -> Tuple[str, str]:
 # Cho qua: `fetch origin [main]` (refspec cấu hình cập nhật `origin/main`), refspec đúng dạng cấu hình
 # `[+]refs/heads/X:refs/remotes/<R>/X` khi <R> là remote ĐÃ cấu hình (tên khác là đường dẫn: `./origin`); xoá/đổi tên ref
 # giả đi (`branch -D origin/x`, `tag -d`, `branch -dr` — Gate đỏ chứ không xanh giả); upstream/điểm bắt đầu là ref remote.
-# Giới hạn đã biết (lệnh cố ý né, D-015 — harness-files.md): ghi thẳng file `.git/refs/…`/`.git/packed-refs`/
-# `.git/<remote>/…`; đổi URL/refspec của remote (`remote add|set-url|rename`, `config remote.<r>.*`, `-c remote.<r>.*`);
-# ghi thẳng `.git/refs/replace/…`, `fast-import`; ref trong biến/thay lệnh. Alias git (lệnh con khác tên) được mở và xét như lệnh thật
+# Ghi thẳng `.git/packed-refs`, `.git/refs/remotes/**` và đổi URL/refspec/insteadOf của remote: chặn từ D-366 (khối
+# REMOTE_CFG dưới, GIT_HOOK_PATTERNS). Giới hạn đã biết (lệnh cố ý né, D-015 — harness-files.md): ghi thẳng file
+# `.git/refs/heads|tags/…`/`.git/<remote>/…`, `.git/refs/replace/…`, `fast-import`; ref trong biến/thay lệnh. Alias git (lệnh con khác tên) được mở và xét như lệnh thật
 # (khối "Alias git" dưới); đối số từ stdin (`xargs`/`parallel`/`find -exec {}`) → UNRESOLVED_TARGET (khối "Đối số không
 # thấy"). Giới hạn của alias: tệp cấu hình tạo trong CÙNG lệnh Bash rồi mới dùng (`printf … > f && GIT_CONFIG_GLOBAL=f
 # git y …` — lúc guard đọc, tệp chưa có), lệnh con là biến (`git $S …`), lệnh xoá biến môi trường (`env -i/-u`, `unset`),
@@ -5477,6 +5484,56 @@ def _fetch_hint(sub: str, hit: str) -> str:
     return f"; dạng được cho qua: `git {sub} <remote đã cấu hình> {spec}`"
 
 
+# D-366 (review #442 🔴, AUD-SEC-523): `perf trial` lấy gốc vòng từ máy chủ `origin` (`ls-remote`) và, ngoại tuyến, từ
+# `refs/remotes/origin/HEAD` — đổi NƠI ref theo dõi remote đến từ là giả gốc vòng như ghi thẳng ref. Chặn (deny, mọi pha):
+# `remote set-url|set-branches` (mọi remote), `remote add|rename|remove|rm` đụng `origin`; `git config` ghi/xoá khoá
+# `remote.<r>.url|pushurl|fetch`, `url.<x>.insteadOf|pushInsteadOf` (mọi phạm vi/tệp), xoá/đổi tên section `remote.*`/
+# `url.*`; cùng khoá đặt một lần (`git -c`, `--config-env`, `GIT_CONFIG_KEY_<i>`/`GIT_CONFIG_PARAMETERS` gán cho BẤT KỲ
+# lệnh nào — `GIT_CONFIG_COUNT=1 … python3 xt.py perf trial start`). Ghi thẳng `.git/packed-refs`, `.git/refs/remotes/**`
+# theo luật tệp metadata Git (GIT_HOOK_PATTERNS). Cho qua: đọc (`remote -v`, `config --get remote.origin.url`), `fetch`.
+# Giới hạn còn lại (ADR-0071 §1): cùng uid sửa file trong `.git` ngoài mọi kênh guard thấy — lớp hai là sandbox (ADR-0067).
+REMOTE_CFG_KEY_RE = re.compile(r"remote\..+\.(?:url|pushurl|fetch)|url\..+\.(?:insteadof|pushinsteadof)", re.I | re.S)
+REMOTE_CFG_WHY = (
+    REMOTE_REF_MARK + " gián tiếp: đổi URL/refspec/insteadOf của remote ({}) — gốc vòng `perf trial` (D-366)"
+)
+REMOTE_CFG_SECTIONS = ("--remove-section", "--rename-section")
+
+
+def _remote_cmd_hit(args: List[str]) -> str:
+    """`git remote …`: `set-url`/`set-branches` (mọi remote); `add|rename|remove|rm` khi tên (cũ hay mới) là `origin`."""
+    _, pos, _ = _parse_opts(args, "tm", ("--track", "--master"))
+    sub, names = (pos + [""])[0], [p.casefold() for p in pos[1:3]]
+    if sub in ("set-url", "set-branches") or (sub in ("add", "rename", "remove", "rm") and "origin" in names):
+        return f"git remote {sub}"
+    return ""
+
+
+def _remote_cfg_write(n: List[str]) -> str:
+    """`git config` ghi/xoá khoá remote (REMOTE_CFG_KEY_RE) hay xoá/đổi tên section `remote.*`/`url.*`; rỗng nếu không."""
+    names = _positionals(n[2:], GIT_CONFIG_VALUE_OPTS)
+    sections = any(_long_match(a.partition("=")[0], REMOTE_CFG_SECTIONS) for a in n[2:] if a.startswith("--"))
+    if sections or names[:1] in (["remove-section"], ["rename-section"]):
+        hit = [a for a in names if a.split(".", 1)[0].lower() in ("remote", "url")]
+        return hit[0] if hit else ""
+    pos = _git_config_write(n)
+    write = len(pos) > 1 or bool(set(n) & GIT_CONFIG_UNSET)
+    return pos[0] if pos and write and REMOTE_CFG_KEY_RE.fullmatch(pos[0]) else ""
+
+
+def _remote_cfg_rule(n: List[str]) -> Tuple[str, str]:
+    """Luật lệnh con (`git_rules`): đổi URL/refspec/insteadOf của remote → deny (D-366)."""
+    hit = _remote_cmd_hit(n[2:]) if n[1] == "remote" else _remote_cfg_write(n) if n[1] == "config" else ""
+    return ("deny", REMOTE_CFG_WHY.format(hit)) if hit else ("", "")
+
+
+def remote_config_oneshot(argv: List[str], n: List[str], exported: Optional[Dict[str, str]] = None) -> Tuple[str, str]:
+    """Khoá remote đặt một lần cho lệnh `argv` (`git -c`, `--config-env`, `GIT_CONFIG_*` gán đầu lệnh hay `export` trước
+    đó) — mọi lệnh, không chỉ git (`xt.py` gọi git kế thừa môi trường) → deny."""
+    pairs = _git_oneshot_config(argv, exported) if n[:1] == ["git"] else _oneshot_env_pairs(argv, exported)[1]
+    hit = next((k for k, _ in pairs if REMOTE_CFG_KEY_RE.fullmatch(k.strip())), "")
+    return ("deny", REMOTE_CFG_WHY.format(f"cấu hình một lần `{hit}`")) if hit else ("", "")
+
+
 # Alias git (AUD-SEC-119, review T-3563, review #306): `git -c alias.x=update-ref x refs/remotes/origin/main HEAD` chạy
 # `update-ref` dưới tên khác. Guard mở alias như git (git.c `run_argv` + alias.c `alias_lookup`, đo trên git 2.43): lệnh
 # con dựng sẵn KHÔNG BAO GIỜ là alias; MỌI tên khác — bất kể hình dạng (`a.b`, `y_x.z`, `1.x`) — đều được tra. Bảng
@@ -5732,6 +5789,9 @@ def git_rules(n: List[str], cwd: Optional[str] = None) -> Tuple[str, str]:
     forged = _remote_ref_rule(n[1], args, cwd) if n[1] in REMOTE_REF_NAMES else _alias_def_rule(n, cwd)
     if forged[0]:
         return forged
+    moved = _remote_cfg_rule([*n[:2], *args])  # D-366: đổi URL/refspec/insteadOf của remote
+    if moved[0]:
+        return moved
     if n[1] == "push":  # AUD-SEC-102: `git push origin 2>&1` trên nhánh chính — chuyển hướng không phải refspec
         return _stricter(_git_push(args, cwd), _git_push(_drop_redirects(args), cwd))
     rule = GIT_RULES.get(n[1])
@@ -8545,18 +8605,27 @@ def _git_oneshot_config(argv: List[str], exported: Optional[Dict[str, str]] = No
     `GIT_CONFIG_PARAMETERS`. Biến = gán ở đầu lệnh ∪ `exported` (gán/`export` ở lệnh trước trong chuỗi — D-216). VAR của
     `--config-env` không gán ở đâu cả, không có trong môi trường của guard (có thể đến từ `source`, `read`…) → giá trị
     `${VAR}`: guard không biết, khoá chạy lệnh tính là không an toàn (như `_push_spread_opt`)."""
-    s = _strip_prefixes(argv)
-    env = {**(exported or {}), **_assign_values(argv[: len(argv) - len(s)])}
-    keys = sorted((k for k in env if re.fullmatch(r"GIT_CONFIG_KEY_\d+", k)), key=lambda k: int(k[15:]))
-    pairs = [(env[k], env.get("GIT_CONFIG_VALUE_" + k[15:], "")) for k in keys]
-    pairs += [(k, v) for w in _split_words(env.get("GIT_CONFIG_PARAMETERS", "")) for k, _, v in [w.partition("=")]]
-    for opt, val in _git_globals(s):
+    env, pairs = _oneshot_env_pairs(argv, exported)
+    for opt, val in _git_globals(_strip_prefixes(argv)):
         key, _, v = val.partition("=")
         if opt == "-c":
             pairs.append((key, v))
         elif opt == "--config-env":
             pairs.append((key, env.get(v, os.environ.get(v, "${" + v + "}"))))
     return pairs
+
+
+def _oneshot_env_pairs(
+    argv: List[str], exported: Optional[Dict[str, str]] = None
+) -> Tuple[Dict[str, str], List[Tuple[str, str]]]:
+    """(biến của lệnh, [(khoá, giá trị)] từ `GIT_CONFIG_KEY_<i>`/`VALUE_<i>` và `GIT_CONFIG_PARAMETERS`): gán đầu lệnh ∪
+    `exported` — dùng cho cả lệnh không phải git (biến kế thừa xuống git con, D-366)."""
+    s = _strip_prefixes(argv)
+    env = {**(exported or {}), **_assign_values(argv[: len(argv) - len(s)])}
+    keys = sorted((k for k in env if re.fullmatch(r"GIT_CONFIG_KEY_\d+", k)), key=lambda k: int(k[15:]))
+    pairs = [(env[k], env.get("GIT_CONFIG_VALUE_" + k[15:], "")) for k in keys]
+    pairs += [(k, v) for w in _split_words(env.get("GIT_CONFIG_PARAMETERS", "")) for k, _, v in [w.partition("=")]]
+    return env, pairs
 
 
 def _git_exec_config(n: List[str], argv: Optional[List[str]] = None, exported: Optional[Dict[str, str]] = None) -> str:
@@ -10677,7 +10746,7 @@ def _scan_command(
     # Lệnh git ghi ref (AUD-SEC-119) cũng cần repo thật để đọc tên remote của nó.
     gdir = _git_dir(argv, cwd) if n[0] == "git" and n[1:2] and n[1] in GIT_DIR_SUBS else None
     # Lệnh khác git (rm/find) xét đích theo thư mục đang đứng sau `cd` (`cd ~ && rm -rf projects`).
-    decision, why = _command_verdict(n, argv, root, cwd, gdir)
+    decision, why = _stricter(_command_verdict(n, argv, root, cwd, gdir), remote_config_oneshot(argv, n, env))
     if decision == "deny":
         return f"Lệnh bị khung chặn ({why}): {' '.join(argv)[:300]}. Muốn làm thật thì người dùng tự chạy."
     if decision == "ask":

@@ -11,7 +11,7 @@ import contextlib
 import io
 import json
 import os
-import shutil
+import pwd
 import subprocess
 import sys
 import unittest
@@ -176,6 +176,7 @@ class TrialLedgerTest(unittest.TestCase):
 
     def test_row_shapes(self) -> None:
         start = {"schema": 1, "event": "start", "id": "PT-0001", "base_sha": "b", "default_ref": "r", "hotspot": ["a"]}
+        start |= {"origin_url": "u"}
         start |= {"hypothesis": "h", "falsifier": "f", "start_head": "s"}
         good = [start, self.kept(), {"schema": 1, "event": "log", "base_sha": "b", "tree": "t"}]
         bad = [
@@ -184,6 +185,7 @@ class TrialLedgerTest(unittest.TestCase):
             {**start, "schema": 2},
             {**start, "event": ["start"]},
             {**start, "default_ref": None},
+            {k: v for k, v in start.items() if k != "origin_url"},
             {**start, "hotspot": [1]},
             self.kept(candidate_files="a"),
             self.kept(candidate_tree=None),
@@ -316,8 +318,9 @@ class TrialStartTest(TrialCase):
 class TrialBaseTest(TrialCase):
     def test_offline_falls_back_to_local_origin_head(self) -> None:
         """Máy chủ không với tới (URL hỏng) → `refs/remotes/origin/HEAD`; thiếu nó → exit 2 kèm cách đặt."""
-        self.git("remote", "set-url", "origin", str(self.tmp / "không-có"))
-        self.assertEqual(xt.trial_round_base(self.repo), (self.base, "refs/heads/main"))
+        url = str(self.tmp / "không-có")
+        self.git("remote", "set-url", "origin", url)
+        self.assertEqual(xt.trial_round_base(self.repo, url), (self.base, "refs/heads/main"))
         self.git("remote", "set-head", "origin", "-d")
         self.assertIn("set-head origin -a", self.refused("status"))
 
@@ -325,8 +328,7 @@ class TrialBaseTest(TrialCase):
         """Máy chủ trả rc 0 mà không có symref (repo rỗng) hoặc `ls-remote` quá giờ → None (dùng ref cục bộ)."""
         empty = self.tmp / "empty.git"
         self.run_git(self.tmp, "init", "-q", "--bare", str(empty))
-        self.git("remote", "set-url", "origin", str(empty))
-        self.assertIsNone(xt._trial_ls_remote(self.repo))
+        self.assertIsNone(xt._trial_ls_remote(str(empty)))
         real = subprocess.run
 
         def slow(cmd: Any, *a: Any, **k: Any) -> Any:
@@ -335,7 +337,7 @@ class TrialBaseTest(TrialCase):
             return real(cmd, *a, **k)
 
         with unittest.mock.patch.object(xt.subprocess, "run", slow):
-            self.assertIsNone(xt._trial_ls_remote(self.repo))
+            self.assertIsNone(xt._trial_ls_remote(str(self.origin)))
 
     def test_unfetched_server_tip_refused(self) -> None:
         self.maintain({"src/other.py": "EXTRA = 1\n"}, fetch=False)
@@ -362,21 +364,43 @@ class TrialBaseTest(TrialCase):
         self.assertIn("không có .xtemplates/scripts/xt.py hay scripts/xt.py", self.refused("status"))
 
     def test_tool_bytes_differ_execs_base_blob(self) -> None:
-        """D-363: byte `xt.py` đang chạy ≠ blob ở gốc → `exec python3 -I <bản gốc> <đúng argv>`; bằng nhau thì không."""
+        """D-363/D-366: byte `xt.py` đang chạy ≠ blob ở gốc → tiến trình con `python3 -I <bản gốc> <đúng argv>` với
+        `CLAUDE_PROJECT_DIR` = gốc dự án (bản xuất nằm ngoài dự án — review #442 🟢a), thoát với mã của con, thư mục tạm
+        dọn sau khi con xong (🟢b); bằng nhau thì không."""
         self.republish({TOOL: XT.read_text(encoding="utf-8") + "# bản gốc khác\n"})
+        tmp = self.tmp / "tmpdir"
+        tmp.mkdir()
+        real, seen = subprocess.run, {}
 
-        class Exec(Exception):
-            pass
+        def spy(cmd: Any, *a: Any, **k: Any) -> Any:
+            if list(cmd[:2]) == [sys.executable, "-I"]:
+                seen.update(cmd=cmd, env=k["env"], text=Path(cmd[2]).read_text(encoding="utf-8"))
+                return real(cmd, *a, **{**k, "capture_output": True, "text": True, "cwd": self.tmp})
+            return real(cmd, *a, **k)
 
-        with unittest.mock.patch.object(xt.os, "execv", side_effect=Exec) as ex, self.assertRaises(Exec):
+        with (
+            unittest.mock.patch.object(xt.tempfile, "tempdir", str(tmp)),
+            unittest.mock.patch.object(xt.subprocess, "run", spy),
+            self.assertRaises(SystemExit) as ex,
+        ):
             run_main("perf", "trial", "status", "--json")
-        exe, argv = ex.call_args.args
-        self.addCleanup(shutil.rmtree, Path(argv[2]).parent)
-        self.assertEqual(
-            (exe, argv[0], argv[1], argv[3:]),
-            (sys.executable, sys.executable, "-I", ["perf", "trial", "status", "--json"]),
-        )
-        self.assertTrue(Path(argv[2]).read_text(encoding="utf-8").endswith("# bản gốc khác\n"))
+        self.assertEqual(ex.exception.code, 0)
+        self.assertEqual(seen["cmd"][3:], ["perf", "trial", "status", "--json"])
+        self.assertEqual(seen["env"]["CLAUDE_PROJECT_DIR"], str(self.repo))
+        self.assertTrue(seen["text"].endswith("# bản gốc khác\n"))
+        self.assertEqual(list(tmp.iterdir()), [])
+
+    def test_gate_process_substitution_runs_once_and_leaves_no_tmp(self) -> None:
+        """Review #442 🟢b: Gate `python3 -I <(git cat-file blob <gốc>:xt.py) perf trial status` — `__file__` là ống
+        `/dev/fd/N` đọc lại rỗng: chạy bản gốc một lần, exit 0, không để lại `xt-perf-tool-*`."""
+        tmp = self.tmp / "tmpdir"
+        tmp.mkdir()
+        gate = f"python3 -I <(git cat-file blob {self.base}:{TOOL}) perf trial status"
+        env = {**os.environ, "TMPDIR": str(tmp)}
+        r = subprocess.run(["bash", "-c", gate], cwd=self.repo, env=env, capture_output=True, text=True, check=False)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("perf trial: vòng", r.stdout)
+        self.assertEqual(list(tmp.iterdir()), [])
 
     def test_git_error_is_exit_2_and_todo_commands(self) -> None:
         with unittest.mock.patch.object(xt, "trial_context", side_effect=RuntimeError("git lỗi")):
@@ -579,10 +603,10 @@ class TrialPrepareTest(TrialCase):
         self.assertEqual([Path(p).name for p, *_ in lines], ["base", "head", "cand"])
         n = HOT.count("\n")
         self.assertEqual([int(c) for *_, c in lines], [n, n, n + 2])
-        for pwd, tmp, path, keep, _ in lines:
-            self.assertEqual((tmp, keep), (pwd + ".tmp", "1"))
-            self.assertEqual(path, f"{pwd}/.venv/bin:{pwd}/node_modules/.bin:/bin:{wd}")
-            self.assertFalse(Path(pwd).exists())
+        for here, tmp, path, keep, _ in lines:
+            self.assertEqual((tmp, keep), (here + ".tmp", "1"))
+            self.assertEqual(path, f"{here}/.venv/bin:{here}/node_modules/.bin:/bin:{wd}")
+            self.assertFalse(Path(here).exists())
         self.assertIn(f"⚠ PATH có {wd}", out)
 
     def test_symlink_pth_direct_url_and_file_dep_outside_refused(self) -> None:
@@ -697,6 +721,156 @@ class TrialTreeUnitTest(TrialCase):
         self.assertIsNone(
             xt.trial_config_problem(trial_config(env={"path": "/bin", "pass": ["A"], "allow_prefix": ["/o"]}))
         )
+
+
+class TrialReview442Test(TrialCase):
+    """Review #442 (D-366): gốc vòng từ đầu nhánh máy chủ thật, cấu hình/môi trường của phiên không lái được git hay
+    lệnh đo, quét/dọn không bỏ sót vì quyền, cây đo cô lập. Mỗi ca tái hiện một đường của bộ tái hiện review."""
+
+    def fake_server(self) -> Path:
+        """Máy chủ giả agent kiểm soát: `main` = commit nới cấu hình + sửa bộ đo (nhánh `evil`); cây agent về `opt`."""
+        self.git("checkout", "-q", "-b", "evil")
+        self.put("perf/trial.json", json.dumps(trial_config(locked=[], budget=999)))
+        self.put("bench.py", "print(1)\n")
+        self.git("commit", "-q", "-am", "nới cấu hình + bộ đo")
+        fake = self.tmp / "fake.git"
+        self.run_git(self.tmp, "init", "-q", "--bare", "-b", "main", str(fake))
+        self.git("push", "-q", str(fake), "evil:main")
+        self.git("checkout", "-q", "opt")
+        return fake
+
+    def prepared(self, cfg: dict[str, Any], tmp: Path | None = None) -> tuple[int, str]:
+        """Gốc mới với `cfg`, `start`, `prepare` (thư mục tạm của tiến trình = `tmp` nếu có): (exit, out + err)."""
+        self.republish({"perf/trial.json": json.dumps(cfg)})
+        self.started()
+        with unittest.mock.patch.object(xt.tempfile, "tempdir", str(tmp) if tmp else xt.tempfile.gettempdir()):
+            rc, out, err = self.tr("prepare")
+        return rc, out + err
+
+    def test_url_pinned_after_first_start(self) -> None:
+        """🔴 AUD-SEC-523: URL origin ghi ở dòng `start`; đổi sang máy chủ giả sau đó (`set-url`) → exit 2 trước khi hỏi
+        máy chủ hay chạy công cụ gốc."""
+        self.started()
+        self.ok("abort", "--reason", "x")
+        self.assertEqual(self.rows()[0]["origin_url"], str(self.origin))
+        self.git("remote", "set-url", "origin", str(self.fake_server()))
+        self.assertIn("URL origin đổi", self.refused("status"))
+
+    def test_insteadof_refused_and_session_git_config_ignored(self) -> None:
+        """🔴 AUD-SEC-523: `url.<giả>.insteadOf <URL origin>` qua `GIT_CONFIG_*` của phiên bị bỏ (allowlist) — gốc vẫn là
+        đầu nhánh máy chủ thật; đặt cục bộ → exit 2; thiếu URL origin → exit 2."""
+        fake = self.fake_server()
+        env = {
+            "GIT_CONFIG_COUNT": "1",
+            "GIT_CONFIG_KEY_0": f"url.{fake}.insteadOf",
+            "GIT_CONFIG_VALUE_0": str(self.origin),
+        }
+        with unittest.mock.patch.dict(os.environ, env):
+            self.assertEqual(self.ctx().base_sha, self.base)
+        self.git("config", f"url.{fake}.insteadOf", str(self.origin))
+        self.assertIn("viết lại URL origin", self.refused("status"))
+        self.git("config", "--unset", f"url.{fake}.insteadOf")
+        self.git("config", "--unset", "remote.origin.url")
+        self.assertIn("remote `origin` chưa có URL", self.refused("status"))
+
+    def test_downgraded_base_refused(self) -> None:
+        """🟠 AUD-SEC-524: nhánh tách từ tổ tiên cũ của `main` (cấu hình cũ) → gốc vẫn = đầu `main` máy chủ; `start` → 2."""
+        tip = self.maintain({"perf/trial.json": json.dumps(trial_config(budget=2))})
+        self.assertEqual(self.ctx().base_sha, tip)
+        self.assertIn("gộp nhánh mặc định trước", self.refused("start", "--hotspot", "src/hot.py", *TRIAL_ARGS))
+
+    def test_submodule_shortcut_hidden_by_config_refused(self) -> None:
+        """🟠 AUD-SEC-525: commit lạ đổi gitlink (đường tắt trong submodule) + `diff.ignoreSubmodules=all` → vẫn exit 2."""
+        sub = self.tmp / "sub"
+        self.run_git(self.tmp, "init", "-q", "-b", "main", str(sub))
+        (sub / "lib.py").write_text("X = 1\n", encoding="utf-8")
+        self.run_git(sub, "add", "lib.py")
+        self.run_git(sub, "commit", "-q", "-m", "sub")
+        self.republish({"src/x.txt": "1\n"})
+        self.run_git(self.tmp / "maint", "submodule", "add", "-q", str(sub), "vendor/sub")
+        self.republish({})
+        self.run_git(self.repo, "submodule", "update", "--init", "-q")
+        (self.repo / "vendor" / "sub" / "lib.py").write_text("X = 0  # đường tắt\n", encoding="utf-8")
+        self.run_git(self.repo / "vendor" / "sub", "commit", "-q", "-am", "đường tắt")
+        self.git("add", "vendor/sub")
+        self.git("commit", "-q", "-m", "bump sub")
+        self.git("config", "diff.ignoreSubmodules", "all")
+        self.assertIn("HEAD^{tree} ≠ cây", self.refused("start", "--hotspot", "src/hot.py", *TRIAL_ARGS))
+
+    def test_home_from_passwd_and_no_user_site(self) -> None:
+        """🟠 AUD-SEC-526: HOME giả của phiên (mang `usercustomize.py`) không tới `setup`: HOME = passwd, PYTHONNOUSERSITE=1;
+        uid không có trong passwd → exit 2."""
+        log = self.ctl / "home.log"
+        with unittest.mock.patch.dict(os.environ, {"HOME": str(self.tmp / "giả")}):
+            rc, out = self.prepared(trial_config(setup=f'echo "$HOME|${{PYTHONNOUSERSITE:-}}" >> {log}'))
+        self.assertEqual(rc, 0, out)
+        home = pwd.getpwuid(os.getuid()).pw_dir
+        self.assertEqual(log.read_text(encoding="utf-8").splitlines(), [f"{home}|1"] * 3)
+        with unittest.mock.patch("pwd.getpwuid", side_effect=KeyError(0)):
+            self.assertIn("không có trong passwd", self.refused("status"))
+
+    def test_unreadable_dir_refused_and_trees_cleaned(self) -> None:
+        """🟠 AUD-SEC-527: `setup` để thư mục `000` (lồng nhau) chứa symlink ra ngoài → exit 2 "không đọc được" thay vì bỏ
+        qua; mọi thư mục tạm được dọn."""
+        tmp = self.tmp / "tmpdir"
+        tmp.mkdir()
+        setup = f"mkdir -p d/e && ln -s {self.ctl} d/e/l && chmod 000 d/e && chmod 000 d"
+        rc, out = self.prepared(trial_config(setup=setup), tmp)
+        self.assertEqual(rc, 2, out)
+        self.assertIn("không đọc được", out)
+        self.assertEqual(list(tmp.iterdir()), [])
+
+    def test_trees_isolated_from_agent_repo_and_each_other(self) -> None:
+        """🟢 AUD-SEC-528: cây đo không có remote `origin` (trỏ repo agent), không thấy cây khác qua `../`."""
+        log = self.ctl / "iso.log"
+        setup = "echo \"$(git remote | tr '\\n' ,)|$(ls -A .. | tr '\\n' ,)\" >> " + str(log)
+        rc, out = self.prepared(trial_config(setup=setup))
+        self.assertEqual(rc, 0, out)
+        want = [f"|{n},{n}.tmp," for n in ("base", "head", "cand")]
+        self.assertEqual(log.read_text(encoding="utf-8").splitlines(), want)
+
+    def test_tmpdir_inside_agent_tree_refused(self) -> None:
+        """🟢 AUD-SEC-528: TMPDIR trong cây agent → exit 2, không dựng cây nào ở đó."""
+        inner = self.repo / ".venv" / "tmp"
+        inner.mkdir(parents=True)
+        rc, out = self.prepared(trial_config(budget=19), inner)
+        self.assertEqual(rc, 2, out)
+        self.assertIn("nằm trong cây agent", out)
+        self.assertEqual(list(inner.iterdir()), [])
+
+    def test_log_marker_in_reason_escaped(self) -> None:
+        """🟢 AUD-SEC-528: mốc đóng PERF-LOG trong `--reason` không chẻ khối — dựng lại hai lần ra cùng nội dung."""
+        sha = "b" * 40
+        ctx = xt.TrialCtx(sha, "refs/heads/main", TOOL, "t", trial_config(), "c", [])
+        rows = [
+            {"event": "decide", "id": "PT-0001", "base_sha": sha, "hotspot": ["a"], "verdict": "aborted"}
+            | {"reason": f"thử {xt.PERF_TRIAL_LOG_END} <!-- xt-perf-trial {sha} --> xong"}
+        ]
+        v1 = xt.trial_log_merge("# PERF-LOG\n", xt.trial_log_block(rows, ctx), sha)
+        self.assertEqual(xt.trial_log_merge(v1, xt.trial_log_block(rows, ctx), sha), v1)
+        self.assertIn("&lt;!-- /xt-perf-trial -->", v1)
+
+    def test_setup_py_and_requirements_locked(self) -> None:
+        """AUD-SEC-529: khoá mặc định gồm `setup.py`, `requirements*.txt` ở mọi độ sâu."""
+        ctx = xt.TrialCtx("b", "r", TOOL, "t", trial_config(), "c", [])
+        for path in ("setup.py", "pkg/setup.py", "requirements.txt", "a/requirements-dev.txt"):
+            with self.subTest(path):
+                self.assertTrue(ctx.locked(path))
+
+    def test_rmtree_nested_unreadable_dirs_and_symlink(self) -> None:
+        """Dọn thư mục `000` lồng nhau; symlink tới thư mục ngoài không bị đổi quyền theo."""
+        out_dir = self.tmp / "ngoài"
+        out_dir.mkdir(mode=0o500)
+        root = self.tmp / "w"
+        (root / "a" / "b").mkdir(parents=True)
+        (root / "a" / "b" / "f").write_text("x", encoding="utf-8")
+        (root / "a" / "lnk").symlink_to(out_dir)
+        (root / "a" / "b").chmod(0)
+        (root / "a").chmod(0)
+        xt._trial_rmtree(root)
+        self.assertFalse(root.exists())
+        self.assertEqual(out_dir.stat().st_mode & 0o777, 0o500)
+        out_dir.chmod(0o700)
 
 
 class TrialParserTest(unittest.TestCase):

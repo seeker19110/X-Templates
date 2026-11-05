@@ -22602,6 +22602,17 @@
 {"id": "r441-ctl-521-fd-stderr", "origin": "control", "refs": ["AUD-SEC-521"], "input": {"command": "printf x > /dev/fd/2"}, "expect": {"allowed": true}},
 {"id": "r441-ctl-521-dev-stdout", "origin": "control", "refs": ["AUD-SEC-521"], "input": {"command": "echo x > /dev/stdout"}, "expect": {"allowed": true}},
 {"id": "r441-ctl-521-dev-null", "origin": "control", "refs": ["AUD-SEC-521"], "input": {"command": "cat > /dev/null"}, "expect": {"allowed": true}},
-{"id": "r441-ctl-521-fd-dir-plain-file", "origin": "control", "refs": ["AUD-SEC-521"], "input": {"command": "exec 3< d; printf x > /dev/fd/3/notes.txt", "files": {"d/.keep": ""}}, "expect": {"allowed": true}}
+{"id": "r441-ctl-521-fd-dir-plain-file", "origin": "control", "refs": ["AUD-SEC-521"], "input": {"command": "exec 3< d; printf x > /dev/fd/3/notes.txt", "files": {"d/.keep": ""}}, "expect": {"allowed": true}},
+{"id": "r442-523-remote-set-url", "origin": "adversarial-reviewer", "refs": ["AUD-SEC-523", "D-366"], "input": {"command": "git remote set-url origin /tmp/fake.git"}, "expect": {"allowed": false, "code": "REMOTE_REF_FORGE"}},
+{"id": "r442-523-config-remote-url", "origin": "adversarial-reviewer", "refs": ["AUD-SEC-523", "D-366"], "input": {"command": "git config remote.origin.url /tmp/fake.git"}, "expect": {"allowed": false, "code": "REMOTE_REF_FORGE"}},
+{"id": "r442-523-config-insteadof", "origin": "adversarial-reviewer", "refs": ["AUD-SEC-523", "D-366"], "input": {"command": "git config url./tmp/fake.git.insteadOf /tmp/srv.git"}, "expect": {"allowed": false, "code": "REMOTE_REF_FORGE"}},
+{"id": "r442-523-envcfg-xt", "origin": "adversarial-reviewer", "refs": ["AUD-SEC-523", "D-366"], "input": {"command": "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=url./tmp/fake.git.insteadOf GIT_CONFIG_VALUE_0=/tmp/srv.git python3 .xtemplates/scripts/xt.py perf trial start --hotspot src/hot.py"}, "expect": {"allowed": false, "code": "REMOTE_REF_FORGE"}},
+{"id": "r442-523-dash-c-insteadof", "origin": "adversarial-reviewer", "refs": ["AUD-SEC-523", "D-366"], "input": {"command": "git -c url./f.insteadOf=/s fetch"}, "expect": {"allowed": false, "code": "REMOTE_REF_FORGE"}},
+{"id": "r442-523-packed-refs-write", "origin": "adversarial-reviewer", "refs": ["AUD-SEC-523", "D-366"], "input": {"command": "printf x > .git/packed-refs"}, "expect": {"allowed": false}},
+{"id": "r442-523-remote-ref-file-write", "origin": "adversarial-reviewer", "refs": ["AUD-SEC-523", "D-366"], "input": {"command": "echo deadbeef > .git/refs/remotes/origin/main"}, "expect": {"allowed": false}},
+{"id": "r442-ctl-523-fetch", "origin": "control", "refs": ["AUD-SEC-523", "D-366"], "input": {"command": "git fetch origin"}, "expect": {"allowed": true}},
+{"id": "r442-ctl-523-remote-v", "origin": "control", "refs": ["AUD-SEC-523", "D-366"], "input": {"command": "git remote -v"}, "expect": {"allowed": true}},
+{"id": "r442-ctl-523-config-get-url", "origin": "control", "refs": ["AUD-SEC-523", "D-366"], "input": {"command": "git config --get remote.origin.url"}, "expect": {"allowed": true}},
+{"id": "r442-ctl-523-cat-packed-refs", "origin": "control", "refs": ["AUD-SEC-523", "D-366"], "input": {"command": "cat .git/packed-refs"}, "expect": {"allowed": true}}
  ]
 }
