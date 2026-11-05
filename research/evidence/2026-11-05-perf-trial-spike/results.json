@@ -1,0 +1,270 @@
+{
+ "npm_install_agent": {
+  "exit": 0,
+  "secs": 0.165
+ },
+ "B": "5e8211b305ef226d52df559f8dd0b96bdf53c728",
+ "K": "10cb478409999c25a0e809bfe5322581be7ca9a7",
+ "setup_secs": {
+  "agent": 0.803,
+  "base": 0.798,
+  "start": 0.835,
+  "cand": 0.837
+ },
+ "npm_ci_exit": {
+  "agent": 0,
+  "base": 0,
+  "start": 0,
+  "cand": 0
+ },
+ "tool_help_exit": 0,
+ "wt_add_secs": [
+  0.006,
+  0.006
+ ],
+ "hazard_base_with_agent_venv": {
+  "fastlib": "$S/lab/proj/src/fastlib/__init__.py",
+  "jslib": "exit 1",
+  "sub_ok": false
+ },
+ "hazard_base_node_modules_symlinked": "$S/lab/proj/jslib",
+ "agent_venv_pth": [
+  "__editable__.fastlib-0.1.0.pth: $S/lab/proj/src",
+  "_virtualenv.pth: import _virtualenv"
+ ],
+ "agent_jslib_link": "../../jslib",
+ "where": {
+  "base": {
+   "fastlib": "$S/lab/wts/base/src/fastlib/__init__.py",
+   "jslib": "$S/lab/wts/base/jslib",
+   "sub_ok": true
+  },
+  "start": {
+   "fastlib": "$S/lab/wts/start/src/fastlib/__init__.py",
+   "jslib": "$S/lab/wts/start/jslib",
+   "sub_ok": true
+  },
+  "candidate": {
+   "fastlib": "$S/lab/proj/src/fastlib/__init__.py",
+   "jslib": "$S/lab/proj/jslib",
+   "sub_ok": true
+  },
+  "cand_wt": {
+   "fastlib": "$S/lab/wts/cand/src/fastlib/__init__.py",
+   "jslib": "$S/lab/wts/cand/jslib",
+   "sub_ok": true
+  }
+ },
+ "c2_build_secs": 0.85,
+ "c2_src_equal": true,
+ "sample_exit": {
+  "base": 0,
+  "start": 0,
+  "cand": 0,
+  "cand_inplace": 0
+ },
+ "sample_round_secs": 1.942,
+ "sample_dirty": {
+  "base": false,
+  "start": false,
+  "cand": true,
+  "cand_inplace": true
+ },
+ "cmp": {
+  "base_vs_cand": {
+   "exit": 0,
+   "verdict": "improved",
+   "change": -0.3659205587420217,
+   "p": 0.00018267179110955043
+  },
+  "start_vs_cand": {
+   "exit": 0,
+   "verdict": "improved",
+   "change": -0.16411427624326674,
+   "p": 0.00018267179110955043
+  },
+  "base_vs_start": {
+   "exit": 0,
+   "verdict": "improved",
+   "change": -0.2414280765458872,
+   "p": 0.00018267179110955043
+  },
+  "instr_exact_raw": {
+   "exit": 0,
+   "verdict": "improved",
+   "change": -0.6666646296358539,
+   "p": null,
+   "unverified-manual": true
+  },
+  "base_vs_tampered_inplace": {
+   "exit": 2,
+   "stderr": "✗ không đủ điều kiện so: lệch harness_sha256: '40bac3f4e6ed9a8ad6cb6035668c689d5af559ca506f10dd228e617d06486470' ≠ 'c3ba189a47e56344f81b68c840faee0e7b58af16c7a7d55e07818fdc85e30854'"
+  },
+  "tampered_base": {
+   "exit": 2,
+   "stderr": "✗ không đủ điều kiện so: baseline đo trên cây bẩn (before.dirty)"
+  }
+ },
+ "aa": [
+  {
+   "exit": 1,
+   "verdict": "neutral",
+   "change": -0.006433998127959037,
+   "p": 0.6775849579524755
+  },
+  {
+   "exit": 1,
+   "verdict": "regressed",
+   "change": 0.11239142917720919,
+   "p": 0.021133928129161116
+  },
+  {
+   "exit": 1,
+   "verdict": "regressed",
+   "change": 0.0781879186812158,
+   "p": 0.00032983852077799424
+  }
+ ],
+ "wall_medians": {
+  "base": 0.031187345000944333,
+  "start": 0.023596741000801558,
+  "cand": 0.019788537996646482,
+  "aa0": 0.030899917997885495,
+  "aa1": 0.03508682299798238,
+  "aa2": 0.033608532998187
+ },
+ "instr": {
+  "base": [
+   [
+    7200022,
+    7200022,
+    7200022
+   ],
+   465817
+  ],
+  "start": [
+   [
+    4000022,
+    4000022,
+    4000022
+   ],
+   465817
+  ],
+  "cand": [
+   [
+    2400022,
+    2400022,
+    2400022
+   ],
+   465817
+  ]
+ },
+ "instr_secs": 1.662,
+ "mem": {
+  "base": [
+   20908,
+   20908,
+   20908
+  ],
+  "start": [
+   20908,
+   20908,
+   20908
+  ],
+  "cand": [
+   20908,
+   20908,
+   20908
+  ]
+ },
+ "equiv_cand": 0,
+ "heldout_ns": [
+  "221068",
+  "211029",
+  "193349",
+  "166527",
+  "191431"
+ ],
+ "heldout": {
+  "base": [
+   7958470,
+   7597066,
+   6960586,
+   5994994,
+   6891538
+  ],
+  "start": [
+   4421382,
+   4220602,
+   3867002,
+   3330562,
+   3828642
+  ],
+  "cand": [
+   2652838,
+   2532370,
+   2320210,
+   1998346,
+   2297194
+  ]
+ },
+ "heldout_out_equal": true,
+ "python_bench_vs_tool": [
+  "3.14.6",
+  "3.14.4"
+ ],
+ "shortcut": {
+  "bench_n": 19,
+  "heldout": [
+   4421386,
+   4220606,
+   3867006,
+   3330566,
+   3828646
+  ]
+ },
+ "tamper_tracked_guard_exit": 1,
+ "pth_cheat": {
+  "tree_fp_unchanged": true,
+  "guard_exit": 0,
+  "inplace_instr": 19,
+  "c2_instr": 2400022
+ },
+ "ref_moved": {
+  "pinned": "5e8211b305ef",
+  "origin_main_now": "10cb47840999"
+ },
+ "trial_files": [
+  "src/fastlib/__init__.py",
+  "src/fastlib/_note.py"
+ ],
+ "stash": {
+  "exit": 0,
+  "secs": 0.009,
+  "fp_back_to_start": true,
+  "ignored_left": true,
+  "pth_left": true,
+  "autopilot_left": true,
+  "list": "stash@{0}: On main: xt-perf-trial T-1 #1"
+ },
+ "stash_submodule": {
+  "trial_files": [
+   "vendor/sub"
+  ],
+  "exit": 0,
+  "fp_back": false,
+  "tail": "cd1dd19d728ea9ade003f31f83dfef5b7c4552761a0be21f8191e89539983cfa\n"
+ },
+ "stash_without_exclude_takes_autopilot": true,
+ "kept_files": [
+  "src/fastlib/__init__.py",
+  "src/fastlib/_note.py"
+ ],
+ "kept_tree_equal": true,
+ "head_moved": true,
+ "wt_remove_secs": [
+  0.001,
+  0.001,
+  0.001
+ ]
+}
