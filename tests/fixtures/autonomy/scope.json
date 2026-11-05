@@ -422,6 +422,16 @@
     "AUD-HAR-274",
     "AUD-HAR-275"
    ]
+  },
+  {
+   "reason": "Hành vi của `xt.py perf trial` và tài liệu đường lùi (audit delta T-3557, D-371): so cây neo trừ đường sổ sách, Gate qua squash-merge, `start` khi PLAN-opt/D-NNN commit trên nhánh, file mới che mô-đun nhập được ở gốc → `tampered`, đường lùi đo tay thay Gate `bash <(…)`, test luật giữ — không phải quyết định cho/chặn của guard, PR hay CI mà bench mô phỏng. Khoá bằng tests/test_perf_trial.TrialAudit3557Test (FLOW-52…55) và tests/test_perf.PerfGateExampleTest.",
+   "ids": [
+    "AUD-HAR-280",
+    "AUD-HAR-281",
+    "AUD-HAR-282",
+    "AUD-HAR-283",
+    "AUD-HAR-284"
+   ]
   }
  ]
 }
