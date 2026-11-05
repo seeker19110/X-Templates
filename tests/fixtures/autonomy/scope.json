@@ -391,6 +391,17 @@
     "AUD-SEC-526",
     "AUD-SEC-527"
    ]
+  },
+  {
+   "reason": "Hành vi lệnh test tự dò của `scripts/dev-task.sh` (review #444, D-369): unittest về `discover` tuần tự, pytest-xdist tôn trọng cấu hình tắt, `XT_JOBS` có trần, README và BASE-GATE-020 — không phải quyết định cho/chặn của guard, PR hay CI mà bench mô phỏng. Khoá bằng tests/test_dev_task_parallel và lệnh kiểm BASE-CFG-003/`xt.py validate`.",
+   "ids": [
+    "AUD-TEST-070",
+    "AUD-TEST-071",
+    "AUD-TEST-072",
+    "AUD-TEST-073",
+    "AUD-TEST-074",
+    "AUD-TEST-075"
+   ]
   }
  ]
 }
