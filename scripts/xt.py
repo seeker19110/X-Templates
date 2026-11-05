@@ -16630,18 +16630,21 @@ class TrialRun:
     cmd_python: Optional[str] = None
 
 
-def trial_finish_check(base: Path, ctx: TrialCtx) -> Dict[str, Any]:
-    """§4 bước 1: lần thử mở ở pha `started`, `HEAD == start_head`; gốc/cấu hình/công cụ tính lại = lúc `start`, dòng
-    `start` của sổ trùng state, `start_head^{tree}` = cây giữ gần nhất — lệch → TrialRefused(2)."""
+def trial_finish_check(base: Path, ctx: TrialCtx, resume: bool = False) -> Dict[str, Any]:
+    """§4 bước 1: lần thử mở ở pha `started` (`resume`: `measuring`/`decided` — §9), `HEAD == start_head`; gốc/cấu
+    hình/công cụ tính lại = lúc `start`, dòng `start` của sổ trùng state, `start_head^{tree}` = cây giữ gần nhất — lệch →
+    TrialRefused(2)."""
     cur = _trial_open_at_head(base)
-    if cur["phase"] != "started":
-        raise TrialRefused(2, f"{cur['id']} ở pha {cur['phase']} (lượt trước dở) — chạy `perf trial finish --resume`")
+    want = PERF_TRIAL_NEXT[cur["phase"]]
+    if want != ("finish --resume" if resume else "finish"):
+        raise TrialRefused(2, f"{cur['id']} ở pha {cur['phase']} — chạy `perf trial {want}`")
     now = {"base_sha": ctx.base_sha, "config_sha": ctx.config_sha, "tool_sha": ctx.tool_sha}
     bad = [k for k, v in now.items() if cur.get(k) != v]
     start = [r for r in ctx.rows if r["event"] == "start" and r["id"] == cur["id"]]
     if len(start) != 1 or any(start[0].get(k) != cur.get(k) for k in PERF_TRIAL_START_KEYS):
         bad.append("dòng start của sổ")
-    anchor = trial_anchor(ctx.rows, ctx.base_sha) or _trial_git(base, "rev-parse", f"{ctx.base_sha}^{{tree}}").strip()
+    before = [r for r in ctx.rows if r.get("id") != cur["id"]]  # `decide kept` của chính lần thử (chết trước khi đóng)
+    anchor = trial_anchor(before, ctx.base_sha) or _trial_git(base, "rev-parse", f"{ctx.base_sha}^{{tree}}").strip()
     if _trial_git(base, "rev-parse", f"{cur['start_head']}^{{tree}}").strip() != anchor:
         bad.append("start_head^{tree} ≠ cây giữ gần nhất")
     if bad:
@@ -16965,41 +16968,87 @@ def trial_judge(base: Path, ctx: TrialCtx, cur: Dict[str, Any]) -> Dict[str, Any
         }
 
 
-def trial_conclude(base: Path, cur: Dict[str, Any], dec: Dict[str, Any], as_json: bool) -> int:
-    """§4 bước 7–9: nối dòng `decide` (pha `decided`) TRƯỚC khi hành động; giữ → để candidate, `kept_tree`, `closed`
-    (exit 0); thu hồi → stash đúng `candidate_files` + vân tay (exit 1, lệch → 4)."""
+def trial_conclude(
+    base: Path, cur: Dict[str, Any], dec: Dict[str, Any], args: argparse.Namespace, files: Optional[List[str]] = None
+) -> int:
+    """§4 bước 7: nối dòng `decide` (pha `decided`) TRƯỚC khi hành động, rồi bước 8–9 (`trial_act`) — trừ `--no-apply`
+    (in quyết định + lệnh thu hồi, pha giữ `decided`). `files` = đường thu hồi (mặc định `candidate_files`)."""
     head = {k: cur[k] for k in ("id", "base_sha", "hotspot", "rounds")}
     tree = {k: cur[k] for k in ("candidate_tree",) if k in cur}
     row = {"event": "decide", "schema": PERF_TRIAL_SCHEMA, **head, **dec, **tree}
     row |= {"candidate_files": cur.get("candidate_files", []), "at": now_iso()}
     cur = trial_update(base, lambda st: ({**st, "phase": "decided", "verdict": dec["verdict"]}, row))
-    print(json.dumps(row, ensure_ascii=False) if as_json else f"{cur['id']} {dec['verdict']}: {dec['reason']}")
-    if dec["verdict"] == "kept":
+    print(json.dumps(row, ensure_ascii=False) if args.json else f"{cur['id']} {dec['verdict']}: {dec['reason']}")
+    files = cur.get("candidate_files", []) if files is None else files
+    return trial_hold_off(cur, files, args.json) if args.no_apply else trial_act(base, cur, files, args.json)
+
+
+def trial_act(base: Path, cur: Dict[str, Any], files: List[str], as_json: bool) -> int:
+    """§4 bước 8–9 theo `verdict` đã ghi: giữ → để candidate, `kept_tree`, `closed` (exit 0); thu hồi → stash đúng
+    `files` + vân tay (exit 1, lệch → 4)."""
+    if cur["verdict"] == "kept":
         trial_update(base, lambda st: ({**st, "phase": "closed", "kept_tree": st["candidate_tree"]}, None))
         if not as_json:
             print(f"✓ giữ — commit candidate; `start` kế đòi HEAD^{{tree}} = {cur['candidate_tree'][:12]}")
         return 0
-    cur = _trial_revert(base, cur, cur.get("candidate_files", []))
+    cur = _trial_revert(base, cur, files)
     return 1 if cur["phase"] == "closed" else 4
+
+
+def trial_hold_off(cur: Dict[str, Any], files: List[str], as_json: bool) -> int:
+    """`finish --no-apply` (ADR-0071 §2, Đường lùi): quyết định đã ghi sổ (pha `decided`, tính lượt — không đo lại tới khi
+    may), KHÔNG giữ/thu hồi; in lệnh thu hồi để người tự chạy, hoặc `finish --resume` để máy làm. Exit 0 = giữ, 1 = cần
+    thu hồi (chưa làm)."""
+    out = sys.stderr if as_json else sys.stdout
+    stash = ["git", "stash", "push", "--include-untracked", "-m", f"xt-perf-trial {cur['id']}", "--", *files]
+    if cur["verdict"] == "kept":
+        print("giữ (chưa áp): `perf trial finish --resume` đóng lần thử, candidate ở lại cây", file=out)
+    elif files:
+        print(f"thu hồi (chưa làm): {shlex.join(stash)}", file=out)
+    else:
+        print("không có file để thu hồi", file=out)
+    print(f"{cur['id']} pha decided — `perf trial finish --resume` để máy giữ/thu hồi và kiểm vân tay", file=out)
+    return 0 if cur["verdict"] == "kept" else 1
+
+
+def trial_resume(base: Path, cur: Dict[str, Any]) -> Tuple[Dict[str, Any], str]:
+    """§9 `--resume` ở pha `measuring` (lượt trước chết giữa chừng): chưa resume lần nào và vân tay cây = `candidate_fp`
+    → `resumes = 1`, `rounds += 1`, đo lại từ đầu (hạt giống mới) — R1; đã resume một lần hoặc cây đổi → lý do
+    `incomplete` (R2, thu hồi). Trả (state, lý do hay "")."""
+    if cur.get("resumes", 0) >= 1:
+        return (
+            cur,
+            "đã `finish --resume` một lần — không đo lại lần nữa (§9: đo lại tới khi may không được quá một lần)",
+        )
+    if tree_fingerprint(base, _trial_genv()) != cur["candidate_fp"]:
+        return cur, "cây agent đổi sau lượt đo dở (vân tay ≠ candidate_fp) — không đo thứ khác candidate đã đóng băng"
+    return trial_update(base, lambda st: ({**st, "resumes": 1, "rounds": st["rounds"] + 1}, None)), ""
 
 
 def _trial_finish(base: Path, ctx: TrialCtx, args: argparse.Namespace) -> int:
     """§2 `finish`: giữ `perf-trial.lock` suốt lệnh; kiểm, đóng băng, đo (kèm held-out, falsifier — §6, §7), quyết, giữ
-    hoặc thu hồi (§4). Chưa có `--resume`, `--no-apply` (T-3706)."""
-    for flag, task in (("resume", "T-3706"), ("no_apply", "T-3706")):
-        if getattr(args, flag):
-            raise TrialRefused(2, f"`finish --{flag.replace('_', '-')}` chưa triển khai ({task})")
+    hoặc thu hồi (§4). `--resume` (§9): pha `decided` → làm nốt bước 8–9, không ghi `decide` trùng; pha `measuring` → R1
+    đo lại một lần hoặc R2 `incomplete`. `--no-apply`: quyết, ghi sổ, không giữ/thu hồi."""
     with _trial_hold(base):
-        cur = trial_finish_check(base, ctx)
-        files = trial_dirty(base)
-        if not files:
-            return trial_conclude(base, cur, {"verdict": "empty", "reason": "không có candidate"}, args.json)
-        cur = trial_freeze(base, ctx, cur, files)
+        cur = trial_finish_check(base, ctx, args.resume)
+        if cur["phase"] == "decided":
+            print(f"{cur['id']} {cur['verdict']} (đã quyết): làm nốt, không ghi `decide` trùng", file=sys.stderr)
+            files = trial_dirty(base)
+            return trial_hold_off(cur, files, args.json) if args.no_apply else trial_act(base, cur, files, args.json)
+        if cur["phase"] == "measuring":
+            cur, why = trial_resume(base, cur)
+            if why:
+                return trial_conclude(base, cur, {"verdict": "incomplete", "reason": why}, args, trial_dirty(base))
+        else:
+            files = trial_dirty(base)
+            if not files:
+                return trial_conclude(base, cur, {"verdict": "empty", "reason": "không có candidate"}, args)
+            cur = trial_freeze(base, ctx, cur, files)
         dec = trial_judge(base, ctx, cur)
         dec["warnings"] = dec.get("warnings", []) + [
             f"PATH có {w} — uid này ghi được" for w in trial_path_warnings(ctx.cfg)
         ]
-        return trial_conclude(base, cur, dec, args.json)
+        return trial_conclude(base, cur, dec, args)
 
 
 def trial_status_doc(ctx: TrialCtx, cur: Dict[str, Any]) -> Dict[str, Any]:
@@ -17296,10 +17345,15 @@ def _add_perf_trial(ppsub: "argparse._SubParsersAction[argparse.ArgumentParser]"
     pts.add_argument("--falsifier", required=True, metavar="EXPR", help="'<chỉ số> <op> <phần trăm>' so start_head")
     _trial_parser(tsub, "prepare", "dựng ba cây đo, chạy setup, kiểm trỏ đúng cây, dọn (T-3702)", "", "0" + no)
     pfi = _trial_parser(
-        tsub, "finish", "đo, quyết, giữ hoặc thu hồi (§4)", "--json", "0 giữ · 1 thu hồi" + no + " · 4 thu hồi lệch"
+        tsub,
+        "finish",
+        "đo, quyết, giữ hoặc thu hồi (§4)",
+        "--json",
+        "0 giữ · 1 thu hồi (`--no-apply`: cần thu hồi, chưa làm)" + no + " · 4 thu hồi lệch",
     )
-    for flag in ("--resume", "--no-apply", "--json"):
-        pfi.add_argument(flag, action="store_true")
+    pfi.add_argument("--resume", action="store_true", help="lượt trước dở: đo lại một lần hoặc làm nốt (§9)")
+    pfi.add_argument("--no-apply", action="store_true", help="quyết + ghi sổ, in lệnh thu hồi, không giữ/thu hồi")
+    pfi.add_argument("--json", action="store_true")
     pst = _trial_parser(
         tsub,
         "status",

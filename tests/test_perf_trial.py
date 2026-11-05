@@ -413,13 +413,29 @@ class TrialBaseTest(TrialCase):
         self.assertIn("perf trial: vòng", r.stdout)
         self.assertEqual(list(tmp.iterdir()), [])
 
-    def test_git_error_is_exit_2_and_todo_commands(self) -> None:
+    def test_git_error_is_exit_2(self) -> None:
         with unittest.mock.patch.object(xt, "trial_context", side_effect=RuntimeError("git lỗi")):
             self.assertEqual(self.tr("status")[0], 2)
-        todo = ((("finish", "--resume"), "T-3706"), (("finish", "--no-apply"), "T-3706"))
-        for args, task in todo:
-            with self.subTest(args):
-                self.assertIn(f"chưa triển khai ({task})", self.refused(*args))
+
+    def test_every_command_execs_base_tool(self) -> None:
+        """T-3706, §5: byte `xt.py` khác blob gốc → MỌI lệnh con (cả cờ `--resume`/`--no-apply`) chạy bản gốc với đúng
+        argv, trước khi lệnh làm gì (sổ không đổi)."""
+        self.republish({TOOL: XT.read_text(encoding="utf-8") + "# bản gốc khác\n"})
+        commands = (
+            ("start", "--hotspot", "src/hot.py", *TRIAL_ARGS),
+            ("prepare",),
+            ("finish", "--resume", "--no-apply", "--json"),
+            ("status", "--check"),
+            ("abort", "--reason", "x"),
+            ("log", "--check"),
+        )
+        for args in commands:
+            with self.subTest(args), unittest.mock.patch.object(xt, "_trial_exec", side_effect=SystemExit(7)) as ex:
+                before = self.ledger()
+                with self.assertRaises(SystemExit) as cm:
+                    run_main("perf", "trial", *args)
+                self.assertEqual((cm.exception.code, self.ledger()), (7, before))
+                self.assertEqual(ex.call_args.args[2], ["perf", "trial", *args])
 
 
 class TrialHeadTreeTest(TrialCase):
@@ -1228,6 +1244,113 @@ class TrialHeldoutTest(TrialCase):
                 got = xt.trial_falsified(expr, cfg, measures)
                 self.assertIn(want, got) if want else self.assertEqual(got, "")
         self.assertIn("coi như trúng", xt.trial_falsified("primary > 0%", cfg, {"primary": {"compare": {}}}))
+
+
+class TrialResumeTest(TrialCase):
+    """T-3706: `finish --resume` (ADR-0071 §9 — R1 một lần, rơi về R2), `finish --no-apply` (§2, Đường lùi), đồng thời.
+    Ca luồng FLOW-21/34/35/36 (kill thật) ở `tests.test_flow`; đây dựng pha bằng hàm nội bộ cho từng nhánh."""
+
+    def measuring(self, text: str) -> str:
+        """Lần thử mở, candidate `text` đã đóng băng (pha `measuring`, `rounds` 1) như lượt `finish` chết giữa chừng."""
+        tid = self.started()
+        self.put("src/hot.py", text)
+        ctx = self.ctx()
+        xt.trial_freeze(self.repo, ctx, xt.trial_finish_check(self.repo, ctx), xt.trial_dirty(self.repo))
+        self.assertEqual(self.tstate()["phase"], "measuring")
+        return tid
+
+    def decides(self, tid: str) -> list[dict[str, Any]]:
+        return [r for r in self.rows() if r["event"] == "decide" and r["id"] == tid]
+
+    def test_resume_needs_unfinished_round(self) -> None:
+        self.started()
+        self.assertIn("chạy `perf trial finish`", self.refused("finish", "--resume"))
+        self.ok("abort", "--reason", "x")
+        self.assertIn("không có lần thử mở", self.refused("finish", "--resume", "--no-apply"))
+
+    def test_r1_measures_once_more_then_r2(self) -> None:
+        """R1: pha `measuring`, cây = `candidate_fp`, `resumes` 0 → đo lại, `rounds` 2, `resumes` 1, giữ (exit 0), một dòng
+        `decide`. R2: lượt dở thứ hai (đã resume một lần) → `incomplete`, thu hồi về `fp_start` (exit 1)."""
+        tid = self.measuring(HOT.replace("K = 3", "K = 2"))
+        rc, out, err = self.tr("finish", "--resume")
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual([(r["verdict"], r["rounds"]) for r in self.decides(tid)], [("kept", 2)])
+        self.assertEqual((self.tstate()["resumes"], self.tstate()["phase"]), (1, "closed"))
+        self.git("commit", "-q", "-am", "giữ")
+        fp0 = xt.tree_fingerprint(self.repo)
+        tid = self.measuring(HOT.replace("K = 3", "K = 1"))
+        xt.trial_update(self.repo, lambda st: ({**st, "resumes": 1}, None))
+        rc, out, err = self.tr("finish", "--resume")
+        self.assertEqual(rc, 1, out + err)
+        self.assertEqual([r["verdict"] for r in self.decides(tid)], ["incomplete"])
+        self.assertIn("một lần", self.decides(tid)[0]["reason"])
+        self.assertEqual(xt.tree_fingerprint(self.repo), fp0)
+
+    def test_r2_tree_changed_reverts_current_files(self) -> None:
+        """Cây đổi sau lượt dở (thêm file ngoài candidate đã đóng băng) → `incomplete`, thu hồi MỌI đường đang đổi (về
+        `fp_start`), không đo."""
+        fp0 = xt.tree_fingerprint(self.repo)
+        tid = self.measuring(HOT.replace("K = 3", "K = 2"))
+        self.put("src/extra.py", "Y = 1\n")
+        with unittest.mock.patch.object(xt, "trial_judge", side_effect=AssertionError("không được đo")):
+            rc, out, err = self.tr("finish", "--resume")
+        self.assertEqual(rc, 1, out + err)
+        self.assertEqual([r["verdict"] for r in self.decides(tid)], ["incomplete"])
+        self.assertEqual((xt.tree_fingerprint(self.repo), (self.repo / "src" / "extra.py").exists()), (fp0, False))
+
+    def test_no_apply_kept_then_resume_closes(self) -> None:
+        """`--no-apply` giữ: exit 0, dòng `decide` ghi (tính lượt), pha `decided`, candidate còn; `--resume --no-apply` in
+        lại, không ghi trùng; `--resume` đóng (`kept_tree`), vẫn một dòng `decide`."""
+        tid = self.started()
+        self.put("src/hot.py", HOT.replace("K = 3", "K = 2"))
+        rc, out, err = self.tr("finish", "--no-apply")
+        self.assertEqual(rc, 0, out + err)
+        self.assertIn("giữ (chưa áp)", out)
+        self.assertEqual((self.tstate()["phase"], len(self.decides(tid))), ("decided", 1))
+        self.assertIn("finish --resume", self.refused("finish"))
+        rc, out, err = self.tr("finish", "--resume", "--no-apply")
+        self.assertEqual((rc, self.tstate()["phase"]), (0, "decided"), out + err)
+        self.assertIn("không ghi `decide` trùng", err)
+        rc, out, err = self.tr("finish", "--resume")
+        self.assertEqual(rc, 0, out + err)
+        st = self.tstate()
+        self.assertEqual((st["phase"], st["kept_tree"], len(self.decides(tid))), ("closed", st["candidate_tree"], 1))
+        self.assertIn("K = 2", (self.repo / "src" / "hot.py").read_text(encoding="utf-8"))
+
+    def test_no_apply_revert_prints_command_then_resume_reverts(self) -> None:
+        """`--no-apply` không giữ: exit 1, cây KHÔNG đổi (không stash), in lệnh `git stash push … -- <file>` đúng danh sách
+        (đường có ký tự shell được quote); `--json`: stdout chỉ là dòng `decide`. `--resume` thu hồi (exit 1, `fp_start`)."""
+        fp0 = xt.tree_fingerprint(self.repo)
+        tid = self.started("src/hot.py", "src/a b.py")
+        self.put("src/hot.py", HOT + "# chú thích\n")
+        self.put("src/a b.py", "Z = 1\n")
+        fp1 = xt.tree_fingerprint(self.repo)
+        rc, out, err = self.tr("finish", "--no-apply", "--json")
+        self.assertEqual(rc, 1, out + err)
+        self.assertEqual(json.loads(out)["id"], tid)
+        want = f"git stash push --include-untracked -m 'xt-perf-trial {tid}' -- src/hot.py 'src/a b.py'"
+        self.assertIn(want, err)
+        self.assertEqual((xt.tree_fingerprint(self.repo), self.git("stash", "list")), (fp1, ""))
+        rc, out, err = self.tr("finish", "--resume")
+        self.assertEqual(rc, 1, out + err)
+        self.assertEqual((xt.tree_fingerprint(self.repo), len(self.decides(tid))), (fp0, 1))
+
+    def test_no_apply_empty_candidate(self) -> None:
+        self.started()
+        rc, out, err = self.tr("finish", "--no-apply")
+        self.assertEqual(rc, 1, out + err)
+        self.assertIn("không có file để thu hồi", out)
+        self.assertEqual(self.tstate()["phase"], "decided")
+
+    def test_concurrent_resume_or_no_apply_refused(self) -> None:
+        """Một `finish`/`abort` đang giữ `perf-trial.lock` → `finish --resume`, `finish --no-apply`, `abort` exit 2 ngay,
+        sổ không đổi; nhả khoá thì `--resume` chạy được."""
+        self.measuring(HOT.replace("K = 3", "K = 2"))
+        with xt._trial_hold(self.repo):
+            for args in (("finish", "--resume"), ("finish", "--resume", "--no-apply"), ("abort", "--reason", "x")):
+                with self.subTest(args):
+                    self.assertIn("đang chạy", self.refused(*args))
+        self.assertEqual(self.tr("finish", "--resume")[0], 0)
 
 
 class TrialParserTest(unittest.TestCase):

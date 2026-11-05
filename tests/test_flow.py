@@ -1091,7 +1091,7 @@ class TrialFlowTest(TmpRepoCase):
         self.ok("log")
         self.assertIn(tid, self.perf_log())
 
-    @flow("FLOW-21")
+    @flow("FLOW-21", done="T-3706")
     def test_flow_21_resume_after_tree_changed_is_incomplete(self) -> None:
         """Given candidate `improved`, `finish` bị SIGKILL giữa lượt đo, rồi cây đổi (≠ `candidate_fp`) · When `finish
         --resume` · Then thu hồi (exit 1), một dòng `decide` `verdict: incomplete`, vân tay = lúc start (R2)."""
@@ -1106,7 +1106,7 @@ class TrialFlowTest(TmpRepoCase):
         self.assertEqual([r["verdict"] for r in self.decided(tid)], ["incomplete"])
         self.assertEqual(self.fp(), fp0)
 
-    @flow("FLOW-21")
+    @flow("FLOW-21", done="T-3706")
     def test_flow_21_second_resume_is_incomplete(self) -> None:
         """Given `finish` bị kill giữa lượt, `finish --resume` cũng bị kill giữa lượt (`resumes` = 1), cây không đổi ·
         When `finish --resume` lần hai · Then không đo lại lần ba: thu hồi (exit 1), một dòng `incomplete`, vân tay = lúc
@@ -1354,7 +1354,7 @@ class TrialFlowTest(TmpRepoCase):
         self.assertEqual(first.wait(timeout=300), 0)
         self.assertEqual(len(self.rows()), 1)
 
-    @flow("FLOW-35")
+    @flow("FLOW-35", done="T-3706")
     def test_flow_35_kill_mid_measure_resume_measures_once_more(self) -> None:
         """Given candidate K = 2, `finish` bị SIGKILL lúc chạy held-out (pha `measuring`, cây = `candidate_fp`) · When
         `finish` → exit 2 chỉ `--resume`; `finish --resume` · Then đo lại từ đầu, giữ (exit 0), đúng một dòng `decide` có
@@ -1374,7 +1374,7 @@ class TrialFlowTest(TmpRepoCase):
         self.assertNotEqual(seeds[0], seeds[-1])
         self.assertIn(seeds[-1], json.dumps(rows[0]))
 
-    @flow("FLOW-36")
+    @flow("FLOW-36", done="T-3706")
     def test_flow_36_kill_after_decide_resume_finishes_revert(self) -> None:
         """Given candidate `neutral`, `finish` chết (`os._exit(9)`) đúng lúc `git stash push` — sau dòng `decide`, trước
         thu hồi · When `finish` → exit 2 chỉ `--resume`; `finish --resume` · Then làm nốt thu hồi (exit 1), vân tay = lúc
