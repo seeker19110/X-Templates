@@ -1714,6 +1714,22 @@ class CpuBudgetTest(unittest.TestCase):
             cpu_budget.assert_not_quadratic(self, work, 10_000, clock=clock, ratio=40)
         self.assertGreaterEqual(cpu_budget.cost(lambda n: sum(range(n)), 10), 0.0)  # đồng hồ thật
 
+    def test_transient_spike_remeasured_quadratic_still_fails(self):
+        """D-380: tranh CPU chỉ ở lần đo lớn đầu (tuyến tính, lần đầu ×20) → đo lại thì qua; bậc hai thật đỏ cả hai lượt."""
+        calls = []
+
+        def spike(n: int) -> float:
+            calls.append(n)
+            base = n * 1e-5
+            return base * 20 if len(calls) == 2 else base  # lần thứ hai là lần đo cỡ lớn đầu tiên
+
+        clock, work = self.fake_clock(spike)
+        cpu_budget.assert_not_quadratic(self, work, 10_000, clock=clock)
+        self.assertEqual(len(calls), 4)  # đã đo lại một lượt
+        clock, work = self.fake_clock(lambda n: n * n * 1e-8)
+        with self.assertRaises(AssertionError):
+            cpu_budget.assert_not_quadratic(self, work, 10_000, clock=clock)
+
     def test_no_hard_cpu_thresholds_left(self):
         hard = re.compile(r"assertLess\(\s*time\.process_time\(\)\s*-\s*\w+\s*,\s*[0-9.]+\s*\)")
         found = [
