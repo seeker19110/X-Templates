@@ -15644,7 +15644,16 @@ PERF_TRIAL_GIT_ENV += tuple(
 )  # danh tính stash
 PERF_TRIAL_DIFF = ("--ignore-submodules=none", "--no-ext-diff", "--no-textconv")  # cấu hình không giấu khác biệt
 PERF_TRIAL_KINDS = ("wall", "exact")  # `exact` = số cuối stdout, chạy ≥ 3 lần và phải trùng (§4 bước 4)
-PERF_TRIAL_METRIC_KEYS = ("cmd", "kind", "unit", "higher_is_better", "runs")
+PERF_TRIAL_METRIC_KEYS: Tuple[str, ...] = ("cmd", "kind", "unit", "higher_is_better", "runs")
+PERF_TRIAL_SECONDARY_KEYS: Tuple[str, ...] = (
+    "name",
+    "cmd",
+    "kind",
+    "unit",
+    "higher_is_better",
+    "ceiling",
+    "regress",
+)  # §1
 PERF_TRIAL_ROW_KEYS = {  # sự kiện sổ → trường chuỗi bắt buộc (ngoài `event`, `schema`, `base_sha`)
     "start": ("id", "default_ref", "origin_url", "hypothesis", "falsifier", "start_head"),
     "decide": ("id", "verdict"),
@@ -15714,20 +15723,41 @@ def trial_config_problem(cfg: Any) -> Optional[str]:
         (cfg.get("timeout", 1) > 0, '"timeout" phải > 0 (giây)'),
     )
     bad_check = next((msg for ok, msg in checks if not ok), None)
-    return bad_check or _trial_env_problem(cfg.get("env", {})) or _trial_metric_problem(cfg["metric"])
+    return bad_check or _trial_env_problem(cfg.get("env", {})) or _trial_metric_problem(cfg)
 
 
-def _trial_metric_problem(m: Dict[str, Any]) -> Optional[str]:
-    """`metric` = {cmd, kind: wall|exact, unit, higher_is_better, runs ≥ 1}; `wall` cần `runs` ≥ PERF_MIN_RUNS (ít hơn thì
-    `perf_compare` luôn `insufficient` — không bao giờ giữ, nên báo sớm); khoá lạ = gõ sai → từ chối."""
-    shape = not set(m) - set(PERF_TRIAL_METRIC_KEYS) and m.get("kind") in PERF_TRIAL_KINDS
-    shape = shape and isinstance(m.get("unit", ""), str) and isinstance(m.get("higher_is_better", False), bool)
-    runs = m.get("runs", PERF_MIN_RUNS)
-    if not shape or not _trial_is(runs, int) or runs < 1:
-        return '"metric" = {cmd, kind: wall|exact, unit: chuỗi, higher_is_better: bool, runs: số nguyên ≥ 1}'
+def _trial_metric_ok(m: Any, keys: Tuple[str, ...]) -> bool:
+    """Một chỉ số: `cmd` chuỗi, `kind` wall|exact, `unit` chuỗi, `higher_is_better` bool, `runs` nguyên ≥ 1, `ceiling`
+    số hữu hạn, `regress` số ≥ 0 (phần trăm); khoá ngoài `keys` = gõ sai."""
+    if not isinstance(m, dict) or set(m) - set(keys) or m.get("kind") not in PERF_TRIAL_KINDS:
+        return False
+    runs, nums = m.get("runs", PERF_MIN_RUNS), [m.get(k, 0) for k in ("ceiling", "regress")]
+    typed = isinstance(m.get("cmd"), str) and isinstance(m.get("unit", ""), str)
+    typed = typed and isinstance(m.get("higher_is_better", False), bool) and _trial_is(runs, int) and runs >= 1
+    return typed and all(_trial_is(x, (int, float)) and math.isfinite(x) for x in nums) and nums[1] >= 0
+
+
+def _trial_metric_problem(cfg: Dict[str, Any]) -> Optional[str]:
+    """`metric` = {cmd, kind: wall|exact, unit, higher_is_better, runs ≥ 1}; `secondary[]` = {name, cmd, kind, unit,
+    higher_is_better, ceiling, regress ≥ 0} (đo cùng lượt, `metric.runs` lượt); có `wall` thì `runs` ≥ PERF_MIN_RUNS (ít
+    hơn: `perf_compare` luôn `insufficient`, không bao giờ giữ — báo sớm); `target` = `<chỉ số> <op> <phần trăm>`."""
+    items = [("metric", cfg["metric"], PERF_TRIAL_METRIC_KEYS)]
+    items += [("secondary[]", s, PERF_TRIAL_SECONDARY_KEYS) for s in cfg.get("secondary", [])]
+    bad = [label for label, m, keys in items if not _trial_metric_ok(m, keys)]
+    if bad:
+        return f'"{bad[0]}" = {{cmd, kind: wall|exact, unit: chuỗi, higher_is_better: bool, runs: số nguyên ≥ 1, ceiling: số, regress: số ≥ 0}}'
+    if any(m["kind"] == "wall" for _, m, _ in items) and cfg["metric"].get("runs", PERF_MIN_RUNS) < PERF_MIN_RUNS:
+        return f'"metric.runs" phải ≥ {PERF_MIN_RUNS} khi có chỉ số kind wall'
     return (
-        f'"metric.runs" phải ≥ {PERF_MIN_RUNS} khi kind wall' if m["kind"] == "wall" and runs < PERF_MIN_RUNS else None
+        None if trial_target(cfg) else '"target" = "<chỉ số> <op> <phần trăm>", chỉ số = primary hoặc secondary[].name'
     )
+
+
+def trial_target(cfg: Dict[str, Any]) -> Optional[Tuple[str, str, float]]:
+    """(chỉ số, op, phần trăm) của `target` (mục tiêu so gốc, `LOOP-OPT-001`); sai dạng hay chỉ số lạ → None."""
+    m = PERF_TRIAL_FALSIFIER_RE.fullmatch(cfg["target"].strip())
+    names = {"primary", *(s["name"] for s in cfg.get("secondary", []))}
+    return (m[1], m[2], float(m[3])) if m and m[1] in names else None
 
 
 def _trial_env_problem(env: Dict[str, Any]) -> Optional[str]:
@@ -16423,13 +16453,29 @@ def trial_run(cmd: str, cwd: Path, env: Dict[str, str], timeout: float) -> Tuple
 def _trial_allowed(tree: TrialTree, cfg: Dict[str, Any], env: Dict[str, str]) -> List[str]:
     """Gốc được phép phân giải tới: chính cây, `sys.base_prefix` của interpreter cây (`.venv/bin/python`, không thì
     `python3` trên PATH allowlist), `env.allow_prefix[]` — đều realpath."""
-    py = tree.root / ".venv" / "bin" / "python"
-    exe = str(py) if py.exists() else shutil.which("python3", path=env["PATH"])
+    exe = _trial_python(tree, env)
     pre = (
         trial_run(f"{shlex.quote(exe)} -I -c 'import sys; print(sys.base_prefix)'", tree.root, env, 60) if exe else None
     )
     extra = [pre[1].strip()] if pre and pre[0] == 0 and pre[1].strip() else []
     return [os.path.realpath(p) for p in (tree.root, *extra, *cfg.get("env", {}).get("allow_prefix", []))]
+
+
+def _trial_python(tree: TrialTree, env: Dict[str, str]) -> Optional[str]:
+    """Interpreter của cây: `.venv/bin/python` của chính cây, không thì `python3` trên PATH allowlist; không có → None."""
+    py = tree.root / ".venv" / "bin" / "python"
+    return str(py) if py.exists() else shutil.which("python3", path=env["PATH"])
+
+
+def trial_cmd_python(tree: TrialTree, env: Dict[str, str]) -> Optional[str]:
+    """`env.cmd_python` của mẫu (§4 bước 4): interpreter lệnh đo của cây (đường tương đối nếu trong cây) + phiên bản;
+    `env.python` giữ nghĩa cũ (Python chạy `xt.py`). Không có interpreter hoặc không chạy được → None."""
+    exe = _trial_python(tree, env)
+    if exe is None:
+        return None
+    rc, out, _ = trial_run(f"{shlex.quote(exe)} -I -c 'import sys; print(sys.version.split()[0])'", tree.root, env, 60)
+    name = exe.removeprefix(f"{tree.root}/")
+    return f"{name} {out.strip()}" if rc == 0 else None
 
 
 def _trial_outside(path: str, allowed: List[str]) -> bool:
@@ -16564,6 +16610,7 @@ class TrialRun:
     tree: TrialTree
     env: Dict[str, str]
     files: Dict[str, TrialEntry]
+    cmd_python: Optional[str] = None
 
 
 def trial_finish_check(base: Path, ctx: TrialCtx) -> Dict[str, Any]:
@@ -16623,6 +16670,7 @@ def trial_ready(trees: List[TrialTree], cfg: Dict[str, Any]) -> List[TrialRun]:
         raise TrialRefused(2, "setup/kiểm trỏ đúng cây: " + "; ".join(bad))
     for run in runs:
         run.env = trial_run_env(run.tree, cfg)
+        run.cmd_python = trial_cmd_python(run.tree, run.env)
     return runs
 
 
@@ -16698,22 +16746,67 @@ def trial_moved(runs: List[TrialRun], cfg: Dict[str, Any]) -> List[str]:
 def trial_record(
     runs: List[TrialRun], m: Dict[str, Any], samples: Dict[str, List[float]], cmp: Dict[str, Dict[str, Any]]
 ) -> Dict[str, Any]:
-    """Số của một chỉ số cho dòng `decide`: mẫu từng cây theo dạng v2 (ADR-0052 §4) + `kind`, và hai phép so."""
+    """Số của một chỉ số cho dòng `decide`: mẫu từng cây theo dạng v2 (ADR-0052 §4) + `kind` + `env.cmd_python`
+    (interpreter lệnh đo của cây; `env.python` giữ nghĩa cũ), và hai phép so."""
     env = {"platform": sys.platform, "python": sys.version.split()[0], "nproc": perf_nproc()}
     keep = {"unit": m.get("unit", ""), "cmd": ["/bin/sh", "-c", m["cmd"]], "kind": m["kind"], "warmup": 0}
-    keep |= {"higher_is_better": m.get("higher_is_better", False), "env": env, "dirty": False}
-    trees = {r.tree.name: {"schema": 2, "samples": samples[r.tree.name], **keep, "head": r.tree.commit} for r in runs}
+    keep |= {"higher_is_better": m.get("higher_is_better", False), "dirty": False}
+    trees = {
+        r.tree.name: {"schema": 2, "samples": samples[r.tree.name], **keep, "head": r.tree.commit}
+        | {"env": env | {"cmd_python": r.cmd_python}}
+        for r in runs
+    }
     return {**trees, "compare": cmp}
 
 
-def trial_verdict(cmp: Dict[str, Dict[str, Any]], equiv_rc: int) -> Tuple[str, str]:
-    """§4 bước 7 (lát T-3703): chỉ số chính `improved` so gốc VÀ so `start_head`, rồi `equiv` xanh; lý do đầu tiên thắng."""
+def _trial_worse(doc: Dict[str, Any], m: Dict[str, Any]) -> Optional[str]:
+    """Chỉ số phụ lùi quá `regress` % (mặc định 0) trong một phép so: `exact` theo số (tất định), `wall` chỉ khi
+    `perf_compare` nói `regressed` (vượt nhiễu); `insufficient` (mẫu `exact` lệch) cũng là lý do."""
+    if doc["verdict"] == "insufficient":
+        return _perf_report(doc)
+    worse = doc["change"] * (-100 if m.get("higher_is_better", False) else 100)
+    limit = m.get("regress", 0)
+    hit = worse > limit and (m["kind"] == "exact" or doc["verdict"] == "regressed")
+    return f"lùi {worse:+.2f}% > regress {limit:g}% ({_perf_report(doc)})" if hit else None
+
+
+def trial_secondary(m: Dict[str, Any], samples: Dict[str, List[float]]) -> Tuple[Dict[str, Dict[str, Any]], str]:
+    """§4 bước 7, FLOW-23/44: (hai phép so, lý do thu hồi hay ""): trung vị candidate vượt `ceiling` (trần tuyệt đối ở phía
+    tệ: `higher_is_better` thì là sàn) hoặc lùi quá `regress` so `start_head` lẫn so gốc."""
+    cmp = trial_compare(samples, m)
+    med, hib = statistics.median(samples["cand"]), m.get("higher_is_better", False)
+    if "ceiling" in m and (med < m["ceiling"] if hib else med > m["ceiling"]):
+        return cmp, f"{m['name']}: candidate {med:g} {m.get('unit', '')} vượt trần {m['ceiling']:g}"
+    why = [f"{m['name']} so {label}: {w}" for ref, label in PERF_TRIAL_TREES if (w := _trial_worse(cmp[ref], m))]
+    return cmp, "; ".join(why)
+
+
+def trial_verdict(cmp: Dict[str, Dict[str, Any]], equiv_rc: int, worse: List[str]) -> Tuple[str, str]:
+    """§4 bước 7: chỉ số chính `improved` so gốc VÀ so `start_head`, `equiv` xanh, mọi chỉ số phụ trong trần và mức lùi;
+    lý do đầu tiên thắng (held-out, falsifier: T-3705)."""
     for ref, label in PERF_TRIAL_TREES:
         if cmp[ref]["verdict"] != "improved":
             return cmp[ref]["verdict"], f"primary so {label}: {_perf_report(cmp[ref])}"
     if equiv_rc:
         return "inequivalent", f"`equiv` exit {equiv_rc} ở cây candidate"
-    return "kept", "primary improved so gốc và start_head; equiv xanh"
+    if worse:
+        return "secondary", "; ".join(worse)
+    return "kept", "primary improved so gốc và start_head; equiv xanh; chỉ số phụ trong trần và mức lùi"
+
+
+def trial_decide(runs: List[TrialRun], cfg: Dict[str, Any], samples: Dict[str, Any], equiv_rc: int) -> Dict[str, Any]:
+    """Quyết từ mẫu đã đo + `equiv`: phép so mọi chỉ số, lý do, số ghi sổ; ⚠ khi interpreter lệnh đo khác giữa các cây."""
+    cmp = trial_compare(samples["primary"], cfg["metric"])
+    measures = {"primary": trial_record(runs, cfg["metric"], samples["primary"], cmp)}
+    worse = []
+    for s in cfg.get("secondary", []):
+        scmp, why = trial_secondary(s, samples[s["name"]])
+        measures[s["name"]] = trial_record(runs, s, samples[s["name"]], scmp)
+        worse += [why] if why else []
+    verdict, reason = trial_verdict(cmp, equiv_rc, worse)
+    pys = sorted({str(r.cmd_python) for r in runs})
+    warn = [f"interpreter lệnh đo khác giữa các cây: {', '.join(pys)}"] if len(pys) > 1 else []
+    return {"verdict": verdict, "reason": reason, "measures": measures, "warnings": warn}
 
 
 def trial_score(base: Path, cur: Dict[str, Any], cfg: Dict[str, Any], trees: List[TrialTree]) -> Dict[str, Any]:
@@ -16722,8 +16815,9 @@ def trial_score(base: Path, cur: Dict[str, Any], cfg: Dict[str, Any], trees: Lis
     runs = trial_ready(trees, cfg)
     m = cfg["metric"]
     rounds = max(m.get("runs", PERF_MIN_RUNS), PERF_TRIAL_EXACT_RUNS if m["kind"] == "exact" else 1)
+    metrics = [("primary", m), *((s["name"], s) for s in cfg.get("secondary", []))]  # chỉ số phụ cùng lượt
     try:
-        samples = trial_measure(runs, [("primary", m)], rounds, cfg.get("timeout", PERF_TRIAL_TIMEOUT))
+        samples = trial_measure(runs, metrics, rounds, cfg.get("timeout", PERF_TRIAL_TIMEOUT))
     except TrialBroken as exc:
         if exc.tree != "cand":
             raise
@@ -16732,16 +16826,23 @@ def trial_score(base: Path, cur: Dict[str, Any], cfg: Dict[str, Any], trees: Lis
     moved = trial_moved(runs, cfg)
     if moved:
         return {"verdict": "tampered", "reason": f"lệnh đo/equiv đổi cây candidate: {', '.join(moved[:10])}"}
-    cmp = trial_compare(samples["primary"], m)
-    verdict, reason = trial_verdict(cmp, equiv_rc)
-    if verdict == "kept" and tree_fingerprint(base, _trial_genv()) != cur["candidate_fp"]:
-        verdict, reason = "incomplete", "cây agent đổi trong lúc đo — không giữ thứ chưa được đo"
-    doc = {
-        "verdict": verdict,
-        "reason": reason,
-        "measures": {"primary": trial_record(runs, m, samples["primary"], cmp)},
-    }
+    doc = trial_decide(runs, cfg, samples, equiv_rc)
+    if doc["verdict"] == "kept" and tree_fingerprint(base, _trial_genv()) != cur["candidate_fp"]:
+        doc |= {"verdict": "incomplete", "reason": "cây agent đổi trong lúc đo — không giữ thứ chưa được đo"}
     return doc | {"heldout": PERF_TRIAL_PENDING, "falsifier_hit": PERF_TRIAL_PENDING}
+
+
+def trial_guard_warnings(base: Path, head: str, cand: str) -> List[str]:
+    """⚠ heuristic của `perf guard` (cache, sleep, đổi đồng hồ, soi stack, file luật git) trên diff `start_head` →
+    commit candidate — từ object, không đọc cây làm việc; môi trường git allowlist, không driver ngoài/textconv."""
+    names = _trial_git_names(base, "diff", "--name-only", "-z", "--no-renames", *PERF_TRIAL_DIFF, head, cand)
+    raw = _perf_git_raw(
+        base,
+        *("diff", "--unified=0", "--text", "--no-color", "--no-renames", *PERF_TRIAL_DIFF),
+        *("--src-prefix=a/", "--dst-prefix=b/", head, cand),
+        env=_trial_genv(),
+    )
+    return [f"perf guard: {s}" for s in perf_guard(names, _perf_diff_lines(raw), [])[1]]
 
 
 def trial_judge(base: Path, ctx: TrialCtx, cur: Dict[str, Any]) -> Dict[str, Any]:
@@ -16761,7 +16862,10 @@ def trial_judge(base: Path, ctx: TrialCtx, cur: Dict[str, Any]) -> Dict[str, Any
         bad = trial_candidate_problems(base, trees[2], files)
         if bad:
             return {"verdict": "unbuildable", "reason": "; ".join(bad)}
-        return trial_score(base, cur, ctx.cfg, trees)
+        doc = trial_score(base, cur, ctx.cfg, trees)
+        return doc | {
+            "warnings": trial_guard_warnings(base, cur["start_head"], trees[2].commit) + doc.get("warnings", [])
+        }
 
 
 def trial_conclude(base: Path, cur: Dict[str, Any], dec: Dict[str, Any], as_json: bool) -> int:
@@ -16795,7 +16899,9 @@ def _trial_finish(base: Path, ctx: TrialCtx, args: argparse.Namespace) -> int:
             return trial_conclude(base, cur, {"verdict": "empty", "reason": "không có candidate"}, args.json)
         cur = trial_freeze(base, ctx, cur, files)
         dec = trial_judge(base, ctx, cur)
-        dec["warnings"] = [f"PATH có {w} — uid này ghi được" for w in trial_path_warnings(ctx.cfg)]
+        dec["warnings"] = dec.get("warnings", []) + [
+            f"PATH có {w} — uid này ghi được" for w in trial_path_warnings(ctx.cfg)
+        ]
         return trial_conclude(base, cur, dec, args.json)
 
 
@@ -16814,9 +16920,60 @@ def trial_status_doc(ctx: TrialCtx, cur: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+PERF_TRIAL_OPS: Dict[str, Callable[[float, float], bool]] = {
+    "<=": lambda a, b: a <= b,
+    ">=": lambda a, b: a >= b,
+    "<": lambda a, b: a < b,
+    ">": lambda a, b: a > b,
+}
+
+
+def _trial_change(row: Dict[str, Any], name: str) -> Optional[float]:
+    """Phần trăm đổi của chỉ số `name` so gốc ở dòng `decide` (đọc sổ, không đo lại — §5); thiếu số → None."""
+    try:
+        value = row["measures"][name]["compare"]["base"]["change"]
+    except (KeyError, TypeError):
+        return None
+    return float(value) * 100 if _trial_is(value, (int, float)) else None
+
+
+def trial_exhausted(ctx: TrialCtx) -> bool:
+    """Hết `budget` của vòng, hoặc mọi đường đã khai trong vòng đều ≥ 3 lần liên tiếp không giữ (→ `loop defer`)."""
+    starts = [r for r in ctx.rows if r["event"] == "start" and r["base_sha"] == ctx.base_sha]
+    paths = {p for r in starts for p in r["hotspot"]}
+    streak = trial_streaks(ctx.rows)
+    dead = bool(paths) and all(streak.get(p, 0) >= PERF_TRIAL_STRIKES for p in paths)
+    return len(starts) >= ctx.cfg["budget"] or dead
+
+
+def trial_check(ctx: TrialCtx, cur: Dict[str, Any]) -> Tuple[int, str]:
+    """`status --check` = Gate của task tối ưu (§2, §5): lần giữ gần nhất của vòng đạt `target` so gốc và không có lần thử
+    mở → 0; chưa đạt → 1, hoặc 3 khi hết `budget`/mọi đường đã cạn. Không đo, không `loop record` (ADR-0052 §3)."""
+    name, op, pct = trial_target(ctx.cfg) or ("primary", "<", -math.inf)
+    kept = [r for r in ctx.rows if r["event"] == "decide" and r["base_sha"] == ctx.base_sha and r["verdict"] == "kept"]
+    got = _trial_change(kept[-1], name) if kept else None
+    if cur.get("phase") in PERF_TRIAL_NEXT:
+        return 1, f"✗ lần thử {cur['id']} đang mở — `perf trial {PERF_TRIAL_NEXT[cur['phase']]}` trước"
+    if got is not None and PERF_TRIAL_OPS[op](got, pct):
+        return 0, f"✓ target `{ctx.cfg['target']}` đạt: {name} {got:+.2f}% so gốc ({kept[-1]['id']})"
+    seen = (
+        "chưa có lần giữ"
+        if not kept
+        else f"lần giữ gần nhất {kept[-1]['id']}: {name} {got if got is None else f'{got:+.2f}%'}"
+    )
+    if trial_exhausted(ctx):
+        return (
+            3,
+            f"✗ target `{ctx.cfg['target']}` chưa đạt ({seen}); hết budget hoặc mọi điểm nóng đã cạn — `loop defer`",
+        )
+    return 1, f"✗ target `{ctx.cfg['target']}` chưa đạt ({seen})"
+
+
 def _trial_status(base: Path, ctx: TrialCtx, args: argparse.Namespace) -> int:
     if args.check:
-        raise TrialRefused(2, "`status --check` chưa triển khai (T-3704)")
+        code, msg = trial_check(ctx, trial_read(base))
+        print(json.dumps({"code": code, "reason": msg}, ensure_ascii=False) if args.json else msg)
+        return code
     doc = trial_status_doc(ctx, trial_read(base))
     if args.json:
         print(json.dumps(doc, ensure_ascii=False))
@@ -17046,10 +17203,16 @@ def _add_perf_trial(ppsub: "argparse._SubParsersAction[argparse.ArgumentParser]"
     for flag in ("--resume", "--no-apply", "--json"):
         pfi.add_argument(flag, action="store_true")
     pst = _trial_parser(
-        tsub, "status", "pha, lần thử mở, đếm theo đường, lệnh kế", "--json", "0" + no + " · 1/3 `--check` (T-3704)"
+        tsub,
+        "status",
+        "pha, lần thử mở, đếm theo đường, lệnh kế",
+        "--json",
+        "0"
+        + no
+        + " · 1 `--check` chưa đạt target hoặc lần thử đang mở · 3 `--check` chưa đạt, hết budget/mọi điểm nóng cạn",
     )
     pst.add_argument("--json", action="store_true")
-    pst.add_argument("--check", action="store_true", help="Gate của task tối ưu: lần giữ đạt target (T-3704)")
+    pst.add_argument("--check", action="store_true", help="Gate của task tối ưu: lần giữ gần nhất đạt target so gốc")
     pab = _trial_parser(
         tsub,
         "abort",

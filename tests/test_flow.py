@@ -1130,7 +1130,7 @@ class TrialFlowTest(TmpRepoCase):
         self.assertIn("src/hot.py", self.refused(*self.start_args("src/hot.py"), code=3))
         self.started("src/other.py")
 
-    @flow("FLOW-23")
+    @flow("FLOW-23", done="T-3704")
     def test_flow_23_secondary_over_ceiling_reverts(self) -> None:
         """Given `mem` trần 1000 (mức lùi nới 10000 % để cô lập trần), candidate `improved` ở chỉ số chính nhưng `BUF =
         2000` · When `finish` · Then thu hồi (exit 1), vân tay = lúc start, lý do nêu `mem`."""
@@ -1585,7 +1585,7 @@ class TrialFlowTest(TmpRepoCase):
         self.assertIn("\tsrc/notes2.txt\n", listing)
         self.assertNotIn("\tsrc/notes.txt\n", listing)
 
-    @flow("FLOW-44")
+    @flow("FLOW-44", done="T-3704")
     def test_flow_44_secondary_regress_under_ceiling_reverts(self) -> None:
         """Given candidate K = 2 (`improved`) kèm `BUF` 100 → 140 (+40 %, dưới trần 1000), `regress` 0 · When `finish` ·
         Then thu hồi (exit 1), lý do nêu `mem`, vân tay = lúc start."""
@@ -1597,7 +1597,7 @@ class TrialFlowTest(TmpRepoCase):
         self.assertEqual(self.fp(), fp0)
         self.assertIn("mem", self.why(self.decided(tid)[0]))
 
-    @flow("FLOW-45")
+    @flow("FLOW-45", done="T-3704")
     def test_flow_45_status_check_follows_target_without_loop_record(self) -> None:
         """Given `target: primary <= -20%` · When thu hồi (`neutral`) → `status --check`; giữ EXTRA 500 → 0 (3500 → 3000,
         −14 %), commit → `status --check`; giữ K = 2 (→ 2000, −43 %), commit → `status --check` · Then exit 1, 1, 0;

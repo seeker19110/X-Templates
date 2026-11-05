@@ -160,6 +160,12 @@ class TrialConfigTest(unittest.TestCase):
             "higher_is_better: bool": trial_config(metric={"cmd": "x", "kind": "exact", "higher_is_better": 1}),
             "kind wall": trial_config(metric={"cmd": "x", "kind": "wall", "runs": 3}),
             "unit: chuỗi": trial_config(metric={"cmd": "x", "kind": "exact", "rnus": 3}),
+            '"secondary[]" = {': trial_config(secondary=[{**sec, "ceiling": "1"}]),
+            "regress: số ≥ 0": trial_config(secondary=[{**sec, "regress": -1}]),
+            "ceiling: số": trial_config(secondary=[{**sec, "ceiling": float("inf")}]),
+            "có chỉ số kind wall": trial_config(secondary=[{**sec, "kind": "wall"}]),
+            '"target" =': trial_config(target="primary giảm 20%"),
+            "chỉ số = primary": trial_config(target="rss <= -5%"),
         }
         for want, cfg in cases.items():
             with self.subTest(want):
@@ -413,7 +419,6 @@ class TrialBaseTest(TrialCase):
         todo = (
             (("finish", "--resume"), "T-3706"),
             (("finish", "--no-apply"), "ADR-0071 §2, chưa giao task"),
-            (("status", "--check"), "T-3704"),
         )
         for args, task in todo:
             with self.subTest(args):
@@ -1012,6 +1017,81 @@ class TrialFinishTest(TrialCase):
         got = xt.trial_compare({"base": [1, 1, 1], "head": [2, 1, 2], "cand": [1, 1, 1]}, {"kind": "exact"})
         self.assertEqual([got[t]["verdict"] for t in ("base", "head")], ["insufficient"] * 2)
         self.assertIn("lệch giữa các lần ở head", got["base"]["reason"])
+
+
+class TrialSecondaryTest(TrialCase):
+    """T-3704: chỉ số phụ (trần + mức lùi), `env.cmd_python`, ⚠ heuristic `perf guard` vào `decide`, `status --check`."""
+
+    def test_secondary_ceiling_and_regress(self) -> None:
+        """Trần ở phía tệ (`higher_is_better` → sàn); `exact` lùi quá `regress` theo số; `wall` chỉ khi `regressed`; mẫu
+        `exact` lệch → lý do; trong trần và mức lùi → không lý do."""
+        mem = {"name": "mem", "kind": "exact", "unit": "B"}
+        fast = {"name": "qps", "kind": "exact", "higher_is_better": True}
+        noise = [1.0 + i / 1000 for i in range(10)]
+
+        def why(m: dict[str, Any], base: list[float], cand: list[float]) -> str:
+            return xt.trial_secondary(m, {"base": base, "head": base, "cand": cand})[1]
+
+        cases = [
+            (mem | {"ceiling": 1000}, [100.0] * 3, [2000.0] * 3, "vượt trần 1000"),
+            (fast | {"ceiling": 50}, [60.0] * 3, [40.0] * 3, "vượt trần 50"),
+            (mem | {"regress": 5}, [100.0] * 3, [104.0] * 3, ""),
+            (mem | {"regress": 3}, [100.0] * 3, [104.0] * 3, "mem so gốc: lùi +4.00% > regress 3%"),
+            (fast, [100.0] * 3, [96.0] * 3, "qps so start_head: lùi +4.00% > regress 0%"),
+            (mem, [100.0] * 3, [100.0, 101.0, 100.0], "thiếu mẫu"),
+            ({"name": "t", "kind": "wall"}, noise, [x * 2 for x in noise], "t so gốc: lùi +"),
+            ({"name": "t", "kind": "wall", "regress": 200}, noise, [x * 2 for x in noise], ""),
+            ({"name": "t", "kind": "wall"}, noise, [x * 1.001 for x in noise], ""),
+        ]
+        for m, base, cand, want in cases:
+            with self.subTest(m=m, cand=cand[:1]):
+                got = why(m, base, cand)
+                self.assertIn(want, got) if want else self.assertEqual(got, "")
+
+    def test_cmd_python_and_guard_warnings_in_decide(self) -> None:
+        """Chỉ cây candidate có `.venv` (do `setup`) → `env.cmd_python` khác giữa các cây (⚠); dòng thêm `lru_cache` →
+        ⚠ `perf guard` trên diff `start_head` → candidate; vẫn giữ (⚠ không chặn)."""
+        setup = "if grep -q 'K = 2' src/hot.py; then python3 -m venv --without-pip .venv; fi"
+        self.republish({"perf/trial.json": json.dumps(trial_config(setup=setup))})
+        self.started()
+        self.put("src/hot.py", HOT.replace("K = 3", "K = 2") + "# functools.lru_cache để sau\n")
+        rc, out, err = self.tr("finish", "--json")
+        self.assertEqual(rc, 0, out + err)
+        row = json.loads(out)
+        pys = {t: row["measures"]["mem"][t]["env"]["cmd_python"] for t in ("base", "cand")}
+        self.assertTrue(pys["cand"].startswith(".venv/bin/python 3."), pys)
+        self.assertFalse(pys["base"].startswith(".venv"), pys)
+        self.assertTrue(any(w.startswith("perf guard: src/hot.py: ") and "lru_cache" in w for w in row["warnings"]))
+        self.assertTrue(any(w.startswith("interpreter lệnh đo khác giữa các cây") for w in row["warnings"]))
+
+    def test_cmd_python_missing_or_broken(self) -> None:
+        root = self.tmp / "t"
+        (root / ".venv" / "bin").mkdir(parents=True)
+        tree = xt.TrialTree("cand", "c", root, self.tmp)
+        self.assertIsNone(xt.trial_cmd_python(tree, {"PATH": str(self.tmp / "không-có")}))
+        (root / ".venv" / "bin" / "python").write_text("#!/bin/sh\nexit 1\n", encoding="utf-8")
+        (root / ".venv" / "bin" / "python").chmod(0o755)
+        self.assertIsNone(xt.trial_cmd_python(tree, {"PATH": "/usr/bin:/bin"}))
+
+    def test_status_check_codes(self) -> None:
+        """Chưa có lần giữ → 1; lần thử mở → 1; lần giữ thiếu số → 1; lần giữ đạt `target` → 0 (`--json`); lần giữ gần
+        nhất chưa đạt và hết `budget` → 3."""
+        self.assertIn("chưa có lần giữ", self.refused("status", "--check", code=1))
+        self.started()
+        self.assertIn("đang mở", self.refused("status", "--check", code=1))
+        self.ok("abort", "--reason", "x")
+        row = {"event": "decide", "id": "PT-0002", "base_sha": self.base, "hotspot": ["src/hot.py"], "verdict": "kept"}
+        row |= {"candidate_tree": "t", "candidate_files": ["src/hot.py"]}
+        self.append_row(row)
+        self.assertIn("primary None", self.refused("status", "--check", code=1))
+        self.append_row(row | {"measures": {"primary": {"compare": {"base": {"change": -0.25}}}}})
+        self.assertEqual(json.loads(self.ok("status", "--check", "--json"))["code"], 0)
+        self.append_row(row | {"measures": {"primary": {"compare": {"base": {"change": -0.1}}}}})
+        self.assertIn("primary -10.00%", self.refused("status", "--check", code=1))
+        self.republish({"perf/trial.json": json.dumps(trial_config(budget=1))})
+        self.started()
+        self.ok("abort", "--reason", "y")
+        self.assertIn("loop defer", self.refused("status", "--check", code=3))
 
 
 class TrialParserTest(unittest.TestCase):
