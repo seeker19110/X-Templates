@@ -8,7 +8,9 @@
 # Thứ tự phân giải (đầu tiên thắng):
 #   1) KHAI BÁO: nếu có xt.yaml (YAML phẳng `task: lệnh`, agent đọc được) hoặc
 #      .claude/project-commands.sh (biến bash <task>=lệnh) → chạy lệnh khai báo.
-#   2) TỰ DÒ: nhận diện hệ sinh thái (node/python/go/rust/make) → chạy lệnh quy ước.
+#   2) TỰ DÒ: nhận diện hệ sinh thái (node/python/go/rust/make) → chạy lệnh quy ước. Test Python chạy song song theo
+#      số nhân (D-367): pytest có xdist → `-n auto`; unittest → mỗi module một tiến trình (`xargs -P`). XT_JOBS=N chọn
+#      số tiến trình (1 = tuần tự như cũ).
 #   3) NO-OP: không có gì khớp → in thông báo skip, exit 0 (KHÔNG làm gãy dự án nào).
 #      Ngoại lệ (ADR-0011): autopilot đang chạy (.autopilot/state.json "active": true) mà `lint`/`test`
 #      rỗng hoặc là lệnh không kiểm gì (true, :, exit 0, echo …) → ĐỎ. Cổng rỗng không phải bằng chứng.
@@ -123,9 +125,40 @@ node_has_script() {
   fi
 }
 
+ncpu() { nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || echo 2; }
+test_jobs() { # $1=mặc định → XT_JOBS nếu là số nguyên dương, không thì $1 (log khi XT_JOBS là rác và DT_HINT=1)
+  local j="${XT_JOBS:-}"
+  if [[ "$j" =~ ^[1-9][0-9]{0,5}$ ]]; then printf '%s' "$j"; return 0; fi
+  [ -n "$j" ] && [ "${DT_HINT:-}" = 1 ] && log "XT_JOBS='$j' không phải số nguyên dương — dùng mặc định ($1)"
+  printf '%s' "$1"
+}
+# unittest song song (D-367): liệt kê module bằng loader như `discover -s tests` (lỗi import → in lỗi, exit 1; module
+# SkipTest lúc import bỏ qua; không test nào → `Ran 0 tests`, exit 5 như lệnh cũ), mỗi module chạy một tiến trình với
+# tests/ ở đầu sys.path như discover. pipefail + xargs (exit 123 khi có tiến trình đỏ) → lệnh đỏ khi bất kỳ phần nào đỏ.
+UT_LIST='import sys,unittest;S=set();f=lambda s:[f(t) if isinstance(t,unittest.TestSuite) else (print(t._exception,file=sys.stderr),sys.exit(1)) if isinstance(t,unittest.loader._FailedTest) else t.__class__.__module__=="unittest.loader" or S.add(t.__class__.__module__) for t in s];f(unittest.TestLoader().discover("tests"));S or (print("Ran 0 tests",file=sys.stderr),sys.exit(5));print("\n".join(sorted(S)))'
+UT_RUN='import os,sys,unittest;sys.path.insert(0,os.path.abspath("tests"));unittest.main(module=None,argv=["unittest",sys.argv[1]])'
+python_test_cmd() { # lệnh test Python tự dò; DT_HINT=1 (run_task) → log gợi ý/XT_JOBS rác đúng một lần mỗi lần chạy
+  local j
+  if command -v pytest >/dev/null 2>&1; then
+    j="$(test_jobs auto)"
+    if [ "$j" = 1 ]; then echo "pytest -q"
+    elif python3 -c 'import xdist' >/dev/null 2>&1; then echo "pytest -q -n $j"
+    else
+      [ "${DT_HINT:-}" = 1 ] && log "gợi ý: cài pytest-xdist để chạy song song theo số nhân (XT_JOBS=1: tuần tự, không gợi ý)"
+      echo "pytest -q"
+    fi
+    return 0
+  fi
+  [ -d "$ROOT/tests" ] || return 0
+  j="$(test_jobs "$(ncpu)")"
+  if [ "$j" = 1 ]; then echo "python3 -m unittest discover -s tests"; return 0; fi
+  echo "python3 -c '$UT_LIST' | xargs -r -P $j -n 1 python3 -c '$UT_RUN'"
+}
+
 detected_cmd() {
-  # In ra lệnh tự-dò cho task $1, hoặc rỗng nếu không dò được.
-  local t="$1" pm
+  # In ra lệnh tự-dò cho task $1, hoặc rỗng nếu không dò được. Go (`go test` song song theo gói), Rust (`cargo test`
+  # song song theo luồng) và Node (jest/vitest dùng worker) đã chạy song song mặc định — giữ nguyên lệnh.
+  local t="$1" pm c
   # Node/JS: ưu tiên script cùng tên trong package.json
   if [ -f "$ROOT/package.json" ] && node_has_script "$t"; then
     pm="$(node_pm)"; echo "$pm run $t"; return 0
@@ -138,8 +171,7 @@ detected_cmd() {
       lint)      command -v ruff >/dev/null 2>&1 && { echo "ruff check ."; return 0; } ;;
       typecheck) command -v pyright >/dev/null 2>&1 && { echo "pyright"; return 0; }
                  command -v mypy >/dev/null 2>&1 && { echo "mypy ."; return 0; } ;;
-      test)      command -v pytest >/dev/null 2>&1 && { echo "pytest -q"; return 0; }
-                 [ -d "$ROOT/tests" ] && { echo "python3 -m unittest discover -s tests"; return 0; } ;;
+      test)      c="$(python_test_cmd)"; [ -n "$c" ] && { echo "$c"; return 0; } ;;
     esac
   fi
   # Go
@@ -257,7 +289,7 @@ run_counted() { # $@=lệnh như sau `bash -o pipefail -c` → exit của lệnh
 
 RAN=0
 run_task() { # $1=task -> chạy; 0 nếu ok hoặc no-op, khác 0 nếu lệnh fail hoặc no-op trong autopilot
-  local cmd; cmd="$(resolve "$1")"
+  local cmd; cmd="$(DT_HINT=1 resolve "$1")" # gợi ý của lệnh tự dò in ở lần phân giải này (guard_turn không in)
   if loop_noop "$1" "$cmd"; then return 3; fi
   if [ -z "$cmd" ]; then log "skip: chưa cấu hình/dò được '$1'"; return 0; fi
   RAN=$((RAN + 1))
@@ -374,7 +406,7 @@ test_shard() { # $1=I (1..N) $2=N [$3=thư mục dữ liệu coverage]
   pick="$(printf '%s\n' "$ids" | shard_pick "$i" "$n")" || return $?
   [ -n "$pick" ] || { log "test-shard: shard $i/$n rỗng (chỉ $total id) — giảm N"; return 1; }
   log "test-shard $i/$n: $(printf '%s\n' "$pick" | grep -c .)/$total id"
-  printf '%s\n' "$pick" | (cd "$ROOT" && run_counted xargs -r -P "$(nproc 2>/dev/null || echo 2)" -n 1 bash -o pipefail -c "$unit" _)
+  printf '%s\n' "$pick" | (cd "$ROOT" && run_counted xargs -r -P "$(ncpu)" -n 1 bash -o pipefail -c "$unit" _)
 }
 test_weights() { # đo lại `test_weights` bằng `test_list` + `test_unit` (coverage vào thư mục tạm, như job `test` của CI)
   local list unit w ids d rc
