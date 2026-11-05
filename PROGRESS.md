@@ -9,7 +9,7 @@
 - Hoãn tới harden: T-1690/T-1691 (quét lại SEC-091…099). Rà `seeker19110/stored`: chờ chủ repo (HAR-036/041, SEC-026, CI-006/7/9, SEC-043; hạn xét: 2026-12-31).
 
 ## Tiếp theo
-1. Bản vá **3.30.1** (PR #450: `AI-GUARD-018` không ký tự vô hình thật, anchor compose; review #450 lượt 1 đã sửa — D-376; lượt 2 thu hẹp, check-links code span sang 3.31.0 — D-378): review lượt 3 → merge → tag; rồi PR nâng 3.30.1 ở 4 dự án đích, theo dõi PR nâng tới merge (dự án tự merge); phản hồi qua `xt.py feedback`.
+1. Bản vá **3.30.1** (PR #450: `AI-GUARD-018` không ký tự vô hình thật, anchor compose; review #450 lượt 1 đã sửa — D-376; lượt 2 thu hẹp, check-links code span sang 3.31.0 — D-378): review tới khi sạch (ADR-0059 §6) → merge → tag; rồi PR nâng 3.30.1 ở 4 dự án đích, theo dõi PR nâng tới merge (dự án tự merge); phản hồi qua `xt.py feedback`.
 2. **Kế tiếp:** tiếp quản nhánh `claude/amazing-brahmagupta-9jqbg1` (ADR-0068 lát A–E, ADR-0069/0070) — chủ dự án chọn đưa vào **3.31.0**; trả nợ trước khi mở PR: AUD-SEC-502, AUD-HAR-227/228, AUD-CODE-050, AUD-TEST-064.
 3. PLAN-harden-2026-10-27-loops còn T-3554 (pilot `next-step`) và T-3555 (lát 5: field trigger, bot nâng bản, worker ngoài phiên). 🟢 mở của `perf trial`/`dev-task.sh` rà ở audit kế (sổ: AUD-HAR-294…297, AUD-TEST-082/083, AUD-PERF-020…025).
 4. Còn: máy hoá `LOOP-HARNESS-031` (dấu hook theo phiên), `LOOP-STOP-030` (ConfigChange); task `[perf]` trong `loop` (D-041); URL phiên do máy chủ MCP gắn vào thân PR; ép báo "đã đo/chưa đo" cho task UI (`LOOP-DESIGN-021`); sàn quyền token; `xt.pyz` (ADR-0010); ca đối kháng cho `autonomy-bench`; `project-commands.sh` được `source` hai lần mỗi task.

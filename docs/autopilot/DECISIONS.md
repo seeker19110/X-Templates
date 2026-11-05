@@ -128,3 +128,10 @@
 - Chọn: Đã sửa ở 31dbad4; review delta lượt 4
 - Lý do (tiêu chí chất lượng cuối): (1) chỉ là chữ sót của D-378, đã sửa và đo lại sau git add; (5) tách PR không thêm an toàn
 - Đường lùi: Tách PR nếu lượt 4 còn chặn
+
+### D-381 · 2026-11-05T15:30:38+00:00 · PR #450: lượt 4 còn chữ sai (tiêu đề/thân PR khai check-links; GO-NO-GO số đo; PROGRESS)
+
+- Phương án: (1) Sửa chữ tại chỗ, review lượt 5 · (2) Tách PR
+- Chọn: Sửa chữ tại chỗ, review lượt 5
+- Lý do (tiêu chí chất lượng cuối): (1) chỉ là chữ; (5) tách không thêm an toàn
+- Đường lùi: Tách PR
