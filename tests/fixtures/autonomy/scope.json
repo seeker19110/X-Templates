@@ -248,13 +248,14 @@
    ]
   },
   {
-   "reason": "Hiệu năng quyết định guard (thời gian, không phải cho/chặn) — đỡ bằng Gate unittest `cpu_budget.assert_not_quadratic` trong tests.test_guard_audit1019 (AuditPhase1101GuardTest.test_quote_like_repeat_not_cubic); sed (AUD-PERF-005): AuditRescan1101GuardTest.test_sed_distinct_delimiters_bounded; `GH_POST_RE` (AUD-PERF-012): tests.test_guard_strict -k gh_post_re_linear",
+   "reason": "Hiệu năng quyết định guard (thời gian, không phải cho/chặn) — đỡ bằng Gate unittest `cpu_budget.assert_not_quadratic` trong tests.test_guard_audit1019 (AuditPhase1101GuardTest.test_quote_like_repeat_not_cubic); sed (AUD-PERF-005): AuditRescan1101GuardTest.test_sed_distinct_delimiters_bounded; `GH_POST_RE` (AUD-PERF-012): tests.test_guard_strict -k gh_post_re_linear; glob tên lệnh (AUD-TEST-084, review #446): tests.test_guard_d155 GlobCommandNameTest — thời gian CPU, `ratio` mặc định 10",
    "ids": [
     "AUD-PERF-004",
     "AUD-PERF-005",
     "AUD-TEST-044",
     "AUD-SEC-320",
-    "AUD-PERF-012"
+    "AUD-PERF-012",
+    "AUD-TEST-084"
    ]
   },
   {
@@ -393,7 +394,7 @@
    ]
   },
   {
-   "reason": "Hành vi lệnh test tự dò của `scripts/dev-task.sh` (review #444, D-369): unittest về `discover` tuần tự, pytest-xdist tôn trọng cấu hình tắt, `XT_JOBS` có trần, README và BASE-GATE-020 — không phải quyết định cho/chặn của guard, PR hay CI mà bench mô phỏng. Khoá bằng tests/test_dev_task_parallel và lệnh kiểm BASE-CFG-003/`xt.py validate`. AUD-TEST-084 (test CPU bậc hai, khoá bằng tests/test_guard_d155) và AUD-TEST-085 (`python3 -P -m pytest`, khoá bằng tests/test_dev_task_parallel) cùng loại — review #446.",
+   "reason": "Hành vi lệnh test tự dò của `scripts/dev-task.sh` (review #444, D-369): unittest về `discover` tuần tự, pytest-xdist tôn trọng cấu hình tắt, `XT_JOBS` có trần, README và BASE-GATE-020 — không phải quyết định cho/chặn của guard, PR hay CI mà bench mô phỏng. Khoá bằng tests/test_dev_task_parallel và lệnh kiểm BASE-CFG-003/`xt.py validate`. AUD-TEST-085 (`python3 -P -m pytest`, khoá bằng tests/test_dev_task_parallel) cùng loại — review #446.",
    "ids": [
     "AUD-TEST-070",
     "AUD-TEST-071",
@@ -401,7 +402,6 @@
     "AUD-TEST-073",
     "AUD-TEST-074",
     "AUD-TEST-075",
-    "AUD-TEST-084",
     "AUD-TEST-085"
    ]
   },
@@ -442,6 +442,12 @@
     "AUD-HAR-291",
     "AUD-HAR-292",
     "AUD-HAR-293"
+   ]
+  },
+  {
+   "reason": "Trần kích thước thư mục của chính repo khung (ADR-0072, D-373): nhóm vượt 2× mốc gần nhất mà chưa có ADR khai mốc mới — đo byte file git theo dõi, không phải quyết định cho/chặn của guard, PR hay CI mà bench mô phỏng. Khoá bằng tests/test_docs_budget.DocsBudgetTest (test_dir_totals_within_double_latest_mark, test_size_marks_are_declared_by_existing_adr).",
+   "ids": [
+    "AUD-ARCH-009"
    ]
   }
  ]

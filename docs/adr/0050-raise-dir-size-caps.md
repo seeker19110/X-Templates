@@ -1,6 +1,6 @@
 # ADR-0050: Nâng trần tổng byte thư mục thêm 1 MiB mỗi nhóm
 
-- **Trạng thái:** Đã chấp nhận (chủ repo 2026-10-26: "nâng lên thêm 1MB đi")
+- **Trạng thái:** Đã chấp nhận (chủ repo 2026-10-26: "nâng lên thêm 1MB đi"); điều kiện 2× xét lại bởi [ADR-0072](0072-review-dir-caps-after-2x.md)
 - **Trạng thái triển khai:** Đã triển khai — `tests/test_docs_budget.py` `DIR_CAPS` (trần cũ + 1 048 576 B).
 - **Ngày:** 2026-10-26
 - **Làm rõ:** ADR-0043 (đóng băng bề mặt 3.x — vẫn giữ trần, chỉ đổi số), D-111 (trần từng file hướng dẫn — không đổi).

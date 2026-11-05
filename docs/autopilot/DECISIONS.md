@@ -107,3 +107,17 @@
 - Chọn: Thu hẹp miễn về đúng file sổ sách thường: docs/autopilot/PLAN*.md, DECISIONS*.md, PERF-LOG (đường cấu hình), PROGRESS.md — file thường, không symlink; cây candidate/HEAD có symlink trỏ vào đường sổ sách → tampered; candidate (diff start_head..candidate) nhắc chuỗi đường sổ sách (docs/autopilot, PROGRESS.md) ngoài chính các file sổ sách → tampered; F3 coi gói namespace là nhập được; check chỉ nhận lần giữ vòng trước khi cây gốc vòng mới == cây gốc vòng trước trừ sổ sách hoặc == HEAD^{tree} (squash-merge); ghi rủi ro còn lại (đường dựng lúc chạy, cùng uid) vào ADR §2 và optimization-loop.md
 - Lý do (tiêu chí chất lượng cuối): (1) phương án 1 đóng cả R1, R1b (symlink → tampered; nhắc đường → tampered) và giữ được F1/F2; phần còn lại là đường dựng lúc chạy cùng lớp giới hạn đã chấp nhận (ADR-0067); (4) phương án 2 làm tính năng chính không dùng được theo tài liệu; thay D-371 ở phần phạm vi miễn
 - Đường lùi: Bỏ hẳn miễn (đường lùi D-371) nếu review sau lại lách được
+
+### D-373 · 2026-11-05T10:50:02+00:00 · Audit ARCH T-3557: .claude/hooks/ đạt 843 817 B = 2,28× mốc 2026-10-26 (369 274 B) từ #433 — ADR-0050 đòi ADR xét lại khi vượt 2× trước 2027-01-21, chưa có ADR, không cổng máy nào bắt
+
+- Phương án: (1) ADR-0072 xét lại: giữ trần nhóm hiện có (1 417 969 B, chưa chạm), chấp nhận mức tăng vì là bản vá an ninh guard (#433–#442, ADR-0065/0066/0067); đặt mốc mới 2026-11-05 cho .claude/hooks và scripts; thêm cổng máy trong tests/test_docs_budget.py: mỗi nhóm ≤ 2× mốc gần nhất trừ khi có ADR xét lại khai trong test; T-3709 đo chi phí compile guard.py mỗi lệnh Bash (AUD-PERF-013) và xét cache bytecode trước 2027-01-21 cùng đợt đánh giá sandbox · (2) Chấp nhận 🟠 có hạn 2027-01-21 không ADR
+- Chọn: ADR-0072 xét lại: giữ trần nhóm hiện có (1 417 969 B, chưa chạm), chấp nhận mức tăng vì là bản vá an ninh guard (#433–#442, ADR-0065/0066/0067); đặt mốc mới 2026-11-05 cho .claude/hooks và scripts; thêm cổng máy trong tests/test_docs_budget.py: mỗi nhóm ≤ 2× mốc gần nhất trừ khi có ADR xét lại khai trong test; T-3709 đo chi phí compile guard.py mỗi lệnh Bash (AUD-PERF-013) và xét cache bytecode trước 2027-01-21 cùng đợt đánh giá sandbox
+- Lý do (tiêu chí chất lượng cuối): (1) ADR-0050 ghi 'phải có ADR' — chấp nhận không ADR trái chính quyết định cũ; (3) cổng máy bắt lần vượt sau thay vì dựa vào audit; (2) giữ trần, không nới; chi phí compile chưa đo được trong phiên (guard chặn script đọc guard.py) nên giao task đo có hạn
+- Đường lùi: Tách guard.py (ADR riêng) nếu T-3709 đo chi phí compile vượt ngân sách hook
+
+### D-374 · 2026-11-05T11:29:58+00:00 · PR #448 (cắt 3.30.0): review lượt 1 chưa sạch (0 🔴, 3 🟠 GO-NO-GO lỗi thời, mốc scripts vô hiệu cổng 2×, test mốc không đọc ADR; 4 🟢) — PR cắt bản không ghi nợ (ADR-0059 §6); đi tiếp thế nào?
+
+- Phương án: (1) Sửa HẾT 3 🟠 + 4 🟢 trong một commit trên PR, rồi review lượt 2 cả PR ở head mới bằng reviewer-alt (effort max) · (2) Tách ADR-0072 + cổng 2× sang PR riêng, PR cắt bản chỉ còn VERSION/CHANGELOG/báo cáo
+- Chọn: Sửa HẾT 3 🟠 + 4 🟢 trong một commit trên PR, rồi review lượt 2 cả PR ở head mới bằng reviewer-alt (effort max)
+- Lý do (tiêu chí chất lượng cuối): (1) các phát hiện đều nhỏ, sửa được ngay, có tái hiện; (3) tách PR làm báo cáo/ARCH lệch khỏi bản đang cắt; (5) một lượt sửa + một review rẻ hơn hai PR
+- Đường lùi: Tách ADR-0072 sang PR riêng nếu review lượt 2 vẫn chặn ở phần đó
