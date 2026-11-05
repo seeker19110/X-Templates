@@ -12,6 +12,7 @@ on:
       - framework/templates/packs/**
       - scripts/install.py
       - tests/pack_mutants.py
+      - tests/pack_baseline.py
       - .github/workflows/pack-web-api.yml
   push:
     branches: [main]
@@ -19,6 +20,7 @@ on:
       - framework/templates/packs/**
       - scripts/install.py
       - tests/pack_mutants.py
+      - tests/pack_baseline.py
       - .github/workflows/pack-web-api.yml
   workflow_dispatch:
 
@@ -30,6 +32,27 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  # AUD-SEC-502 (D-377): contract so với baseline.json của NHÁNH GỐC — baseline chỉ được đổi khi PR tăng phiên bản gói
+  # (`VERSION`, ADR-0068); chép đè baseline cùng đổi không tương thích trong một PR thì đỏ.
+  contract-baseline:
+    name: contract-baseline
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false # job không push (AUD-CI-028)
+          fetch-depth: 0 # cần origin/<nhánh gốc>
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.14"
+      - name: baseline.json khớp nhánh gốc hoặc phiên bản gói tăng
+        env:
+          BASE_REF: ${{ github.base_ref }}
+          PACK: framework/templates/packs/web-api-ts
+        run: python3 tests/pack_baseline.py check "$PACK" "origin/$BASE_REF"
+
   acceptance:
     name: pack-acceptance (${{ matrix.case }})
     runs-on: ubuntu-latest
@@ -44,12 +67,13 @@ jobs:
         # Cùng tag + digest với dự án đích hotel-manager (BASE-DEP-008: ghim digest).
         image: postgres:17.11-trixie@sha256:2d2b8998d31037bf721cfdf764d76ba74171b4fab3431b7f72c27c56ddbdf9e3
         env:
-          POSTGRES_PASSWORD: postgres
+          # Không literal mật khẩu (BASE-SEC-005): CSDL rỗng dùng một lần trên runner tạm — xác thực trust.
+          POSTGRES_HOST_AUTH_METHOD: trust
         ports: ["5432:5432"]
         options: >-
           --health-cmd "pg_isready -U postgres" --health-interval 2s --health-timeout 5s --health-retries 30
     env:
-      DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
+      DATABASE_URL: postgres://postgres@localhost:5432/postgres
       PG_TOOLS_CONTAINER: ${{ job.services.postgres.id }}
       PACK: framework/templates/packs/web-api-ts
       CASE: ${{ matrix.case }}

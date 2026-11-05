@@ -26,12 +26,13 @@ jobs:
       postgres:
         image: postgres:17.11-trixie@sha256:2d2b8998d31037bf721cfdf764d76ba74171b4fab3431b7f72c27c56ddbdf9e3
         env:
-          POSTGRES_PASSWORD: postgres
+          # Không literal mật khẩu (BASE-SEC-005): CSDL rỗng dùng một lần trên runner tạm — xác thực trust.
+          POSTGRES_HOST_AUTH_METHOD: trust
         ports: ["5432:5432"]
         options: >-
           --health-cmd "pg_isready -U postgres" --health-interval 2s --health-timeout 5s --health-retries 30
     env:
-      DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
+      DATABASE_URL: postgres://postgres@localhost:5432/postgres
       PG_TOOLS_CONTAINER: ${{ job.services.postgres.id }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

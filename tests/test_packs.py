@@ -6,8 +6,10 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import re
 import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -17,6 +19,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import pack_baseline
 import pack_mutants
 import xt
 
@@ -85,6 +88,18 @@ class PackContractTest(unittest.TestCase):
                 self.assertIn(f'"{f.stem}"', registry)
                 text = f.read_text(encoding="utf-8")
                 self.assertIn("export async function down", text)
+
+    def test_migrations_bound_locks_and_rerun_is_noop(self):
+        """Audit DATA (D-377): DDL không chờ khoá vô hạn — mỗi `up`/`down` mở bằng `SET LOCAL lock_timeout` +
+        `statement_timeout` (DB-MIG-005; FK tới bảng đang phục vụ khoá bảng được trỏ); `up` lần hai là no-op
+        (DB-MIG-004) có test."""
+        lock = re.compile(r"sql`\s*SET LOCAL lock_timeout = '\d+s';\s*SET LOCAL statement_timeout = '\d+s';")
+        for f in sorted((PACK / "starter" / "src" / "migrations").glob("*.ts")):
+            with self.subTest(f.name):
+                text = f.read_text(encoding="utf-8")
+                self.assertEqual(len(lock.findall(text)), text.count("sql`"), "mọi khối SQL mở bằng giới hạn khoá")
+        slice_test = (PACK / "starter" / "test" / "slice.test.ts").read_text(encoding="utf-8")
+        self.assertIn('expect(await migrate(raw, "up")).toEqual([]);', slice_test)
 
 
 class ReadmeIndexTest(unittest.TestCase):
@@ -194,6 +209,95 @@ class MutantsTest(unittest.TestCase):
                 code, out = self.run_main("promotion", self.report(rows, digest, state))
                 self.assertEqual(code, 1)
                 self.assertIn(msg, out)
+
+
+class ContractBaselineTest(unittest.TestCase):
+    """AUD-SEC-502 (D-377): `baseline.json` của contract chỉ được đổi so với nhánh gốc khi PR tăng phiên bản gói (=
+    `VERSION` của khung, ADR-0068) — đổi không tương thích kèm chép đè baseline trong cùng PR thì CI đỏ."""
+
+    BASE = {"paths": {"/a": {"get": {}}}}
+
+    def setUp(self):
+        self.repo = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.repo)
+        self.git("init", "-q", "-b", "main")
+        self.pack = self.repo / "packs" / "p"
+        self.write(version="0.1.0", baseline=self.BASE)
+        self.git("add", "-A")
+        self.git("commit", "-qm", "gốc")
+
+    def git(self, *args: str) -> str:
+        env = {**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@x", "GIT_COMMITTER_NAME": "t"}
+        env["GIT_COMMITTER_EMAIL"] = "t@x"
+        cmd = ["git", "-C", str(self.repo), "-c", "commit.gpgsign=false", *args]
+        return subprocess.run(cmd, check=True, capture_output=True, text=True, env=env).stdout
+
+    def write(self, version: object = None, baseline: object = None) -> None:
+        contract = self.pack / "starter" / "contract"
+        contract.mkdir(parents=True, exist_ok=True)
+        (self.repo / "VERSION").unlink(missing_ok=True)
+        if version is not None:
+            (self.repo / "VERSION").write_text(f"{version}\n", encoding="utf-8")
+        if baseline is not None:
+            (contract / "baseline.json").write_text(json.dumps(baseline, indent=1), encoding="utf-8")
+
+    def run_main(self, *argv: str) -> tuple[int, str]:
+        out, err = io.StringIO(), io.StringIO()
+        with redirect_stdout(out), redirect_stderr(err):
+            code = pack_baseline.main(list(argv))
+        return code, out.getvalue() + err.getvalue()
+
+    def check(self) -> tuple[int, str]:
+        return self.run_main("check", str(self.pack), "main")
+
+    def test_unchanged_or_reformatted_baseline_passes(self):
+        self.assertEqual(self.check()[0], 0)
+        (self.pack / "starter" / "contract" / "baseline.json").write_text(json.dumps(self.BASE), encoding="utf-8")
+        self.assertEqual(self.check()[0], 0)  # chỉ đổi định dạng: cùng nội dung JSON
+
+    def test_baseline_change_without_version_bump_fails(self):
+        changed = {"paths": {}}
+        for version in ("0.1.0", "0.0.9", None, "1.0", "v2.0.0", 2):
+            with self.subTest(version=version):
+                self.write(version=version, baseline=changed)
+                code, out = self.check()
+                self.assertEqual(code, 1, out)
+                self.assertIn("AUD-SEC-502", out)
+
+    def test_baseline_change_with_version_bump_passes(self):
+        for version in ("0.1.1", "0.2.0", "1.0.0", "0.1.10"):
+            with self.subTest(version=version):
+                self.write(version=version, baseline={"paths": {}})
+                self.assertEqual(self.check()[0], 0)
+
+    def test_new_pack_or_base_without_version(self):
+        self.write(version=None, baseline=self.BASE)
+        self.git("commit", "-qam", "gốc không VERSION")
+        self.write(version="0.0.1", baseline={"paths": {}})
+        self.assertEqual(self.check()[0], 1)  # gốc không đọc được phiên bản: chặt
+        fresh = self.repo / "packs" / "moi"
+        (fresh / "starter" / "contract").mkdir(parents=True)
+        (fresh / "starter" / "contract" / "baseline.json").write_text("{}", encoding="utf-8")
+        self.assertEqual(self.run_main("check", str(fresh), "main")[0], 0)  # gói mới: chưa có baseline ở gốc
+
+    def test_broken_inputs(self):
+        (self.pack / "starter" / "contract" / "baseline.json").write_text("{", encoding="utf-8")
+        code, out = self.check()
+        self.assertEqual((code, "không đọc được" in out), (1, True))
+        (self.pack / "starter" / "contract" / "baseline.json").unlink()
+        code, out = self.check()
+        self.assertEqual((code, "không đọc được" in out), (1, True))
+        self.assertEqual(self.run_main("check", str(self.pack), "khong-co-ref")[0], 2)
+        self.assertEqual(self.run_main("check", str(self.pack))[0], 2)
+        self.assertEqual(self.run_main("zap", "a", "b")[0], 2)
+
+    def test_real_repo_version_and_ci_runs_check(self):
+        self.assertRegex((ROOT / "VERSION").read_text(encoding="utf-8").strip(), EXACT)
+        self.assertEqual(self.run_main("check", str(PACK), "HEAD")[0], 0)
+        wf = (ROOT / ".github" / "workflows" / "pack-web-api.yml").read_text(encoding="utf-8")
+        self.assertIn('python3 tests/pack_baseline.py check "$PACK" "origin/$BASE_REF"', wf)
+        self.assertIn("BASE_REF: ${{ github.base_ref }}", wf)
+        self.assertIn("- tests/pack_baseline.py", wf)  # đổi script kiểm cũng chạy workflow
 
 
 if __name__ == "__main__":

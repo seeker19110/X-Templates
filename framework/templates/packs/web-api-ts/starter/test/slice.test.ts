@@ -103,6 +103,7 @@ describe("migration", () => {
       expect(left.rows[0]?.n).toBe(0);
       const steps = await migrate(raw, "up");
       expect(steps).toEqual(Object.keys(MIGRATIONS).map((m) => `Up ${m} Success`));
+      expect(await migrate(raw, "up")).toEqual([]); // lần hai: no-op, không lỗi (DB-MIG-004)
       const rls = await sql<{ relname: string }>`
         SELECT relname FROM pg_class WHERE relrowsecurity AND relforcerowsecurity ORDER BY relname`.execute(
         raw,

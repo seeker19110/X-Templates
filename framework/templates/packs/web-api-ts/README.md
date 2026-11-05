@@ -35,7 +35,8 @@ phải làm đỏ đúng test ghi ở `expect_fail`.
 
 - Kết nối ứng dụng dùng một vai trò có quyền `SET ROLE app_rw`; triển khai thật: vai trò đăng nhập riêng chỉ là thành viên
   `app_rw` + vai trò migration riêng (sở hữu bảng) — chưa có trong gói.
-- Contract tĩnh: `baseline.json` sửa được trong cùng PR (đổi không tương thích kèm chép đè baseline lọt — review xem diff
-  `contract/`). `job_effects.job_id` có FK không kèm tenant (RLS vẫn lọc theo tenant).
+- Contract tĩnh: ở repo khung, CI `pack-web-api.yml` (job `contract-baseline`, `tests/pack_baseline.py`) chỉ cho
+  `baseline.json` khác nhánh gốc khi PR tăng `VERSION` (AUD-SEC-502); ở dự án đích (starter đã là của dự án) baseline vẫn
+  sửa được cùng PR — review xem diff `contract/`. `job_effects.job_id` có FK không kèm tenant (RLS vẫn lọc theo tenant).
 - Phiên đăng nhập không có thu hồi/giới hạn tần suất; không có MFA; không UI; không staging/deploy thật (promote = digest +
   chữ ký GO-NO-GO §5 của khung).

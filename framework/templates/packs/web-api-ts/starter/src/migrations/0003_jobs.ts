@@ -4,6 +4,8 @@ import { type Kysely, sql } from "kysely";
 
 export async function up(db: Kysely<unknown>): Promise<void> {
   await sql`
+    SET LOCAL lock_timeout = '5s';
+    SET LOCAL statement_timeout = '60s';
     CREATE TABLE jobs (
       id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
       tenant_id uuid NOT NULL DEFAULT app.current_tenant() REFERENCES tenants (id),
@@ -40,6 +42,8 @@ export async function up(db: Kysely<unknown>): Promise<void> {
 
 export async function down(db: Kysely<unknown>): Promise<void> {
   await sql`
+    SET LOCAL lock_timeout = '5s';
+    SET LOCAL statement_timeout = '60s';
     REVOKE ALL ON jobs, job_effects FROM app_rw;
     DROP TABLE job_effects;
     DROP TABLE jobs;

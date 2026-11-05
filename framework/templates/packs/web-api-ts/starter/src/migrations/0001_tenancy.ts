@@ -1,9 +1,13 @@
 // 0001 — tenant, người dùng, phiên đăng nhập; vai trò `app_rw` và hàm ngữ cảnh `app.current_tenant()`.
 // Migration đã áp ở môi trường chung KHÔNG sửa — sửa bằng migration mới. Mỗi migration có `down` đã chạy thử trong test.
+// Mỗi khối SQL mở bằng `SET LOCAL lock_timeout`/`statement_timeout` (DB-MIG-005: FK tới bảng đang phục vụ cũng khoá bảng
+// được trỏ) — hết thời gian thì migration lỗi, transaction lùi, chạy lại `migrate up`; migration mới làm theo.
 import { type Kysely, sql } from "kysely";
 
 export async function up(db: Kysely<unknown>): Promise<void> {
   await sql`
+    SET LOCAL lock_timeout = '5s';
+    SET LOCAL statement_timeout = '60s';
     DO $$ BEGIN
       IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'app_rw') THEN
         CREATE ROLE app_rw NOLOGIN;
@@ -44,6 +48,8 @@ export async function up(db: Kysely<unknown>): Promise<void> {
 export async function down(db: Kysely<unknown>): Promise<void> {
   // Vai trò `app_rw` là của cả cluster (cơ sở dữ liệu khác có thể dùng) — không xoá ở đây.
   await sql`
+    SET LOCAL lock_timeout = '5s';
+    SET LOCAL statement_timeout = '60s';
     DROP TABLE sessions;
     DROP TABLE users;
     DROP TABLE tenants;
