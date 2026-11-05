@@ -8,9 +8,9 @@
 # Thứ tự phân giải (đầu tiên thắng):
 #   1) KHAI BÁO: nếu có xt.yaml (YAML phẳng `task: lệnh`, agent đọc được) hoặc
 #      .claude/project-commands.sh (biến bash <task>=lệnh) → chạy lệnh khai báo.
-#   2) TỰ DÒ: nhận diện hệ sinh thái (node/python/go/rust/make) → chạy lệnh quy ước. Test Python chạy song song theo
-#      số nhân (D-367): pytest có xdist → `python3 -m pytest -n auto`; unittest → mỗi module một tiến trình (`xargs -P`). XT_JOBS=N chọn
-#      số tiến trình (1 = tuần tự như cũ).
+#   2) TỰ DÒ: nhận diện hệ sinh thái (node/python/go/rust/make) → chạy lệnh quy ước. pytest có xdist chạy song song theo
+#      số nhân (D-367, D-369): `python3 -m pytest -q -n auto`, trừ khi cấu hình tắt xdist; XT_JOBS=N chọn số tiến trình
+#      (1 = `pytest -q` tuần tự; trần 4×số nhân). unittest giữ `discover` tuần tự.
 #   3) NO-OP: không có gì khớp → in thông báo skip, exit 0 (KHÔNG làm gãy dự án nào).
 #      Ngoại lệ (ADR-0011): autopilot đang chạy (.autopilot/state.json "active": true) mà `lint`/`test`
 #      rỗng hoặc là lệnh không kiểm gì (true, :, exit 0, echo …) → ĐỎ. Cổng rỗng không phải bằng chứng.
@@ -126,35 +126,47 @@ node_has_script() {
 }
 
 ncpu() { nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || echo 2; }
-test_jobs() { # $1=mặc định → XT_JOBS nếu là số nguyên dương, không thì $1 (log khi XT_JOBS là rác và DT_HINT=1)
-  local j="${XT_JOBS:-}"
-  if [[ "$j" =~ ^[1-9][0-9]{0,5}$ ]]; then printf '%s' "$j"; return 0; fi
-  [ -n "$j" ] && [ "${DT_HINT:-}" = 1 ] && log "XT_JOBS='$j' không phải số nguyên dương — dùng mặc định ($1)"
-  printf '%s' "$1"
+test_jobs() { # số tiến trình pytest-xdist: XT_JOBS nguyên dương (trần 4×số nhân), rác/không đặt → `auto`; log khi DT_HINT=1
+  local j="${XT_JOBS:-}" cap
+  cap=$(( $(ncpu) * 4 ))
+  if [[ "$j" =~ ^[1-9][0-9]{0,5}$ ]]; then
+    if [ "$j" -gt "$cap" ]; then
+      [ "${DT_HINT:-}" = 1 ] && log "XT_JOBS=$j vượt trần 4×số nhân — dùng $cap"
+      j="$cap"
+    fi
+    printf '%s' "$j"; return 0
+  fi
+  [ -n "$j" ] && [ "${DT_HINT:-}" = 1 ] && log "XT_JOBS='$j' không phải số nguyên dương — dùng mặc định (auto)"
+  printf 'auto'
 }
-# unittest song song (D-367): liệt kê module bằng loader như `discover -s tests` (lỗi import → in lỗi, exit 1; module
-# SkipTest lúc import bỏ qua; không test nào → `Ran 0 tests`, exit 5 như lệnh cũ), mỗi module chạy một tiến trình với
-# tests/ ở đầu sys.path như discover. pipefail + xargs (exit 123 khi có tiến trình đỏ) → lệnh đỏ khi bất kỳ phần nào đỏ.
-UT_LIST='import sys,unittest;S=set();f=lambda s:[f(t) if isinstance(t,unittest.TestSuite) else (print(t._exception,file=sys.stderr),sys.exit(1)) if isinstance(t,unittest.loader._FailedTest) else t.__class__.__module__=="unittest.loader" or S.add(t.__class__.__module__) for t in s];f(unittest.TestLoader().discover("tests"));S or (print("Ran 0 tests",file=sys.stderr),sys.exit(5));print("\n".join(sorted(S)))'
-UT_RUN='import os,sys,unittest;sys.path.insert(0,os.path.abspath("tests"));unittest.main(module=None,argv=["unittest",sys.argv[1]])'
-python_test_cmd() { # lệnh test Python tự dò; DT_HINT=1 (run_task) → log gợi ý/XT_JOBS rác đúng một lần mỗi lần chạy
+pytest_xdist_off() { # 0 = tắt xdist có chủ ý: PYTEST_DISABLE_PLUGIN_AUTOLOAD, PYTEST_ADDOPTS hoặc cấu hình pytest ở ROOT có `no:xdist`
+  [ -n "${PYTEST_DISABLE_PLUGIN_AUTOLOAD:-}" ] && return 0
+  case "${PYTEST_ADDOPTS:-}" in *no:xdist*) return 0 ;; esac
+  local f
+  for f in pytest.ini .pytest.ini pytest.toml .pytest.toml pyproject.toml tox.ini setup.cfg; do
+    [ -f "$ROOT/$f" ] && grep -q 'no:xdist' "$ROOT/$f" 2>/dev/null && return 0
+  done
+  return 1
+}
+python_test_cmd() { # lệnh test Python tự dò; DT_HINT=1 (run_task) → log gợi ý/XT_JOBS đúng một lần mỗi lần chạy
   local j
   if command -v pytest >/dev/null 2>&1; then
-    j="$(test_jobs auto)"
-    if [ "$j" = 1 ]; then echo "pytest -q"
-    # `python3 -m pytest`: đúng interpreter vừa import được xdist (xdist phụ thuộc pytest) — `pytest` trên PATH có thể là
-    # pipx/venv khác không có xdist → `-n` lỗi "unrecognized arguments".
-    elif python3 -c 'import xdist' >/dev/null 2>&1; then echo "python3 -m pytest -q -n $j"
-    else
-      [ "${DT_HINT:-}" = 1 ] && log "gợi ý: cài pytest-xdist để chạy song song theo số nhân (XT_JOBS=1: tuần tự, không gợi ý)"
-      echo "pytest -q"
+    if pytest_xdist_off; then echo "pytest -q"; return 0; fi
+    # `python3 -m pytest`: đúng interpreter vừa tìm thấy xdist (xdist phụ thuộc pytest) — `pytest` trên PATH có thể là
+    # pipx/venv khác không có xdist → `-n` lỗi "unrecognized arguments". Khác `pytest`: thêm cwd vào sys.path.
+    if python3 -c 'import importlib.util,sys; sys.exit(importlib.util.find_spec("xdist") is None)' >/dev/null 2>&1; then
+      j="$(test_jobs)"
+      if [ "$j" = 1 ]; then echo "pytest -q"; else echo "python3 -m pytest -q -n $j"; fi
+      return 0
     fi
-    return 0
+    [ "${XT_JOBS:-}" != 1 ] && [ "${DT_HINT:-}" = 1 ] \
+      && log "gợi ý: cài pytest-xdist để chạy test song song theo số nhân (XT_JOBS=1: tuần tự, không gợi ý)"
+    echo "pytest -q"; return 0
   fi
-  [ -d "$ROOT/tests" ] || return 0
-  j="$(test_jobs "$(ncpu)")"
-  if [ "$j" = 1 ]; then echo "python3 -m unittest discover -s tests"; return 0; fi
-  echo "python3 -c '$UT_LIST' | xargs -r -P $j -n 1 python3 -c '$UT_RUN'"
+  # unittest: `discover` tuần tự như cũ (D-369) — bộ chia theo module tự viết sai với setUpClass/setUpModule skip,
+  # load_tests, FunctionTestCase, lớp test định nghĩa ở module khác.
+  [ -d "$ROOT/tests" ] && echo "python3 -m unittest discover -s tests"
+  return 0
 }
 
 detected_cmd() {
