@@ -1,14 +1,7 @@
 # Nhật ký quyết định tự duyệt
 
 > Ghi bởi `xt.py loop decide`. Phiên chính tự duyệt điểm quyết định theo tiêu chí chất lượng cuối (`LOOP-STOP-018`, ADR-0008 của khung). Người xem lại bất cứ lúc nào; đổi ý → quyết định mới ghi "thay D-NNN", không sửa mục cũ.
-> Bản tháng trước: [`DECISIONS-2026-10.md`](DECISIONS-2026-10.md) (D-001…D-287), [`DECISIONS-2026-11.md`](DECISIONS-2026-11.md) (D-292…D-351) — máy đọc cả bản tháng (T-3651).
-
-### D-356 · 2026-11-04T22:53:05+00:00 · T-3551: chốt ADR-0071 perf trial — 14 điểm hở của bản nháp (ID FLOW, nơi đo candidate, nguồn cấu hình, kiểm trỏ đúng cây, start khi HEAD lệch cây giữ, held-out, falsifier, PERF-LOG, --resume, neo công cụ chấm, sửa file khoá, khoá điểm nóng, đo xen kẽ)
-
-- Phương án: (1) Nhận cả 14 đề xuất của bản nháp: FLOW giữ nghĩa nghiên cứu §10 cho 20…23, ca mới FLOW-27…34; candidate đo ở worktree dựng lại; cấu hình JSON đọc từ commit gốc; kiểm trỏ đúng cây bằng probe + quét .pth/symlink; từ chối start khi HEAD^{tree} ≠ kept_tree; held-out hạt giống lúc finish, phải improved; falsifier trúng → thu hồi; PERF-LOG miễn khi chỉ nối thêm; --resume R1 rơi về R2; công cụ chấm neo cả exec blob gốc lẫn Gate <(git show); sửa file khoá → thu hồi + tính lượt; khoá điểm nóng theo đường file + kiểm diff; luôn đo xen kẽ · (2) Giữ phương án B cho ID FLOW (đổi nghĩa FLOW-20…23 theo PLAN) và đo candidate tại chỗ cho rẻ hơn
-- Chọn: Nhận cả 14 đề xuất của bản nháp: FLOW giữ nghĩa nghiên cứu §10 cho 20…23, ca mới FLOW-27…34; candidate đo ở worktree dựng lại; cấu hình JSON đọc từ commit gốc; kiểm trỏ đúng cây bằng probe + quét .pth/symlink; từ chối start khi HEAD^{tree} ≠ kept_tree; held-out hạt giống lúc finish, phải improved; falsifier trúng → thu hồi; PERF-LOG miễn khi chỉ nối thêm; --resume R1 rơi về R2; công cụ chấm neo cả exec blob gốc lẫn Gate <(git show); sửa file khoá → thu hồi + tính lượt; khoá điểm nóng theo đường file + kiểm diff; luôn đo xen kẽ
-- Lý do (tiêu chí chất lượng cuối): (1) spike đo được: đo theo khối 18 % improved sai trong A/A, đo tại chỗ bị .pth bị ignore lừa — các phương án chặt hơn chặn cả hai; (3) ID ổn định theo conventions (không đổi nghĩa ID đã dùng); (2) mỗi task một PR, perf trial là lệnh mới, Gate mẫu cũ giữ nguyên làm đường lùi; chi phí +0,8 s/cây chỉ phá hoà (5)
-- Đường lùi: Gỡ skill /optimize khỏi perf trial, quay về Gate mẫu perf-gate.sh; finish --no-apply là lối tạm
+> Bản tháng trước: [`DECISIONS-2026-10.md`](DECISIONS-2026-10.md) (D-001…D-287), [`DECISIONS-2026-11.md`](DECISIONS-2026-11.md) (D-292…D-356) — máy đọc cả bản tháng (T-3651).
 
 ### D-357 · 2026-11-04T22:54:48+00:00 · T-3680…T-3687 (perf trial, ADR-0071): mỗi task một PR (8 PR) hay gộp?
 
@@ -121,3 +114,10 @@
 - Chọn: Sửa HẾT 3 🟠 + 4 🟢 trong một commit trên PR, rồi review lượt 2 cả PR ở head mới bằng reviewer-alt (effort max)
 - Lý do (tiêu chí chất lượng cuối): (1) các phát hiện đều nhỏ, sửa được ngay, có tái hiện; (3) tách PR làm báo cáo/ARCH lệch khỏi bản đang cắt; (5) một lượt sửa + một review rẻ hơn hai PR
 - Đường lùi: Tách ADR-0072 sang PR riêng nếu review lượt 2 vẫn chặn ở phần đó
+
+### D-375 · 2026-11-05T12:47:31+00:00 · AUD-HAR-301 (xboss nâng 3.30.0): harness_permissions: own đổi 11 lệnh hook dạng ${CLAUDE_PROJECT_DIR} sang tương đối — đúng giao ước đã ghi (harness-files.md, test own_permissions_keeps_project_permissions_and_relative_hooks, chủ repo duyệt 2026-10-22 cho dhcb); sửa trong 3.30.1?
+
+- Phương án: (1) 3.30.1 giữ giao ước, ghi chú ở harness-files.md + CHANGELOG 'Dự án đích': dự án cần lệnh hook tuyệt đối thì không dùng own (hoặc gộp tay); 3.31.0 xét own giữ dạng lệnh sẵn có của dự án (ADR mới) · (2) Đổi giao ước ngay trong 3.30.1
+- Chọn: 3.30.1 giữ giao ước, ghi chú ở harness-files.md + CHANGELOG 'Dự án đích': dự án cần lệnh hook tuyệt đối thì không dùng own (hoặc gộp tay); 3.31.0 xét own giữ dạng lệnh sẵn có của dự án (ADR mới)
+- Lý do (tiêu chí chất lượng cuối): (2) bản vá không đổi giao ước đã được chủ repo duyệt; (1) xboss hiện chạy đúng (PR #706 xanh, hook tuyệt đối giữ ở lần cài này) — rủi ro chỉ ở lần cài sau, đã ghi; (3) đổi giao ước cần ADR và test mới
+- Đường lùi: Đổi trong 3.30.x nếu dự án đích nào hỏng hook vì dạng tương đối trước 3.31.0
