@@ -25,6 +25,7 @@ import base64
 import binascii
 import bisect
 import contextlib
+import contextvars
 import fnmatch
 import functools
 import itertools
@@ -9091,13 +9092,59 @@ def _where(t: str, root: str, cwd: Optional[str]) -> List[str]:
     if old:
         return _where(t[old.end() :].lstrip("/") or ".", root, None)
     if cwd is not None:
-        return [_resolve_target(t, root, cwd)]
+        return _fd_where(_resolve_target(t, root, cwd), root, cwd)
     t = PROJECT_REF_RE.sub(lambda _: root, t, count=1)
     pwd = PWD_REF_RE.match(t)  # `$PWD/x` khi thư mục không biết = `x` tương đối
     t = (t[pwd.end() :].lstrip("/") or ".") if pwd else t
     if not t or t.startswith(("/", "~", "$")):
-        return [t]
+        return _fd_where(t, root, None)
     return _unknown_where(t, root)
+
+
+# AUD-SEC-521: fd mở trên THƯ MỤC (`exec 3< d`, `{fd}< d`, `< d`) — `/dev/fd/3/f` là `d/f` (kernel theo liên kết của fd
+# rồi đi tiếp). Tiền tố fd giải theo chữ như AUD-SEC-511 (`/dev/./fd/3`, `//dev/fd/3`, `/dev/../dev/fd/3`).
+FD_DIR_RE = re.compile(r"/dev/(?:fd/\d+|std(?:in|out|err))|/proc/[^/]+/fd/\d+")
+# Đích của `<` (không `<<`, `<<<`, `<>`, `<&`, `<(`) trong chữ lệnh, kể cả lệnh lồng: nguyên văn, có nháy hay không;
+# không phân theo số fd (`4<&3` sao chép, `{fd}<` không biết số) — mọi thư mục mở là ứng viên cho mọi `/dev/fd/N/…`.
+FD_OPEN_RE = re.compile(r"(?<!<)<(?![<>&(])[ \t]*(?:'([^']*)'|\"([^\"$`\\]*)\"|([^\s;&|()<>`$'\"\\]+))")
+FD_DIRS: contextvars.ContextVar[Tuple[str, ...]] = contextvars.ContextVar("FD_DIRS", default=())
+
+
+def _fd_open_dirs(cmd: str) -> Tuple[str, ...]:
+    """Đường nguyên văn mà `cmd` mở để đọc bằng `<` (ứng viên thư mục của `/dev/fd/N/…` — AUD-SEC-521)."""
+    return tuple(dict.fromkeys(next(g for g in m.groups() if g is not None) for m in FD_OPEN_RE.finditer(cmd)))
+
+
+def _fd_dir_tail(path: str) -> Optional[str]:
+    """Phần đuôi của `path` sau tiền tố fd đầu tiên khi giải theo chữ (`/dev//fd/./3/a/../b` → `a/../b`, `..` của đuôi
+    giữ nguyên: nó leo từ thư mục của fd); không có tiền tố fd hay không có đuôi (`/dev/fd/3`) → None."""
+    if not path.startswith("/"):
+        return None
+    parts, stack = path.split("/"), cast(List[str], [])
+    for i, part in enumerate(parts):
+        if part == "..":
+            stack = stack[:-1]
+        elif part not in ("", "."):
+            stack.append(part)
+        if 2 <= len(stack) <= 4 and FD_DIR_RE.fullmatch("/" + "/".join(stack)):
+            return "/".join(p for p in parts[i + 1 :] if p not in ("", ".")) or None
+    return None
+
+
+def _fd_where(t: str, root: str, cwd: Optional[str]) -> List[str]:
+    """`t` dưới thư mục mở trên fd (AUD-SEC-521): đuôi ở thư mục không biết (D-106), ở mọi thư mục mở bằng `<` trong
+    lệnh (`FD_DIRS`), và — khi đuôi leo bằng `..` — ở gốc hệ thống; `t` khác giữ nguyên. Thư mục mở chỉ ghép một tầng
+    (`exec 3< /dev/fd/3` không lặp vô hạn)."""
+    tail = _fd_dir_tail(t)
+    if tail is None:
+        return [t]
+    up = UP_LEAD_RE.sub("", tail)
+    out = [t, *_where(tail, root, None), *(_where("/" + up, root, cwd) if up != tail else [])]
+    dirs, token = FD_DIRS.get(), FD_DIRS.set(())
+    try:
+        return out + [x for d in dirs for x in _where(posixpath.join(d, tail), root, cwd)]
+    finally:
+        FD_DIRS.reset(token)
 
 
 def _unknown_where(t: str, root: str) -> List[str]:
@@ -14031,7 +14078,9 @@ def bash_decision(
     """Quyết định cho một lệnh Bash: deny/ask/"" kèm cờ `commit`, `no_verify`, `commit_dir` cho hook cổng commit.
     `cwd` = thư mục lệnh bắt đầu chạy (payload hook); `cd <dir>` trong lệnh dời nó để biết commit rơi vào repo nào.
     `depth` = độ sâu shell lồng (`sh -c`, heredoc/pipe vào shell) đang quét. Guard không phân định được cách bash đọc
-    lệnh (`ScanTooComplex`) → chặn, không đoán."""
+    lệnh (`ScanTooComplex`) → chặn, không đoán. Thư mục mở bằng `<` trong chữ lệnh (cả lệnh lồng) cộng dồn vào `FD_DIRS`
+    suốt lần quét (AUD-SEC-521)."""
+    token = FD_DIRS.set(tuple(dict.fromkeys((*FD_DIRS.get(), *_fd_open_dirs(cmd)))))
     try:
         return _bash_decision(cmd, root, cwd, depth, budget, rewrites)
     except ScanTooComplex as e:
@@ -14046,6 +14095,8 @@ def bash_decision(
         }
         out.update(getattr(e, "flags", {}))  # review #433 R1: giữ cờ bỏ hook (`no_verify`/`push_no_verify`) cho adapter
         return out
+    finally:
+        FD_DIRS.reset(token)
 
 
 def _clean_strict(cmd: str, budget: ScanBudget) -> Tuple[str, bool]:

@@ -1802,6 +1802,60 @@ class Review441Test(unittest.TestCase):
             self.assertNotEqual(self.policy(cmd)["code"], "NONE", cmd)
         self.assertEqual(guard._fd_script_why("bash /dev/stdin <<'E'\necho\nE"), "")
 
+    def test_521_write_through_fd_opened_directory(self):
+        """AUD-SEC-521: `exec 3< d; printf x > /dev/fd/3/f` ghi vào `d/f` (bash 5.2, Linux) — đích `/dev/fd/N/…`,
+        `/dev/std*/…`, `/proc/<pid>/fd/N/…` là thư mục không biết (D-106) cộng mọi thư mục mở bằng `<` trong lệnh."""
+        (self.root / ".github" / "workflows").mkdir(parents=True)
+        (self.root / "d").mkdir()
+        hooks = "printf x > .claude/hooks/guard.py"
+        for variant in (
+            "printf x > /dev/fd/3/guard.py 3< .claude/hooks",
+            "exec 3< .claude/hooks; printf x > /dev/fd/3/guard.py",
+            "exec 3<.claude/hooks && echo x >> /dev/fd/3/guard.py",
+            "exec {fd}< .claude/hooks; printf x > /dev/fd/10/guard.py",
+            "printf x > /dev/stdin/guard.py < .claude/hooks",
+            "printf x > /dev/./fd/3/guard.py 3< .claude/hooks",
+            "printf x > //dev/fd/3/guard.py 3< .claude/hooks",
+            "printf x > /dev/../dev/fd/3/guard.py 3< .claude/hooks",
+            "printf x > /dev/fd/3/x/../guard.py 3< .claude/hooks",
+            "printf x > /dev/fd/3/hooks/guard.py 3< .claude",
+            "printf x > /dev/fd/3/../hooks/guard.py 3< .claude/agents",
+            "printf x > /proc/self/fd/3/guard.py 3< .claude/hooks",
+            "printf x > /proc/$$/fd/3/guard.py 3< .claude/hooks",
+            "cd /dev && printf x > fd/3/guard.py 3< .claude/hooks",
+            "printf x > /dev/fd/3/guard.py",
+            "chmod 000 /dev/fd/3/guard.py 3< .claude/hooks",
+            "rm -f /dev/fd/3/guard.py",
+        ):
+            self.same_block(variant, hooks)
+        self.same_block("printf x > /dev/fd/3/pre-commit 3< .git/hooks", "printf x > .git/hooks/pre-commit")
+        self.same_block("tee /proc/thread-self/fd/4/state.json 4< .autopilot", "printf x > .autopilot/state.json")
+        self.same_block("printf x > /dev/fd/3/STAGE.json 3< docs/autopilot", "printf x > docs/autopilot/STAGE.json")
+        self.same_block("printf x > /dev/fd/3/ci.yml 3< .github/workflows", "printf x > .github/workflows/ci.yml")
+        self.same_block(
+            "printf x > /dev/fd/3/../../dev/fd/4/ci.yml 3< d 4< .github/workflows",
+            "printf x > .github/workflows/ci.yml",
+        )
+        self.same_block("printf x > /dev/fd/3/.gitconfig 3< ~", "printf x > ~/.gitconfig")
+        self.assert_codes(
+            "NONE",
+            "printf x > /dev/fd/2",
+            "echo x > /dev/stdout",
+            "cat > /dev/null",
+            "echo x > /dev/stderr",
+            "printf x > /dev/fd/3 3> out.txt",
+            "exec 3< d; printf x > /dev/fd/3/notes.txt",
+            "printf x > /dev/fd/3/ 3< d",
+            "sort < d/in.txt > /dev/fd/1",
+        )
+        self.assertIsNone(guard._fd_dir_tail("/dev/fd/3"))
+        self.assertIsNone(guard._fd_dir_tail("dev/fd/3/x"))
+        self.assertEqual(guard._fd_dir_tail("/dev//fd/./3/./a/../b"), "a/../b")
+        self.assertEqual(
+            guard._fd_open_dirs("exec 3< 'a b'; x {fd}<\"c\" <d <<E <<<f 3<> g <(h) 4<&3 $(<i) $j<k"),
+            ("a b", "c", "d", "i", "k"),
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

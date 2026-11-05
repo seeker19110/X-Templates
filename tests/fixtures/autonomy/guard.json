@@ -22569,6 +22569,14 @@
 {"id": "r441-ctl-513-source-existing-file", "origin": "control", "refs": ["AUD-SEC-513"], "input": {"command": ". ./env.sh; printf x > guard.py", "files": {"env.sh": "export A=1\n"}}, "expect": {"allowed": true}},
 {"id": "r441-ctl-514-fake-git-dir-extract-elsewhere", "origin": "control", "refs": ["AUD-SEC-514"], "input": {"command": "mkdir -p build/objects && tar -xzf /tmp/deps.tgz -C vendor"}, "expect": {"allowed": true}},
 {"id": "r441-ctl-514-bare-tmp-extract-elsewhere", "origin": "control", "refs": ["AUD-SEC-514"], "input": {"command": "git init --bare /tmp/r.git && tar -xf /tmp/a.tar -C build"}, "expect": {"allowed": true}},
-{"id": "r441-ctl-517-cpio-unique-list", "origin": "control", "refs": ["AUD-SEC-517"], "input": {"command": "cd .claude/hooks && cpio -i --lis < a.cpio", "files": {".claude/hooks/.keep": ""}}, "expect": {"allowed": true}}
+{"id": "r441-ctl-517-cpio-unique-list", "origin": "control", "refs": ["AUD-SEC-517"], "input": {"command": "cd .claude/hooks && cpio -i --lis < a.cpio", "files": {".claude/hooks/.keep": ""}}, "expect": {"allowed": true}},
+{"id": "r441-521-fd-dir-redirect-guard", "origin": "audit", "refs": ["AUD-SEC-521"], "input": {"command": "printf x > /dev/fd/3/guard.py 3< .claude/hooks", "files": {".claude/hooks/guard.py": ""}}, "expect": {"allowed": false, "code": "HOOK_BYPASS"}},
+{"id": "r441-521-exec-fd-dir-git-hook", "origin": "audit", "refs": ["AUD-SEC-521"], "input": {"command": "exec 3< .git/hooks; printf x > /dev/fd/3/pre-commit"}, "expect": {"allowed": false, "code": "HOOK_BYPASS"}},
+{"id": "r441-521-proc-fd-dir-evidence", "origin": "audit", "refs": ["AUD-SEC-521"], "input": {"command": "tee /proc/self/fd/4/state.json 4< .autopilot", "files": {".autopilot/state.json": "{}"}}, "expect": {"allowed": false, "code": "EVIDENCE_HANDWRITE"}},
+{"id": "r441-521-stdin-dir-guard", "origin": "audit", "refs": ["AUD-SEC-521"], "input": {"command": "exec < .claude/hooks; printf x > /dev/stdin/guard.py", "files": {".claude/hooks/guard.py": ""}}, "expect": {"allowed": false, "code": "HOOK_BYPASS"}},
+{"id": "r441-ctl-521-fd-stderr", "origin": "control", "refs": ["AUD-SEC-521"], "input": {"command": "printf x > /dev/fd/2"}, "expect": {"allowed": true}},
+{"id": "r441-ctl-521-dev-stdout", "origin": "control", "refs": ["AUD-SEC-521"], "input": {"command": "echo x > /dev/stdout"}, "expect": {"allowed": true}},
+{"id": "r441-ctl-521-dev-null", "origin": "control", "refs": ["AUD-SEC-521"], "input": {"command": "cat > /dev/null"}, "expect": {"allowed": true}},
+{"id": "r441-ctl-521-fd-dir-plain-file", "origin": "control", "refs": ["AUD-SEC-521"], "input": {"command": "exec 3< d; printf x > /dev/fd/3/notes.txt", "files": {"d/.keep": ""}}, "expect": {"allowed": true}}
  ]
 }
