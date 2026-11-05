@@ -15865,7 +15865,7 @@ def trial_default_branch(base: Path, url: str) -> Tuple[str, str, str]:
     stderr (D-371: gốc chỉ dựa ref cục bộ); không xác định được → TrialRefused(2)."""
     srv = _trial_ls_remote(url)
     if srv is not None:
-        return (*srv, "server")
+        return srv[0], srv[1], "server"
     sym = _git(base, "symbolic-ref", "-q", "refs/remotes/origin/HEAD", env=_trial_genv())
     tip = _git(base, "rev-parse", "-q", "--verify", "refs/remotes/origin/HEAD^{commit}", env=_trial_genv())
     ref = sym.stdout.strip()
