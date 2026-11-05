@@ -162,6 +162,60 @@ class PackFreshTest(PackBase):
         self.assertIn("starter: kept 1 · kept-own 1", err)
         self.assertEqual(self.manifest()["packs"][PACK]["starter"], [])  # chỉ ghi file đã chép
 
+    def test_fresh_keeps_filled_yaml_keys_of_project(self) -> None:
+        """Repo sạch mà xt.yaml đã điền lệnh riêng (Python…): chỉ đặt khoá vắng/rỗng, khoá đã điền giữ + báo (review 🟠)."""
+        src = make_src(self.tmp, "khung-yaml-day", xt_yaml="lint: \"ruff check .\"  # của dự án\ne2e: ''\n")
+        plan = self.pack_plan(src)  # chưa có xt.yaml ở đích: mọi khoá đều đặt
+        self.assertEqual(plan["xt_yaml"], {"apply": YAML_KEYS})
+        write_tree(self.target, {"xt.yaml": "lint: \"ruff check .\"  # của dự án\ne2e: ''\n"})
+        self.assertEqual(
+            self.pack_plan(src)["xt_yaml"],
+            {"apply": {"e2e": "pnpm e2e"}, "kept": {"lint": {"own": '"ruff check ."', "pack": "pnpm lint"}}},
+        )
+        err = self.install(src)
+        self.assertEqual(self.read("xt.yaml"), 'lint: "ruff check ."  # của dự án\ne2e: "pnpm e2e"\n')
+        self.assertIn('giữ `lint: "ruff check ."` của dự án — gói đề nghị "pnpm lint"', err)
+        self.assertIn("đặt 1 khoá (e2e)", err)
+
+    def test_yaml_own_value_and_split(self) -> None:
+        text = 'a: ""\nb:\nc: "x"  # chú thích\nd: # chỉ chú thích\ne: "pnpm lint"\n'
+        self.assertEqual([install.yaml_own_value(text, k) for k in "abcdez"], ["", "", '"x"', "", '"pnpm lint"', None])
+        apply, kept = install.pack_yaml_split(text, {"a": "1", "c": "2", "e": "pnpm lint", "z": "3"})
+        self.assertEqual((apply, kept), ({"a": "1", "e": "pnpm lint", "z": "3"}, {"c": {"own": '"x"', "pack": "2"}}))
+        empty: dict[str, str] = {}
+        self.assertEqual(install.pack_yaml_split(text, empty), ({}, {}))
+        write_tree(self.target, {"xt.yaml": "\xff"})  # không đọc được → coi như rỗng: đặt mọi khoá
+        (self.target / "xt.yaml").write_bytes(b"\xff\xfe")
+        with redirect_stderr(io.StringIO()):
+            self.assertEqual(install.pack_yaml_plan(self.target, "fresh", {"a": "1"}), {"apply": {"a": "1"}})
+
+    def test_fresh_merges_missing_gitignore_lines(self) -> None:
+        src = make_src(self.tmp, "khung-gi", starter={**STARTER_V1, ".gitignore": "node_modules/\n.env\n"})
+        write_tree(self.target, {".gitignore": "build/"})
+        self.assertEqual(self.actions(self.pack_plan(src)["starter"])[".gitignore"], "merged")
+        err = self.install(src)
+        self.assertTrue(self.read(".gitignore").startswith("build/\nnode_modules/\n.env\n"))
+        self.assertIn("merged 1", err)
+        self.assertEqual(self.actions(self.pack_plan(src)["starter"])[".gitignore"], "owned-by-project")
+
+    def test_gitignore_already_has_lines_or_unreadable(self) -> None:
+        src = make_src(self.tmp, "khung-gi2", starter={".gitignore": "node_modules/\n"})
+        write_tree(self.target, {".gitignore": "x\nnode_modules/\n"})
+        self.assertEqual(self.actions(self.pack_plan(src)["starter"])[".gitignore"], "kept-own")
+        (self.target / ".gitignore").write_bytes(b"\xff\xfe")
+        self.assertEqual(self.actions(self.pack_plan(src)["starter"])[".gitignore"], "kept-own")
+
+    def test_framework_copy_skips_pack_payloads(self) -> None:
+        """`.xtemplates/framework` không chứa starter/managed của gói — test/`package.json` của gói không bị công cụ
+        của dự án đích (vitest, workspace) nhặt nhầm (review lát B 🔴); `pack.json`/README vẫn có."""
+        write_tree(self.v1 / "framework/templates/packs/demo", {"README.md": "x\n"})
+        write_tree(self.v1 / "framework/other/starter", {"keep.md": "x\n"})  # chỉ thư mục con của packs/<id>/
+        code, _, err = self.run_main(self.v1, "--label", "p1", "--no-git-hooks")
+        self.assertEqual(code, 0, err)
+        packs = self.target / ".xtemplates/framework/templates/packs/demo"
+        self.assertEqual(sorted(p.name for p in packs.iterdir()), ["README.md", "pack.json"])
+        self.assertTrue((self.target / ".xtemplates/framework/other/starter/keep.md").is_file())
+
     def test_fresh_without_yaml_template_creates_xt_yaml(self) -> None:
         src = make_src(self.tmp, "khung-khong-yaml", xt_yaml=None)
         self.install(src)
@@ -189,16 +243,24 @@ class PackBrownfieldTest(PackBase):
         plan = self.pack_plan(self.v1)
         self.assertEqual(plan["mode"], "brownfield")
         self.assertEqual(set(self.actions(plan["starter"]).values()), {"skipped-brownfield"})
-        self.assertEqual(set(self.actions(plan["managed"]).values()), {"copied"})
+        # dự án đang chạy: file managed mới chỉ là đề xuất — không đổi hành vi (workflow mới làm đỏ chính sách CI của
+        # hotel-manager, lát C)
+        self.assertEqual(set(self.actions(plan["managed"]).values()), {"updated-new"})
         self.assertEqual(plan["xt_yaml"], {"suggested": YAML_KEYS})
         err = self.install(self.v1)
         for rel in STARTER_V1:
             self.assertFalse((self.target / rel).exists(), rel)
         for rel, text in MANAGED_V1.items():
-            self.assertEqual(self.read(rel), text)
+            self.assertFalse((self.target / rel).exists(), rel)
+            self.assertEqual(self.read(rel + ".xtemplates-new"), text)
         self.assertEqual(self.read("xt.yaml"), 'lint: ""\ntest: "make test"\n')  # không đụng cấu hình dự án
         self.assertIn("gợi ý khoá lint, e2e — không ghi", err)
+        self.assertIn("managed: updated-new 3", err)
         self.assertEqual(self.manifest()["packs"][PACK]["starter"], [])
+        # nâng bản khi đề xuất chưa được nhận: vẫn là đề xuất; nhận (đổi tên) rồi thì nâng theo hash
+        self.assertEqual(set(self.actions(self.pack_plan(self.v1)["managed"]).values()), {"updated-new"})
+        (self.target / "ops/keep.txt.xtemplates-new").rename(self.target / "ops/keep.txt")
+        self.assertEqual(self.actions(self.pack_plan(self.v1)["managed"])["ops/keep.txt"], "kept")
 
     def test_package_json_symlink_counts_as_brownfield(self) -> None:
         (self.target / "package.json").symlink_to(self.tmp / "khong-co")
@@ -236,7 +298,7 @@ class PackUpgradeTest(PackBase):
         self.assertTrue(self.read("xt.yaml").startswith('lint: "biome check"\n'))  # nâng bản không đặt khoá gói
         self.assertNotIn("pnpm", self.read("xt.yaml"))
         self.assertIn("managed: kept-own 1 · updated 1 · updated-new 1", err)
-        self.assertIn(".xtemplates-new, so sánh và gộp tay", err)
+        self.assertIn(".xtemplates-new (dự án đã sửa file", err)
         doc = self.manifest()
         self.assertEqual(doc["packs"][PACK]["version"], "p2")
         self.assertEqual(doc["packs"][PACK]["starter"], sorted(STARTER_V1))  # giữ danh sách lần cài đầu

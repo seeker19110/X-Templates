@@ -135,12 +135,27 @@ def drop_symlink(path: Path) -> None:
         path.unlink()
 
 
-def copy_tree_replace(src: Path, dst: Path) -> None:
+BYTECODE = shutil.ignore_patterns("__pycache__", "*.pyc")
+PACK_PAYLOADS = ("starter", "managed")
+
+
+def framework_ignore(dirpath: str, names: list[str]) -> set[str]:
+    """Bỏ bytecode và cây nội dung của gói sản phẩm (`templates/packs/<id>/starter|managed`) khỏi `.xtemplates/framework`:
+    installer đọc gói từ khung nguồn; chép vào dự án đích thì test `*.test.ts`/`package.json` của gói bị công cụ của dự
+    án (vitest, pnpm workspace…) nhặt nhầm (review lát B 🔴)."""
+    skip = set(BYTECODE(dirpath, names))
+    here = Path(dirpath)
+    if here.parent.name == "packs" and here.parent.parent.name == "templates":
+        skip |= {n for n in names if n in PACK_PAYLOADS}
+    return skip
+
+
+def copy_tree_replace(src: Path, dst: Path, ignore: Callable[[str, list[str]], set[str]] = BYTECODE) -> None:
     """Copy vào thư mục tạm rồi mới thay: lỗi giữa chừng không để dst mất/dở."""
     tmp = dst.with_name(dst.name + ".tmp")
     drop_symlink(tmp)
     shutil.rmtree(tmp, ignore_errors=True)
-    shutil.copytree(src, tmp, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+    shutil.copytree(src, tmp, ignore=ignore)
     drop_symlink(dst)
     if dst.exists():
         shutil.rmtree(dst)
@@ -647,7 +662,7 @@ def github_root_error(target: Path) -> str | None:
 def install_framework(xt_dir: Path, label: str | None) -> str:
     """Bước 1: framework + research + scripts + VERSION + README vào .xtemplates/ — thay thế toàn bộ (bản chỉ đọc).
     Trả nhãn đã ghi vào VERSION."""
-    copy_tree_replace(SRC / "framework", xt_dir / "framework")
+    copy_tree_replace(SRC / "framework", xt_dir / "framework", framework_ignore)
     # research/: chỉ file module trong framework/ trỏ tới bằng đường dẫn tương đối (AUD-XFEAT-046) — nhật ký nghiên cứu
     # khác của repo khung không phải của dự án đích.
     if (SRC / "research").is_dir():
@@ -1176,14 +1191,37 @@ def starter_action(target: Path, rel: str, src: Path, mode: str) -> str:
         return "skipped-symlink"
     if not dst.exists():
         return "copied"
-    return "kept" if dst.is_file() and dst.read_bytes() == src.read_bytes() else "kept-own"
+    if dst.is_file() and dst.read_bytes() == src.read_bytes():
+        return "kept"
+    return "merged" if rel == ".gitignore" and gitignore_missing(dst, src) else "kept-own"
 
 
-def managed_action(target: Path, rel: str, src: Path, files: dict[str, str]) -> tuple[str, bytes]:
-    """Quyết định (không ghi) cho một file managed: như harness (`classify_copy` với hash manifest)."""
+def gitignore_missing(dst: Path, src: Path) -> list[str]:
+    """Dòng ignore của starter mà `.gitignore` sẵn có của dự án chưa có (`node_modules/`, `.env`…) — file của dự án giữ
+    nguyên, chỉ nối thêm (review lát B 🟢); không đọc được → rỗng (giữ file, không nối)."""
+    try:
+        have = set(dst.read_text(encoding="utf-8").splitlines())
+    except (OSError, UnicodeDecodeError):
+        return []
+    return [line for line in src.read_text(encoding="utf-8").splitlines() if line and line not in have]
+
+
+def merge_gitignore(dst: Path, src: Path) -> None:
+    text = dst.read_text(encoding="utf-8")
+    lead = "" if not text or text.endswith("\n") else "\n"
+    dst.write_text(text + lead + "\n".join(gitignore_missing(dst, src)) + "\n", encoding="utf-8")
+
+
+def managed_action(target: Path, rel: str, src: Path, files: dict[str, str], mode: str) -> tuple[str, bytes]:
+    """Quyết định (không ghi) cho một file managed: như harness (`classify_copy` với hash manifest). File chưa có ở dự
+    án brownfield — hoặc dự án chưa nhận đề xuất trước (`.xtemplates-new` còn đó) — chỉ thành đề xuất `updated-new`:
+    thêm workflow/script vào dự án đang chạy là đổi hành vi (hotel-manager đòi mọi job PR là required check — lát C)."""
     if under_symlink(target, rel):
         return "skipped-symlink", b""
-    return classify_copy(src, target / rel, installed_hash=files.get(rel))
+    dst = target / rel
+    if not dst.exists() and (mode == "brownfield" or dst.with_name(dst.name + ".xtemplates-new").exists()):
+        return "updated-new", source_bytes(src)
+    return classify_copy(src, dst, installed_hash=files.get(rel))
 
 
 def pack_plan(target: Path, pack: dict[str, Any]) -> dict[str, Any]:
@@ -1191,14 +1229,15 @@ def pack_plan(target: Path, pack: dict[str, Any]) -> dict[str, Any]:
     pid, files = pack["id"], load_manifest(target)
     mode = pack_mode(target, pid)
     starter = [{"path": r, "action": starter_action(target, r, s, mode)} for r, s in pack_tree(pid, "starter")]
-    managed = [{"path": r, "action": managed_action(target, r, s, files)[0]} for r, s in pack_tree(pid, "managed")]
-    yaml_key = "apply" if mode == "fresh" else "suggested"
+    managed = [
+        {"path": r, "action": managed_action(target, r, s, files, mode)[0]} for r, s in pack_tree(pid, "managed")
+    ]
     return {
         "id": pid,
         "mode": mode,
         "starter": starter,
         "managed": managed,
-        "xt_yaml": {yaml_key: dict(pack["xt_yaml"])},
+        "xt_yaml": pack_yaml_plan(target, mode, dict(pack["xt_yaml"])),
     }
 
 
@@ -1216,20 +1255,22 @@ def install_pack_starter(target: Path, pid: str, mode: str) -> list[str]:
         if action == "copied":
             (target / rel).parent.mkdir(parents=True, exist_ok=True)
             copied.append(rel)
+        if action == "merged":
+            merge_gitignore(target / rel, src)
         write_copy(src, target / rel, action, src.read_bytes())
     log(f"  gói {pid}/starter: {_action_counts(actions)}")
     return copied
 
 
-def install_pack_managed(target: Path, pid: str) -> list[str]:
-    """File managed như harness: cập nhật theo hash, `.xtemplates-new` khi dự án đã sửa; hash mẫu vào `files` của
-    manifest (`HASHED`), `kept-own`/symlink giữ hash cũ. Trả mọi đường dẫn managed của gói."""
+def install_pack_managed(target: Path, pid: str, mode: str) -> list[str]:
+    """File managed như harness: cập nhật theo hash, `.xtemplates-new` khi dự án đã sửa (hoặc file mới ở brownfield);
+    hash mẫu vào `files` của manifest (`HASHED`), `kept-own`/symlink giữ hash cũ. Trả mọi đường dẫn managed của gói."""
     files = load_manifest(target)
     actions: Counter[str] = Counter()
     rels: list[str] = []
     for rel, src in pack_tree(pid, "managed"):
-        status, data = managed_action(target, rel, src, files)
-        if status == "copied":
+        status, data = managed_action(target, rel, src, files, mode)
+        if status in ("copied", "updated-new"):
             (target / rel).parent.mkdir(parents=True, exist_ok=True)
         write_copy(src, target / rel, status, data)
         actions[status] += 1
@@ -1239,7 +1280,10 @@ def install_pack_managed(target: Path, pid: str) -> list[str]:
     write_manifests(target, files, load_rules(target))
     log(f"  gói {pid}/managed: {_action_counts(actions)}")
     if actions["updated-new"]:
-        log(f"  ⚠ gói {pid}: file managed dự án đã sửa — bản gói mới ở <file>.xtemplates-new, so sánh và gộp tay")
+        log(
+            f"  ⚠ gói {pid}: bản gói ở <file>.xtemplates-new (dự án đã sửa file, hoặc file mới ở dự án đang chạy) — "
+            "so sánh rồi đổi tên/gộp tay để nhận"
+        )
     return rels
 
 
@@ -1257,8 +1301,46 @@ def yaml_set_keys(text: str, values: dict[str, str]) -> str:
     return text
 
 
+YAML_EMPTY_RE = re.compile(r"""^(?:""|'')?[ \t]*(?:#.*)?$""")
+
+
+def yaml_own_value(text: str, key: str) -> str | None:
+    """Giá trị thô (bỏ chú thích cuối dòng) của khoá cấp 1 trong xt.yaml của dự án; vắng → None, rỗng (`""`, `''`,
+    không ghi gì) → ""."""
+    m = re.search(rf"^{re.escape(key)}:[ \t]*([^\r\n]*)", text, re.M)
+    if m is None:
+        return None
+    raw = m[1]
+    return "" if YAML_EMPTY_RE.match(raw) else raw.split(" #", 1)[0].strip()
+
+
+def pack_yaml_split(own: str, values: dict[str, str]) -> tuple[dict[str, str], dict[str, dict[str, str]]]:
+    """(khoá sẽ đặt: vắng/rỗng/đã đúng giá trị gói, khoá giữ của dự án: {khoá: {own, pack}}) — repo sạch vẫn có thể đã
+    điền lệnh riêng (Python, Go…): không ghi đè lệnh của dự án (review lát B 🟠)."""
+    apply: dict[str, str] = {}
+    kept: dict[str, dict[str, str]] = {}
+    for key, value in values.items():
+        cur = yaml_own_value(own, key)
+        if cur in (None, "", json.dumps(value, ensure_ascii=False)):
+            apply[key] = value
+        else:
+            kept[key] = {"own": str(cur), "pack": value}
+    return apply, kept
+
+
+def pack_yaml_plan(target: Path, mode: str, values: dict[str, str]) -> dict[str, Any]:
+    """Phần `xt_yaml` của `--plan`: repo sạch → `apply` (+ `kept` khi dự án đã điền khoá); còn lại → `suggested`."""
+    if mode != "fresh":
+        return {"suggested": dict(values)}
+    path = target / "xt.yaml"
+    own = (read_own_yaml(path) or "") if path.is_file() and not path.is_symlink() else ""
+    apply, kept = pack_yaml_split(own, values)
+    return {"apply": apply, **({"kept": kept} if kept else {})}
+
+
 def install_pack_yaml(target: Path, pid: str, mode: str, values: dict[str, str]) -> None:
-    """Khoá `xt_yaml` của gói: chỉ ghi khi chép starter lần này (repo sạch); dự án đã có cấu hình → chỉ gợi ý."""
+    """Khoá `xt_yaml` của gói: chỉ ghi khi chép starter lần này (repo sạch), và chỉ khoá vắng/rỗng — khoá dự án đã điền
+    giữ nguyên, báo kèm giá trị của gói; dự án đã có cấu hình (brownfield/nâng bản) → chỉ gợi ý."""
     if not values:
         return
     names = ", ".join(values)
@@ -1272,8 +1354,11 @@ def install_pack_yaml(target: Path, pid: str, mode: str, values: dict[str, str])
     own = read_own_yaml(path) if path.exists() else ""
     if own is None:
         return
-    path.write_bytes(yaml_set_keys(own, values).encode("utf-8"))
-    log(f"  gói {pid}/xt.yaml: đặt {len(values)} khoá ({names})")
+    apply, kept = pack_yaml_split(own, values)
+    path.write_bytes(yaml_set_keys(own, apply).encode("utf-8"))
+    log(f"  gói {pid}/xt.yaml: đặt {len(apply)} khoá ({', '.join(apply) or 'không có'})")
+    for key, pair in kept.items():
+        log(f"  ⚠ gói {pid}/xt.yaml: giữ `{key}: {pair['own']}` của dự án — gói đề nghị {json.dumps(pair['pack'])}")
 
 
 def record_pack(target: Path, pid: str, entry: dict[str, Any]) -> None:
@@ -1292,7 +1377,7 @@ def install_pack(target: Path, pack: dict[str, Any], version: str) -> None:
     starter = install_pack_starter(target, pid, mode)
     if mode == "upgrade":
         starter = _str_list(prior.get("starter")) if isinstance(prior, dict) else []
-    managed = install_pack_managed(target, pid)
+    managed = install_pack_managed(target, pid, mode)
     record_pack(target, pid, {"version": version, "starter": starter, "managed": managed})
     install_pack_yaml(target, pid, mode, pack["xt_yaml"])
 

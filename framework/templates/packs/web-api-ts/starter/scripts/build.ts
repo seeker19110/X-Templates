@@ -14,6 +14,7 @@ const tar = execFileSync("tar", [
   "--owner=0",
   "--group=0",
   "--numeric-owner",
+  "--mode=u=rwX,go=rX", // quyền file không theo umask của máy build — digest chỉ phụ thuộc nội dung
   "--exclude=*.test.ts",
   "-cf",
   "-",

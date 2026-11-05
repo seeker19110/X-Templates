@@ -3,23 +3,39 @@ import { createHash, randomBytes, randomUUID, scrypt as scryptCb, timingSafeEqua
 import { promisify } from "node:util";
 import type { Db } from "./db.ts";
 
-const scrypt = promisify(scryptCb) as (pw: string, salt: Buffer, len: number) => Promise<Buffer>;
+type Cost = { N: number; r: number; p: number; maxmem: number };
+const scrypt = promisify(scryptCb) as (pw: string, salt: Buffer, len: number, opts: Cost) => Promise<Buffer>;
 const KEY_LEN = 32;
+// Tham số ghi trong chuỗi hash (`scrypt$N=…,r=…,p=…$muối$khoá`): tăng cost sau này không phá hash cũ.
+// Mặc định N=2^17, r=8, p=1 (OWASP Password Storage Cheat Sheet).
+const COST = { N: 2 ** 17, r: 8, p: 1 };
+const MAXMEM = 256 * 1024 * 1024;
 export const SESSION_HOURS = 12;
 
 export async function hashPassword(password: string): Promise<string> {
   const salt = randomBytes(16);
-  const key = await scrypt(password, salt, KEY_LEN);
-  return `scrypt$${salt.toString("base64url")}$${key.toString("base64url")}`;
+  const key = await scrypt(password, salt, KEY_LEN, { ...COST, maxmem: MAXMEM });
+  const params = `N=${COST.N},r=${COST.r},p=${COST.p}`;
+  return `scrypt$${params}$${salt.toString("base64url")}$${key.toString("base64url")}`;
+}
+
+function parseCost(params: string): Cost | null {
+  const m = /^N=(\d+),r=(\d+),p=(\d+)$/.exec(params);
+  if (!m) return null;
+  const [N, r, p] = [Number(m[1]), Number(m[2]), Number(m[3])];
+  return N >= 2 ** 14 && N <= 2 ** 20 && r >= 1 && r <= 32 && p >= 1 && p <= 16
+    ? { N, r, p, maxmem: MAXMEM }
+    : null;
 }
 
 export async function verifyPassword(password: string, stored: string): Promise<boolean> {
-  const [scheme, salt, key] = stored.split("$");
-  if (scheme !== "scrypt" || !salt || !key) {
+  const [scheme, params, salt, key] = stored.split("$");
+  const cost = parseCost(params ?? "");
+  if (scheme !== "scrypt" || !cost || !salt || !key) {
     return false;
   }
   const want = Buffer.from(key, "base64url");
-  const got = await scrypt(password, Buffer.from(salt, "base64url"), want.length);
+  const got = await scrypt(password, Buffer.from(salt, "base64url"), want.length, cost);
   return got.length === want.length && timingSafeEqual(got, want);
 }
 
@@ -33,7 +49,7 @@ export interface Principal {
 }
 
 // Mật khẩu giả để so khi email không tồn tại — thời gian trả lời không lộ email nào có thật.
-const DUMMY = `scrypt$${randomBytes(16).toString("base64url")}$${randomBytes(KEY_LEN).toString("base64url")}`;
+const DUMMY = `scrypt$N=${COST.N},r=${COST.r},p=${COST.p}$${randomBytes(16).toString("base64url")}$${randomBytes(KEY_LEN).toString("base64url")}`;
 
 export async function login(db: Db, email: string, password: string): Promise<string | null> {
   const user = await db

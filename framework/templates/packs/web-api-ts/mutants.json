@@ -20,10 +20,10 @@
     },
     {
       "id": "contract-runtime",
-      "why": "server đổi tên trường phản hồi — phá client đang dùng",
+      "why": "server bỏ trường bắt buộc của phản hồi (created_at của POST /v1/notes) — chỉ bộ so schema khi chạy bắt được",
       "file": "src/server.ts",
-      "find": "return [200, { token }];",
-      "replace": "return [200, { accessToken: token }];",
+      "find": "      .returning([\"id\", \"body\", \"created_at\"])\n      .executeTakeFirstOrThrow(),",
+      "replace": "      .returning([\"id\", \"body\"])\n      .executeTakeFirstOrThrow(),",
       "expect_fail": "mọi phản hồi khớp schema đã khai"
     },
     {

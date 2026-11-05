@@ -80,6 +80,19 @@ describe("worker", () => {
     expect(rows).toEqual([{ status: "failed", attempts: MAX_ATTEMPTS }]);
   });
 
+  it("worker chết ở lần thử cuối → job thành failed, không kẹt running", async () => {
+    await enqueue(db, b.id, "dies", "k7", {});
+    for (let i = 0; i < MAX_ATTEMPTS; i++) {
+      expect((await claim(db, b.id, "dies", "w", 50))?.attempts).toBe(i + 1);
+      await sleep(80); // không complete/fail: worker chết, lease hết hạn
+    }
+    expect(await claim(db, b.id, "dies", "w", 50)).toBeNull();
+    const rows = await withTenant(db, b.id, (tx) =>
+      tx.selectFrom("jobs").select(["status", "locked_by"]).where("kind", "=", "dies").execute(),
+    );
+    expect(rows).toEqual([{ status: "failed", locked_by: null }]);
+  });
+
   it("worker của tenant B không thấy job của A", async () => {
     await enqueue(db, a.id, "only-a", "k5", {});
     expect(await claim(db, b.id, "only-a", "wb", 5000)).toBeNull();

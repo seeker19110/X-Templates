@@ -47,6 +47,13 @@ export async function claim(
   leaseMs: number,
 ): Promise<Claimed | null> {
   return withTenant(db, tenantId, async (tx) => {
+    // Job hết lượt mà worker cuối chết (lease hết hạn) → `failed`, không kẹt `running` mãi (review lát B).
+    await sql`
+      UPDATE jobs SET status = 'failed', locked_by = NULL, locked_until = NULL, updated_at = now(),
+        last_error = coalesce(last_error, 'lease hết hạn ở lần thử cuối')
+      WHERE kind = ${kind} AND status = 'running' AND locked_until < now() AND attempts >= ${MAX_ATTEMPTS}`.execute(
+      tx,
+    );
     const res = await sql<Claimed>`
       UPDATE jobs SET status = 'running', attempts = attempts + 1, locked_by = ${workerId},
         locked_until = now() + make_interval(secs => ${leaseMs / 1000}), updated_at = now()
