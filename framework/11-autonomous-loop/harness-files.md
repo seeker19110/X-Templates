@@ -103,8 +103,11 @@ OS/devcontainer có egress allowlist (`LOOP-HARNESS-022`) và việc phiên chí
   (`exec < f; gh … -F -`, `{ gh …; } < f` — AUD-SEC-180), file tương đối sau `cd`, tool MCP ngoài `MCP_REVIEW_POST_RE` (steward chỉ đọc comment issue).
 - **Ref remote là ref cục bộ** (AUD-SEC-119): guard chặn lệnh git ghi `refs/remotes/…` hay tạo ref trùng `<remote>/…`
   (`REMOTE_REF_FORGE`) và ghi `refs/replace/…` (`git replace`, AUD-SEC-158 — `xt.py` cũng đọc git với
-  `--no-replace-objects`, không theo grafts — AUD-SEC-168), nhưng không chặn ghi thẳng file `.git/refs/…`, `.git/packed-refs`, `.git/<remote>/…`; đổi URL
-  hay refspec của remote (`remote add|set-url|rename`, `config remote.<r>.*`, `git -c remote.<r>.fetch=…`) rồi `fetch`;
+  `--no-replace-objects`, không theo grafts — AUD-SEC-168), và từ #442 (D-366) chặn cả ghi thẳng `.git/packed-refs`, `.git/refs/remotes/**` lẫn đổi gốc của remote:
+  `remote set-url|set-branches` (mọi remote), `remote add|rename|remove|rm` khi tên cũ/mới là `origin`, `config remote.<r>.url|pushurl|fetch`
+  và `url.<b>.insteadOf|pushInsteadOf` (kể cả `--unset`, `--remove-section`/`--rename-section`), `git -c`/`--config-env`/`GIT_CONFIG_*` một lần;
+  `remote set-head <r> <nhánh>|-d` cũng chặn (`-a` hỏi máy chủ thì qua). Còn lọt: ghi thẳng file `.git/refs/heads|tags/…`, `.git/<remote>/…`
+  (cùng uid sửa trực tiếp file trong `.git` ngoài guard — lớp hai là sandbox, ADR-0067), `remote add|rename|remove` tên khác `origin`;
   ghi thẳng `.git/refs/replace/…`, grafts (`.git/info/grafts`, `GIT_GRAFT_FILE`) với lệnh git ngoài `xt.py`, `fast-import`; ref là thay lệnh (`$(…)`) hay biến trong script lồng (`xargs sh -c 'git update-ref "$@"'`).
   Alias git: mọi lệnh con ngoài danh sách dựng sẵn (bất kể tên: `a.b`, `y_x.z`, `1.x`) được tra trong bảng alias do
   CHÍNH git dựng (`git -C <repo> [-c/--config-env/--git-dir của lệnh] config --list -z` với `GIT_CONFIG_COUNT/KEY_*/

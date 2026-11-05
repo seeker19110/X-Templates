@@ -126,16 +126,19 @@
 | typing-extensions | 4.16.0 | PSF-2.0 | như trên (bắc cầu của pyee) |
 | axe-core (vendored, `tests_e2e/vendor/axe/`) | 4.14.0 | MPL-2.0 (chấp nhận — xem trên) | chỉ test E2E, không phân phối kèm |
 
-## Binary CI: bun (test plugin OpenCode)
+## Binary CI: bun (test plugin OpenCode), Gitleaks CLI (quét bí mật)
 
 | Gói | Bản | License | Nguồn và hash | Dùng ở |
 |---|---|---|---|---|
 | `@oven/bun-linux-x64` | 1.4.4 | MIT (`license` của registry npm, đọc 2026-11-03) | tarball <https://registry.npmjs.org/@oven/bun-linux-x64/-/bun-linux-x64-1.4.4.tgz>; `BUN_SHA256` ghim trong `.github/workflows/ci.yml` (sha256 tính trên tarball, khớp `dist.integrity` sha512 của registry) | job CI chạy `tests.test_adapters` (plugin OpenCode, AUD-TEST-056); không phân phối kèm |
+| Gitleaks CLI (`gitleaks_8.30.1_linux_x64.tar.gz`) | 8.30.1 | MIT (`LICENSE` upstream tại tag `v8.30.1`, đọc 2026-11-05) | <https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz>; `sha256` ghim trong `.github/workflows/secret-scan.yml` và `framework/templates/secret-scan.yml` (đối chiếu `checksums.txt` của bản phát hành) | job CI `gitleaks` (AUD-CI-027, AUD-CI-030) và mẫu cho dự án đích; không phân phối kèm |
 
 Không bot nào nâng bản ghim này (Dependabot không đọc biến `env` của workflow) — nâng tay (AUD-DEP-011): chọn bản đã qua
 cooldown `BASE-DEP-019`; `npm view @oven/bun-linux-x64@<X> license dist.tarball dist.integrity`; tải tarball, `sha256sum`,
 đối chiếu sha512 với `dist.integrity`; sửa `BUN_VERSION` + `BUN_SHA256` trong `ci.yml` (cùng commit, nêu lý do chạm CI). Cache
 tarball bằng `actions/cache` theo `BUN_SHA256`: đang cân nhắc (tải 4 lần/lượt CI), chưa làm.
+
+Gitleaks cũng không có bot nào nâng (phiên bản và `sha256` nằm trong `run:`) — nâng tay: chọn bản đã qua cooldown `BASE-DEP-019`; đọc `checksums.txt` của bản phát hành trên trang releases; sửa `asset`, URL và `sha256` ở **cả hai** workflow (cùng commit, nêu lý do chạm CI); kiểm `LICENSE` upstream còn MIT.
 
 ## Cách tạo lại
 
