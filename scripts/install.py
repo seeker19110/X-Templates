@@ -503,8 +503,9 @@ NO_PERMISSION_CHANGES = ("allow_add", "deny_add", "ask_remove", "deny_remove", "
 
 
 def own_permissions(target: Path) -> bool:
-    """`harness_permissions: own` trong xt.yaml của dự án: dự án giữ mô hình quyền và dạng lệnh hook riêng (dhcb cấm
-    `allow: Bash` trùm, bắt hook `bash .claude/hooks/x.sh` — chủ repo 2026-10-22). Thiếu/không đọc được → False."""
+    """`harness_permissions: own` trong xt.yaml của dự án: dự án giữ mô hình quyền riêng (dhcb cấm `allow: Bash` trùm —
+    chủ repo 2026-10-22); lệnh hook khung ghi dạng tương đối `bash .claude/hooks/x.sh` (`_relative_hooks`), kể cả khi
+    dự án đang dùng dạng `${CLAUDE_PROJECT_DIR}` (D-375, `harness-files.md`). Thiếu/không đọc được → False."""
     try:
         return bool(OWN_PERMISSIONS_RE.search((target / "xt.yaml").read_text(encoding="utf-8-sig")))
     except (OSError, UnicodeDecodeError):

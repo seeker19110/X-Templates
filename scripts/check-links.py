@@ -45,7 +45,9 @@ QUOTE_RE = re.compile(r"^ {0,3}(?:>\s?)+")
 HTML_ANCHOR_RE = re.compile(r"<[a-z][a-z0-9]*\s[^>]*\b(?:id|name)=[\"']?([^\"'\s>]+)", re.IGNORECASE)
 LINE_ANCHOR_RE = re.compile(r"^L\d+(?:-L\d+)?$")  # `#L3`, `#L3-L9`: dòng mã trên GitHub, không phải tiêu đề
 URL_RE = re.compile(r"^https?://[^\s]+$")
-CODE_SPAN_RE = re.compile(r"(`+)(?!`).*?(?<!`)\1(?!`)")  # `x` và ``x ` y``: URL trong đó là ví dụ, không phải nguồn
+# `x` và ``x ` y``: URL trong đó là ví dụ, không phải nguồn. Mở span chỉ ở đầu cả chuỗi backtick và khi backtick không bị
+# escape (`\`` nguyên văn; `\\`` vẫn mở — số backslash chẵn); trong span backslash là chữ nên đóng không xét escape.
+CODE_SPAN_RE = re.compile(r"(?<![\\`])(?:\\\\)*(`+)(?!`).*?(?<!`)\1(?!`)")
 AUTOLINK_RE = re.compile(r"<(https?://[^\s<>]+)>")
 BARE_URL_RE = re.compile(r"https?://[^\s<>\[\]\"`|]+")
 SKIP_HOSTS = {"localhost", "127.0.0.1", "example.com", "example.org", "example.net"}
