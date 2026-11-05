@@ -3,7 +3,7 @@
 
 - Mọi `[text](đường/dẫn.md#anchor)` tương đối phải trỏ tới file/thư mục có thật; `#anchor` (cùng file hoặc file `.md`
   khác) phải là slug của một tiêu đề theo cách GitHub sinh, hoặc `<a id|name="…">`.
-- Bỏ qua URL (http:, mailto:…), nội dung trong code fence (``` hoặc ~~~).
+- Bỏ qua URL (http:, mailto:…), nội dung trong code fence (``` hoặc ~~~) và code span (`` `[x](y)` `` là ví dụ).
 - Link trỏ ra ngoài gốc repo là lỗi (file có trên máy người viết nhưng không có trong repo).
 - Bỏ qua thư mục: .git, node_modules, .venv, .autopilot, __pycache__.
 Thoát 1 nếu có link hỏng. Chỉ dùng thư viện chuẩn.
@@ -81,9 +81,10 @@ def _unangle(target: str) -> str:
 
 
 def iter_links(root: Path) -> Iterator[tuple[Path, int, str]]:
-    """(file, số dòng, đích) của mọi link Markdown ngoài code fence; đích đã bỏ `<>`."""
+    """(file, số dòng, đích) của mọi link Markdown ngoài code fence và code span (`[x](y)` trong backtick là ví dụ cú
+    pháp — FB-115); đích đã bỏ `<>`."""
     for p, n, line in iter_lines(root):
-        for target in LINK_RE.findall(line):
+        for target in LINK_RE.findall(CODE_SPAN_RE.sub(" ", line)):
             yield p, n, _unangle(target)
 
 
