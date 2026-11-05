@@ -1,5 +1,5 @@
 """T-3708 (D-367, D-369): lệnh test TỰ DÒ của `scripts/dev-task.sh` — pytest có xdist chạy song song
-(`python3 -m pytest -q -n <JOBS>`) trừ khi cấu hình tắt xdist; unittest giữ `discover -s tests` tuần tự như cũ;
+(`python3 -P -m pytest -q -n <JOBS>`) trừ khi cấu hình tắt xdist; unittest giữ `discover -s tests` tuần tự như cũ;
 `XT_JOBS` chọn số tiến trình (1 = `pytest -q`, rác = `auto`, trần 4×số nhân). Lệnh khai báo trong xt.yaml không đổi.
 Dự án giả trong thư mục tạm, PATH chỉ gồm công cụ cần thiết (không lọt pytest/ruff của máy), xdist giả qua PYTHONPATH;
 "không có xdist" = `python3 -S` (che site-packages của máy) và không có xdist giả."""
@@ -7,6 +7,7 @@ Dự án giả trong thư mục tạm, PATH chỉ gồm công cụ cần thiết
 from __future__ import annotations
 
 import os
+import py_compile
 import re
 import shutil
 import subprocess
@@ -18,9 +19,15 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 TOOLS = "bash sh dirname basename grep sed awk tail head mktemp tee rm cat xargs getconf sort ls sleep touch env"
 NPROC = 2  # `nproc` giả → trần XT_JOBS = 8
-FAKE_PYTEST = '#!/bin/sh\necho "PYTEST-ARGS: $*"\n'
-# `python3 -m pytest` (có xdist): module giả trên PYTHONPATH — in dấu khác lệnh `pytest` trên PATH để biết lệnh nào chạy.
-FAKE_PYTEST_MODULE = 'import sys\n\nprint("PYTEST-MODULE-ARGS: " + " ".join(sys.argv[1:]))\n'
+FAKE_PYTEST = '#!/bin/sh\necho "PYTEST-ARGS: $*"\nexit "${FAKE_PYTEST_RC:-0}"\n'
+# `python3 -P -m pytest` (có xdist): module giả trên PYTHONPATH — in dấu khác lệnh `pytest` trên PATH để biết lệnh nào
+# chạy; nạp các mô-đun pytest thật nạp sớm (`_pytest`, `pluggy`, `argparse` — giả hoặc stdlib) để lộ mô-đun gốc che chúng;
+# exit theo FAKE_PYTEST_RC (mặc định 0) để giả bộ test đỏ.
+FAKE_PYTEST_MODULE = (
+    "import os\nimport sys\n\nimport _pytest\nimport argparse\nimport pluggy\n\n"
+    'print("PYTEST-MODULE-ARGS: " + " ".join(sys.argv[1:]))\nsys.exit(int(os.environ.get("FAKE_PYTEST_RC", "0")))\n'
+)
+SHADOW = "raise SystemExit(0)\n"  # mô-đun ở gốc che pytest: nếu được nạp, lệnh test exit 0 — xanh giả
 OK_MODULE = "import unittest\n\n\nclass A(unittest.TestCase):\n    def test_ok(self):\n        pass\n"
 HINT = "cài pytest-xdist để chạy test song song"
 
@@ -48,13 +55,18 @@ class DevTaskParallelTest(unittest.TestCase):
         path.write_text(body, encoding="utf-8")
         path.chmod(0o755)
 
-    def python(self, site: bool) -> None:
+    def python(self, site: bool, no_p: bool = False) -> None:
         flag = "" if site else " -S"  # -S: không nạp site-packages → xdist thật của máy (nếu có) không thấy được
-        self.script(self.bin / "python3", f'#!/bin/sh\nexec "{sys.executable}"{flag} "$@"\n')
+        # no_p: giả python3 < 3.11 — không biết `-P` (CPython: "Unknown option", exit 2).
+        old = 'case "$1" in -P) echo "Unknown option: -P" >&2; exit 2 ;; esac\n' if no_p else ""
+        self.script(self.bin / "python3", f'#!/bin/sh\n{old}exec "{sys.executable}"{flag} "$@"\n')
 
     def pytest(self, xdist: bool) -> None:
         self.script(self.bin / "pytest", FAKE_PYTEST)
         (self.pypath / "pytest.py").write_text(FAKE_PYTEST_MODULE, encoding="utf-8")
+        (self.pypath / "pluggy.py").write_text("", encoding="utf-8")
+        (self.pypath / "_pytest").mkdir(exist_ok=True)
+        (self.pypath / "_pytest" / "__init__.py").write_text("", encoding="utf-8")
         if xdist:
             (self.pypath / "xdist").mkdir(exist_ok=True)
             (self.pypath / "xdist" / "__init__.py").write_text("", encoding="utf-8")
@@ -87,14 +99,14 @@ class DevTaskParallelTest(unittest.TestCase):
 
     # --- pytest ---------------------------------------------------------------------------------------------------
     def test_pytest_with_xdist_runs_n_jobs(self):
-        """Có xdist → `python3 -m pytest`: cùng interpreter vừa tìm thấy xdist (pytest trên PATH có thể là pipx/venv
+        """Có xdist → `python3 -P -m pytest`: cùng interpreter vừa tìm thấy xdist (pytest trên PATH có thể là pipx/venv
         khác không có xdist → `-n` lỗi "unrecognized arguments")."""
         self.pytest(xdist=True)
         for jobs, flag in ((None, "-n auto"), ("3", "-n 3"), ("8", "-n 8"), ("abc", "-n auto"), ("0", "-n auto")):
             with self.subTest(jobs=jobs):
                 r = self.dt("test", jobs=jobs)
                 self.assertEqual(r.returncode, 0, r.stderr)
-                self.assertEqual(self.ran(r), f"python3 -m pytest -q {flag}")
+                self.assertEqual(self.ran(r), f"python3 -P -m pytest -q {flag}")
                 self.assertIn(f"PYTEST-MODULE-ARGS: -q {flag}", r.stdout)
                 self.assertNotIn("PYTEST-ARGS", r.stdout)  # không chạy pytest trên PATH
                 self.assertNotIn(HINT, r.stderr)
@@ -107,7 +119,7 @@ class DevTaskParallelTest(unittest.TestCase):
             with self.subTest(jobs=jobs):
                 r = self.dt("test", jobs=jobs)
                 self.assertEqual(r.returncode, 0, r.stderr)
-                self.assertEqual(self.ran(r), f"python3 -m pytest -q -n {4 * NPROC}")
+                self.assertEqual(self.ran(r), f"python3 -P -m pytest -q -n {4 * NPROC}")
                 self.assertEqual(r.stderr.count(f"XT_JOBS={jobs} vượt trần 4×số nhân — dùng {4 * NPROC}"), 1, r.stderr)
 
     def test_pytest_jobs_one_is_sequential(self):
@@ -164,11 +176,60 @@ class DevTaskParallelTest(unittest.TestCase):
                     self.assertIn("PYTEST-ARGS: -q\n", r.stdout)
                     self.assertNotIn(HINT, r.stderr)
 
+    def test_pytest_root_module_shadowing_is_not_false_green(self):
+        """D-371, review #446: `python3 -m` thêm cwd vào `sys.path` → mô-đun ở gốc trùng tên mô-đun pytest nạp (`pytest`,
+        `xdist`, `_pytest`, `pluggy`, `argparse`; tệp, gói hay `.pyc` trần) chạy thay pytest — bộ test đỏ ra exit 0. `-P`
+        không thêm cwd: pytest thật chạy, đỏ vẫn đỏ; dò xdist cũng không bị `xdist.py` ở gốc đánh lừa."""
+        self.pytest(xdist=True)
+
+        def pyc(p: Path) -> None:
+            src = self.tmp / ".shadow_src.py"
+            src.write_text(SHADOW, encoding="utf-8")
+            py_compile.compile(str(src), cfile=str(p), doraise=True)
+            src.unlink()
+
+        for name, make in (
+            ("pytest.py", lambda p: p.write_text(SHADOW, encoding="utf-8")),
+            ("xdist.py", lambda p: p.write_text(SHADOW, encoding="utf-8")),
+            ("pytest", lambda p: (p.mkdir(), (p / "__init__.py").write_text(SHADOW, encoding="utf-8"))),
+            ("_pytest", lambda p: (p.mkdir(), (p / "__init__.py").write_text(SHADOW, encoding="utf-8"))),
+            ("pluggy.py", lambda p: p.write_text(SHADOW, encoding="utf-8")),
+            ("argparse.py", lambda p: p.write_text(SHADOW, encoding="utf-8")),
+            ("pytest.pyc", pyc),
+        ):
+            with self.subTest(shadow=name):
+                path = self.tmp / name
+                make(path)
+                try:
+                    r = self.dt("test", FAKE_PYTEST_RC="1")
+                finally:
+                    shutil.rmtree(path) if path.is_dir() else path.unlink()
+                self.assertEqual(r.returncode, 1, r.stderr)  # đỏ thật, không xanh giả
+                self.assertEqual(self.ran(r), "python3 -P -m pytest -q -n auto")
+                self.assertIn("PYTEST-MODULE-ARGS: -q -n auto", r.stdout)
+        (self.tmp / "conftest.py").write_text("", encoding="utf-8")  # cấu hình pytest hợp lệ: vẫn song song
+        r = self.dt("test")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.ran(r), "python3 -P -m pytest -q -n auto")
+
+    def test_pytest_python_without_safe_path_runs_plain(self):
+        """python3 < 3.11 không có `-P` → `pytest -q` không `-n` như trước #444, log lý do (trừ XT_JOBS=1)."""
+        self.pytest(xdist=True)
+        self.python(site=False, no_p=True)
+        for jobs in (None, "1"):
+            with self.subTest(jobs=jobs):
+                r = self.dt("test", jobs=jobs)
+                self.assertEqual(r.returncode, 0, r.stderr)
+                self.assertEqual(self.ran(r), "pytest -q")
+                self.assertIn("PYTEST-ARGS: -q\n", r.stdout)
+                self.assertNotIn(HINT, r.stderr)
+                self.assertEqual(r.stderr.count("không có '-P'"), 0 if jobs == "1" else 1, r.stderr)
+
     def test_pytest_empty_autoload_env_is_not_disabled(self):
         self.pytest(xdist=True)
         r = self.dt("test", PYTEST_DISABLE_PLUGIN_AUTOLOAD="", PYTEST_ADDOPTS="-q")
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertEqual(self.ran(r), "python3 -m pytest -q -n auto")
+        self.assertEqual(self.ran(r), "python3 -P -m pytest -q -n auto")
 
     def test_declared_test_command_unchanged(self):
         self.pytest(xdist=True)

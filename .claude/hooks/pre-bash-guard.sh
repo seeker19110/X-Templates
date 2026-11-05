@@ -55,7 +55,9 @@ gate_config_changed() { # $1=gốc repo → 0 nếu file đổi so với HEAD (�
     case "$f" in
     xt.yaml | .claude/settings.json | .claude/hooks/pre-bash-guard.sh | scripts/dev-task.sh | \
       .xtemplates/scripts/dev-task.sh | scripts/xt.py | .xtemplates/scripts/xt.py | ruff.toml | */ruff.toml | .ruff.toml | */.ruff.toml | pyproject.toml | \
-      */pyproject.toml | .coveragerc | */.coveragerc | requirements*.txt | */requirements*.txt) return 0 ;;
+      */pyproject.toml | .coveragerc | */.coveragerc | requirements*.txt | */requirements*.txt | \
+      pytest.py | conftest.py | */conftest.py | pytest.ini | .pytest.ini | pytest.toml | .pytest.toml | tox.ini | \
+      setup.cfg) return 0 ;; # cấu hình pytest ở gốc: dev-task (`no:xdist`) và pytest đọc — review #446
     esac
   done < <(git -C "$1" -c core.quotePath=false diff --no-renames --relative --name-only HEAD -- 2>/dev/null
     git -C "$1" -c core.quotePath=false ls-files --others --exclude-standard 2>/dev/null)
