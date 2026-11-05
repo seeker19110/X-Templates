@@ -3,7 +3,7 @@
 - **Trạng thái:** Đã chấp nhận (2026-11-05, phiên chính tự duyệt — D-356: nhận cả mười bốn đề xuất in đậm ở §Điểm đã chốt;
   chủ repo 2026-11-05 "làm hết đi"; sửa theo review #440 — D-360: baseline do máy tính, không lối ra `--base`, PERF-LOG dựng từ
   sổ, điểm nóng là danh sách file; sửa theo review #442 — D-366: gốc = đầu nhánh máy chủ, không merge-base; sửa theo review #443 — D-368: `status --check`
-  ràng `HEAD^{tree}`, pathspec theo nghĩa đen, môi trường mới mỗi lần chạy lệnh đo, khoá `.venv/`/`node_modules/`). Chưa triển khai — T-3700…T-3707 (PLAN-harden-2026-10-27-loops).
+  ràng `HEAD^{tree}`, pathspec theo nghĩa đen, môi trường mới mỗi lần chạy lệnh đo, khoá `.venv/`/`node_modules/`). Đã triển khai — T-3700…T-3707 (PLAN-harden-2026-10-27-loops); `/optimize` gọi từ T-3707.
 - **Ngày:** 2026-11-05.
 - **Thực hiện:** [ADR-0052 §Quyết định 7](0052-loop-state-rev-progress-perf-v2-next-step.md#quyết-định) (D-203; ràng buộc đầu
   vào — bảng ở §Ràng buộc) và §3 (lần thử tối ưu không đi qua `loop record`), thêm `LOOP-OPT-007` (held-out) và `LOOP-OPT-004`
@@ -105,8 +105,8 @@ Mã thoát chung: **2** = máy từ chối **trước khi đụng cây agent** (
 | `perf trial start --hotspot PATH… --hypothesis TEXT --falsifier EXPR` | Tính `base_sha` (§1). Đòi: không có lần thử mở; cây sạch ngoài `.autopilot/` — không miễn file nào (`git status --porcelain --untracked-files=all --ignore-submodules=none`); `HEAD^{tree}` = cây của sự kiện `kept`/`log` gần nhất trong vòng, lần đầu vòng = cây `base_sha` (không ngoại lệ); file khoá không đổi `base_sha..HEAD`; mỗi `PATH` là đường file chuẩn hoá (có ở gốc hoặc chưa có ở `HEAD`), không khớp khoá; còn `budget`. Ghi `start_head`, `fp_start`, giả thuyết, falsifier, điểm nóng vào state và dòng `start` vào sổ | 0 · 2 từ chối, không ghi gì · 3 một đường điểm nóng đã cạn (§8) hoặc hết `budget` |
 | `perf trial prepare` | Dựng ba cây cho lần thử đang mở, chạy `setup`, kiểm trỏ đúng cây (§4 bước 3), in kết quả, dọn; không đổi phase — để dự án thử cấu hình trước vòng | 0 · 2 |
 | `perf trial finish [--resume] [--no-apply] [--json]` | Đóng băng, kiểm, đo, quyết, giữ hoặc thu hồi, ghi sổ (§4); `--no-apply` chỉ in quyết định và lệnh thu hồi | 0 giữ · 1 thu hồi xong (vân tay = `fp_start`) · 2 · 4 |
-| `perf trial status [--json] [--check]` | Pha, lần thử mở, đếm theo đường, lệnh kế (`finish`/`finish --resume`/`abort`). `--check` = Gate của task tối ưu: lần giữ gần nhất của vòng đạt `target` so với gốc, không có lần thử mở, cây sạch ngoài `.autopilot/` và `HEAD^{tree}` = cây `kept`/`log` gần nhất của vòng (lần đầu = gốc) — số ở sổ chỉ nói về cây đó; sai → 1 "commit lạ sau lần giữ"/"cây bẩn" (D-368, FLOW-46) | 0 · 1 `--check` chưa đạt · 2 state/sổ hỏng · 3 `--check` chưa đạt và mọi đường đã khai cạn hoặc hết `budget` (→ `loop defer`) |
-| `perf trial abort --reason TEXT` | Lấy `perf-trial.lock`; thu hồi như `finish` thu hồi, ghi `aborted` (tính vào 3 lần) | 0 · 2 không có lần thử, `HEAD ≠ start_head`, không lấy được khoá · 4 |
+| `perf trial status [--json] [--check]` | Pha, lần thử mở, đếm theo đường, lệnh kế (`finish`/`finish --resume`/`abort`). `--check` = Gate của task tối ưu: lần giữ gần nhất của vòng đạt `target` so với gốc (`target` trên chỉ số chính: cả tổng held-out khi cấu hình khai `heldout` — D-370), không có lần thử mở, cây sạch ngoài `.autopilot/` và `HEAD^{tree}` = cây `kept`/`log` gần nhất của vòng (lần đầu = gốc) — số ở sổ chỉ nói về cây đó; sai → 1 "commit lạ sau lần giữ"/"cây bẩn" (D-368, FLOW-46) | 0 · 1 `--check` chưa đạt · 2 state/sổ hỏng · 3 `--check` chưa đạt và mọi đường đã khai cạn hoặc hết `budget` (→ `loop defer`) |
+| `perf trial abort --reason TEXT` | Lấy `perf-trial.lock`; thu hồi như `finish` thu hồi, ghi `aborted` (tính vào 3 lần); sau `finish --no-apply` giữ cũng ghi `aborted` — dòng `kept` chưa áp của lần thử mất hiệu lực (neo, đếm, Gate — D-370) | 0 · 2 không có lần thử, `HEAD ≠ start_head`, không lấy được khoá · 4 |
 | `perf trial log [--check]` | Dựng khối PERF-LOG của vòng (mốc `base_sha`) từ dòng `decide` của sổ, thay đúng khối đó trong `docs/autopilot/PERF-LOG.md`, phần còn lại giữ nguyên byte; ghi sự kiện `log` với cây = `HEAD^{tree}` + PERF-LOG mới (index tạm) — `start` kế đòi cây này sau khi commit. `--check`: so file với bản dựng | 0 · 1 `--check` lệch · 2 có lần thử mở, cây bẩn |
 
 `finish`/`abort`/`start` không phải Gate và không đi qua `loop record` (ADR-0052 §3): thu hồi là kết quả bình thường, không
@@ -168,7 +168,7 @@ phải lần đỏ của task. Gate của task tối ưu là `perf trial status 
    --no-ext-diff --no-textconv` (review #442: `diff.ignoreSubmodules=all` giấu đổi gitlink).
 4. **Đo cùng lượt, xen kẽ:** chỉ số chính ở ba cây, vòng tròn đổi thứ tự (B K C, K C B, C B K…), `runs` mỗi cây; `exact` chạy
    ≥ 3 lần và đòi trùng nhau (lệch → `insufficient`; chỉ lấy **số cuối** stdout — mã in lúc thoát (`atexit`, `sys.stdout`,
-   vá `builtins`) chỉ ⚠ heuristic; so toàn stdout với gốc: T-3705); chỉ số phụ cùng lượt. **Mỗi lần chạy** lệnh đo, `equiv`,
+   vá `builtins`) ⚠ heuristic, và đầu ra chỉ số chính ở candidate — `exact`: stdout trừ số cuối, `wall`: toàn stdout — phải bằng gốc như held-out, khác → `inequivalent` (D-370)); chỉ số phụ cùng lượt. **Mỗi lần chạy** lệnh đo, `equiv`,
    held-out có `HOME`, `XDG_*_HOME`, `TMPDIR` là thư mục tạm MỚI cạnh cây, dọn ngay sau lần chạy (`setup` dùng `HOME` thật cho
    cache gói), và trước mỗi lần chạy xoá file khớp `scratch` khác danh sách sau `setup` (vd kết quả cache trong
    `__pycache__/`) — cache đĩa trong lẫn ngoài cây không đi qua giữa các mẫu (D-368: một lần mỗi cây cho cả lượt từng giữ
@@ -198,7 +198,7 @@ phải lần đỏ của task. Gate của task tối ưu là `perf trial status 
 `git cat-file blob <base_sha>:<đường xt.py>`; khác (kể cả `__file__` là ống `/dev/fd/N` đọc lại rỗng) → xuất blob ra thư mục tạm, chạy `python3 -I <tạm>/xt.py perf
 trial …` ở tiến trình con với `CLAUDE_PROJECT_DIR` = gốc dự án, dọn thư mục khi con xong, thoát bằng mã của con (D-366;
 spike: `xt.py` một file, chạy được qua blob). Gate của task tối ưu trong PLAN-opt: ``python3 -I <(git cat-file blob
-origin/HEAD:<đường xt.py>) perf trial status --check`` — đầu vào không lấy từ cây candidate;
+refs/remotes/origin/HEAD:<đường xt.py> || echo 'raise SystemExit(2)') perf trial status --check`` — đầu vào không lấy từ cây candidate; không đọc được blob (thiếu `origin/HEAD`, sai đường) → script `raise SystemExit(2)`, không xanh vì script rỗng (`pipefail` không áp cho `<(…)`, D-370);
 `--check` đọc số từ dòng `decide`, không đo lại. Can thiệp cùng uid trong lúc đo vẫn là giới hạn đã biết (§Hệ quả).
 
 ### 6. Held-out (`LOOP-OPT-007`)
@@ -229,15 +229,15 @@ danh sách (không thì thu hồi, `verdict: off-hotspot`).
 
 `finish` khi phase `measuring`/`decided` → exit 2 "chạy `finish --resume`". `--resume` (lấy khoá): `measuring` + vân tay cây =
 `candidate_fp` + `resumes == 0` → `resumes = 1`, đo lại từ đầu (bỏ mọi số dở, hạt giống mới), quyết một lần (FLOW-35); vân
-tay khác **hoặc** đã resume một lần → thu hồi, `verdict: incomplete` (FLOW-21); `decided` → làm nốt bước 8–9, không ghi
-`decide` trùng (FLOW-36). Mỗi lượt đo tăng `rounds` (ghi vào `decide` và PERF-LOG) — đo lại tới khi may không làm được quá
+tay khác **hoặc** đã resume một lần → thu hồi, `verdict: incomplete` (FLOW-21); `decided` — hay sổ đã có dòng `decide` của lần thử (chết giữa dòng `decide` và
+state, FLOW-50) → làm nốt bước 8–9 theo dòng đó, không ghi `decide` trùng (FLOW-36). Mỗi lượt đo tăng `rounds` (ghi vào `decide` và PERF-LOG) — đo lại tới khi may không làm được quá
 một lần. Cây tạm mất sau reboot → dựng lại. Hai `finish` (hay `finish` và `abort`) cùng lúc: `perf-trial.lock` không lấy
 được → exit 2 ngay. SIGTERM/SIGINT giữa lượt đo (D-368): dừng cả nhóm tiến trình lệnh đo, dọn cây tạm, nối dòng
-`interrupt`, pha về `started`, exit 2 — `finish` kế đo lại (`rounds` tăng); tín hiệu thứ hai trong lúc dọn bị bỏ qua.
+`interrupt`; tín hiệu thứ hai trong lúc dọn bị bỏ qua. Ngắt sau đóng băng **tiêu lần đo lại duy nhất** (chung bộ đếm `resumes`, D-370): lần đầu → `resumes = 1`, pha về `started`, exit 2, `finish` kế đo lại (`rounds` tăng); ngắt hay chết khi lần đo lại đã tiêu → `incomplete`, thu hồi, tính lượt (FLOW-47) — ngắt không rút lại được hạt giống held-out tới khi may.
 
 ### 10. Ca FLOW
 
-ID FLOW-20…23 giữ nghĩa nghiên cứu §10; FLOW-27…34 giữ nghĩa bản ADR trước review #440; ca review #440 cần thêm là FLOW-35…45; review #443 thêm FLOW-46 (D-368).
+ID FLOW-20…23 giữ nghĩa nghiên cứu §10; FLOW-27…34 giữ nghĩa bản ADR trước review #440; ca review #440 cần thêm là FLOW-35…45; review #443 thêm FLOW-46 (D-368); review #445 thêm FLOW-47…51 (D-370).
 
 | ID | Given / When | Then |
 |---|---|---|
@@ -266,6 +266,11 @@ ID FLOW-20…23 giữ nghĩa nghiên cứu §10; FLOW-27…34 giữ nghĩa bản
 | FLOW-44 | chỉ số chính `improved`, bộ nhớ +40 % dưới trần, `regress` 0 | thu hồi, exit 1 |
 | FLOW-45 | thu hồi rồi giữ một lần chưa đạt `target`, rồi giữ đạt | không dòng `loop record` nào cho task; `status --check` exit 1, rồi 0 |
 | FLOW-46 | giữ đạt `target`, commit; rồi commit lạ (chậm hơn gốc) / commit trả cây về cây giữ / sửa file chưa commit | `status --check` exit 0 → 1 "commit lạ sau lần giữ" → 0 → 1 "cây bẩn" |
+| FLOW-47 | candidate đóng băng, SIGTERM giữa lượt; `finish` lại, SIGTERM lần hai (hoặc SIGTERM giữa `--resume`) | lần đầu exit 2, pha `started`, `resumes` 1; lần hai `incomplete`, thu hồi về `fp_start`, một dòng `decide` |
+| FLOW-48 | lần giữ: chỉ số chính đạt `target` nhờ hard-code input bộ đo, held-out gộp chỉ −4 % | `status --check` exit 1 nêu held-out gộp |
+| FLOW-49 | candidate in số giả lúc thoát (`atexit.register(print, 1)`), có/không held-out | `inequivalent` (đầu ra chỉ số chính khác gốc), thu hồi |
+| FLOW-50 | `finish` chết sau dòng `decide`, trước state `decided` → `finish --resume` / `finish` | dùng lại quyết định đã ghi, một dòng `decide`, đếm không cộng đôi |
+| FLOW-51 | `finish --no-apply` giữ rồi `abort` | dòng `aborted` sau `kept`, cây = `fp_start`; `start`/`log` kế exit 0, `status --check` 1 |
 
 ### Ràng buộc ADR-0052 §7 (và §3) → cách đáp ứng
 
@@ -316,7 +321,7 @@ của chính task đó và task trước. Số T-3700…T-3707 thay T-3680…T-3
 
 | Task | Phạm vi | Gate |
 |---|---|---|
-| T-3700 | Corpus: FLOW-20…23, 27…45 vào `tests/test_flow.py` với `XFAIL` (tái hiện ghi rõ), không mã | `python3 -m unittest -q tests.test_flow && python3 -c "import sys; sys.path[:0] = ['tests', 'scripts']; import test_flow as t; s = {'FLOW-%d' % n for n in [20, 21, 22, 23, *range(27, 46)]}; sys.exit(bool(s - t.FLOW_IDS or s - t.XFAIL.keys()))"` |
+| T-3700 | Corpus: FLOW-20…23, 27…45 vào `tests/test_flow.py` với `XFAIL` (tái hiện ghi rõ), không mã | `python3 -m unittest -q tests.test_flow && python3 -c "import sys; sys.path[:0] = ['tests', 'scripts']; import test_flow as t; s = {'FLOW-%d' % n for n in [20, 21, 22, 23, *range(27, 46)]}; sys.exit(bool(s - t.FLOW_IDS or s & t.XFAIL.keys()))"` (D-365: T-3707 gỡ mọi ID khỏi `XFAIL`, Gate đổi theo) |
 | T-3701 | Cấu hình gốc + khoá mặc định, `base_sha` merge-base, sổ (khoá, `rev`), `start`/`status`/`abort` (thu hồi stash + vân tay, exit 4), đếm theo đường, `budget`, `log`; `tests/test_perf_trial.py` + `tests/shard-weights.json` | `XT_FLOW_STRICT=FLOW-22,FLOW-37,FLOW-38,FLOW-39,FLOW-40 python3 -m unittest -q tests.test_perf_trial tests.test_flow` |
 | T-3702 | Môi trường đo: cây tạm dựng từ tree object, `setup` allowlist, kiểm trỏ đúng cây, danh sách file đầy đủ, dọn; `prepare` | `XT_FLOW_STRICT=FLOW-32,FLOW-42,FLOW-43 python3 -m unittest -q tests.test_perf_trial tests.test_flow` |
 | T-3703 | `finish` lõi: kiểm trường, đóng băng, khoá/điểm nóng, đo xen kẽ chỉ số chính (`wall`/`exact`), kiểm cây sau lượt, tương đương, quyết, giữ/thu hồi + vân tay, dòng `decide`, `perf-trial.lock` | `XT_FLOW_STRICT=FLOW-20,FLOW-28,FLOW-29,FLOW-33,FLOW-41 python3 -m unittest -q tests.test_perf_trial tests.test_flow` |

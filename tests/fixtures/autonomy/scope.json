@@ -411,6 +411,17 @@
     "AUD-HAR-262",
     "AUD-HAR-263"
    ]
+  },
+  {
+   "reason": "Hành vi của `xt.py perf trial` (review #445, D-370): Gate mẫu fail-closed khi không đọc được công cụ, ngắt sau đóng băng tiêu lần đo lại duy nhất, `status --check` đòi held-out gộp đạt `target`, đầu ra chỉ số chính so gốc, không ghi `decide` trùng sau khi chết, `abort` sau `finish --no-apply` giữ — không phải quyết định cho/chặn của guard, PR hay CI mà bench mô phỏng. Khoá bằng tests/test_perf_trial.TrialReview445Test (FLOW-47…51).",
+   "ids": [
+    "AUD-HAR-270",
+    "AUD-HAR-271",
+    "AUD-HAR-272",
+    "AUD-HAR-273",
+    "AUD-HAR-274",
+    "AUD-HAR-275"
+   ]
   }
  ]
 }

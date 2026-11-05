@@ -42,32 +42,8 @@ from test_xt_cli import TmpRepoCase, run_main
 
 F = TypeVar("F", bound=Callable[..., Any])
 
-_NO_TRIAL = "chưa có lệnh con `xt.py perf trial` cần (ADR-0071) — `chưa triển khai (T-37NN)`, ca đỏ ở lệnh đó"
-XFAIL: dict[str, str] = {  # ID → tái hiện + task sửa (ADR-0071 §10 và bảng tách T-3552; review #440 → AUD-HAR-230…233)
-    "FLOW-20": f"{_NO_TRIAL}: không `finish` nên candidate `neutral` không bị thu hồi, không `log` — T-3703",
-    "FLOW-21": f"{_NO_TRIAL}: không `finish --resume` (R2: cây đổi hoặc đã resume → `incomplete`) — T-3706",
-    "FLOW-22": f"{_NO_TRIAL}: không sổ `perf-trials.jsonl` nên `start` không đếm ba lần qua restart — T-3701",
-    "FLOW-23": f"{_NO_TRIAL}: không chỉ số phụ có `ceiling` — T-3704",
-    "FLOW-27": f"{_NO_TRIAL}: không giữ candidate `improved`, không `candidate_tree` ở dòng `decide` — T-3705",
-    "FLOW-28": f"{_NO_TRIAL}: không kiểm `HEAD == start_head`, không ghim merge-base, không so cây đo sau lượt — T-3703",
-    "FLOW-29": f"{_NO_TRIAL}: không `tampered` khi sửa file khoá, không đo ở cây dựng lại (`.pth` bị ignore) — T-3703",
-    "FLOW-30": f"{_NO_TRIAL}: không held-out sinh lúc finish — T-3705",
-    "FLOW-31": f"{_NO_TRIAL}: `start` không đòi giả thuyết/falsifier/cây sạch, falsifier không thu hồi — T-3705",
-    "FLOW-32": f"{_NO_TRIAL}: `prepare` không kiểm `setup` trỏ đúng cây — T-3702",
-    "FLOW-33": f"{_NO_TRIAL}: không thu hồi bằng stash + vân tay, không exit 4 — T-3703",
-    "FLOW-34": f"{_NO_TRIAL}: không `perf-trial.lock` cho `finish`/`abort` — T-3706",
-    "FLOW-35": f"{_NO_TRIAL}: `--resume` không đo lại một lần với hạt giống mới — T-3706",
-    "FLOW-36": f"{_NO_TRIAL}: `--resume` ở pha `decided` không làm nốt thu hồi — T-3706",
-    "FLOW-37": f"{_NO_TRIAL}: `start` không đòi cây gốc/cây giữ, miễn PERF-LOG, nhận `--base` (AUD-HAR-231) — T-3701",
-    "FLOW-38": f"{_NO_TRIAL}: baseline/cấu hình do agent chọn được (AUD-HAR-230) — T-3701",
-    "FLOW-39": f'{_NO_TRIAL}: điểm nóng "mồi" mở lại đường đã cạn (AUD-HAR-233) — T-3701',
-    "FLOW-40": f"{_NO_TRIAL}: PERF-LOG trong cây làm lần thu hồi thứ hai kẹt (AUD-HAR-232) — T-3701",
-    "FLOW-41": f"{_NO_TRIAL}: lần giữ đặt lại đếm của mọi đường đã khai (AUD-HAR-233), không `off-hotspot` — T-3703",
-    "FLOW-42": f"{_NO_TRIAL}: `setup`/`probe` thừa hưởng môi trường phiên agent — T-3702",
-    "FLOW-43": f"{_NO_TRIAL}: cây candidate dựng từ patch (bỏ gitlink, đổi tên, `diff.external`) — T-3702",
-    "FLOW-44": f"{_NO_TRIAL}: chỉ số phụ không có mức lùi `regress` — T-3704",
-    "FLOW-45": f"{_NO_TRIAL}: không `status --check` theo `target` — T-3704",
-}
+# ID → tái hiện + task sửa. FLOW-20…23, 27…45 (`perf trial`, ADR-0071 §10) gỡ ở T-3707 (D-365): mọi ca đã xanh.
+XFAIL: dict[str, str] = {}
 STRICT: frozenset[str] = frozenset(s.strip() for s in os.environ.get("XT_FLOW_STRICT", "").split(",") if s.strip())
 FLOW_IDS: set[str] = set()
 
@@ -811,6 +787,7 @@ HOT = (
     "        total += i\n    return total\n\n\ndef cost(n):\n    return n * K + EXTRA\n"
 )
 SHORTCUT = HOT.replace("    return n * K + EXTRA", "    return 1 if n == 1000 else n * K + EXTRA")  # hard-code N bộ đo
+HELD_RANGE, HELD_N = (2000, 5000), 5  # input held-out: HELD_N số KHÁC NHAU trong khoảng (`heldout_gen.py`)
 TOOL = ".xtemplates/scripts/xt.py"  # đường `xt.py` của khung ở dự án đích (install.py)
 XT = ROOT / "scripts" / "xt.py"  # công cụ được chạy (D-363) — cùng byte với bản ở `TOOL` của gốc
 GIT_ID = ("-c", "user.name=t", "-c", "user.email=t@example.invalid", "-c", "commit.gpgsign=false")
@@ -855,7 +832,7 @@ def trial_files(ctl: Path) -> dict[str, str]:
         "heldout_gen.py": head
         + "import random\nseed = sys.stdin.read().strip()\n"
         + f"with open({str(ctl / 'seeds.log')!r}, 'a', encoding='utf-8') as f:\n    f.write(seed + '\\n')\n"
-        + "r = random.Random(seed)\nprint('\\n'.join(str(r.randrange(2000, 9000)) for _ in range(5)))\n",
+        + f"r = random.Random(seed)\nprint('\\n'.join(map(str, r.sample(range{HELD_RANGE}, {HELD_N}))))\n",
         "heldout_run.py": head + _hang(ctl, "hang-heldout") + "import hot\nprint(hot.cost(int(sys.argv[1])))\n",
         "probe.py": head
         + f"with open({str(ctl / 'probe.env')!r}, 'a', encoding='utf-8') as f:\n"
@@ -885,7 +862,7 @@ def trial_config(**over: Any) -> dict[str, Any]:
 
 
 class TrialFlowTest(TmpRepoCase):
-    """Ca `perf trial` (ADR-0071 §10). Hôm nay mọi ca đỏ ở lệnh `perf trial` đầu tiên (`trial` đòi lệnh con có thật)."""
+    """Ca `perf trial` (ADR-0071 §10); `done=` ghi task làm ca xanh (T-3701…T-3706), không còn ID nào trong `XFAIL`."""
 
     def setUp(self) -> None:
         super().setUp()
@@ -1091,7 +1068,7 @@ class TrialFlowTest(TmpRepoCase):
         self.ok("log")
         self.assertIn(tid, self.perf_log())
 
-    @flow("FLOW-21")
+    @flow("FLOW-21", done="T-3706")
     def test_flow_21_resume_after_tree_changed_is_incomplete(self) -> None:
         """Given candidate `improved`, `finish` bị SIGKILL giữa lượt đo, rồi cây đổi (≠ `candidate_fp`) · When `finish
         --resume` · Then thu hồi (exit 1), một dòng `decide` `verdict: incomplete`, vân tay = lúc start (R2)."""
@@ -1106,7 +1083,7 @@ class TrialFlowTest(TmpRepoCase):
         self.assertEqual([r["verdict"] for r in self.decided(tid)], ["incomplete"])
         self.assertEqual(self.fp(), fp0)
 
-    @flow("FLOW-21")
+    @flow("FLOW-21", done="T-3706")
     def test_flow_21_second_resume_is_incomplete(self) -> None:
         """Given `finish` bị kill giữa lượt, `finish --resume` cũng bị kill giữa lượt (`resumes` = 1), cây không đổi ·
         When `finish --resume` lần hai · Then không đo lại lần ba: thu hồi (exit 1), một dòng `incomplete`, vân tay = lúc
@@ -1145,7 +1122,7 @@ class TrialFlowTest(TmpRepoCase):
         self.assertEqual(self.fp(), fp0)
         self.assertIn("mem", self.why(self.decided(tid)[0]))
 
-    @flow("FLOW-27")
+    @flow("FLOW-27", done="T-3705")
     def test_flow_27_improved_candidate_is_kept_and_next_start_accepts(self) -> None:
         """Given candidate K = 2 (`improved` so với gốc và `start_head`), tương đương + held-out xanh · When `finish` ·
         Then exit 0, candidate còn trong cây; commit nó → `candidate_tree` của dòng `decide` = `HEAD^{tree}` (cây giữ);
@@ -1257,10 +1234,10 @@ class TrialFlowTest(TmpRepoCase):
         self.assertEqual(rc, 1, out + err)
         self.assertNotEqual(self.decided(tid)[0]["verdict"], "kept")
 
-    @flow("FLOW-30")
+    @flow("FLOW-30", done="T-3705")
     def test_flow_30_hardcoded_bench_input_fails_heldout(self) -> None:
         """Given candidate trả 1 khi `n == 1000` (đúng input bộ đo: −99,97 %) · When `finish` · Then held-out (input từ
-        hạt giống lúc finish, 2000…8999) không `improved` so với `start_head` lẫn gốc → thu hồi (exit 1), lý do nêu
+        hạt giống lúc finish, 2000…4999) không `improved` so với `start_head` lẫn gốc → thu hồi (exit 1), lý do nêu
         held-out, vân tay = lúc start."""
         fp0 = self.fp()
         tid = self.started()
@@ -1296,7 +1273,7 @@ class TrialFlowTest(TmpRepoCase):
         self.assertEqual((st["hypothesis"], st["falsifier"]), (TRIAL_ARGS[1], TRIAL_ARGS[3]))
         self.assertEqual((st["fp_start"], st["start_head"], st["base_sha"]), (self.fp(), self.base, self.base))
 
-    @flow("FLOW-31")
+    @flow("FLOW-31", done="T-3705")
     def test_flow_31_falsifier_hit_reverts(self) -> None:
         """Given falsifier `primary > -50%`, candidate K = 2 (−28,6 % — `improved` nhưng không đạt điều giả thuyết hứa)
         · When `finish` · Then thu hồi (exit 1), lý do nêu falsifier, vân tay = lúc start."""
@@ -1354,7 +1331,7 @@ class TrialFlowTest(TmpRepoCase):
         self.assertEqual(first.wait(timeout=300), 0)
         self.assertEqual(len(self.rows()), 1)
 
-    @flow("FLOW-35")
+    @flow("FLOW-35", done="T-3706")
     def test_flow_35_kill_mid_measure_resume_measures_once_more(self) -> None:
         """Given candidate K = 2, `finish` bị SIGKILL lúc chạy held-out (pha `measuring`, cây = `candidate_fp`) · When
         `finish` → exit 2 chỉ `--resume`; `finish --resume` · Then đo lại từ đầu, giữ (exit 0), đúng một dòng `decide` có
@@ -1374,7 +1351,7 @@ class TrialFlowTest(TmpRepoCase):
         self.assertNotEqual(seeds[0], seeds[-1])
         self.assertIn(seeds[-1], json.dumps(rows[0]))
 
-    @flow("FLOW-36")
+    @flow("FLOW-36", done="T-3706")
     def test_flow_36_kill_after_decide_resume_finishes_revert(self) -> None:
         """Given candidate `neutral`, `finish` chết (`os._exit(9)`) đúng lúc `git stash push` — sau dòng `decide`, trước
         thu hồi · When `finish` → exit 2 chỉ `--resume`; `finish --resume` · Then làm nốt thu hồi (exit 1), vân tay = lúc
@@ -1646,6 +1623,25 @@ class FlowRegistryTest(unittest.TestCase):
         """`XT_FLOW_STRICT` và `XFAIL` chỉ được nêu ID có test mang nó — không để Gate xanh vì thiếu ca."""
         self.assertEqual(sorted(STRICT - FLOW_IDS), [], "XT_FLOW_STRICT nêu ID không có test")
         self.assertEqual(sorted(XFAIL.keys() - FLOW_IDS), [], "XFAIL nêu ID không có test")
+
+    def test_heldout_fixture_is_deterministic(self) -> None:
+        """Ca giữ EXTRA 500 → 0 (FLOW-41, FLOW-45, `test_keep_json…`) từng đỏ ~0,06 %: hạt giống ra input lớn thì tổng
+        held-out đổi < sàn 2 % (`neutral`), hoặc input trùng thì ít hơn 5. Mọi hạt giống: HELD_N input khác nhau trong
+        khoảng; worst case (HELD_N số lớn nhất) tổng và từng input vẫn đổi ≥ sàn; khoảng không chứa N = 1000 (FLOW-30)."""
+        lo, hi = HELD_RANGE
+        top = range(hi - HELD_N, hi)
+        self.assertGreaterEqual(HELD_N * 500 / sum(3 * n + 500 for n in top), xt.PERF_MIN_EFFECT)
+        self.assertGreaterEqual(500 / (3 * (hi - 1) + 500), xt.PERF_MIN_EFFECT)
+        self.assertGreater(lo, 1000)
+        with tempfile.TemporaryDirectory() as d:
+            gen = Path(d, "gen.py")
+            gen.write_text(trial_files(Path(d))["heldout_gen.py"], encoding="utf-8")
+            for seed in ("0", "ffffffffffffffff", "9e3779b97f4a7c15"):
+                out = subprocess.run(
+                    [sys.executable, str(gen)], input=seed, capture_output=True, text=True, check=True
+                ).stdout.split()
+                self.assertEqual(len(set(out)), HELD_N, out)
+                self.assertTrue(all(lo <= int(x) < hi for x in out), out)
 
 
 if __name__ == "__main__":

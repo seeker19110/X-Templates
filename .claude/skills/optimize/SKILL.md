@@ -14,21 +14,21 @@ Luật và công cụ: `<FW>/11-autonomous-loop/optimization-loop.md` (LOOP-OPT,
 3. Không mục nào cho PLAN-opt → dừng, báo "không có mục tối ưu" (muốn tối ưu: đặt ngân sách số vào `PROJECT.md` trước, `XC-PERF-001`). Mục tiêu chưa có số → `loop decide` chọn từ hồ sơ `XC-PERF`, ghi D-NNN.
 
 ## Bước 1 — khoá bộ đo (`LOOP-OPT-002`)
-Với mỗi mục: harness đo (`bench/`), bộ test tương đương hành vi (`tests/equiv/`), input đo, `scripts/perf-gate.sh` — **đã commit ở nhánh đích** trước khi sửa (PR riêng nếu chưa có). Gate lấy script từ commit gốc: `bash <(git show origin/main:scripts/perf-gate.sh)`; script dùng `xt.py` của worktree commit gốc: `perf guard --base origin/main --locked … --strict`, baseline đo trên commit gốc **cùng lượt**, `perf sample` bản sau, `perf compare`. Ưu tiên đại lượng tất định (`--exact`, `LOOP-OPT-009`).
+Mỗi mục: `perf/trial.json` (`setup`, `metric`, `secondary[]`, `target`, `budget`, `equiv`, `heldout`, `locked` — ADR-0071 §1), harness đo, test tương đương, bộ sinh held-out — **đã commit ở nhánh mặc định** trước khi sửa (PR riêng nếu chưa có). Máy đọc chúng và `xt.py` từ commit gốc, tự khoá trình chạy/manifest/lockfile. Ưu tiên `kind: exact` (`LOOP-OPT-009`).
 
 ## Bước 2 — PLAN-opt (tự duyệt)
-`docs/autopilot/PLAN-opt-<ngày>.md` theo mẫu `<FW>/templates/PLAN.md`: **mỗi mục một task**, dòng task ghi mục tiêu số + điều kiện đo + nguồn (`perf`/`FIELD-…`; (c): nhánh, baseline, D-NNN), Gate là `perf-gate.sh` từ commit gốc (+ lượt `perf compare` thứ hai trên held-out nếu có, `LOOP-OPT-007`; `--no-regress` cho chỉ số phụ, `LOOP-OPT-008`). Tóm tắt ≤ 20 dòng → `<XT> loop decide --question "Duyệt PLAN-opt …"` → làm tiếp.
+`docs/autopilot/PLAN-opt-<ngày>.md` theo mẫu `<FW>/templates/PLAN.md`: **mỗi mục một task**, dòng task ghi mục tiêu số + điều kiện đo + nguồn (`perf`/`FIELD-…`; (c): nhánh, baseline, D-NNN); Gate: ``python3 -I <(git cat-file blob refs/remotes/origin/HEAD:<đường xt.py> || echo 'raise SystemExit(2)') perf trial status --check`` (đạt `target`, cả held-out gộp). Tóm tắt ≤ 20 dòng → `<XT> loop decide --question "Duyệt PLAN-opt …"` → làm tiếp.
 
 ## Bước 3 — vòng cho mỗi task (`optimization-loop.md` §Vòng)
-`<XT> loop verify --all` rồi `<XT> loop init --plan docs/autopilot/PLAN-opt-<ngày>.md --blueprint BLUEPRINT.md --single-session`; mỗi vòng:
+`<XT> loop verify --all` rồi `<XT> loop init --plan docs/autopilot/PLAN-opt-<ngày>.md --blueprint BLUEPRINT.md --single-session`; mỗi lần thử:
 1. **Profile trước**; chỉ nhận điểm nóng có trần Amdahl đủ cho mục tiêu (`LOOP-OPT-006`); đính profile vào PR.
-2. **Một giả thuyết, một thay đổi**: ghi kỳ vọng + falsifier vào `docs/autopilot/PERF-LOG.md` **trước** khi đo (`LOOP-OPT-004`).
-3. `<XT> loop record --task T-NNN -- '<Gate y nguyên>'` → `improved` + test xanh → giữ, commit; `neutral`/`regressed`/`insufficient` → **hoàn tác**, ghi dòng "bỏ" vào PERF-LOG. `perf guard` đỏ là kết luận.
-4. 3 lần liên tiếp không `improved` cùng điểm nóng → đổi điểm nóng hoặc `loop defer` (`LOOP-OPT-011`). Đạt mục tiêu → task xong, **không tối ưu vượt**.
-5. Lát xong → PR ≤ 150 dòng, trước push theo `/gate` bước 4, mô tả PR: giả thuyết, profile, số trước/sau, mọi ⚠ của `perf guard`; `<XT> pr next` → `reviewer-alt` trả lời **từng ⚠** và từng kiểu tự rà (hard-code shape, thoát sớm, cache, stub) trong ghi chú `pr reviewed --clean` (`LOOP-OPT-005`) → merge ghim head. Giữ → commit baseline/ngân sách mới, siết ratchet (`LOOP-OPT-012`); nới ngân sách chỉ qua D-NNN.
+2. Cây sạch: `<XT> perf trial start --hotspot <file>… --hypothesis … --falsifier '<chỉ số> <op> <%>'` (`LOOP-OPT-004`), rồi **một thay đổi** chỉ trong điểm nóng (`prepare` thử `setup`).
+3. `<XT> perf trial finish`: máy đo, quyết, thu hồi — 0 giữ → commit; 1 đã thu hồi; 2 đọc lý do; 4 → `loop defer`. Không tự hoàn tác, không `loop record` từng lần thử. Bị ngắt/chết: `perf trial status` chỉ lệnh kế (`finish --resume` một lần, `abort`). Rồi `perf trial log`, commit PERF-LOG.
+4. `start` exit 3 (đường 3 lần không giữ, hết `budget`) → đổi điểm nóng hoặc `loop defer` (`LOOP-OPT-011`). Gate exit 0 → `loop record` Gate, task xong, **không tối ưu vượt**.
+5. Lát xong → PR ≤ 150 dòng, trước push theo `/gate` bước 4, mô tả PR: giả thuyết, profile, số trước/sau, mọi ⚠ của dòng `decide`; `<XT> pr next` → `reviewer-alt` trả lời **từng ⚠** và từng kiểu tự rà (hard-code shape, thoát sớm, cache, stub) trong ghi chú `pr reviewed --clean` (`LOOP-OPT-005`) → merge ghim head. Giữ → commit baseline/ngân sách mới, siết ratchet (`LOOP-OPT-012`); nới ngân sách chỉ qua D-NNN.
 
 ## Bước 4 — kết thúc
 Stop hook `done` (sau `<XT> loop verify --all`) → `<XT> release-check --json` (hàng `perf` phải PASS) → phát hành theo `/complete` bước 5; bản **chỉ tối ưu** (không đổi hành vi) dùng `GO-NO-GO.md` §Chế độ delta — người vẫn ký. Nghiệm thu bằng field sau khi lên (`LOOP-OPT-013`): `FIELD-<ngày>.json` mới so với PERF-LOG; chưa đạt ngoài đời → task vòng kế, không khai "xong". Báo cáo ≤ 15 dòng: ngân sách, số trước/sau (lab + field), giữ/bỏ, D-NNN, còn treo.
 
 ## Không bao giờ
-Tối ưu khi không có số đỏ hay mục tiêu (c) · đọc baseline từ file agent sửa được · sửa harness/ngưỡng/script Gate trong task tối ưu · gộp nhiều thay đổi vào một lần đo · tự kéo số từ production hoặc nhận khoá thật · đổi hành vi dưới danh nghĩa tối ưu · khai "nhanh hơn" khi `perf compare` không `improved`.
+Tối ưu khi không có số đỏ hay mục tiêu (c) · sửa `perf/trial.json`/bộ đo trong task tối ưu · gộp nhiều thay đổi vào một lần thử · tự kéo số từ production hoặc nhận khoá thật · đổi hành vi dưới danh nghĩa tối ưu · khai "nhanh hơn" khi `perf trial` không giữ.
