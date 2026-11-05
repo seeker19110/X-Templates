@@ -92,7 +92,12 @@ OS/devcontainer có egress allowlist (`LOOP-HARNESS-022`) và việc phiên chí
   từ stdin. Lệnh con mờ không tính khi lệnh chỉ đọc file (`cat`/`grep`/`git`… `scripts/xt.py "$F"`); đường script mờ chỉ
   tính khi có `python` đứng trước hoặc nó là lệnh, và lệnh con là `stage`. `xt.py` coi biến phiên agent có mặt (kể cả
   rỗng) là agent. `--framework "$FW"` bị chặn với mọi lệnh con — dùng `XT_FRAMEWORK`. Còn lọt (AUD-SEC-161): đường
-  script mờ sau trình chạy không phải python (`uv run "$XT" "$(…)"`), bản sao/tên khác của `xt.py`, `python3 -c`/`runpy`, alias, script lồng.
+  script mờ sau trình chạy không phải python (`uv run "$XT" "$(…)"`), bản sao/tên khác của `xt.py`, alias, script lồng.
+  Nạp `xt` trong tiến trình (AUD-SEC-498): script trình thông dịch (`-c`, stdin, heredoc, ống) có `import xt` kèm
+  `main`/`stage`/`approve`/`adopt`/biến môi trường/truy cập động, hàm nạp (`runpy`, `import_module`, `__import__`,
+  `exec`/`eval`/`compile`, `spec_from_file_location`) với đối số không phải chữ nguyên văn hay trỏ `xt`, và
+  `-m runpy xt` bị chặn; thư viện đọc (`xt.parse_plan`, `xt.review_debt`) vẫn qua. Còn lọt: tên dựng qua đường guard không
+  thấy (tệp `.py` ghi bằng Write rồi chạy).
 - **Dấu review đăng tay** (AUD-SEC-069/156/157): guard chặn lệnh `gh` đăng chữ khi dấu `xt-review v1` ở argv, ở bất
   kỳ đâu trong chuỗi lệnh (heredoc, `printf`), hay trong nguồn thân của chính lệnh đó (`-F f`, `--body-file`, `-F k=@f`,
   `--input`, `< f`, file đọc trong `$(…)`/backtick, `cat f |`, `$(cat)` đọc stdin; cả chuỗi JSON, cả khoá) — nguồn có mà

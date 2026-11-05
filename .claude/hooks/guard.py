@@ -6877,6 +6877,128 @@ def _approves_literal(n: List[str]) -> bool:
     return "approve" in tail or ("init" in tail and any(t.startswith("--adopt") for t in tail))
 
 
+# AUD-SEC-498 (D-377): script trình thông dịch nạp `xt` trong tiến trình — guard không thấy lệnh con (`xt.main([…])`,
+# `runpy.run_path('scripts/xt.py')`, `exec(open(…).read())`, `python3 -m runpy xt …`). Thư viện đọc của xt
+# (`xt.parse_plan`, `xt.review_debt` — Kiểm PM-PLAN-001, Gate audit) vẫn qua khi script không có tên/chữ rủi ro.
+# Phân tích tĩnh chữ nguyên văn: tên dựng lúc chạy qua đường guard không thấy vẫn lọt (AUD-SEC-161).
+XT_INPROC_WHY = (
+    "duyệt giai đoạn sản phẩm (AUD-SEC-498) có thể chạy trong tiến trình: script trình thông dịch nạp `xt` (`import xt`"
+    " kèm `main`/`stage`/`approve`/`adopt`/biến môi trường/truy cập động; `runpy`, `import_module`, `exec`/`eval` chữ"
+    " không rõ; `-m runpy xt`) — guard không thấy lệnh con; gọi `python3 scripts/xt.py <lệnh>`"
+)
+XT_INPROC_DEPTH = 3  # số tầng `exec('…')` lồng đọc lại; sâu hơn → chặt
+# Hàm nạp/chạy mã theo tên hay đường (gọi theo tên hay thuộc tính: `runpy.run_path`, `from runpy import run_path`)
+XT_INPROC_LOADERS = frozenset(
+    {"run_path", "run_module", "_run_module_as_main", "_run_code", "spec_from_file_location", "SourceFileLoader"}
+    | {"SourcelessFileLoader", "load_source", "load_module", "import_module", "find_spec", "exec_module", "__import__"}
+)
+XT_INPROC_BUILTINS = frozenset({"exec", "eval", "compile", "execfile", "__import__"})  # chỉ khi gọi như builtin
+XT_INPROC_BUILTIN_MODS = frozenset({"builtins", "__builtins__"})  # `builtins.exec(…)`
+XT_INPROC_NAME_RE = re.compile(r"(?:.*[/\\.])?xt(?:\.pyc?)?", re.S)  # `xt`, `scripts.xt`, `scripts/xt.py`
+# Tên/chữ thư viện đọc của xt không cần — đi cùng `import xt` thì chặn (gọi CLI, sửa biến agent, truy cập động)
+XT_INPROC_RISKY_RE = re.compile(
+    r"main|stage|approv|adopt|environ|putenv|unsetenv|CLAUDE|AI_AGENT|[gsd]etattr|^vars$|^dir$|globals|locals"
+    r"|__dict__|__getattribute__|attrgetter|methodcaller|getmembers|^exec|^eval$|^compile$|__import__|import_module"
+    r"|builtins|modules|__loader__|__spec__",
+    re.I,
+)
+# Script không phải Python hợp lệ: luật chữ (`import … xt`, tên hàm nạp)
+XT_INPROC_TEXT_RE = re.compile(
+    r"\b(?:import|from)\b[^;\n]*\bxt\b(?![\w-])|\b(?:runpy|run_path|run_module|spec_from_file_location"
+    r"|Source(?:less)?FileLoader|load_source|import_module|__import__|execfile)\b"
+)
+RUNPY_OPT_RE = re.compile(r"-[A-Za-z]*m(runpy)?")  # `-m runpy`, `-mrunpy`, `-Bm runpy`
+
+
+def _xt_inproc_text(script: str) -> bool:
+    """Luật chữ cho script không phân tích được: nhắc nạp `xt` hay hàm nạp mã."""
+    return bool(XT_INPROC_TEXT_RE.search(script))
+
+
+def _xt_inproc_python(script: str, depth: int) -> bool:
+    """Script Python nạp `xt` trong tiến trình theo cách guard không thấy lệnh con: lời gọi hàm nạp có đối số không rõ
+    hay trỏ `xt`, hoặc `import xt` kèm tên/chữ rủi ro. Không phải Python → luật chữ; `exec('…')` lồng đọc lại tới
+    `XT_INPROC_DEPTH` tầng, sâu hơn thì chặt."""
+    import ast
+
+    if depth >= XT_INPROC_DEPTH:
+        return True
+    try:
+        nodes = list(ast.walk(ast.parse(script)))
+    except Exception:  # SyntaxError, ValueError (NUL), RecursionError: không phải Python — luật chữ
+        return _xt_inproc_text(script)
+    if any(isinstance(n, ast.Call) and _xt_loader_call(n, depth) for n in nodes):
+        return True
+    return any(_xt_imports(n) for n in nodes) and any(_xt_risky(n) for n in nodes)
+
+
+def _xt_loader_call(call: Any, depth: int) -> bool:
+    """`call` (ast.Call) là hàm nạp mã mà một đối số không phải chữ nguyên văn, là tên/đường `xt`, có mở rộng shell,
+    hay (cho `exec('…')`) là script lại nạp `xt`."""
+    import ast
+
+    f = call.func
+    owner = f.value if isinstance(f, ast.Attribute) else None
+    name = f.id if isinstance(f, ast.Name) else f.attr if isinstance(f, ast.Attribute) else ""
+    builtin = isinstance(f, ast.Name) or (isinstance(owner, ast.Name) and owner.id in XT_INPROC_BUILTIN_MODS)
+    if name not in XT_INPROC_LOADERS and not (builtin and name in XT_INPROC_BUILTINS):
+        return False
+    for a in [*call.args, *(k.value for k in call.keywords)]:
+        v = a.value if isinstance(a, ast.Constant) else None
+        if not isinstance(a, ast.Constant):
+            return True
+        text = v.decode("utf-8", "replace") if isinstance(v, bytes) else v if isinstance(v, str) else ""
+        if XT_INPROC_NAME_RE.fullmatch(text) or _opaque(text) or (text and _xt_inproc_python(text, depth + 1)):
+            return True
+    return False
+
+
+def _xt_imports(node: Any) -> bool:
+    """`import xt`, `import scripts.xt`, `from xt import …`, `from scripts import xt`."""
+    import ast
+
+    if isinstance(node, ast.Import):
+        return any("xt" in a.name.split(".") for a in node.names)
+    if isinstance(node, ast.ImportFrom):
+        return "xt" in (node.module or "").split(".") or any(a.name == "xt" for a in node.names)
+    return False
+
+
+def _xt_risky(node: Any) -> bool:
+    """Tên (biến, thuộc tính, tên nhập, `*`) hay chữ nguyên văn rủi ro khi đi cùng `import xt`."""
+    import ast
+
+    if isinstance(node, ast.alias):
+        words = [node.name, node.asname or ""]
+    elif isinstance(node, ast.Constant):
+        words = [node.value] if isinstance(node.value, str) else []
+    else:
+        words = [getattr(node, "id", "") if isinstance(node, ast.Name) else getattr(node, "attr", "")]
+    return any(w == "*" or XT_INPROC_RISKY_RE.search(w) for w in words if w)
+
+
+def _xt_inproc_argv(argv: List[str]) -> bool:
+    """`python3 -m runpy <mô-đun>` mà mô-đun là `xt` (`xt`, `scripts.xt`, `…/xt.py`) hay mờ."""
+    n = _interp_argv(argv) if argv else []
+    if not n or not PYTHON_RE.fullmatch(posixpath.basename(n[0])):
+        return False
+    for i, t in enumerate(n):
+        m = RUNPY_OPT_RE.fullmatch(t)
+        at = i + 1 if m and m.group(1) else i + 2 if m and n[i + 1 : i + 2] == ["runpy"] else 0
+        if at and at < len(n):
+            mod = n[at]
+            return bool(XT_INPROC_NAME_RE.fullmatch(mod)) or _vague(mod)
+    return False
+
+
+def xt_inproc_asks(cmd: str, tokens: List[str], cwd: Optional[str]) -> List[str]:
+    """AUD-SEC-498: script trình thông dịch (`-c`, stdin, heredoc, here-string, ống) hay `-m runpy` nạp `xt` trong
+    tiến trình → cùng nhóm chặn với duyệt giai đoạn (STAGE_APPROVE)."""
+    scripts = [_nfkc(s) for s, _ in _interp_scripts_at(cmd, tokens, cwd)]
+    hit = any(_xt_inproc_python(s, 0) for s in scripts) or any(_xt_inproc_argv(c) for c in split_commands(tokens))
+    return [XT_INPROC_WHY] if hit else []
+
+
 def _forges_review(argv: List[str]) -> bool:
     """Lệnh `gh` đăng/sửa comment, review, thân PR/issue (hoặc `gh api`) mang dấu review — chỉ argv của lệnh thật,
     không phải chữ trong heredoc/chuỗi của lệnh khác (script sửa tài liệu nhắc tới dấu)."""
@@ -14417,6 +14539,7 @@ def _bash_decision(
         return res
     res.pop("exported", None)
     _argv_shell_check(cmd, tokens, strict, asks, res, root, cwd)
+    asks += xt_inproc_asks(cmd, tokens, cwd)  # sau tập con chuẩn: lệnh ngoài tập con giữ mã BUDGET (AUD-SEC-406/415)
     allow = res.pop("allow", "")
     # `allow` bỏ hỏi cho CẢ lệnh Bash → chỉ khi merge đứng một mình và trơn (không gì shell còn mở rộng/chạy thêm).
     if allow and (len(commands) > 1 or not PLAIN_MERGE_RE.fullmatch(cmd.strip())):

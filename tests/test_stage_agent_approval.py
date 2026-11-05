@@ -307,5 +307,86 @@ class StageAgentApprovalGuardTest(TmpRepoCase):
             self.assertEqual(self.decide(proj, self.PLAIN), "deny")
 
 
+class XtInProcessGuardTest(unittest.TestCase):
+    """AUD-SEC-498 (D-377): nạp `xt` trong tiến trình (`python3 -c 'import xt; xt.main([...])'`, `runpy`, `import_module`,
+    `exec`, `-m runpy xt`) — guard không thấy lệnh con nên chặn; dùng thư viện đọc (`xt.parse_plan`) và lệnh CLI rõ vẫn
+    qua."""
+
+    DENY = (
+        "python3 -c \"import os,sys; os.environ.pop('CLAUDECODE',None); sys.path.insert(0,'scripts'); import xt;"
+        " xt.main(['stage','approve','--sha','abc'])\"",
+        'python3 -c \'import sys; sys.path.insert(0,"scripts"); from xt import main; main(["stage","approve"])\'',
+        "python3 -c \"import sys; sys.path.insert(0,'scripts'); from xt import *; main(sys.argv[1:])\" x y",
+        "python3 -c \"import sys; sys.path.insert(0,'scripts'); import xt as t; getattr(t, 'ma'+'in')(['loop'])\"",
+        'python3 -c "import scripts.xt as t; t.cmd_stage(None)"',
+        "python3 -c \"from scripts import xt; xt.main(['stage','approve'])\"",
+        "python3 -c \"import sys; sys.path.insert(0,'scripts'); import xt; xt.parse_plan('x'); print('init --adopt')\"",
+        "python3 -c \"import runpy,sys; sys.argv=['xt','stage','approve']; runpy.run_path('scripts/xt.py',"
+        " run_name='__main__')\"",
+        "P=scripts/xt.py; python3 -c \"import runpy,os; runpy.run_path(os.environ['P'])\"",
+        "python3 -c \"import runpy; runpy.run_path('scr'+'ipts/x'+'t.py')\"",
+        "python3 -c \"import runpy; runpy.run_path('$P')\"",
+        "python3 -c \"import sys; sys.path.insert(0,'scripts'); import runpy; runpy.run_module('xt',"
+        " run_name='__main__')\" stage approve",
+        "python3 -c \"import importlib,sys; sys.path.insert(0,'scripts');"
+        " importlib.import_module('xt').main(['stage','approve'])\"",
+        "python3 -c \"__import__('xt').main(['stage','approve'])\"",
+        "python3 -c \"exec(open('scripts/xt.py').read())\"",
+        "python3 -c \"exec('import xt; xt.main([1])')\"",
+        "python3 -c \"import importlib.util as u; s=u.spec_from_file_location('m','scripts/xt.py')\"",
+        "python3 - <<'PY'\nimport sys; sys.path.insert(0, 'scripts'); import xt; xt.main(['stage', 'approve'])\nPY",
+        "python3 <<< \"import xt; xt.main(['stage','approve'])\"",
+        "echo \"import xt; xt.main(['loop'])\" | python3",
+        "python3 -c 'import xt; xt.main([' 2>/dev/null",  # không phải Python hợp lệ: luật chữ
+        "PYTHONPATH=scripts python3 -m runpy xt stage approve",
+        "PYTHONPATH=scripts python3 -mrunpy scripts.xt stage approve",
+        'python3 -m runpy "$M" stage approve',
+        "bash -c \"python3 -c 'import xt; xt.main([1])'\"",
+        "uv run python -c \"import xt; xt.main(['stage','approve'])\"",
+    )
+    ALLOW = (
+        "python3 scripts/xt.py loop status",
+        "python3 -c 'print(1)'",
+        "python3 -c \"import json,sys; d=json.load(sys.stdin); print([c for c in d if 'xt-review v1' in c])\"",
+        "python3 -c \"import importlib.metadata as m; print(m.version('pip'))\"",
+        "python3 -c \"print(eval('1+2'))\"",
+        "python3 -m unittest -q tests.test_xt",
+        "python3 -m runpy json.tool f.json",
+        # Kiểm PM-PLAN-001 (BLUEPRINT.md) và Gate dùng thư viện đọc của xt
+        "python3 -c \"import sys;sys.path.insert(0,'scripts');import xt,pathlib;t=xt.parse_plan(pathlib.Path('PLAN.md'));"
+        "assert t and all(x['gate'] for x in t)\"",
+        "python3 -c \"import sys; sys.path.insert(0,'scripts'); import xt; from pathlib import Path;"
+        " d,s=xt.review_debt(Path('.'),Path('docs/ops/AUDIT-STATUS.md')); print(*d,sep=chr(10));"
+        ' sys.exit(1 if d or not s else 0)"',
+        'python3 -c "import xt_helpers; xt_helpers.run()"',
+        "node -e \"const xt = require('./xt'); console.log(1)\"",
+    )
+
+    def setUp(self):
+        self.enterContext(unittest.mock.patch.dict(os.environ, {"XT_GUARD_POLICY": "", "XT_GUARD_PHASE": ""}))
+
+    def decide(self, cmd):
+        return dict(guard.apply_policy(guard.bash_decision(cmd, str(ROOT), str(ROOT))))
+
+    def test_in_process_xt_denied(self):
+        for cmd in self.DENY:
+            with self.subTest(cmd=cmd):
+                out = self.decide(cmd)
+                self.assertEqual((out.get("decision"), out.get("code")), ("deny", "STAGE_APPROVE"))
+                self.assertIn("AUD-SEC-498", str(out.get("reason")))
+
+    def test_cli_and_library_reads_pass(self):
+        for cmd in self.ALLOW:
+            with self.subTest(cmd=cmd):
+                self.assertNotEqual(self.decide(cmd).get("decision"), "deny")
+
+    def test_python_scan_helpers(self):
+        self.assertFalse(guard._xt_inproc_python("x = (", 0))  # không phải Python: luật chữ, không nạp xt
+        self.assertTrue(guard._xt_inproc_python("exec('exec(\"exec(1)\")')", guard.XT_INPROC_DEPTH))  # quá sâu: chặt
+        self.assertTrue(guard._xt_inproc_text("import runpy as r"))
+        self.assertFalse(guard._xt_inproc_argv([]))
+        self.assertFalse(guard._xt_inproc_argv(["python3", "-m", "runpy"]))
+
+
 if __name__ == "__main__":
     unittest.main()
