@@ -293,6 +293,7 @@
  "tests.test_perf_trial.TrialPrepareTest": 2.6,
  "tests.test_perf_trial.TrialReadTest": 0.7,
  "tests.test_perf_trial.TrialResumeTest": 3.4,
+ "tests.test_perf_trial.TrialReview443Test": 8.0,
  "tests.test_perf_trial.TrialSecondaryTest": 1.0,
  "tests.test_perf_trial.TrialStartTest": 2.1,
  "tests.test_perf_trial.TrialTreeUnitTest": 1.0,

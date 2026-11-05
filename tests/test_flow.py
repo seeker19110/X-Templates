@@ -1621,6 +1621,25 @@ class TrialFlowTest(TmpRepoCase):
         auto = self.repo / ".autopilot"
         self.assertEqual([(auto / n).exists() for n in ("evidence", "state.json")], [False, False])
 
+    @flow("FLOW-46")
+    def test_flow_46_status_check_bound_to_kept_tree(self) -> None:
+        """Given giữ K = 2 (−29 %, đạt `target`), commit · When commit lạ K = 9 (chậm gấp ba gốc) → `status --check`;
+        commit trả cây về K = 2 → `status --check`; sửa file chưa commit → `status --check` · Then exit 0 lúc đầu, 1
+        "commit lạ sau lần giữ", 0 (cây trùng cây giữ), 1 "cây bẩn" — Gate không xanh nhờ số của cây khác (D-368)."""
+        self.started()
+        self.hot(k=2)
+        self.ok("finish")
+        self.git("commit", "-q", "-am", "giữ K=2")
+        self.ok("status", "--check")
+        self.hot(k=9)
+        self.git("commit", "-q", "-am", "commit lạ: K=9")
+        self.assertIn("commit lạ sau lần giữ", self.refused("status", "--check", code=1))
+        self.hot(k=2)
+        self.git("commit", "-q", "-am", "về K=2")
+        self.ok("status", "--check")
+        self.put("src/other.py", "EXTRA = 99999\n")
+        self.assertIn("cây bẩn", self.refused("status", "--check", code=1))
+
 
 class FlowRegistryTest(unittest.TestCase):
     def test_strict_ids_exist(self) -> None:
