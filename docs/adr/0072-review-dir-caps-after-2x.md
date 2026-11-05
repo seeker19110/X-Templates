@@ -19,11 +19,11 @@ bị vượt mà chưa có ADR.
 Số đo (file git theo dõi, `git ls-tree -r -l <sha>` cộng cột kích thước theo pathspec của nhóm trong `DIR_CAPS`; mốc
 2026-10-26 = số ADR-0050 ghi, đo trên `main` + PR #282):
 
-| Nhóm | Mốc 2026-10-26 | 2× mốc | `742434b` | Tỉ lệ | Trần `DIR_CAPS` |
+| Nhóm | Mốc (ngày, nguồn) | 2× mốc | `742434b` | Tỉ lệ | Trần `DIR_CAPS` |
 |---|---:|---:|---:|---:|---:|
-| `.claude/hooks/` | 369 274 | 738 548 | 843 817 | 2,29× | 1 417 969 |
-| `scripts/*.py` + `scripts/xt_app/` | 711 824 | 1 423 648 | 1 164 066 | 1,64× | 1 760 431 |
-| `framework/11-autonomous-loop/` | 232 297 | 464 594 | 292 202 | 1,26× | 1 280 883 |
+| `.claude/hooks/` | 369 274 (2026-10-26, ADR-0050) | 738 548 | 843 817 | 2,29× | 1 417 969 |
+| `scripts/*.py` + `scripts/xt_app/` | 711 824 (2026-10-26, ADR-0050) | 1 423 648 | 1 164 066 | 1,64× | 1 760 431 |
+| `framework/11-autonomous-loop/` | 232 297 (2026-10-26, ADR-0050) | 464 594 | 292 202 | 1,26× | 1 280 883 |
 | `docs/ops/` (trừ `*-ARCHIVE.md`) | 771 538 (2026-11-02, D-314) | 1 543 076 | 808 591 | 1,05× | 810 114 |
 | `docs/autopilot/` (trừ `DECISIONS-*.md`) | 335 567 (2026-11-02, D-314) | 671 134 | 348 007 | 1,04× | 352 345 |
 
