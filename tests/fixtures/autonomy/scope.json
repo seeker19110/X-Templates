@@ -393,6 +393,17 @@
    ]
   },
   {
+   "reason": "Hành vi lệnh test tự dò của `scripts/dev-task.sh` (review #444, D-369): unittest về `discover` tuần tự, pytest-xdist tôn trọng cấu hình tắt, `XT_JOBS` có trần, README và BASE-GATE-020 — không phải quyết định cho/chặn của guard, PR hay CI mà bench mô phỏng. Khoá bằng tests/test_dev_task_parallel và lệnh kiểm BASE-CFG-003/`xt.py validate`.",
+   "ids": [
+    "AUD-TEST-070",
+    "AUD-TEST-071",
+    "AUD-TEST-072",
+    "AUD-TEST-073",
+    "AUD-TEST-074",
+    "AUD-TEST-075"
+   ]
+  },
+  {
    "reason": "Hành vi của `xt.py perf trial` (review #443, D-368): `status --check` ràng `HEAD^{tree}` với cây neo, pathspec theo nghĩa đen qua stdin, môi trường lệnh đo mới mỗi lần chạy, khoá `.venv/`/`node_modules/` và thu hồi file trong thư mục PATH của cây đo — không phải quyết định cho/chặn của guard, PR hay CI mà bench mô phỏng. Khoá bằng FLOW-46 (tests/test_flow.py) và tests/test_perf_trial.TrialReview443Test.",
    "ids": [
     "AUD-HAR-260",

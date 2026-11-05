@@ -1,6 +1,6 @@
 # Nhật ký quyết định tự duyệt — tháng 11/2026 (phần đầu)
 
-> Bản tháng của [`DECISIONS.md`](DECISIONS.md) (cách T-3651): 48 mục D-292…D-338 (2026-11-01…03; đợt 2 D-311…D-330 dời 2026-11-04, đợt 3 D-331…D-333 và đợt 4 D-334…D-338 dời 2026-11-05) dời nguyên văn để `docs/autopilot` còn trong trần byte (ADR-0043, không nới trần). `loop decide` vẫn ghi vào `DECISIONS.md`; mọi công cụ đọc cả bản tháng. Không sửa mục cũ — đổi ý ghi quyết định mới "thay D-NNN".
+> Bản tháng của [`DECISIONS.md`](DECISIONS.md) (cách T-3651): 48 mục D-292…D-340 (2026-11-01…04; đợt 2 D-311…D-330 dời 2026-11-04, đợt 3 D-331…D-333, đợt 4 D-334…D-338 và đợt 5 D-340 dời 2026-11-05; không có D-339) dời nguyên văn để `docs/autopilot` còn trong trần byte (ADR-0043, không nới trần). `loop decide` vẫn ghi vào `DECISIONS.md`; mọi công cụ đọc cả bản tháng. Không sửa mục cũ — đổi ý ghi quyết định mới "thay D-NNN".
 
 ### D-292 · 2026-11-01T03:17:20+00:00 · Duyệt PLAN-upgrade-2026-11-01 (ADR-0061 Adaptive Agent theo nhận định chủ dự án; stored ưu tiên 1-3; sửa batch audit delta) và cách máy hoá ADR-0061
 
@@ -329,3 +329,10 @@
 - Chọn: Mở rộng luật phía đọc (D-336/337) thêm GIT_DIR/--git-dir/GIT_COMMON_DIR (khác .git của dự án), GIT_TEMPLATE_DIR/--template, GIT_EXEC_PATH/--exec-path; chặn ghi qua hard link bằng so inode — T-3667
 - Lý do (tiêu chí chất lượng cuối): (1) các dạng này nguyên văn trong một lệnh nên luật tĩnh bắt được (ADR-0067 chỉ chấp nhận tên dựng lúc chạy); (3) cùng một luật phía đọc, không thêm miễn trừ
 - Đường lùi: Bỏ các biến/cờ mới khỏi luật phía đọc
+
+### D-340 · 2026-11-04T01:05:06+00:00 · Audit delta 2026-11-04: xử lý nợ Git guard sau #434 thế nào?
+
+- Phương án: (1) Sửa các đường lách Git guard tái hiện được, giữ test hồi quy có đối chứng và chạy cổng đầy đủ trước PR · (2) Giữ các phát hiện mở và hoãn sang đợt sandbox
+- Chọn: Sửa các đường lách Git guard tái hiện được, giữ test hồi quy có đối chứng và chạy cổng đầy đủ trước PR
+- Lý do (tiêu chí chất lượng cuối): Hai ca scratch cho Git đọc cấu hình đổi hook hoặc chạy alias mà guard cho qua. Chặn ở đầu đọc và ghi theo phạm vi hẹp, giữ đường lùi bằng một lát PR. Chạy phiên tương tác.
+- Đường lùi: Revert commit sửa guard và mở lại phát hiện với bằng chứng tái hiện.

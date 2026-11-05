@@ -1,14 +1,7 @@
 # Nhật ký quyết định tự duyệt
 
 > Ghi bởi `xt.py loop decide`. Phiên chính tự duyệt điểm quyết định theo tiêu chí chất lượng cuối (`LOOP-STOP-018`, ADR-0008 của khung). Người xem lại bất cứ lúc nào; đổi ý → quyết định mới ghi "thay D-NNN", không sửa mục cũ.
-> Bản tháng trước: [`DECISIONS-2026-10.md`](DECISIONS-2026-10.md) (D-001…D-287), [`DECISIONS-2026-11.md`](DECISIONS-2026-11.md) (D-292…D-338) — máy đọc cả bản tháng (T-3651).
-
-### D-340 · 2026-11-04T01:05:06+00:00 · Audit delta 2026-11-04: xử lý nợ Git guard sau #434 thế nào?
-
-- Phương án: (1) Sửa các đường lách Git guard tái hiện được, giữ test hồi quy có đối chứng và chạy cổng đầy đủ trước PR · (2) Giữ các phát hiện mở và hoãn sang đợt sandbox
-- Chọn: Sửa các đường lách Git guard tái hiện được, giữ test hồi quy có đối chứng và chạy cổng đầy đủ trước PR
-- Lý do (tiêu chí chất lượng cuối): Hai ca scratch cho Git đọc cấu hình đổi hook hoặc chạy alias mà guard cho qua. Chặn ở đầu đọc và ghi theo phạm vi hẹp, giữ đường lùi bằng một lát PR. Chạy phiên tương tác.
-- Đường lùi: Revert commit sửa guard và mở lại phát hiện với bằng chứng tái hiện.
+> Bản tháng trước: [`DECISIONS-2026-10.md`](DECISIONS-2026-10.md) (D-001…D-287), [`DECISIONS-2026-11.md`](DECISIONS-2026-11.md) (D-292…D-340) — máy đọc cả bản tháng (T-3651).
 
 ### D-341 · 2026-11-04T05:34:12+00:00 · Nhận 90 bài học stored XT-H-027…116 (chủ dự án yêu cầu 2026-11-04): mức và phạm vi?
 
@@ -136,9 +129,23 @@
 - Lý do (tiêu chí chất lượng cuối): (1) phương án 1 đóng mọi đường đã tái hiện bằng hai lớp độc lập; đòi HEAD chứa đầu nhánh chặt hơn merge-base và bỏ lựa chọn tổ tiên của agent; phần còn lại là giới hạn cùng uid đã được ADR-0067 chấp nhận — ghi rõ, sửa tiền đề D-361; (3) mỗi điểm có test tái hiện
 - Đường lùi: Trở về merge-base nếu đòi HEAD chứa đầu nhánh làm vòng tối ưu phải gộp main quá thường
 
+### D-367 · 2026-11-05T04:10:16+00:00 · Chủ repo 2026-11-05: tận dụng tối đa nhân CPU khi chạy test, áp cho cả dự án đích — dev-task tự dò hiện chạy pytest/unittest một tiến trình
+
+- Phương án: (1) dev-task tự dò: pytest → 'pytest -q -n auto' khi import được xdist (không thì 'pytest -q' kèm gợi ý cài pytest-xdist), unittest → mỗi module test một tiến trình qua xargs -P; số tiến trình = XT_JOBS nếu đặt, mặc định nproc; Go/Rust/Node giữ (đã song song mặc định); thêm mục SHOULD ở quality-gates.md (test chạy song song theo số nhân + test độc lập thứ tự) và CHANGELOG 'Dự án đích'; dự án đích đã khai lệnh test trong xt.yaml: không đè, PR nâng bản đề xuất cờ song song phù hợp · (2) Chỉ ghi hướng dẫn trong tài liệu, không đổi dev-task
+- Chọn: dev-task tự dò: pytest → 'pytest -q -n auto' khi import được xdist (không thì 'pytest -q' kèm gợi ý cài pytest-xdist), unittest → mỗi module test một tiến trình qua xargs -P; số tiến trình = XT_JOBS nếu đặt, mặc định nproc; Go/Rust/Node giữ (đã song song mặc định); thêm mục SHOULD ở quality-gates.md (test chạy song song theo số nhân + test độc lập thứ tự) và CHANGELOG 'Dự án đích'; dự án đích đã khai lệnh test trong xt.yaml: không đè, PR nâng bản đề xuất cờ song song phù hợp
+- Lý do (tiêu chí chất lượng cuối): (4) dự án dùng lệnh tự dò được lợi ngay; (2) chỉ đổi lệnh tự dò, lệnh khai báo trong xt.yaml giữ nguyên, XT_JOBS=1 trả về tuần tự; (1) test phụ thuộc thứ tự lộ ra là lỗi thật (frontend-testing.md đã nêu) — mục SHOULD đòi test độc lập
+- Đường lùi: XT_JOBS=1 hoặc khai lệnh test tường minh trong xt.yaml
+
 ### D-368 · 2026-11-05T05:06:07+00:00 · Review #443 (perf trial finish): 🔴 status --check không ràng HEAD (commit lạ sau lần giữ vẫn exit 0); 🟠 candidate_files thành pathspec glob cuốn sổ .autopilot vào stash; 🟠 cache đĩa (HOME/XDG/TMPDIR một lần mỗi cây, kênh scratch) tính thành tăng tốc; 🟠 candidate tự mang interpreter (.venv/bin, node_modules/.bin đầu PATH không khoá); 6 🟢
 
 - Phương án: (1) Sửa hết trong #443: check đòi cây sạch ngoài .autopilot và HEAD^{tree} == cây neo (sai → exit 1 'commit lạ sau lần giữ'); mọi pathspec qua --pathspec-from-file=- --pathspec-file-nul + GIT_LITERAL_PATHSPECS=1 (sửa luôn Argument list too long); HOME/XDG_*/TMPDIR tạo mới MỖI mẫu, file khớp scratch xoá giữa các mẫu wall; khoá mặc định thêm **/.venv/**, **/node_modules/**, .gitignore và thu hồi khi file candidate nằm dưới thư mục PATH của cây; 🟢: PERF_SUSPECT_RE thêm atexit/sys.stdout/builtins (so toàn stdout với gốc để T-3705), SIGTERM dọn cây + giết nhóm tiến trình + pha về started, README mô tả finish/status --check và sửa 'merge-base' theo D-366, test thứ tự xen kẽ, thông báo --no-apply trỏ T-3706 · (2) Chỉ sửa 🔴, ghi nợ 🟠/🟢
 - Chọn: Sửa hết trong #443: check đòi cây sạch ngoài .autopilot và HEAD^{tree} == cây neo (sai → exit 1 'commit lạ sau lần giữ'); mọi pathspec qua --pathspec-from-file=- --pathspec-file-nul + GIT_LITERAL_PATHSPECS=1 (sửa luôn Argument list too long); HOME/XDG_*/TMPDIR tạo mới MỖI mẫu, file khớp scratch xoá giữa các mẫu wall; khoá mặc định thêm **/.venv/**, **/node_modules/**, .gitignore và thu hồi khi file candidate nằm dưới thư mục PATH của cây; 🟢: PERF_SUSPECT_RE thêm atexit/sys.stdout/builtins (so toàn stdout với gốc để T-3705), SIGTERM dọn cây + giết nhóm tiến trình + pha về started, README mô tả finish/status --check và sửa 'merge-base' theo D-366, test thứ tự xen kẽ, thông báo --no-apply trỏ T-3706
 - Lý do (tiêu chí chất lượng cuối): (1) ba 🟠 là đường giữ oan/hỏng sổ đã tái hiện — lệnh này sắp thành Gate thật ở T-3707 cùng bản 3.30.0, nợ sẽ chặn release-check anyway; (3) mỗi điểm có ca tái hiện chuyển thành test; (5) sửa một lần rẻ hơn ghi nợ rồi PR riêng
 - Đường lùi: Tách 🟢 sang PR sau nếu PR quá lớn để review
+
+### D-369 · 2026-11-05T05:08:03+00:00 · Review #444 (T-3708): bộ chia unittest theo module tự viết gây xanh giả (lớp định nghĩa ở module khác bị bỏ), đỏ giả (setUpClass/setUpModule skip → zero_tests_red exit 5; load_tests/doctest, FunctionTestCase, stdout lúc import lẫn vào danh sách); pytest -n ép cả khi cấu hình tắt xdist; BASE-GATE-020 chép QA-STRAT-007; CI đỏ BASE-CFG-003 (XT_JOBS thiếu README)
+
+- Phương án: (1) Unittest trở về discover tuần tự như cũ (bỏ bộ chia); chỉ pytest + xdist song song: python3 -m pytest -q -n <JOBS>, dò bằng importlib.util.find_spec('xdist'), bỏ -n khi PYTEST_DISABLE_PLUGIN_AUTOLOAD đặt hoặc cấu hình pytest (pytest.ini/pyproject/setup.cfg/tox.ini) có 'no:xdist'; XT_JOBS có trần 4×nproc; README thêm XT_JOBS; BASE-GATE-020 chỉ giữ ý song song, trỏ QA-STRAT-007 cho độc lập thứ tự, sửa '→ Kiểm'; CHANGELOG ghi cwd vào sys.path; sửa hàm phụ tests_dir bị gom thành test · (2) Sửa bộ chia unittest (TestLoader ghi module, gom output, dò không-test toàn cục)
+- Chọn: Unittest trở về discover tuần tự như cũ (bỏ bộ chia); chỉ pytest + xdist song song: python3 -m pytest -q -n <JOBS>, dò bằng importlib.util.find_spec('xdist'), bỏ -n khi PYTEST_DISABLE_PLUGIN_AUTOLOAD đặt hoặc cấu hình pytest (pytest.ini/pyproject/setup.cfg/tox.ini) có 'no:xdist'; XT_JOBS có trần 4×nproc; README thêm XT_JOBS; BASE-GATE-020 chỉ giữ ý song song, trỏ QA-STRAT-007 cho độc lập thứ tự, sửa '→ Kiểm'; CHANGELOG ghi cwd vào sys.path; sửa hàm phụ tests_dir bị gom thành test
+- Lý do (tiêu chí chất lượng cuối): (1) bộ chia tự viết sai ở 7 dạng hợp lệ của unittest — xanh giả là lỗi nặng nhất của một cổng; discover tuần tự đúng sẵn; (3) pytest-xdist là công cụ chuẩn, đã kiểm; (4) dự án Python muốn song song dùng pytest-xdist (BASE-GATE-020 nói cách); (5) tốc độ chỉ phá hoà
+- Đường lùi: Mở task riêng cho bộ chia unittest có TestLoader ghi module nếu dự án đích unittest-thuần cần tốc độ
