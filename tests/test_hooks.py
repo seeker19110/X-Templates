@@ -340,6 +340,9 @@ class CommitGateFastConfigChangeTest(CommitGateFastHookBase):
             "pyproject.toml",
             "pkg/pyproject.toml",
             ".coveragerc",
+            "pytest.py",  # D-371: `python3 -m pytest` (dev-task) thêm cwd vào sys.path → pytest.py gốc giả lệnh test tự dò
+            "conftest.py",
+            "tests/conftest.py",
             "requirements-dev.txt",
             "requirements.txt",
             "scripts/dev-task.sh",

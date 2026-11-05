@@ -6,10 +6,12 @@ from __future__ import annotations
 import os
 import pwd
 import sys
-import time
 import unittest
 import unittest.mock as mock
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))  # tests/cpu_budget.py
+import cpu_budget
 
 ROOT = Path(__file__).resolve().parent.parent
 os.environ.setdefault("XT_GUARD_PHASE", "harden")
@@ -160,7 +162,6 @@ class GlobCommandNameTest(unittest.TestCase):
     def test_guard_glob_budget_and_long_heads(self):
         """Review #247/#248: lồng nhiều tầng chặn nhanh; quá `GLOB_MAX_HEADS` tên glob chặn trước khi dựng bản viết lại
         (dựng trước từng cạn bộ nhớ); tên dài không vào fnmatch."""
-        start = time.monotonic()
         self.assertEqual(policy(" ".join(["/usr/bin/[bcenx]*"] * 7) + " true")["decision"], "deny")
         heads = [
             "/bin/r?",
@@ -174,9 +175,10 @@ class GlobCommandNameTest(unittest.TestCase):
             "/bin/[a-z]m",
         ]
         self.assertEqual(policy("; ".join(f"{h} x" for h in heads))["decision"], "deny")
-        for cmd in ("/bin/" + "[:" * 30000 + " a", "/bin/[" + "[:a:]" * 4000 + "x a"):
-            policy(cmd)
-        self.assertLess(time.monotonic() - start, 15)
+        # Đo thời gian CPU theo tỉ lệ cỡ n/4n (cpu_budget), không ngưỡng đồng hồ tường — đỏ khi máy tải (D-371).
+        # Cỡ lớn giữ đúng đầu vào cũ: 30000 và 4000 lặp.
+        cpu_budget.assert_not_quadratic(self, lambda k: policy("/bin/" + "[:" * k + " a"), 7500, ratio=40)
+        cpu_budget.assert_not_quadratic(self, lambda k: policy("/bin/[" + "[:a:]" * k + "x a"), 1000, ratio=40)
 
     def test_guard_glob_names_container_clis(self):
         """AUD-SEC-106: `/usr/bin/nerdct?` mở ra CLI container cùng cú pháp docker."""
