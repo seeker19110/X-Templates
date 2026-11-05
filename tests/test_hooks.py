@@ -6757,6 +6757,34 @@ class GuardRemoteRefTest(unittest.TestCase):
             with self.subTest(cmd):
                 self.assert_forged(cmd)
 
+    def test_guard_remote_set_head(self):
+        """ADR-0071 §1, D-361: `perf trial` ngoại tuyến đọc nhánh mặc định từ `refs/remotes/origin/HEAD` — `remote set-head
+        <r> <nhánh>`/`-d` (cả sau cờ của `remote`, qua alias, đặt alias) bị chặn; `-a` hỏi máy chủ và lệnh `remote` khác
+        thì qua."""
+        for cmd in (
+            "git remote set-head origin opt",
+            "git remote set-head origin -d",
+            "git remote set-head origin --delete",
+            "git remote set-head origin -a -d",
+            "git remote set-head fork evil",
+            "git remote -v set-head origin opt",
+            "git remote set-head",
+            "git -c alias.sh=remote sh set-head origin opt",
+            "git config alias.sh 'remote set-head origin opt'",
+        ):
+            with self.subTest(cmd=cmd):
+                self.assert_forged(cmd)
+        for cmd in (
+            "git remote set-head origin -a",
+            "git remote set-head origin --auto",
+            "git remote",
+            "git remote -v",
+            "git remote show origin",
+            "git remote set-branches origin main",
+        ):
+            with self.subTest(cmd=cmd):
+                self.assert_allowed(cmd)
+
     def test_guard_replace_ref_denied(self):
         """`git replace` thay đối tượng mà Gate/`pr debt` đọc (`origin/main`, SHA review) — ghi `refs/replace/` bị chặn
         như ref remote; liệt kê/xoá thay thế thì cho qua (AUD-SEC-158)."""

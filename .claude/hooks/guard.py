@@ -5004,8 +5004,8 @@ def _git_branch(args: List[str]) -> Tuple[str, str]:
 # ref CỤC BỘ: `update-ref refs/remotes/origin/main HEAD`, `fetch . HEAD:refs/remotes/origin/main`, `push . HEAD:origin/main`
 # ghi thẳng nó; `tag`/`branch`/`checkout -b`/`switch -c`/`worktree add -b`/`stash branch`/`update-ref` tạo ref cùng tên mà
 # git giải trước (`$GIT_DIR/<tên>`, `refs/<tên>`, `refs/tags/`, `refs/heads/` trước `refs/remotes/` — gitrevisions). Chặn
-# (deny ở mọi chính sách và mọi pha, không nới ở pha build): ghi/xoá ref dưới `refs/remotes/`, tạo/đổi tên/sao chép ref
-# có tên ngắn `<remote>/…`. Tên remote: `git remote` ở repo của lệnh ∪ REMOTE_NAMES (đọc lỗi vẫn giữ tên mặc định), so
+# (deny ở mọi chính sách và mọi pha, không nới ở pha build): ghi/xoá ref dưới `refs/remotes/` (cả `remote set-head <r>
+# <nhánh>|-d` — ADR-0071, D-361; `-a` hỏi máy chủ thì qua), tạo/đổi tên/sao chép ref có tên ngắn `<remote>/…`. Tên remote: `git remote` ở repo của lệnh ∪ REMOTE_NAMES (đọc lỗi vẫn giữ tên mặc định), so
 # không phân biệt hoa thường (macOS: `refs/heads/Origin/main` là cùng file với ref git tìm khi giải `origin/main`).
 # Cho qua: `fetch origin [main]` (refspec cấu hình cập nhật `origin/main`), refspec đúng dạng cấu hình
 # `[+]refs/heads/X:refs/remotes/<R>/X` khi <R> là remote ĐÃ cấu hình (tên khác là đường dẫn: `./origin`); xoá/đổi tên ref
@@ -5231,6 +5231,14 @@ def _stash_names(args: List[str], _cwd: Optional[str]) -> RefNames:
     return _positionals(args[1:2]) if args[:1] == ["branch"] else []
 
 
+def _remote_names(args: List[str], _cwd: Optional[str]) -> RefNames:
+    """remote: `set-head <r> <nhánh>` và `set-head <r> -d` ghi/xoá `refs/remotes/<r>/HEAD` — nhánh mặc định `perf trial`
+    đọc khi ngoại tuyến (ADR-0071 §1, D-361); `set-head <r> -a` lấy từ máy chủ → cho qua. Lệnh con khác: giới hạn ở trên."""
+    flags, pos, _ = _parse_opts(args, "", ())
+    auto = _has_opt(flags, {"-a", "--auto"}) and not _has_opt(flags, {"-d", "--delete"})
+    return [f"refs/remotes/{(pos + ['', ''])[1]}/HEAD"] if pos[:1] == ["set-head"] and not auto else []
+
+
 def _push_names(args: List[str], _cwd: Optional[str]) -> RefNames:
     """push: đích của refspec (`src:dst`; không `:` thì đích = nguồn) — `push . HEAD:origin/main` ghi chính repo này."""
     return [r.split(":")[-1] for r in _push_refs(args)[1:]]
@@ -5301,6 +5309,7 @@ REMOTE_REF_NAMES: Dict[str, Callable[[List[str], Optional[str]], RefNames]] = {
     "fetch": _fetch_names,
     "pull": _fetch_names,
     "push": _push_names,
+    "remote": _remote_names,
 }
 # Lệnh con git mà `_scan_command` giải repo thật (`git -C`, `cd`): commit (cổng), push (nhánh hiện tại), ghi ref (remote),
 # config (đặt alias ghi ref — tên remote của repo đó).

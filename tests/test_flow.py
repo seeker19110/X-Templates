@@ -9,7 +9,8 @@ Cơ chế xfail (không skip):
   nên Gate của task sửa chỉ xanh khi ca thật sự đạt.
 - `@flow("FLOW-NN")` gắn ID cho test và ghi vào `FLOW_IDS`; `test_strict_ids_exist` đỏ khi `XT_FLOW_STRICT` hoặc `XFAIL`
   nêu ID không có test nào mang nó (Gate không xanh vì thiếu ca).
-- Gỡ ID khỏi `XFAIL` khi task sửa xong; ID không còn xfail vẫn chạy thường.
+- Gỡ ID khỏi `XFAIL` khi task sửa xong; ID không còn xfail vẫn chạy thường. Một ID nhiều ca, task chỉ làm xanh một phần:
+  `@flow("FLOW-NN", done="T-NNNN")` cho ca đã xanh — ca đó chạy thường dù ID còn trong `XFAIL` (các ca khác vẫn xfail).
 """
 
 from __future__ import annotations
@@ -41,7 +42,7 @@ from test_xt_cli import TmpRepoCase, run_main
 
 F = TypeVar("F", bound=Callable[..., Any])
 
-_NO_TRIAL = "chưa có `xt.py perf trial` (ADR-0071) — argparse `invalid choice: 'trial'`, ca đỏ ở lệnh đầu tiên"
+_NO_TRIAL = "chưa có lệnh con `xt.py perf trial` cần (ADR-0071) — `chưa triển khai (T-37NN)`, ca đỏ ở lệnh đó"
 XFAIL: dict[str, str] = {  # ID → tái hiện + task sửa (ADR-0071 §10 và bảng tách T-3552; review #440 → AUD-HAR-230…233)
     "FLOW-20": f"{_NO_TRIAL}: không `finish` nên candidate `neutral` không bị thu hồi, không `log` — T-3703",
     "FLOW-21": f"{_NO_TRIAL}: không `finish --resume` (R2: cây đổi hoặc đã resume → `incomplete`) — T-3706",
@@ -71,12 +72,12 @@ STRICT: frozenset[str] = frozenset(s.strip() for s in os.environ.get("XT_FLOW_ST
 FLOW_IDS: set[str] = set()
 
 
-def flow(flow_id: str) -> Callable[[F], F]:
-    """Gắn ID cho test; ID thuộc XFAIL và không thuộc STRICT → `expectedFailure`."""
+def flow(flow_id: str, done: str = "") -> Callable[[F], F]:
+    """Gắn ID cho test; ID thuộc XFAIL, không thuộc STRICT và ca chưa có `done` (task làm nó xanh) → `expectedFailure`."""
 
     def deco(fn: F) -> F:
         FLOW_IDS.add(flow_id)
-        if flow_id in XFAIL and flow_id not in STRICT:
+        if flow_id in XFAIL and flow_id not in STRICT and not done:
             return unittest.expectedFailure(fn)
         return fn
 
@@ -800,9 +801,9 @@ class FlowTest(TmpRepoCase):
 # Dự án đồ chơi: chỉ số chính tất định `cost(1000)` (gốc 3 × 1000 + 500 = 3500, càng thấp càng tốt), chỉ số phụ `mem` =
 # `BUF` (trần 1000, `regress` 0), held-out từ hạt giống lúc finish. "Máy chủ" là repo bare `origin` (nhánh mặc định
 # `main`, `ls-remote --symref` trả được); cây agent là clone ở nhánh `opt`; người bảo trì đẩy `main` từ clone riêng.
-# Mọi lệnh gọi `xt.py perf trial …` THẬT qua subprocess — bản sao ở `TOOL` commit trong gốc, nên neo công cụ từ blob
-# gốc (§5) không `exec` sang bản khác. Tên trường sổ theo ADR §3/§4 (`id`, `phase`, `base_sha`, `fp_start`, `verdict`,
-# `rounds`, `candidate_tree`); khoá loại sự kiện (`event`) và lý do (`reason`) ADR chưa đặt tên — đổi ở `rows`/`why`.
+# Mọi lệnh gọi `ROOT/scripts/xt.py perf trial …` THẬT qua subprocess (D-363: coverage tính được); bản sao cùng byte ở
+# `TOOL` commit trong gốc, nên neo công cụ từ blob gốc (§5) không `exec` sang bản khác. Tên trường sổ theo ADR §3/§4
+# (`id`, `phase`, `base_sha`, `fp_start`, `verdict`, `rounds`, `candidate_tree`, `event`, `reason`).
 
 TRIAL_ARGS = ("--hypothesis", "bỏ vòng thừa trong cost", "--falsifier", "primary > -5%")
 HOT = (
@@ -811,6 +812,7 @@ HOT = (
 )
 SHORTCUT = HOT.replace("    return n * K + EXTRA", "    return 1 if n == 1000 else n * K + EXTRA")  # hard-code N bộ đo
 TOOL = ".xtemplates/scripts/xt.py"  # đường `xt.py` của khung ở dự án đích (install.py)
+XT = ROOT / "scripts" / "xt.py"  # công cụ được chạy (D-363) — cùng byte với bản ở `TOOL` của gốc
 GIT_ID = ("-c", "user.name=t", "-c", "user.email=t@example.invalid", "-c", "commit.gpgsign=false")
 # FLOW-36: chết đúng lúc `git stash push` (sau dòng `decide`, trước thu hồi) — như FLOW-08, không phụ thuộc tên hàm nội bộ.
 CRASH_AT_STASH = (
@@ -958,7 +960,7 @@ class TrialFlowTest(TmpRepoCase):
     def trial(self, *args: str, env: dict[str, str] | None = None) -> tuple[int, str, str]:
         """`xt.py perf trial …` (bản ở gốc) trong cây agent. Lệnh con chưa có → đỏ ngay, không lẫn với exit 2 từ chối."""
         r = subprocess.run(
-            [sys.executable, str(self.repo / TOOL), "perf", "trial", *args],
+            [sys.executable, str(XT), "perf", "trial", *args],
             cwd=self.repo,
             env={**os.environ, **(env or {})},
             capture_output=True,
@@ -967,6 +969,7 @@ class TrialFlowTest(TmpRepoCase):
             check=False,
         )
         self.assertNotIn("invalid choice: 'trial'", r.stderr, "chưa có `xt.py perf trial` (ADR-0071)")
+        self.assertNotIn("chưa triển khai", r.stderr, "lệnh con chưa có — exit 2 của nó không phải từ chối thật")
         return r.returncode, r.stdout, r.stderr
 
     def ok(self, *args: str) -> str:
@@ -1042,7 +1045,7 @@ class TrialFlowTest(TmpRepoCase):
         (self.ctl / marker).write_text("1", encoding="utf-8")
         self.addCleanup(self.release, marker)
         proc = subprocess.Popen(
-            [sys.executable, str(self.repo / TOOL), "perf", "trial", *args],
+            [sys.executable, str(XT), "perf", "trial", *args],
             cwd=self.repo,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
@@ -1119,7 +1122,7 @@ class TrialFlowTest(TmpRepoCase):
         self.assertEqual([r["verdict"] for r in self.decided(tid)], ["incomplete"])
         self.assertEqual(self.fp(), fp0)
 
-    @flow("FLOW-22")
+    @flow("FLOW-22", done="T-3701")
     def test_flow_22_three_non_kept_survive_restart(self) -> None:
         """Given ba lần thử `abort` trên `src/hot.py`, mỗi lệnh một tiến trình (restart: đếm chỉ ở `perf-trials.jsonl`) ·
         When `start --hotspot src/hot.py` · Then exit 3 nêu đường, sổ/cây không đổi; đường khác vẫn nhận (exit 0)."""
@@ -1167,7 +1170,7 @@ class TrialFlowTest(TmpRepoCase):
         self.assertIn("start_head", self.refused("finish"))
         self.assertEqual(self.git("stash", "list"), "")
 
-    @flow("FLOW-28")
+    @flow("FLOW-28", done="T-3701")
     def test_flow_28_moved_default_branch_keeps_merge_base(self) -> None:
         """Given `start` + `abort` ở gốc B, rồi `main` của máy chủ đi tiếp và cây agent `fetch` (`origin/main` dời) ·
         When `start` · Then exit 0, `base_sha` vẫn B — `fetch` không đổi merge-base, vòng không đổi."""
@@ -1262,7 +1265,7 @@ class TrialFlowTest(TmpRepoCase):
         self.assertEqual(self.fp(), fp0)
         self.assertIn("heldout", self.why(self.decided(tid)[0]).replace("-", "").replace("_", ""))
 
-    @flow("FLOW-31")
+    @flow("FLOW-31", done="T-3701")
     def test_flow_31_start_needs_hypothesis_falsifier_clean_tree(self) -> None:
         """Given cây sạch · When `start` thiếu/rỗng giả thuyết, thiếu falsifier, falsifier sai dạng hoặc chỉ số lạ; cây
         bẩn (sửa file track, file mới chưa track) · Then exit 2, không ghi gì (không state, không sổ). Đối chứng: đủ và
@@ -1375,7 +1378,7 @@ class TrialFlowTest(TmpRepoCase):
         tid = self.started()
         self.hot(tail="# chú thích\n")
         r = subprocess.run(
-            [sys.executable, "-c", CRASH_AT_STASH, str((self.repo / TOOL).parent), "perf", "trial", "finish"],
+            [sys.executable, "-c", CRASH_AT_STASH, str(XT.parent), "perf", "trial", "finish"],
             cwd=self.repo,
             capture_output=True,
             text=True,
@@ -1389,7 +1392,7 @@ class TrialFlowTest(TmpRepoCase):
         self.assertEqual(rc, 1, out + err)
         self.assertEqual((self.fp(), len(self.decided(tid))), (fp0, 1))
 
-    @flow("FLOW-37")
+    @flow("FLOW-37", done="T-3701")
     def test_flow_37_start_refuses_dirty_perf_log_and_base_flag(self) -> None:
         """Given cây sạch ở gốc · When `start` khi chỉ PERF-LOG bẩn (nối thêm — không miễn, D-360); `start --base HEAD`
         · Then exit 2, sổ/cây không đổi. Đối chứng: PERF-LOG về nguyên, không `--base` → exit 0."""
@@ -1401,7 +1404,7 @@ class TrialFlowTest(TmpRepoCase):
         self.refused(*self.start_args(extra=(*TRIAL_ARGS, "--base", "HEAD")))
         self.started()
 
-    @flow("FLOW-37")
+    @flow("FLOW-37", done="T-3701")
     def test_flow_37_shortcut_commit_before_first_start_refused(self) -> None:
         """AUD-HAR-231 — Given commit đường tắt trước lần `start` đầu vòng (hard-code N của bộ đo trong `src/hot.py`;
         hoặc sửa `bench.py` khoá) nên `HEAD^{tree}` ≠ cây gốc · When `start` · Then exit 2, sổ/cây không đổi — đường tắt
@@ -1413,7 +1416,7 @@ class TrialFlowTest(TmpRepoCase):
             self.git("reset", "-q", "--hard", self.base)
         self.started()
 
-    @flow("FLOW-37")
+    @flow("FLOW-37", done="T-3701")
     def test_flow_37_commit_after_log_tree_refused(self) -> None:
         """AUD-HAR-231 — Given lần thử `abort`, `perf trial log`, commit PERF-LOG (cây của sự kiện `log`), rồi commit lạ
         (đường tắt) · When `start` · Then exit 2 (`HEAD^{tree}` ≠ cây giữ gần nhất), sổ/cây không đổi. Đối chứng: bỏ
@@ -1428,7 +1431,7 @@ class TrialFlowTest(TmpRepoCase):
         self.git("reset", "-q", "--hard", "HEAD~1")
         self.started()
 
-    @flow("FLOW-38")
+    @flow("FLOW-38", done="T-3701")
     def test_flow_38_loosened_config_on_branch_is_not_base(self) -> None:
         """AUD-HAR-230 — Given agent commit `perf/trial.json` nới (`locked: []`, `equiv: "true"`, bộ đo `echo 1`) trên
         nhánh, đẩy nhánh lên máy chủ và trỏ `origin/HEAD` cục bộ về nó (`remote set-head`), đặt `XT_PROGRESS_BASE=HEAD`
@@ -1452,7 +1455,7 @@ class TrialFlowTest(TmpRepoCase):
         self.assertEqual(st["config_sha"], self.git("rev-parse", f"{self.base}:perf/trial.json"))
         self.assertIn("main", st["default_ref"])
 
-    @flow("FLOW-38")
+    @flow("FLOW-38", done="T-3701")
     def test_flow_38_merging_default_branch_starts_new_round(self) -> None:
         """Given vòng ở gốc B có sự kiện `log` đã commit; `main` của máy chủ đi tiếp, agent merge `origin/main` vào nhánh
         (merge-base đổi → vòng mới) · When `start` · Then exit 2: lần đầu vòng mới đòi `HEAD^{tree}` = cây gốc mới."""
@@ -1464,7 +1467,7 @@ class TrialFlowTest(TmpRepoCase):
         self.git("merge", "-q", "--no-edit", "origin/main")
         self.refused(*self.start_args())
 
-    @flow("FLOW-39")
+    @flow("FLOW-39", done="T-3701")
     def test_flow_39_decoy_hotspot_does_not_reopen_exhausted_path(self) -> None:
         """AUD-HAR-233 — Given `src/hot.py` cạn (3 lần `abort`) · When `start --hotspot src/hot.py --hotspot
         src/other.py` (khai kèm đường "mồi") · Then exit 3, sổ/cây không đổi. Đối chứng: chỉ `src/other.py` → exit 0."""
@@ -1472,7 +1475,7 @@ class TrialFlowTest(TmpRepoCase):
         self.assertIn("src/hot.py", self.refused(*self.start_args("src/hot.py", "src/other.py"), code=3))
         self.started("src/other.py")
 
-    @flow("FLOW-40")
+    @flow("FLOW-40", done="T-3701")
     def test_flow_40_two_reverts_then_log_commit_start(self) -> None:
         """AUD-HAR-232 — Given hai lần thử liên tiếp bị thu hồi (`abort`) · Then mỗi lần cây = lúc start và PERF-LOG
         không đổi byte (`start`/`abort` không ghi cây), `start` thứ hai không kẹt · When `perf trial log`, commit, `start`

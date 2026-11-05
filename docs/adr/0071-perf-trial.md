@@ -107,7 +107,12 @@ phải lần đỏ của task. Gate của task tối ưu là `perf trial status 
   **Không** chứa hạt giống held-out (§6). Ghi qua khoá `flock` + `rev` như `update_state` (ADR-0052 §2); khoá riêng
   `perf-trial.lock` giữ suốt `finish` và `abort` (một người đo/thu hồi).
 - `perf-trials.jsonl` — chỉ nối, mỗi sự kiện một dòng (`start`, `decide`, `log`), `fsync`; nguồn của đếm ba lần, chống thử
-  trùng (khoá `hotspot` + `candidate_tree`) và của PERF-LOG. Bền qua restart vì là file, không phải bộ nhớ phiên.
+  trùng (khoá `hotspot` + `candidate_tree`) và của PERF-LOG. Bền qua restart vì là file, không phải bộ nhớ phiên. Tên trường
+  (D-363, T-3701): mọi dòng có `event` (`start`|`decide`|`log`), `schema: 1`, `base_sha`, `at`; `start` thêm `id`,
+  `default_ref`, `config_sha`, `tool_sha`, `hotspot[]`, `hypothesis`, `falsifier`, `start_head`, `fp_start`; `decide` thêm
+  `id`, `hotspot[]`, `verdict`, `reason` (lý do — chữ hoặc JSON), `candidate_files[]`, `rounds` (`kept` bắt buộc
+  `candidate_tree`); `log` thêm `tree`. Dòng hỏng (kể cả dòng cuối thiếu xuống dòng) → mọi lệnh exit 2, không đoán.
+  `setup` của cấu hình là **một chuỗi lệnh shell**.
 
 ### 4. Máy trạng thái của `finish`
 

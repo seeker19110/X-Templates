@@ -5832,6 +5832,31 @@
    }
   },
   {
+   "id": "guard-d361-remote-set-head",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "D-361"
+   ],
+   "input": {
+    "command": "git remote set-head origin opt"
+   },
+   "expect": {
+    "allowed": false,
+    "code": "REMOTE_REF_FORGE"
+   }
+  },
+  {
+   "id": "guard-control-remote-set-head-auto",
+   "origin": "control",
+   "refs": [],
+   "input": {
+    "command": "git remote set-head origin -a"
+   },
+   "expect": {
+    "allowed": true
+   }
+  },
+  {
    "id": "guard-control-fetch-origin",
    "origin": "control",
    "refs": [],
