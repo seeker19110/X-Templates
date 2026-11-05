@@ -214,6 +214,7 @@
  "tests.test_hooks.CommitGateFastHookTest": 11.0,
  "tests.test_hooks.CommitGateFastNoVerifyTest": 2.5,
  "tests.test_hooks.CommitGateForeignRepoTest": 2.8,
+ "tests.test_hooks.CommitGatePytestConfigChangeTest": 4.3,
  "tests.test_hooks.CommitGateRepoTest": 5.2,
  "tests.test_hooks.CommitGateXtPyHookTest": 3.1,
  "tests.test_hooks.DevTaskGateParTest": 4.7,

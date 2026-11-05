@@ -3,7 +3,7 @@ title: File harness: PLAN · PROGRESS · BLUEPRINT · evidence · state
 kind: module
 prefix: LOOP-HARNESS
 applies_to: [all]
-updated: 2026-11-04
+updated: 2026-11-05
 ---
 
 # File harness: PLAN · PROGRESS · BLUEPRINT · evidence · state

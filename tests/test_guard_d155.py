@@ -176,9 +176,10 @@ class GlobCommandNameTest(unittest.TestCase):
         ]
         self.assertEqual(policy("; ".join(f"{h} x" for h in heads))["decision"], "deny")
         # Đo thời gian CPU theo tỉ lệ cỡ n/4n (cpu_budget), không ngưỡng đồng hồ tường — đỏ khi máy tải (D-371).
-        # Cỡ lớn giữ đúng đầu vào cũ: 30000 và 4000 lặp.
-        cpu_budget.assert_not_quadratic(self, lambda k: policy("/bin/" + "[:" * k + " a"), 7500, ratio=40)
-        cpu_budget.assert_not_quadratic(self, lambda k: policy("/bin/[" + "[:a:]" * k + "x a"), 1000, ratio=40)
+        # Cỡ lớn giữ đúng đầu vào cũ: 30000 và 4000 lặp. Tỉ lệ mặc định (10): canh bậc hai — bỏ `GLOB_HEAD_MAX` (tên dài
+        # vào fnmatch, review #248) phải đỏ; `ratio=40` cho lọt bậc hai (review #446).
+        cpu_budget.assert_not_quadratic(self, lambda k: policy("/bin/" + "[:" * k + " a"), 7500)
+        cpu_budget.assert_not_quadratic(self, lambda k: policy("/bin/[" + "[:a:]" * k + "x a"), 1000)
 
     def test_guard_glob_names_container_clis(self):
         """AUD-SEC-106: `/usr/bin/nerdct?` mở ra CLI container cùng cú pháp docker."""
