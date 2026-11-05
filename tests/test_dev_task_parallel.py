@@ -164,6 +164,35 @@ class DevTaskParallelTest(unittest.TestCase):
                     self.assertIn("PYTEST-ARGS: -q\n", r.stdout)
                     self.assertNotIn(HINT, r.stderr)
 
+    def test_pytest_root_module_shadowing_falls_back_to_plain(self):
+        """D-371: `python3 -m` thêm cwd vào `sys.path` → `pytest.py`/`xdist.py` (tệp hay gói) ở gốc che pytest/xdist thật;
+        rơi về `pytest -q` không `-n`, có log lý do. `conftest.py` là cấu hình hợp lệ — không rơi."""
+        self.pytest(xdist=True)
+        for name, make in (
+            ("pytest.py", lambda p: p.write_text("", encoding="utf-8")),
+            ("xdist.py", lambda p: p.write_text("", encoding="utf-8")),
+            ("pytest", lambda p: (p.mkdir(), (p / "__init__.py").write_text("", encoding="utf-8"))),
+            ("xdist", lambda p: (p.mkdir(), (p / "__init__.py").write_text("", encoding="utf-8"))),
+        ):
+            with self.subTest(shadow=name):
+                path = self.tmp / name
+                make(path)
+                r = self.dt("test")
+                self.assertEqual(r.returncode, 0, r.stderr)
+                self.assertEqual(self.ran(r), "pytest -q")
+                self.assertNotIn("-n ", self.ran(r))
+                self.assertIn("che pytest/xdist", r.stderr)
+                self.assertIn("PYTEST-ARGS: -q\n", r.stdout)
+                if path.is_dir():
+                    shutil.rmtree(path)
+                else:
+                    path.unlink()
+        (self.tmp / "conftest.py").write_text("", encoding="utf-8")
+        (self.tmp / "pytest").mkdir()  # thư mục không có __init__.py: không phải gói
+        r = self.dt("test")
+        self.assertEqual(self.ran(r), "python3 -m pytest -q -n auto")
+        self.assertNotIn("che pytest/xdist", r.stderr)
+
     def test_pytest_empty_autoload_env_is_not_disabled(self):
         self.pytest(xdist=True)
         r = self.dt("test", PYTEST_DISABLE_PLUGIN_AUTOLOAD="", PYTEST_ADDOPTS="-q")

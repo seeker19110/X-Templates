@@ -148,6 +148,13 @@ pytest_xdist_off() { # 0 = tắt xdist có chủ ý: PYTEST_DISABLE_PLUGIN_AUTOL
   done
   return 1
 }
+root_shadows_pytest() { # 0 = gốc có pytest/xdist là tệp .py hoặc gói (có __init__.py); conftest.py không tính
+  local m
+  for m in pytest xdist; do
+    [ -f "$ROOT/$m.py" ] || [ -f "$ROOT/$m/__init__.py" ] && return 0
+  done
+  return 1
+}
 python_test_cmd() { # lệnh test Python tự dò; DT_HINT=1 (run_task) → log gợi ý/XT_JOBS đúng một lần mỗi lần chạy
   local j
   if command -v pytest >/dev/null 2>&1; then
@@ -155,6 +162,10 @@ python_test_cmd() { # lệnh test Python tự dò; DT_HINT=1 (run_task) → log 
     # `python3 -m pytest`: đúng interpreter vừa tìm thấy xdist (xdist phụ thuộc pytest) — `pytest` trên PATH có thể là
     # pipx/venv khác không có xdist → `-n` lỗi "unrecognized arguments". Khác `pytest`: thêm cwd vào sys.path.
     if python3 -c 'import importlib.util,sys; sys.exit(importlib.util.find_spec("xdist") is None)' >/dev/null 2>&1; then
+      if root_shadows_pytest; then # D-371: mô-đun ở gốc che pytest/xdist khi gọi `python3 -m` (cwd vào sys.path)
+        [ "${DT_HINT:-}" = 1 ] && log "gốc có pytest/xdist (tệp hay gói) che pytest/xdist khi gọi 'python3 -m pytest' — chạy 'pytest -q', không '-n'"
+        echo "pytest -q"; return 0
+      fi
       j="$(test_jobs)"
       if [ "$j" = 1 ]; then echo "pytest -q"; else echo "python3 -m pytest -q -n $j"; fi
       return 0
