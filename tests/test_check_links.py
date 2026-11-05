@@ -121,49 +121,6 @@ class CheckLinksModuleTest(unittest.TestCase):
         self.cl.anchors(self.repo / "b.md")
         self.assertLess(time.monotonic() - start, 5)
 
-    def test_check_skips_links_inside_code_spans(self):
-        # FB-115 (X-Company): `[x](y)` trong code span là ví dụ cú pháp, không phải link — từng bị báo hỏng oan.
-        # Link có chữ là code span vẫn kiểm; backtick lẻ không mở code span (CommonMark) nên link sau nó vẫn kiểm.
-        self.write("ok.md", "x\n")
-        self.write(
-            "a.md",
-            "Viết `[nhãn](duong/dan.md)` hoặc ``[a](b.md) ` c`` nhé.\n"
-            "[`ok.md`](ok.md) [`mất`](mat1.md) `x` [thật](mat2.md)\n"
-            "backtick lẻ ` [hỏng](mat3.md)\n",
-        )
-        self.assertEqual(
-            self.cl.check(self.repo),
-            [
-                "a.md:2: liên kết hỏng -> mat1.md",
-                "a.md:2: liên kết hỏng -> mat2.md",
-                "a.md:3: liên kết hỏng -> mat3.md",
-            ],
-        )
-
-    def test_code_span_opener_not_inside_backtick_run_nor_escaped(self):
-        # Review #450: ``` ``x` ``` không có code span (mở 2 cần đóng 2) — backtick thứ hai không được mở span; `\``
-        # là backtick nguyên văn (CommonMark), `\\`` thì backslash bị escape nên backtick vẫn mở span. Link trong ô
-        # bảng có code span bên cạnh và link ngoài khối code vẫn kiểm.
-        self.write(
-            "a.md",
-            "``[x](m1.md)`\n"
-            "\\`[x](m2.md)\\`\n"
-            "\\\\`[ví dụ](v1.md)` và `[ví dụ](v2.md)\\`\n"
-            "| `ma` | [bảng](m3.md) | ``a ` b`` |\n"
-            "```\n[khối](v3.md)\n```\n"
-            "[sau khối](m4.md)\n",
-        )
-        self.assertEqual(
-            self.cl.check(self.repo),
-            [
-                "a.md:1: liên kết hỏng -> m1.md",
-                "a.md:2: liên kết hỏng -> m2.md",
-                "a.md:4: liên kết hỏng -> m3.md",
-                "a.md:8: liên kết hỏng -> m4.md",
-            ],
-        )
-        self.assertEqual(self.cl.line_urls("``https://a.example.org/x`"), ["https://a.example.org/x"])
-
     def test_check_absolute_link_missing_is_error(self):
         self.write("a.md", "[x](/khong/co.md)\n")
         self.assertEqual(self.cl.check(self.repo), ["a.md:1: liên kết hỏng -> /khong/co.md"])

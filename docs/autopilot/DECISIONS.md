@@ -114,3 +114,10 @@
 - Chọn: Sửa HẾT trong một commit: lưu trữ dòng đã sửa đủ chỗ + đo lại sau git add; cổng quét mọi file tracked trừ tests/ (lỗi UTF-8 → báo, không bỏ qua); sửa chú thích mẫu xt.yaml + docstring install.py theo giao ước; 🟢: regex code span theo CommonMark tối thiểu (lookbehind backtick, \` escape) + test, test dùng escape, PROGRESS 3.30.1, harness-files một câu, giới hạn chuỗi selector ≤ 1 liên tiếp; rồi review lượt 2 cả PR
 - Lý do (tiêu chí chất lượng cuối): (1) research/ được cài vào dự án đích — đúng lớp lỗi bản vá nhắm tới; (1) tài liệu own sai là gốc lỗi xboss; (3) đều nhỏ, có tái hiện; PR cắt bản không mang nợ (ADR-0059 §6)
 - Đường lùi: Tách cổng mở rộng nếu quét mọi file chặn oan nội dung hợp lệ
+
+### D-378 · 2026-11-05T14:28:05+00:00 · PR #450 (cắt 3.30.1): review lượt 2 còn 3 🟢 — F1 hồi quy so main (che code span theo cả dòng ghép backtick lẻ của hai ô bảng → link hỏng ở ô giữa không báo), F2 danh sách số vắng thiếu D-352…355, F3 lookbehind sai với backtick sau backtick đã escape; trần rethink đã dùng
+
+- Phương án: (1) Thu hẹp: rút phần sửa check-links (AUD-CODE-061, FB-115) khỏi 3.30.1 — trả scripts/check-links.py và test về main, AUD-CODE-061 về mở (sửa ở 3.31.0 bằng bộ quét backtick theo CommonMark + tách ô GFM), CHANGELOG bỏ dòng; sửa F2; review lượt 3 chỉ delta · (2) Sửa F1/F3 bằng bộ quét mới ngay trong 3.30.1
+- Chọn: Thu hẹp: rút phần sửa check-links (AUD-CODE-061, FB-115) khỏi 3.30.1 — trả scripts/check-links.py và test về main, AUD-CODE-061 về mở (sửa ở 3.31.0 bằng bộ quét backtick theo CommonMark + tách ô GFM), CHANGELOG bỏ dòng; sửa F2; review lượt 3 chỉ delta
+- Lý do (tiêu chí chất lượng cuối): (1) bản vá không được mang hồi quy (F1); regex che code span đã hai lượt lộ ca sai — viết bộ quét đúng là việc của bản thường; (2) mục tiêu chính 3.30.1 (AI-GUARD-018, compose, cổng ký tự vô hình) đã sạch qua hai lượt review; FB-115 là báo oan có từ trước, giữ thêm một bản không tệ hơn
+- Đường lùi: Đưa lại phần check-links vào 3.30.x nếu bộ quét mới xong trước khi dự án đích cần

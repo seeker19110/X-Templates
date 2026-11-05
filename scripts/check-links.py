@@ -3,7 +3,7 @@
 
 - Mọi `[text](đường/dẫn.md#anchor)` tương đối phải trỏ tới file/thư mục có thật; `#anchor` (cùng file hoặc file `.md`
   khác) phải là slug của một tiêu đề theo cách GitHub sinh, hoặc `<a id|name="…">`.
-- Bỏ qua URL (http:, mailto:…), nội dung trong code fence (``` hoặc ~~~) và code span (`` `[x](y)` `` là ví dụ).
+- Bỏ qua URL (http:, mailto:…), nội dung trong code fence (``` hoặc ~~~).
 - Link trỏ ra ngoài gốc repo là lỗi (file có trên máy người viết nhưng không có trong repo).
 - Bỏ qua thư mục: .git, node_modules, .venv, .autopilot, __pycache__.
 Thoát 1 nếu có link hỏng. Chỉ dùng thư viện chuẩn.
@@ -45,9 +45,7 @@ QUOTE_RE = re.compile(r"^ {0,3}(?:>\s?)+")
 HTML_ANCHOR_RE = re.compile(r"<[a-z][a-z0-9]*\s[^>]*\b(?:id|name)=[\"']?([^\"'\s>]+)", re.IGNORECASE)
 LINE_ANCHOR_RE = re.compile(r"^L\d+(?:-L\d+)?$")  # `#L3`, `#L3-L9`: dòng mã trên GitHub, không phải tiêu đề
 URL_RE = re.compile(r"^https?://[^\s]+$")
-# `x` và ``x ` y``: URL trong đó là ví dụ, không phải nguồn. Mở span chỉ ở đầu cả chuỗi backtick và khi backtick không bị
-# escape (`\`` nguyên văn; `\\`` vẫn mở — số backslash chẵn); trong span backslash là chữ nên đóng không xét escape.
-CODE_SPAN_RE = re.compile(r"(?<![\\`])(?:\\\\)*(`+)(?!`).*?(?<!`)\1(?!`)")
+CODE_SPAN_RE = re.compile(r"(`+)(?!`).*?(?<!`)\1(?!`)")  # `x` và ``x ` y``: URL trong đó là ví dụ, không phải nguồn
 AUTOLINK_RE = re.compile(r"<(https?://[^\s<>]+)>")
 BARE_URL_RE = re.compile(r"https?://[^\s<>\[\]\"`|]+")
 SKIP_HOSTS = {"localhost", "127.0.0.1", "example.com", "example.org", "example.net"}
@@ -83,10 +81,9 @@ def _unangle(target: str) -> str:
 
 
 def iter_links(root: Path) -> Iterator[tuple[Path, int, str]]:
-    """(file, số dòng, đích) của mọi link Markdown ngoài code fence và code span (`[x](y)` trong backtick là ví dụ cú
-    pháp — FB-115); đích đã bỏ `<>`."""
+    """(file, số dòng, đích) của mọi link Markdown ngoài code fence; đích đã bỏ `<>`."""
     for p, n, line in iter_lines(root):
-        for target in LINK_RE.findall(CODE_SPAN_RE.sub(" ", line)):
+        for target in LINK_RE.findall(line):
             yield p, n, _unangle(target)
 
 
