@@ -14,14 +14,17 @@ Cơ chế xfail (không skip):
 
 from __future__ import annotations
 
+import contextlib
 import functools
 import json
 import multiprocessing
 import os
 import re
+import signal
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 import unittest.mock
 from collections.abc import Callable
@@ -38,7 +41,32 @@ from test_xt_cli import TmpRepoCase, run_main
 
 F = TypeVar("F", bound=Callable[..., Any])
 
-XFAIL: dict[str, str] = {}
+_NO_TRIAL = "chưa có `xt.py perf trial` (ADR-0071) — argparse `invalid choice: 'trial'`, ca đỏ ở lệnh đầu tiên"
+XFAIL: dict[str, str] = {  # ID → tái hiện + task sửa (ADR-0071 §10 và bảng tách T-3552; review #440 → AUD-HAR-230…233)
+    "FLOW-20": f"{_NO_TRIAL}: không `finish` nên candidate `neutral` không bị thu hồi, không `log` — T-3703",
+    "FLOW-21": f"{_NO_TRIAL}: không `finish --resume` (R2: cây đổi hoặc đã resume → `incomplete`) — T-3706",
+    "FLOW-22": f"{_NO_TRIAL}: không sổ `perf-trials.jsonl` nên `start` không đếm ba lần qua restart — T-3701",
+    "FLOW-23": f"{_NO_TRIAL}: không chỉ số phụ có `ceiling` — T-3704",
+    "FLOW-27": f"{_NO_TRIAL}: không giữ candidate `improved`, không `candidate_tree` ở dòng `decide` — T-3705",
+    "FLOW-28": f"{_NO_TRIAL}: không kiểm `HEAD == start_head`, không ghim merge-base, không so cây đo sau lượt — T-3703",
+    "FLOW-29": f"{_NO_TRIAL}: không `tampered` khi sửa file khoá, không đo ở cây dựng lại (`.pth` bị ignore) — T-3703",
+    "FLOW-30": f"{_NO_TRIAL}: không held-out sinh lúc finish — T-3705",
+    "FLOW-31": f"{_NO_TRIAL}: `start` không đòi giả thuyết/falsifier/cây sạch, falsifier không thu hồi — T-3705",
+    "FLOW-32": f"{_NO_TRIAL}: `prepare` không kiểm `setup` trỏ đúng cây — T-3702",
+    "FLOW-33": f"{_NO_TRIAL}: không thu hồi bằng stash + vân tay, không exit 4 — T-3703",
+    "FLOW-34": f"{_NO_TRIAL}: không `perf-trial.lock` cho `finish`/`abort` — T-3706",
+    "FLOW-35": f"{_NO_TRIAL}: `--resume` không đo lại một lần với hạt giống mới — T-3706",
+    "FLOW-36": f"{_NO_TRIAL}: `--resume` ở pha `decided` không làm nốt thu hồi — T-3706",
+    "FLOW-37": f"{_NO_TRIAL}: `start` không đòi cây gốc/cây giữ, miễn PERF-LOG, nhận `--base` (AUD-HAR-231) — T-3701",
+    "FLOW-38": f"{_NO_TRIAL}: baseline/cấu hình do agent chọn được (AUD-HAR-230) — T-3701",
+    "FLOW-39": f'{_NO_TRIAL}: điểm nóng "mồi" mở lại đường đã cạn (AUD-HAR-233) — T-3701',
+    "FLOW-40": f"{_NO_TRIAL}: PERF-LOG trong cây làm lần thu hồi thứ hai kẹt (AUD-HAR-232) — T-3701",
+    "FLOW-41": f"{_NO_TRIAL}: lần giữ đặt lại đếm của mọi đường đã khai (AUD-HAR-233), không `off-hotspot` — T-3703",
+    "FLOW-42": f"{_NO_TRIAL}: `setup`/`probe` thừa hưởng môi trường phiên agent — T-3702",
+    "FLOW-43": f"{_NO_TRIAL}: cây candidate dựng từ patch (bỏ gitlink, đổi tên, `diff.external`) — T-3702",
+    "FLOW-44": f"{_NO_TRIAL}: chỉ số phụ không có mức lùi `regress` — T-3704",
+    "FLOW-45": f"{_NO_TRIAL}: không `status --check` theo `target` — T-3704",
+}
 STRICT: frozenset[str] = frozenset(s.strip() for s in os.environ.get("XT_FLOW_STRICT", "").split(",") if s.strip())
 FLOW_IDS: set[str] = set()
 
@@ -766,6 +794,824 @@ class FlowTest(TmpRepoCase):
                 rc, text = self.perf_compare(before, after, *extra)
                 self.assertEqual(rc, want, text)
                 self.assertEqual(REFUSE in text, want == 2, text)
+
+
+# --------------------------------------------------------------------------- perf trial (ADR-0071 §10, T-3700)
+# Dự án đồ chơi: chỉ số chính tất định `cost(1000)` (gốc 3 × 1000 + 500 = 3500, càng thấp càng tốt), chỉ số phụ `mem` =
+# `BUF` (trần 1000, `regress` 0), held-out từ hạt giống lúc finish. "Máy chủ" là repo bare `origin` (nhánh mặc định
+# `main`, `ls-remote --symref` trả được); cây agent là clone ở nhánh `opt`; người bảo trì đẩy `main` từ clone riêng.
+# Mọi lệnh gọi `xt.py perf trial …` THẬT qua subprocess — bản sao ở `TOOL` commit trong gốc, nên neo công cụ từ blob
+# gốc (§5) không `exec` sang bản khác. Tên trường sổ theo ADR §3/§4 (`id`, `phase`, `base_sha`, `fp_start`, `verdict`,
+# `rounds`, `candidate_tree`); khoá loại sự kiện (`event`) và lý do (`reason`) ADR chưa đặt tên — đổi ở `rows`/`why`.
+
+TRIAL_ARGS = ("--hypothesis", "bỏ vòng thừa trong cost", "--falsifier", "primary > -5%")
+HOT = (
+    "from other import EXTRA\n\nK = 3\nBUF = 100\n\n\ndef compute(n):\n    total = 0\n    for i in range(n):\n"
+    "        total += i\n    return total\n\n\ndef cost(n):\n    return n * K + EXTRA\n"
+)
+SHORTCUT = HOT.replace("    return n * K + EXTRA", "    return 1 if n == 1000 else n * K + EXTRA")  # hard-code N bộ đo
+TOOL = ".xtemplates/scripts/xt.py"  # đường `xt.py` của khung ở dự án đích (install.py)
+GIT_ID = ("-c", "user.name=t", "-c", "user.email=t@example.invalid", "-c", "commit.gpgsign=false")
+# FLOW-36: chết đúng lúc `git stash push` (sau dòng `decide`, trước thu hồi) — như FLOW-08, không phụ thuộc tên hàm nội bộ.
+CRASH_AT_STASH = (
+    "import os, subprocess, sys\n"
+    "sys.path.insert(0, sys.argv[1])\n"
+    "import xt\n"
+    "real = subprocess.Popen\n"
+    "class Crash(real):\n"
+    "    def __init__(self, args, *a, **k):\n"
+    "        if not isinstance(args, (str, bytes)) and 'stash' in args and 'push' in args:\n"
+    "            os._exit(9)\n"
+    "        super().__init__(args, *a, **k)\n"
+    "subprocess.Popen = Crash\n"
+    "sys.exit(xt.main(sys.argv[2:]))\n"
+)
+
+
+def _hang(ctl: Path, marker: str) -> str:
+    """Đoạn mã của script đo: còn file `ctl/marker` thì báo `ctl/hanging` rồi chờ — ca kill/chen ngang giữa lượt."""
+    m, h = str(ctl / marker), str(ctl / "hanging")
+    return f"if os.path.exists({m!r}):\n    open({h!r}, 'w').close()\n    while os.path.exists({m!r}):\n        time.sleep(0.05)\n"
+
+
+def trial_files(ctl: Path) -> dict[str, str]:
+    """File của gốc; script đo ghi dấu vết ra `ctl` (đường tuyệt đối ngoài mọi cây)."""
+    head = "import os, sys, time\nsys.path.insert(0, 'src')\n"
+    dirty = str(ctl / "dirty")
+    return {
+        ".gitignore": ".autopilot/\n.cache/\n.venv/\nnode_modules/\n__pycache__/\nscratch.log\n",
+        "src/hot.py": HOT,
+        "src/other.py": "EXTRA = 500\n",
+        "src/notes.txt": "ghi chú\n",
+        "docs/autopilot/PERF-LOG.md": "# PERF-LOG\n\nGhi chú của người.\n",
+        "bench.py": head
+        + _hang(ctl, "hang")
+        + f"import hot\nif os.path.exists({dirty!r}) and hot.K == 3:\n"  # chỉ cây gốc/`start_head` (K = 3) bị bẩn
+        + "    with open('src/hot.py', 'a', encoding='utf-8') as f:\n        f.write('# bẩn\\n')\nprint(hot.cost(1000))\n",
+        "mem.py": head + "import hot\nprint(hot.BUF)\n",
+        "equiv.py": head + "import hot\nassert hot.compute(10) == 45\n",
+        "heldout_gen.py": head
+        + "import random\nseed = sys.stdin.read().strip()\n"
+        + f"with open({str(ctl / 'seeds.log')!r}, 'a', encoding='utf-8') as f:\n    f.write(seed + '\\n')\n"
+        + "r = random.Random(seed)\nprint('\\n'.join(str(r.randrange(2000, 9000)) for _ in range(5)))\n",
+        "heldout_run.py": head + _hang(ctl, "hang-heldout") + "import hot\nprint(hot.cost(int(sys.argv[1])))\n",
+        "probe.py": head
+        + f"with open({str(ctl / 'probe.env')!r}, 'a', encoding='utf-8') as f:\n"
+        + "    f.write(''.join(f'{k}={v}\\n' for k, v in os.environ.items()))\n"
+        + "import hot\nprint(os.path.realpath(hot.__file__))\n",
+    }
+
+
+def trial_config(**over: Any) -> dict[str, Any]:
+    """`perf/trial.json` (ADR-0071 §1); dict mới mỗi lần gọi — sửa lồng nhau không rò sang ca khác."""
+    cfg: dict[str, Any] = {
+        "schema": 1,
+        "setup": "true",
+        "locked": ["bench.py", "mem.py", "equiv.py", "heldout_*.py", "probe.py"],
+        "metric": {"cmd": "python3 bench.py", "kind": "exact", "unit": "lệnh", "higher_is_better": False, "runs": 3},
+        "secondary": [
+            {"name": "mem", "cmd": "python3 mem.py", "kind": "exact", "unit": "B", "higher_is_better": False}
+            | {"ceiling": 1000, "regress": 0}
+        ],
+        "target": "primary <= -20%",
+        "budget": 20,
+        "equiv": "python3 equiv.py",
+        "heldout": {"gen": "python3 heldout_gen.py", "cmd": "python3 heldout_run.py {input}"},
+        "timeout": 120,
+    }
+    return {**cfg, **over}
+
+
+class TrialFlowTest(TmpRepoCase):
+    """Ca `perf trial` (ADR-0071 §10). Hôm nay mọi ca đỏ ở lệnh `perf trial` đầu tiên (`trial` đòi lệnh con có thật)."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.ctl = self.tmp / "ctl"
+        self.ctl.mkdir()
+        self.origin = self.tmp / "origin.git"
+        self.run_git(self.tmp, "init", "-q", "--bare", "-b", "main", str(self.origin))
+        self.init_repo()
+        self.write_tree(self.repo, {**trial_files(self.ctl), "perf/trial.json": json.dumps(trial_config())})
+        (self.repo / TOOL).parent.mkdir(parents=True)
+        (self.repo / TOOL).write_bytes((ROOT / "scripts" / "xt.py").read_bytes())
+        self.git("add", "-A")
+        self.git("commit", "-q", "-m", "gốc")
+        self.git("remote", "add", "origin", str(self.origin))
+        self.git("push", "-q", "-u", "origin", "main")
+        self.git("remote", "set-head", "origin", "-a")
+        self.git("checkout", "-q", "-b", "opt")
+        self.base = self.git("rev-parse", "HEAD")
+        self.enterContext(unittest.mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(self.repo)}))
+        os.environ.pop("XT_PROGRESS_BASE", None)  # patch.dict khôi phục khi xong ca
+
+    # ---- hạ tầng repo
+    def run_git(self, cwd: Path, *args: str) -> str:
+        cmd = ["git", "-C", str(cwd), *GIT_ID, "-c", "protocol.file.allow=always", *args]
+        return subprocess.run(cmd, capture_output=True, text=True, check=True).stdout.strip()
+
+    def write_tree(self, root: Path, files: dict[str, str]) -> None:
+        for rel, text in files.items():
+            (root / rel).parent.mkdir(parents=True, exist_ok=True)
+            (root / rel).write_text(text, encoding="utf-8")
+
+    def put(self, rel: str, text: str) -> Path:
+        self.write_tree(self.repo, {rel: text})
+        return self.repo / rel
+
+    def maint(self) -> Path:
+        """Clone của người bảo trì (đẩy `main` lên máy chủ — nhánh mặc định được bảo vệ, đổi qua review)."""
+        maint = self.tmp / "maint"
+        if not maint.exists():
+            self.run_git(self.tmp, "clone", "-q", str(self.origin), str(maint))
+        return maint
+
+    def maintain(self, files: dict[str, str], msg: str = "bảo trì") -> str:
+        """Người bảo trì commit `files` lên `main` của máy chủ; cây agent `fetch` (chưa merge)."""
+        maint = self.maint()
+        self.write_tree(maint, files)
+        self.run_git(maint, "add", "-A")
+        self.run_git(maint, "commit", "-q", "-m", msg)
+        self.run_git(maint, "push", "-q", "origin", "HEAD:main")
+        self.git("fetch", "-q", "origin")
+        return self.run_git(maint, "rev-parse", "HEAD")
+
+    def republish(self, files: dict[str, str]) -> None:
+        """Gốc mới trước mọi lần thử (vd cấu hình khác): `main` đi tiếp, nhánh `opt` dựng lại từ đó."""
+        self.maintain(files, "gốc mới")
+        self.git("checkout", "-q", "-B", "opt", "origin/main")
+        self.base = self.git("rev-parse", "HEAD")
+
+    def add_submodule(self) -> Path:
+        """Repo con (`f.txt`) gắn ở `vendor/sub` qua người bảo trì; cây agent `submodule update --init`."""
+        sub = self.tmp / "sub"
+        self.run_git(self.tmp, "init", "-q", "-b", "main", str(sub))
+        (sub / "f.txt").write_text("a\n", encoding="utf-8")
+        self.run_git(sub, "add", "f.txt")
+        self.run_git(sub, "commit", "-q", "-m", "f")
+        self.run_git(self.maint(), "submodule", "add", "-q", str(sub), "vendor/sub")
+        self.republish({})
+        self.run_git(self.repo, "submodule", "update", "--init", "-q")
+        return self.repo / "vendor" / "sub"
+
+    # ---- lệnh và sổ
+    def trial(self, *args: str, env: dict[str, str] | None = None) -> tuple[int, str, str]:
+        """`xt.py perf trial …` (bản ở gốc) trong cây agent. Lệnh con chưa có → đỏ ngay, không lẫn với exit 2 từ chối."""
+        r = subprocess.run(
+            [sys.executable, str(self.repo / TOOL), "perf", "trial", *args],
+            cwd=self.repo,
+            env={**os.environ, **(env or {})},
+            capture_output=True,
+            text=True,
+            timeout=300,
+            check=False,
+        )
+        self.assertNotIn("invalid choice: 'trial'", r.stderr, "chưa có `xt.py perf trial` (ADR-0071)")
+        return r.returncode, r.stdout, r.stderr
+
+    def ok(self, *args: str) -> str:
+        rc, out, err = self.trial(*args)
+        self.assertEqual(rc, 0, f"perf trial {' '.join(args)}: {out}{err}")
+        return out
+
+    def start_args(self, *hotspots: str, extra: tuple[str, ...] = TRIAL_ARGS) -> tuple[str, ...]:
+        """`start --hotspot …` (mặc định `src/hot.py`) + giả thuyết/falsifier."""
+        return ("start", *(a for h in hotspots or ("src/hot.py",) for a in ("--hotspot", h)), *extra)
+
+    def start(
+        self, *hotspots: str, extra: tuple[str, ...] = TRIAL_ARGS, env: dict[str, str] | None = None
+    ) -> tuple[int, str, str]:
+        return self.trial(*self.start_args(*hotspots, extra=extra), env=env)
+
+    def started(self, *hotspots: str, extra: tuple[str, ...] = TRIAL_ARGS) -> str:
+        """`start` phải nhận (exit 0); trả `id` lần thử (`PT-NNNN`)."""
+        rc, out, err = self.start(*hotspots, extra=extra)
+        self.assertEqual(rc, 0, out + err)
+        return str(self.tstate()["id"])
+
+    def tstate(self) -> dict[str, Any]:
+        data = json.loads((self.repo / ".autopilot" / "perf-trial.json").read_text(encoding="utf-8"))
+        assert isinstance(data, dict)
+        return data
+
+    def rows(self, event: str = "decide") -> list[dict[str, Any]]:
+        path = self.repo / ".autopilot" / "perf-trials.jsonl"
+        lines = path.read_text(encoding="utf-8").splitlines() if path.exists() else []
+        return [r for r in map(json.loads, lines) if r.get("event") == event]
+
+    def decided(self, tid: str) -> list[dict[str, Any]]:
+        return [r for r in self.rows() if r.get("id") == tid]
+
+    def why(self, row: dict[str, Any]) -> str:
+        return f"{row.get('verdict')} {json.dumps(row.get('reason'), ensure_ascii=False)}"
+
+    def ledger(self) -> tuple[bytes | None, ...]:
+        """Byte của state + sổ — "không ghi gì" so bằng cái này."""
+        files = (self.repo / ".autopilot" / n for n in ("perf-trial.json", "perf-trials.jsonl"))
+        return tuple(f.read_bytes() if f.exists() else None for f in files)
+
+    def fp(self) -> str | None:
+        return xt.tree_fingerprint(self.repo)
+
+    def hot(self, k: int = 3, buf: int = 100, tail: str = "") -> None:
+        """Candidate trong `src/hot.py`: K = 2 là `improved` thật (3500 → 2500), `tail` nối cuối file."""
+        self.put("src/hot.py", HOT.replace("K = 3", f"K = {k}").replace("BUF = 100", f"BUF = {buf}") + tail)
+
+    def perf_log(self) -> str:
+        return (self.repo / "docs" / "autopilot" / "PERF-LOG.md").read_text(encoding="utf-8")
+
+    def abort_round(self, hotspots: tuple[str, ...], n: int) -> None:
+        """`n` lần thử không giữ (`abort`, mỗi lệnh một tiến trình — restart) trên `hotspots`."""
+        for i in range(n):
+            self.started(*hotspots)
+            self.hot(tail=f"# thử {i}\n")
+            self.ok("abort", "--reason", f"thử {i}")
+
+    def refused(self, *args: str, code: int = 2, env: dict[str, str] | None = None) -> str:
+        """`perf trial <args>` bị từ chối đúng `code`; sổ, state, HEAD và cây không đổi. Trả stdout + stderr."""
+        before, fp0, head = self.ledger(), self.fp(), self.git("rev-parse", "HEAD")
+        rc, out, err = self.trial(*args, env=env)
+        self.assertEqual(rc, code, out + err)
+        self.assertEqual((self.ledger(), self.fp(), self.git("rev-parse", "HEAD")), (before, fp0, head))
+        return out + err
+
+    def spawn(self, *args: str, marker: str = "hang") -> "subprocess.Popen[bytes]":
+        """`perf trial …` ở tiến trình riêng (nhóm tiến trình mới); script đo treo khi còn `ctl/marker` — chờ tới lúc treo."""
+        hanging = self.ctl / "hanging"
+        hanging.unlink(missing_ok=True)
+        (self.ctl / marker).write_text("1", encoding="utf-8")
+        self.addCleanup(self.release, marker)
+        proc = subprocess.Popen(
+            [sys.executable, str(self.repo / TOOL), "perf", "trial", *args],
+            cwd=self.repo,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+        self.addCleanup(self.kill, proc)
+        deadline = time.monotonic() + 60
+        while proc.poll() is None and not hanging.exists() and time.monotonic() < deadline:
+            time.sleep(0.05)
+        self.assertTrue(hanging.exists(), f"`perf trial {' '.join(args)}` không tới bước đo (exit {proc.poll()})")
+        return proc
+
+    def kill(self, proc: "subprocess.Popen[bytes]") -> None:
+        """SIGKILL cả nhóm tiến trình (crash giữa lượt); đã thoát thì thôi."""
+        if proc.poll() is None:
+            with contextlib.suppress(ProcessLookupError):
+                os.killpg(proc.pid, signal.SIGKILL)
+            proc.wait()
+
+    def release(self, marker: str = "hang") -> None:
+        (self.ctl / marker).unlink(missing_ok=True)
+
+    # ---- ca
+    @flow("FLOW-20")
+    def test_flow_20_neutral_candidate_is_reverted_exactly(self) -> None:
+        """Given lần thử mở (điểm nóng `src/hot.py`, `src/extra.py`); candidate `neutral` (chú thích + file mới chưa
+        track); file người dùng ngoài danh sách: `.autopilot/note.txt`, `scratch.log` bị ignore · When `finish` · Then
+        exit 1, vân tay = lúc start, `git status` sạch, hai file người dùng còn nguyên, dòng `decide` không `kept`;
+        `perf trial log` ghi lần thử vào PERF-LOG — đường thu hồi. Tái hiện: chưa có `finish`/`log`."""
+        fp0 = self.fp()
+        tid = self.started("src/hot.py", "src/extra.py")
+        self.put(".autopilot/note.txt", "của người dùng\n")
+        self.put("scratch.log", "bị ignore\n")
+        self.hot(tail="# chú thích\n")
+        self.put("src/extra.py", "Y = 2\n")
+        rc, out, err = self.trial("finish")
+        self.assertEqual(rc, 1, out + err)
+        self.assertEqual((self.fp(), self.git("status", "--porcelain")), (fp0, ""))
+        self.assertEqual((self.repo / ".autopilot" / "note.txt").read_text(encoding="utf-8"), "của người dùng\n")
+        self.assertEqual((self.repo / "scratch.log").read_text(encoding="utf-8"), "bị ignore\n")
+        self.assertEqual(len(self.decided(tid)), 1)
+        self.assertNotEqual(self.decided(tid)[0]["verdict"], "kept")
+        self.ok("log")
+        self.assertIn(tid, self.perf_log())
+
+    @flow("FLOW-21")
+    def test_flow_21_resume_after_tree_changed_is_incomplete(self) -> None:
+        """Given candidate `improved`, `finish` bị SIGKILL giữa lượt đo, rồi cây đổi (≠ `candidate_fp`) · When `finish
+        --resume` · Then thu hồi (exit 1), một dòng `decide` `verdict: incomplete`, vân tay = lúc start (R2)."""
+        fp0 = self.fp()
+        tid = self.started()
+        self.hot(k=2)
+        self.kill(self.spawn("finish"))
+        self.release()
+        self.hot(k=2, tail="# sửa sau crash\n")
+        rc, out, err = self.trial("finish", "--resume")
+        self.assertEqual(rc, 1, out + err)
+        self.assertEqual([r["verdict"] for r in self.decided(tid)], ["incomplete"])
+        self.assertEqual(self.fp(), fp0)
+
+    @flow("FLOW-21")
+    def test_flow_21_second_resume_is_incomplete(self) -> None:
+        """Given `finish` bị kill giữa lượt, `finish --resume` cũng bị kill giữa lượt (`resumes` = 1), cây không đổi ·
+        When `finish --resume` lần hai · Then không đo lại lần ba: thu hồi (exit 1), một dòng `incomplete`, vân tay = lúc
+        start — đo lại tới khi may không làm được quá một lần."""
+        fp0 = self.fp()
+        tid = self.started()
+        self.hot(k=2)
+        self.kill(self.spawn("finish"))
+        self.kill(self.spawn("finish", "--resume"))
+        self.release()
+        rc, out, err = self.trial("finish", "--resume")
+        self.assertEqual(rc, 1, out + err)
+        self.assertEqual([r["verdict"] for r in self.decided(tid)], ["incomplete"])
+        self.assertEqual(self.fp(), fp0)
+
+    @flow("FLOW-22")
+    def test_flow_22_three_non_kept_survive_restart(self) -> None:
+        """Given ba lần thử `abort` trên `src/hot.py`, mỗi lệnh một tiến trình (restart: đếm chỉ ở `perf-trials.jsonl`) ·
+        When `start --hotspot src/hot.py` · Then exit 3 nêu đường, sổ/cây không đổi; đường khác vẫn nhận (exit 0)."""
+        self.abort_round(("src/hot.py",), 3)
+        self.assertIn("src/hot.py", self.refused(*self.start_args("src/hot.py"), code=3))
+        self.started("src/other.py")
+
+    @flow("FLOW-23")
+    def test_flow_23_secondary_over_ceiling_reverts(self) -> None:
+        """Given `mem` trần 1000 (mức lùi nới 10000 % để cô lập trần), candidate `improved` ở chỉ số chính nhưng `BUF =
+        2000` · When `finish` · Then thu hồi (exit 1), vân tay = lúc start, lý do nêu `mem`."""
+        cfg = trial_config()
+        cfg["secondary"][0]["regress"] = 10000
+        self.republish({"perf/trial.json": json.dumps(cfg)})
+        fp0 = self.fp()
+        tid = self.started()
+        self.hot(k=2, buf=2000)
+        rc, out, err = self.trial("finish")
+        self.assertEqual(rc, 1, out + err)
+        self.assertEqual(self.fp(), fp0)
+        self.assertIn("mem", self.why(self.decided(tid)[0]))
+
+    @flow("FLOW-27")
+    def test_flow_27_improved_candidate_is_kept_and_next_start_accepts(self) -> None:
+        """Given candidate K = 2 (`improved` so với gốc và `start_head`), tương đương + held-out xanh · When `finish` ·
+        Then exit 0, candidate còn trong cây; commit nó → `candidate_tree` của dòng `decide` = `HEAD^{tree}` (cây giữ);
+        `start` kế nhận — đường giữ."""
+        tid = self.started()
+        self.hot(k=2)
+        rc, out, err = self.trial("finish")
+        self.assertEqual(rc, 0, out + err)
+        self.assertIn("K = 2", (self.repo / "src" / "hot.py").read_text(encoding="utf-8"))
+        self.git("commit", "-q", "-am", "giữ")
+        row = self.decided(tid)[0]
+        self.assertEqual((row["verdict"], row["candidate_tree"]), ("kept", self.git("rev-parse", "HEAD^{tree}")))
+        self.started()
+
+    @flow("FLOW-28")
+    def test_flow_28_commit_mid_trial_refused_untouched(self) -> None:
+        """Given lần thử mở, candidate đã commit (`HEAD ≠ start_head`) · When `finish` · Then exit 2, HEAD/cây/sổ không
+        đổi, không mục stash — baseline bị lái bằng commit giữa chừng."""
+        self.started()
+        self.hot(k=2)
+        self.git("commit", "-q", "-am", "lén commit")
+        self.assertIn("start_head", self.refused("finish"))
+        self.assertEqual(self.git("stash", "list"), "")
+
+    @flow("FLOW-28")
+    def test_flow_28_moved_default_branch_keeps_merge_base(self) -> None:
+        """Given `start` + `abort` ở gốc B, rồi `main` của máy chủ đi tiếp và cây agent `fetch` (`origin/main` dời) ·
+        When `start` · Then exit 0, `base_sha` vẫn B — `fetch` không đổi merge-base, vòng không đổi."""
+        self.started()
+        self.ok("abort", "--reason", "thử ghim")
+        self.maintain({"src/other.py": "EXTRA = 400\n"}, "main đi tiếp")
+        self.assertNotEqual(self.git("rev-parse", "origin/main"), self.base)
+        self.started()
+        self.assertEqual(self.tstate()["base_sha"], self.base)
+
+    @flow("FLOW-28")
+    def test_flow_28_measured_base_tree_dirtied_refused(self) -> None:
+        """Given candidate K = 2; bộ đo (khoá, từ gốc) sửa `src/hot.py` của cây nó chạy khi K = 3 (cây gốc và
+        `start_head`) · When `finish` · Then exit 2 (danh sách file cây gốc khác sau lượt), candidate còn nguyên, không
+        dòng `decide`."""
+        self.started()
+        self.hot(k=2)
+        (self.ctl / "dirty").write_text("1", encoding="utf-8")
+        rc, out, err = self.trial("finish")
+        self.assertEqual(rc, 2, out + err)
+        self.assertIn("K = 2", (self.repo / "src" / "hot.py").read_text(encoding="utf-8"))
+        self.assertEqual(self.rows(), [])
+
+    @flow("FLOW-29")
+    def test_flow_29_candidate_edits_locked_file_is_tampered(self) -> None:
+        """Given candidate K = 2 kèm sửa `bench.py` (khoá) để in số nhỏ · When `finish` · Then thu hồi (exit 1),
+        `verdict: tampered`, vân tay = lúc start (`bench.py` về như gốc)."""
+        fp0 = self.fp()
+        tid = self.started()
+        self.hot(k=2)
+        self.put("bench.py", "print(1)\n")
+        rc, out, err = self.trial("finish")
+        self.assertEqual(rc, 1, out + err)
+        self.assertEqual(self.decided(tid)[0]["verdict"], "tampered")
+        self.assertEqual(self.fp(), fp0)
+
+    @flow("FLOW-29")
+    def test_flow_29_sitecustomize_outside_glob_is_tampered(self) -> None:
+        """Given candidate thêm `src/sitecustomize.py` (ngoài glob `locked` của dự án — review #440 lách test tương đương
+        bằng nó) · When `finish` · Then `tampered` nhờ khoá mặc định `**/sitecustomize.py`, thu hồi (exit 1)."""
+        fp0 = self.fp()
+        tid = self.started()
+        self.hot(k=2)
+        self.put("src/sitecustomize.py", "import builtins\n")
+        rc, out, err = self.trial("finish")
+        self.assertEqual(rc, 1, out + err)
+        self.assertEqual(self.decided(tid)[0]["verdict"], "tampered")
+        self.assertEqual(self.fp(), fp0)
+
+    @flow("FLOW-29")
+    def test_flow_29_ignored_pth_in_agent_venv_does_not_fool_measure(self) -> None:
+        """Given mọi lệnh đo dùng `.venv/bin/python`, `setup` dựng `.venv` trong từng cây; `.pth` bị ignore trong `.venv`
+        cây agent nạp `hot` giả (đo tại chỗ in 19 — bẫy kiểm có thật) · When `finish` với candidate `neutral` · Then không
+        giữ (exit 1): số đo từ cây dựng lại, không từ cây agent."""
+        py = ".venv/bin/python"
+        cfg = trial_config(setup="python3 -m venv --without-pip .venv", equiv=f"{py} equiv.py")
+        cfg["metric"]["cmd"], cfg["secondary"][0]["cmd"] = f"{py} bench.py", f"{py} mem.py"
+        cfg["heldout"]["cmd"] = f"{py} heldout_run.py {{input}}"
+        self.republish({"perf/trial.json": json.dumps(cfg)})
+        subprocess.run([sys.executable, "-m", "venv", "--without-pip", str(self.repo / ".venv")], check=True)
+        site = subprocess.run(
+            [str(self.repo / py), "-c", "import site; print(site.getsitepackages()[0])"],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+        fake = self.put(
+            ".cache/hot.py",
+            "K = 3\nBUF = 100\n\n\ndef compute(n):\n    return n * (n - 1) // 2\n\n\ndef cost(n):\n    return 19\n",
+        )
+        load = f"import importlib.util as u, sys; s = u.spec_from_file_location('hot', {str(fake)!r}); "
+        load += "m = u.module_from_spec(s); s.loader.exec_module(m); sys.modules['hot'] = m\n"
+        Path(site, "evil.pth").write_text(load, encoding="utf-8")
+        trap = subprocess.run([str(self.repo / py), "bench.py"], cwd=self.repo, capture_output=True, text=True)
+        self.assertEqual(trap.stdout.strip(), "19", trap.stderr)
+        tid = self.started()
+        self.hot(tail="# chú thích\n")
+        rc, out, err = self.trial("finish")
+        self.assertEqual(rc, 1, out + err)
+        self.assertNotEqual(self.decided(tid)[0]["verdict"], "kept")
+
+    @flow("FLOW-30")
+    def test_flow_30_hardcoded_bench_input_fails_heldout(self) -> None:
+        """Given candidate trả 1 khi `n == 1000` (đúng input bộ đo: −99,97 %) · When `finish` · Then held-out (input từ
+        hạt giống lúc finish, 2000…8999) không `improved` so với `start_head` lẫn gốc → thu hồi (exit 1), lý do nêu
+        held-out, vân tay = lúc start."""
+        fp0 = self.fp()
+        tid = self.started()
+        self.put("src/hot.py", SHORTCUT)
+        rc, out, err = self.trial("finish")
+        self.assertEqual(rc, 1, out + err)
+        self.assertEqual(self.fp(), fp0)
+        self.assertIn("heldout", self.why(self.decided(tid)[0]).replace("-", "").replace("_", ""))
+
+    @flow("FLOW-31")
+    def test_flow_31_start_needs_hypothesis_falsifier_clean_tree(self) -> None:
+        """Given cây sạch · When `start` thiếu/rỗng giả thuyết, thiếu falsifier, falsifier sai dạng hoặc chỉ số lạ; cây
+        bẩn (sửa file track, file mới chưa track) · Then exit 2, không ghi gì (không state, không sổ). Đối chứng: đủ và
+        sạch → exit 0, state ghi giả thuyết, falsifier, `fp_start` = vân tay cây, `start_head` = HEAD, `base_sha` = gốc."""
+        bad = {
+            "thiếu giả thuyết": ("--falsifier", "primary > -5%"),
+            "giả thuyết rỗng": ("--hypothesis", "  ", "--falsifier", "primary > -5%"),
+            "thiếu falsifier": ("--hypothesis", "h"),
+            "falsifier sai dạng": ("--hypothesis", "h", "--falsifier", "nhanh hơn"),
+            "falsifier chỉ số lạ": ("--hypothesis", "h", "--falsifier", "rss > 5%"),
+        }
+        for name, extra in bad.items():
+            rc, out, err = self.start(extra=extra)
+            self.assertEqual((rc, self.ledger()), (2, (None, None)), f"{name}: {out}{err}")
+        for rel, text in {"src/hot.py": HOT + "# sửa\n", "src/new.py": "Z = 1\n"}.items():
+            self.put(rel, text)
+            self.assertIn(rel, self.refused(*self.start_args()))
+            self.assertEqual(self.ledger(), (None, None))
+            self.git("checkout", "-q", "--", "src/hot.py")
+            (self.repo / "src" / "new.py").unlink(missing_ok=True)
+        self.started()
+        st = self.tstate()
+        self.assertEqual((st["hypothesis"], st["falsifier"]), (TRIAL_ARGS[1], TRIAL_ARGS[3]))
+        self.assertEqual((st["fp_start"], st["start_head"], st["base_sha"]), (self.fp(), self.base, self.base))
+
+    @flow("FLOW-31")
+    def test_flow_31_falsifier_hit_reverts(self) -> None:
+        """Given falsifier `primary > -50%`, candidate K = 2 (−28,6 % — `improved` nhưng không đạt điều giả thuyết hứa)
+        · When `finish` · Then thu hồi (exit 1), lý do nêu falsifier, vân tay = lúc start."""
+        fp0 = self.fp()
+        tid = self.started(extra=("--hypothesis", "bỏ nửa chi phí", "--falsifier", "primary > -50%"))
+        self.hot(k=2)
+        rc, out, err = self.trial("finish")
+        self.assertEqual(rc, 1, out + err)
+        self.assertEqual(self.fp(), fp0)
+        self.assertIn("falsifier", self.why(self.decided(tid)[0]))
+
+    @flow("FLOW-32")
+    def test_flow_32_setup_resolving_outside_tree_refused(self) -> None:
+        """Given `setup` (từ gốc) symlink `node_modules` của cây đo về cây agent · When `perf trial prepare` · Then exit 2
+        trước khi đo, nêu `node_modules`; candidate còn nguyên, không dòng `decide`."""
+        self.republish(
+            {"perf/trial.json": json.dumps(trial_config(setup=f"ln -s {self.repo}/node_modules node_modules"))}
+        )
+        self.put("node_modules/pkg/index.js", "module.exports = 1\n")
+        self.started()
+        self.hot(k=2)
+        rc, out, err = self.trial("prepare")
+        self.assertEqual(rc, 2, out + err)
+        self.assertIn("node_modules", out + err)
+        self.assertIn("K = 2", (self.repo / "src" / "hot.py").read_text(encoding="utf-8"))
+        self.assertEqual(self.rows(), [])
+
+    @flow("FLOW-33")
+    def test_flow_33_submodule_edit_stops_after_stash(self) -> None:
+        """Given candidate sửa `src/hot.py` (chú thích) và nội dung submodule `vendor/sub` · When `finish` · Then stash
+        không đưa cây về `fp_start` → exit 4, in SHA stash, pha giữ `decided`, submodule vẫn bị sửa (không thử cách khác,
+        `LOOP-STOP-025`)."""
+        sub = self.add_submodule()
+        self.started()
+        self.hot(tail="# chú thích\n")
+        (sub / "f.txt").write_text("b\n", encoding="utf-8")
+        rc, out, err = self.trial("finish")
+        self.assertEqual(rc, 4, out + err)
+        self.assertRegex(out + err, r"\b[0-9a-f]{40}\b")
+        self.assertEqual(self.tstate()["phase"], "decided")
+        self.assertEqual((sub / "f.txt").read_text(encoding="utf-8"), "b\n")
+
+    @flow("FLOW-34")
+    def test_flow_34_concurrent_finish_or_abort_refused(self) -> None:
+        """Given candidate K = 2, một `finish` đang đo (bộ đo treo — chồng lấn chắc chắn, mạnh hơn barrier) · When `finish`
+        và `abort` khác chen vào · Then cả hai exit 2 ngay (`perf-trial.lock`), sổ/cây không đổi; `finish` đầu đo xong,
+        exit 0; đúng một dòng `decide`."""
+        self.started()
+        self.hot(k=2)
+        first = self.spawn("finish")
+        for args in (("finish",), ("abort", "--reason", "chen ngang")):
+            rc, out, err = self.trial(*args)
+            self.assertEqual(rc, 2, f"{args}: {out}{err}")
+        self.release()
+        self.assertEqual(first.wait(timeout=300), 0)
+        self.assertEqual(len(self.rows()), 1)
+
+    @flow("FLOW-35")
+    def test_flow_35_kill_mid_measure_resume_measures_once_more(self) -> None:
+        """Given candidate K = 2, `finish` bị SIGKILL lúc chạy held-out (pha `measuring`, cây = `candidate_fp`) · When
+        `finish` → exit 2 chỉ `--resume`; `finish --resume` · Then đo lại từ đầu, giữ (exit 0), đúng một dòng `decide` có
+        `rounds: 2`, hạt giống của nó khác hạt giống lượt bị kill (bộ sinh ghi lại cả hai)."""
+        tid = self.started()
+        self.hot(k=2)
+        self.kill(self.spawn("finish", marker="hang-heldout"))
+        self.release("hang-heldout")
+        rc, out, err = self.trial("finish")
+        self.assertEqual(rc, 2, out + err)
+        self.assertIn("--resume", out + err)
+        self.ok("finish", "--resume")
+        rows = self.decided(tid)
+        self.assertEqual([(r["verdict"], r["rounds"]) for r in rows], [("kept", 2)])
+        seeds = (self.ctl / "seeds.log").read_text(encoding="utf-8").split()
+        self.assertGreaterEqual(len(seeds), 2, seeds)
+        self.assertNotEqual(seeds[0], seeds[-1])
+        self.assertIn(seeds[-1], json.dumps(rows[0]))
+
+    @flow("FLOW-36")
+    def test_flow_36_kill_after_decide_resume_finishes_revert(self) -> None:
+        """Given candidate `neutral`, `finish` chết (`os._exit(9)`) đúng lúc `git stash push` — sau dòng `decide`, trước
+        thu hồi · When `finish` → exit 2 chỉ `--resume`; `finish --resume` · Then làm nốt thu hồi (exit 1), vân tay = lúc
+        start, vẫn một dòng `decide`."""
+        fp0 = self.fp()
+        tid = self.started()
+        self.hot(tail="# chú thích\n")
+        r = subprocess.run(
+            [sys.executable, "-c", CRASH_AT_STASH, str((self.repo / TOOL).parent), "perf", "trial", "finish"],
+            cwd=self.repo,
+            capture_output=True,
+            text=True,
+            timeout=300,
+            check=False,
+        )
+        self.assertEqual(r.returncode, 9, r.stdout + r.stderr)
+        self.assertEqual((self.tstate()["phase"], len(self.decided(tid))), ("decided", 1))
+        self.assertIn("--resume", self.refused("finish"))
+        rc, out, err = self.trial("finish", "--resume")
+        self.assertEqual(rc, 1, out + err)
+        self.assertEqual((self.fp(), len(self.decided(tid))), (fp0, 1))
+
+    @flow("FLOW-37")
+    def test_flow_37_start_refuses_dirty_perf_log_and_base_flag(self) -> None:
+        """Given cây sạch ở gốc · When `start` khi chỉ PERF-LOG bẩn (nối thêm — không miễn, D-360); `start --base HEAD`
+        · Then exit 2, sổ/cây không đổi. Đối chứng: PERF-LOG về nguyên, không `--base` → exit 0."""
+        log = self.repo / "docs" / "autopilot" / "PERF-LOG.md"
+        orig = log.read_bytes()
+        log.write_bytes(orig + "| PT-0001 | nối thêm |\n".encode())
+        self.assertIn("PERF-LOG", self.refused(*self.start_args()))
+        log.write_bytes(orig)
+        self.refused(*self.start_args(extra=(*TRIAL_ARGS, "--base", "HEAD")))
+        self.started()
+
+    @flow("FLOW-37")
+    def test_flow_37_shortcut_commit_before_first_start_refused(self) -> None:
+        """AUD-HAR-231 — Given commit đường tắt trước lần `start` đầu vòng (hard-code N của bộ đo trong `src/hot.py`;
+        hoặc sửa `bench.py` khoá) nên `HEAD^{tree}` ≠ cây gốc · When `start` · Then exit 2, sổ/cây không đổi — đường tắt
+        không thành `start_head` để candidate sau chỉ so với nó. Đối chứng: bỏ commit → exit 0."""
+        for rel, text in {"src/hot.py": SHORTCUT, "bench.py": "print(1)\n"}.items():
+            self.put(rel, text)
+            self.git("commit", "-q", "-am", f"đường tắt {rel}")
+            self.refused(*self.start_args())
+            self.git("reset", "-q", "--hard", self.base)
+        self.started()
+
+    @flow("FLOW-37")
+    def test_flow_37_commit_after_log_tree_refused(self) -> None:
+        """AUD-HAR-231 — Given lần thử `abort`, `perf trial log`, commit PERF-LOG (cây của sự kiện `log`), rồi commit lạ
+        (đường tắt) · When `start` · Then exit 2 (`HEAD^{tree}` ≠ cây giữ gần nhất), sổ/cây không đổi. Đối chứng: bỏ
+        commit lạ → exit 0."""
+        self.started()
+        self.ok("abort", "--reason", "thử")
+        self.ok("log")
+        self.git("commit", "-q", "-am", "PERF-LOG")
+        self.put("src/hot.py", SHORTCUT)
+        self.git("commit", "-q", "-am", "commit lạ")
+        self.refused(*self.start_args())
+        self.git("reset", "-q", "--hard", "HEAD~1")
+        self.started()
+
+    @flow("FLOW-38")
+    def test_flow_38_loosened_config_on_branch_is_not_base(self) -> None:
+        """AUD-HAR-230 — Given agent commit `perf/trial.json` nới (`locked: []`, `equiv: "true"`, bộ đo `echo 1`) trên
+        nhánh, đẩy nhánh lên máy chủ và trỏ `origin/HEAD` cục bộ về nó (`remote set-head`), đặt `XT_PROGRESS_BASE=HEAD`
+        · When `start` (và `start --base HEAD`) · Then exit 2, sổ/cây không đổi: gốc = merge-base với nhánh mặc định do
+        MÁY CHỦ báo (`ls-remote --symref`), không theo HEAD, biến môi trường hay ref cục bộ. Đối chứng: bỏ commit nới →
+        exit 0, `base_sha` = gốc, `config_sha` = blob `perf/trial.json` ở gốc, `default_ref` là `main`."""
+        loose = trial_config(locked=[], equiv="true", budget=999)
+        loose["metric"]["cmd"] = "echo 1"
+        self.put("perf/trial.json", json.dumps(loose))
+        self.git("commit", "-q", "-am", "nới cấu hình")
+        self.git("push", "-q", "origin", "opt")
+        self.git("remote", "set-head", "origin", "opt")
+        env = {"XT_PROGRESS_BASE": "HEAD"}
+        self.refused(*self.start_args(), env=env)
+        self.refused(*self.start_args(extra=(*TRIAL_ARGS, "--base", "HEAD")), env=env)
+        self.git("reset", "-q", "--hard", self.base)
+        rc, out, err = self.start(env=env)
+        self.assertEqual(rc, 0, out + err)
+        st = self.tstate()
+        self.assertEqual(st["base_sha"], self.base)
+        self.assertEqual(st["config_sha"], self.git("rev-parse", f"{self.base}:perf/trial.json"))
+        self.assertIn("main", st["default_ref"])
+
+    @flow("FLOW-38")
+    def test_flow_38_merging_default_branch_starts_new_round(self) -> None:
+        """Given vòng ở gốc B có sự kiện `log` đã commit; `main` của máy chủ đi tiếp, agent merge `origin/main` vào nhánh
+        (merge-base đổi → vòng mới) · When `start` · Then exit 2: lần đầu vòng mới đòi `HEAD^{tree}` = cây gốc mới."""
+        self.started()
+        self.ok("abort", "--reason", "thử")
+        self.ok("log")
+        self.git("commit", "-q", "-am", "PERF-LOG")
+        self.maintain({"src/other.py": "EXTRA = 400\n"}, "main đi tiếp")
+        self.git("merge", "-q", "--no-edit", "origin/main")
+        self.refused(*self.start_args())
+
+    @flow("FLOW-39")
+    def test_flow_39_decoy_hotspot_does_not_reopen_exhausted_path(self) -> None:
+        """AUD-HAR-233 — Given `src/hot.py` cạn (3 lần `abort`) · When `start --hotspot src/hot.py --hotspot
+        src/other.py` (khai kèm đường "mồi") · Then exit 3, sổ/cây không đổi. Đối chứng: chỉ `src/other.py` → exit 0."""
+        self.abort_round(("src/hot.py",), 3)
+        self.assertIn("src/hot.py", self.refused(*self.start_args("src/hot.py", "src/other.py"), code=3))
+        self.started("src/other.py")
+
+    @flow("FLOW-40")
+    def test_flow_40_two_reverts_then_log_commit_start(self) -> None:
+        """AUD-HAR-232 — Given hai lần thử liên tiếp bị thu hồi (`abort`) · Then mỗi lần cây = lúc start và PERF-LOG
+        không đổi byte (`start`/`abort` không ghi cây), `start` thứ hai không kẹt · When `perf trial log`, commit, `start`
+        · Then `log` có cả hai lần thử, giữ nguyên phần người viết, `log --check` exit 0; `start` kế exit 0."""
+        fp0, log0 = self.fp(), self.perf_log()
+        ids = []
+        for i in range(2):
+            ids.append(self.started())
+            self.hot(tail=f"# thử {i}\n")
+            self.ok("abort", "--reason", f"thử {i}")
+            self.assertEqual((self.fp(), self.perf_log(), self.git("status", "--porcelain")), (fp0, log0, ""))
+        self.ok("log")
+        text = self.perf_log()
+        self.assertEqual([tid in text for tid in ids], [True, True])
+        self.assertIn("Ghi chú của người.\n", text)
+        self.ok("log", "--check")
+        self.git("commit", "-q", "-am", "PERF-LOG")
+        self.started()
+
+    @flow("FLOW-41")
+    def test_flow_41_keep_resets_only_changed_paths(self) -> None:
+        """AUD-HAR-233 — Given `src/hot.py` 2 lần `abort`; khai `src/hot.py` + `src/other.py`, lần giữ chỉ đổi
+        `src/other.py` (EXTRA 500 → 0), commit; thêm 1 lần `abort` trên `src/hot.py` · When `start --hotspot src/hot.py`
+        · Then exit 3 (đếm của `src/hot.py` = 3, lần giữ không đặt lại nó). Đối chứng: `src/other.py` → exit 0."""
+        self.abort_round(("src/hot.py",), 2)
+        self.started("src/hot.py", "src/other.py")
+        self.put("src/other.py", "EXTRA = 0\n")
+        self.ok("finish")
+        self.git("commit", "-q", "-am", "giữ other")
+        self.abort_round(("src/hot.py",), 1)
+        self.refused(*self.start_args("src/hot.py"), code=3)
+        self.started("src/other.py")
+
+    @flow("FLOW-41")
+    def test_flow_41_file_outside_hotspots_is_off_hotspot(self) -> None:
+        """Given khai `src/hot.py`, candidate K = 2 kèm file mới `src/extra.py` ngoài danh sách · When `finish` · Then
+        thu hồi (exit 1), `verdict: off-hotspot`, vân tay = lúc start (file mới bị gỡ)."""
+        fp0 = self.fp()
+        tid = self.started()
+        self.hot(k=2)
+        self.put("src/extra.py", "Y = 1\n")
+        rc, out, err = self.trial("finish")
+        self.assertEqual(rc, 1, out + err)
+        self.assertEqual(self.decided(tid)[0]["verdict"], "off-hotspot")
+        self.assertEqual(self.fp(), fp0)
+        self.assertFalse((self.repo / "src" / "extra.py").exists())
+
+    @flow("FLOW-42")
+    def test_flow_42_setup_and_probe_get_allowlisted_env(self) -> None:
+        """Given `setup` ghi `env` ra ngoài cây, `probe` ghi `os.environ`; phiên agent có `NODE_OPTIONS`, `LD_PRELOAD`,
+        `PYTHONPATH` (về `src/` cây agent), `BASH_ENV` (script để lại dấu) · When `perf trial prepare` · Then exit 0;
+        `setup` và `probe` đã chạy nhưng không thấy bốn biến đó; script `BASH_ENV` không chạy."""
+        bash_env = self.ctl / "bashenv.sh"
+        bash_env.write_text(f'touch "{self.ctl}/bashenv-ran"\n', encoding="utf-8")
+        cfg = trial_config(setup=f'env >> "{self.ctl}/setup.env"', probe="python3 probe.py")
+        self.republish({"perf/trial.json": json.dumps(cfg)})
+        self.started()
+        leak = {
+            "NODE_OPTIONS": "--require /nonexistent/evil.js",
+            "LD_PRELOAD": str(self.ctl / "evil.so"),
+            "PYTHONPATH": str(self.repo / "src"),
+            "BASH_ENV": str(bash_env),
+        }
+        rc, out, err = self.trial("prepare", env=leak)
+        self.assertEqual(rc, 0, out + err)
+        for name in ("setup.env", "probe.env"):
+            seen = "\n" + (self.ctl / name).read_text(encoding="utf-8")
+            self.assertEqual([v for v in leak if f"\n{v}=" in seen], [], name)
+        self.assertFalse((self.ctl / "bashenv-ran").exists())
+
+    @flow("FLOW-43")
+    def test_flow_43_candidate_tree_from_objects_not_patch(self) -> None:
+        """Given candidate: commit mới trong submodule (gitlink đổi), đổi tên `src/notes.txt` → `src/notes2.txt`, sửa
+        `src/hot.py`; repo agent có `diff.external` và textconv qua `.git/info/attributes` · When `perf trial prepare`
+        (`setup` ghi `ls-tree` của từng cây ra ngoài) · Then exit 0 và có cây đo đúng bằng cây candidate tính từ cây agent
+        (index tạm `add -A`): gitlink mới, có đường mới, không đường cũ — `git apply` bỏ lặng gitlink, `git diff` theo
+        driver ngoài."""
+        setup = f'git ls-tree -r HEAD > "{self.ctl}/tree-$(git rev-parse "HEAD^{{tree}}")"'
+        self.republish({"perf/trial.json": json.dumps(trial_config(setup=setup))})
+        sub = self.add_submodule()
+        self.started("src/hot.py", "src/notes.txt", "src/notes2.txt")
+        self.run_git(sub, "commit", "-q", "--allow-empty", "-m", "sub đi tiếp")
+        new_sub = self.run_git(sub, "rev-parse", "HEAD")
+        self.git("mv", "src/notes.txt", "src/notes2.txt")
+        self.hot(k=2)
+        ext = self.ctl / "ext.sh"
+        ext.write_text("#!/bin/sh\necho đổi\n", encoding="utf-8")
+        ext.chmod(0o755)
+        self.git("config", "diff.external", str(ext))
+        self.git("config", "diff.evil.textconv", "sed s/K/Q/")
+        (self.repo / ".git" / "info" / "attributes").write_text("*.py diff=evil\n", encoding="utf-8")
+        idx = {"GIT_INDEX_FILE": str(self.tmp / "expect.idx")}
+        self.git("read-tree", "HEAD", env=idx)
+        self.git("add", "-A", env=idx)
+        want = self.git("write-tree", env=idx)
+        rc, out, err = self.trial("prepare")
+        self.assertEqual(rc, 0, out + err)
+        dump = self.ctl / f"tree-{want}"
+        self.assertTrue(dump.exists(), sorted(p.name for p in self.ctl.glob("tree-*")))
+        listing = dump.read_text(encoding="utf-8")
+        self.assertIn(f"160000 commit {new_sub}\tvendor/sub", listing)
+        self.assertIn("\tsrc/notes2.txt\n", listing)
+        self.assertNotIn("\tsrc/notes.txt\n", listing)
+
+    @flow("FLOW-44")
+    def test_flow_44_secondary_regress_under_ceiling_reverts(self) -> None:
+        """Given candidate K = 2 (`improved`) kèm `BUF` 100 → 140 (+40 %, dưới trần 1000), `regress` 0 · When `finish` ·
+        Then thu hồi (exit 1), lý do nêu `mem`, vân tay = lúc start."""
+        fp0 = self.fp()
+        tid = self.started()
+        self.hot(k=2, buf=140)
+        rc, out, err = self.trial("finish")
+        self.assertEqual(rc, 1, out + err)
+        self.assertEqual(self.fp(), fp0)
+        self.assertIn("mem", self.why(self.decided(tid)[0]))
+
+    @flow("FLOW-45")
+    def test_flow_45_status_check_follows_target_without_loop_record(self) -> None:
+        """Given `target: primary <= -20%` · When thu hồi (`neutral`) → `status --check`; giữ EXTRA 500 → 0 (3500 → 3000,
+        −14 %), commit → `status --check`; giữ K = 2 (→ 2000, −43 %), commit → `status --check` · Then exit 1, 1, 0;
+        không bằng chứng/state `loop record` nào (`finish` không phải Gate, ADR-0052 §3)."""
+        codes = []
+        self.started()
+        self.hot(tail="# chú thích\n")
+        self.assertEqual(self.trial("finish")[0], 1)
+        codes.append(self.trial("status", "--check")[0])
+        self.started("src/hot.py", "src/other.py")
+        self.put("src/other.py", "EXTRA = 0\n")
+        self.ok("finish")
+        self.git("commit", "-q", "-am", "giữ 1")
+        codes.append(self.trial("status", "--check")[0])
+        self.started()
+        self.hot(k=2)
+        self.ok("finish")
+        self.git("commit", "-q", "-am", "giữ 2")
+        codes.append(self.trial("status", "--check")[0])
+        self.assertEqual(codes, [1, 1, 0])
+        auto = self.repo / ".autopilot"
+        self.assertEqual([(auto / n).exists() for n in ("evidence", "state.json")], [False, False])
 
 
 class FlowRegistryTest(unittest.TestCase):

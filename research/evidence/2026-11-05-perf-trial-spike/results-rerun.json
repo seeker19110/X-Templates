@@ -1,0 +1,401 @@
+{
+ "loadavg_start": [
+  4.97,
+  20.52,
+  24.47
+ ],
+ "npm_install_agent": {
+  "exit": 0,
+  "secs": 0.416
+ },
+ "B": "5ed6b9e19e48d6dd4e7787d189d581c95aeee30d",
+ "K": "642dd73a2bd3ae3362f9c67429cece20d4e881a6",
+ "setup_secs": {
+  "agent": 1.664,
+  "base": 2.241,
+  "start": 1.207,
+  "cand": 1.121
+ },
+ "npm_ci_exit": {
+  "agent": 0,
+  "base": 0,
+  "start": 0,
+  "cand": 0
+ },
+ "tool_help_exit": 0,
+ "wt_add_secs": [
+  0.008,
+  0.008
+ ],
+ "hazard_base_with_agent_venv": {
+  "fastlib": "$S/lab/proj/src/fastlib/__init__.py",
+  "jslib": "exit 1",
+  "sub_ok": false
+ },
+ "hazard_base_node_modules_symlinked": "$S/lab/proj/jslib",
+ "agent_venv_pth": [
+  "__editable__.fastlib-0.1.0.pth: $S/lab/proj/src",
+  "_virtualenv.pth: import _virtualenv"
+ ],
+ "agent_jslib_link": "../../jslib",
+ "where": {
+  "base": {
+   "fastlib": "$S/lab/wts/base/src/fastlib/__init__.py",
+   "jslib": "$S/lab/wts/base/jslib",
+   "sub_ok": true
+  },
+  "start": {
+   "fastlib": "$S/lab/wts/start/src/fastlib/__init__.py",
+   "jslib": "$S/lab/wts/start/jslib",
+   "sub_ok": true
+  },
+  "candidate": {
+   "fastlib": "$S/lab/proj/src/fastlib/__init__.py",
+   "jslib": "$S/lab/proj/jslib",
+   "sub_ok": true
+  },
+  "cand_wt": {
+   "fastlib": "$S/lab/wts/cand/src/fastlib/__init__.py",
+   "jslib": "$S/lab/wts/cand/jslib",
+   "sub_ok": true
+  }
+ },
+ "c2_build_secs": 1.138,
+ "c2_src_equal": true,
+ "sample_exit": {
+  "base": 0,
+  "start": 0,
+  "cand": 0,
+  "cand_inplace": 0
+ },
+ "sample_round_secs": 2.46,
+ "sample_dirty": {
+  "base": false,
+  "start": false,
+  "cand": true,
+  "cand_inplace": true
+ },
+ "cmp": {
+  "base_vs_cand": {
+   "exit": 0,
+   "verdict": "improved",
+   "change": -0.39184708919477446,
+   "p": 0.00018267179110955043
+  },
+  "start_vs_cand": {
+   "exit": 0,
+   "verdict": "improved",
+   "change": -0.16217515700629526,
+   "p": 0.0017062493689196003
+  },
+  "base_vs_start": {
+   "exit": 0,
+   "verdict": "improved",
+   "change": -0.2741288159561114,
+   "p": 0.0017062493689196003
+  },
+  "instr_exact_raw": {
+   "exit": 0,
+   "verdict": "improved",
+   "change": -0.6666646296358539,
+   "p": null,
+   "unverified-manual": true
+  },
+  "base_vs_tampered_inplace": {
+   "exit": 2,
+   "stderr": "✗ không đủ điều kiện so: lệch harness_sha256: '40bac3f4e6ed9a8ad6cb6035668c689d5af559ca506f10dd228e617d06486470' ≠ 'c3ba189a47e56344f81b68c840faee0e7b58af16c7a7d55e07818fdc85e30854'"
+  },
+  "tampered_base": {
+   "exit": 2,
+   "stderr": "✗ không đủ điều kiện so: baseline đo trên cây bẩn (before.dirty)"
+  }
+ },
+ "aa": [
+  {
+   "exit": 1,
+   "verdict": "neutral",
+   "change": 0.05436074723472104,
+   "p": 0.27303633975118824
+  },
+  {
+   "exit": 1,
+   "verdict": "regressed",
+   "change": 1.730406480586762,
+   "p": 0.00018267179110955043
+  },
+  {
+   "exit": 1,
+   "verdict": "regressed",
+   "change": 1.260577792080112,
+   "p": 0.00018267179110955043
+  }
+ ],
+ "wall_medians": {
+  "base": 0.03727000100116129,
+  "start": 0.02706726300311857,
+  "cand": 0.02282957100032945,
+  "aa0": 0.039252361999388086,
+  "aa1": 0.11437819699858665,
+  "aa2": 0.08552089099976001
+ },
+ "instr": {
+  "base": [
+   [
+    7200022,
+    7200022,
+    7200022
+   ],
+   465817
+  ],
+  "start": [
+   [
+    4000022,
+    4000022,
+    4000022
+   ],
+   465817
+  ],
+  "cand": [
+   [
+    2400022,
+    2400022,
+    2400022
+   ],
+   465817
+  ]
+ },
+ "instr_secs": 3.671,
+ "mem": {
+  "base": [
+   21108,
+   21108,
+   21108
+  ],
+  "start": [
+   21108,
+   21108,
+   21108
+  ],
+  "cand": [
+   21108,
+   21108,
+   21108
+  ]
+ },
+ "equiv_cand": 0,
+ "heldout_ns": [
+  "171780",
+  "172945",
+  "155407",
+  "240475",
+  "248192"
+ ],
+ "heldout": {
+  "base": [
+   6184102,
+   6226042,
+   5594674,
+   8657122,
+   8934934
+  ],
+  "start": [
+   3435622,
+   3458922,
+   3108162,
+   4809522,
+   4963862
+  ],
+  "cand": [
+   2061382,
+   2075362,
+   1864906,
+   2885722,
+   2978326
+  ]
+ },
+ "heldout_out_equal": true,
+ "python_bench_vs_tool": [
+  "3.14.6",
+  "3.14.4"
+ ],
+ "shortcut": {
+  "bench_n": 19,
+  "heldout": [
+   3435626,
+   3458926,
+   3108166,
+   4809526,
+   4963866
+  ]
+ },
+ "tamper_tracked_guard_exit": 1,
+ "pth_cheat": {
+  "tree_fp_unchanged": true,
+  "guard_exit": 0,
+  "inplace_instr": 19,
+  "c2_instr": 2400022
+ },
+ "ref_moved": {
+  "pinned": "5ed6b9e19e48",
+  "origin_main_now": "642dd73a2bd3"
+ },
+ "trial_files": [
+  "src/fastlib/__init__.py",
+  "src/fastlib/_note.py"
+ ],
+ "stash": {
+  "exit": 0,
+  "secs": 0.056,
+  "fp_back_to_start": true,
+  "ignored_left": true,
+  "pth_left": true,
+  "autopilot_left": true,
+  "list": "stash@{0}: On main: xt-perf-trial T-1 #1"
+ },
+ "stash_submodule": {
+  "trial_files": [
+   "vendor/sub"
+  ],
+  "exit": 0,
+  "tail": "No local changes to save\n",
+  "fp_back": false
+ },
+ "stash_without_exclude_takes_autopilot": true,
+ "kept_files": [
+  "src/fastlib/__init__.py",
+  "src/fastlib/_note.py"
+ ],
+ "kept_tree_equal": true,
+ "head_moved": true,
+ "wt_remove_secs": [
+  0.016,
+  0.012,
+  0.021
+ ],
+ "loadavg_end": [
+  19.78,
+  20.08,
+  23.71
+ ],
+ "step_secs": {
+  "sub-init": "1× 0.002 s exit 0",
+  "sub-commit": "2× 0.008 s exit 0",
+  "init": "1× 0.002 s exit 0",
+  "npm-install-lock": "1× 0.416 s exit 0",
+  "submodule-add": "1× 0.050 s exit 0",
+  "commit-B": "2× 0.031 s exit 0",
+  "rev-B": "1× 0.002 s exit 0",
+  "commit-K": "1× 0.008 s exit 0",
+  "rev-K": "1× 0.002 s exit 0",
+  "origin-main": "1× 0.002 s exit 0",
+  "setup-agent-submodule": "1× 0.027 s exit 0",
+  "setup-agent-venv": "1× 0.013 s exit 0",
+  "setup-agent-pip-e": "1× 1.338 s exit 0",
+  "setup-agent-npm-ci": "1× 0.285 s exit 0",
+  "tool-show": "1× 0.010 s exit 0",
+  "tool-help": "1× 0.297 s exit 0",
+  "tree_fp": "5× 2.117 s exit 0",
+  "wt-add-base": "1× 0.008 s exit 0",
+  "wt-add-start": "1× 0.008 s exit 0",
+  "where-hazard": "1× 0.021 s exit 0",
+  "where-js-hazard": "1× 0.023 s exit 1",
+  "where-sub-hazard": "1× 0.001 s exit 0",
+  "gitlink-hazard": "1× 0.001 s exit 0",
+  "hazard-js": "1× 0.024 s exit 0",
+  "setup-base-submodule": "1× 0.030 s exit 0",
+  "setup-base-venv": "1× 0.009 s exit 0",
+  "setup-base-pip-e": "1× 1.690 s exit 0",
+  "setup-base-npm-ci": "1× 0.511 s exit 0",
+  "setup-start-submodule": "1× 0.038 s exit 0",
+  "setup-start-venv": "1× 0.008 s exit 0",
+  "setup-start-pip-e": "1× 0.913 s exit 0",
+  "setup-start-npm-ci": "1× 0.248 s exit 0",
+  "where-base": "1× 0.022 s exit 0",
+  "where-js-base": "1× 0.026 s exit 0",
+  "where-sub-base": "1× 0.002 s exit 0",
+  "gitlink-base": "1× 0.001 s exit 0",
+  "where-start": "1× 0.023 s exit 0",
+  "where-js-start": "1× 0.029 s exit 0",
+  "where-sub-start": "1× 0.002 s exit 0",
+  "gitlink-start": "1× 0.001 s exit 0",
+  "where-candidate": "1× 0.024 s exit 0",
+  "where-js-candidate": "1× 0.025 s exit 0",
+  "where-sub-candidate": "1× 0.002 s exit 0",
+  "gitlink-candidate": "1× 0.002 s exit 0",
+  "wt-add-cand": "1× 0.008 s exit 0",
+  "cand-diff": "1× 0.003 s exit 0",
+  "cand-apply": "1× 0.000 s exit 0",
+  "cand-untracked": "1× 0.001 s exit 0",
+  "cand-overlay": "1× 0.003 s exit 0",
+  "setup-cand-submodule": "1× 0.031 s exit 0",
+  "setup-cand-venv": "1× 0.012 s exit 0",
+  "setup-cand-pip-e": "1× 0.860 s exit 0",
+  "setup-cand-npm-ci": "1× 0.218 s exit 0",
+  "where-cand_wt": "1× 0.022 s exit 0",
+  "where-js-cand_wt": "1× 0.024 s exit 0",
+  "where-sub-cand_wt": "1× 0.001 s exit 0",
+  "gitlink-cand_wt": "1× 0.001 s exit 0",
+  "c2-diff": "1× 0.001 s exit 0",
+  "ag-diff": "1× 0.001 s exit 0",
+  "sample-base": "1× 0.771 s exit 0",
+  "sample-start": "1× 0.649 s exit 0",
+  "sample-cand": "1× 0.512 s exit 0",
+  "sample-cand_inplace": "1× 0.529 s exit 0",
+  "compare-base-cand": "1× 0.226 s exit 0",
+  "compare-start-cand": "1× 0.239 s exit 0",
+  "compare-base-start": "1× 0.257 s exit 0",
+  "sample-aa0": "1× 0.737 s exit 0",
+  "compare-aa0": "1× 0.246 s exit 1",
+  "sample-aa1": "1× 1.366 s exit 0",
+  "compare-aa1": "1× 0.795 s exit 1",
+  "sample-aa2": "1× 1.720 s exit 0",
+  "compare-aa2": "1× 0.514 s exit 1",
+  "instr-base": "3× 1.922 s exit 0",
+  "instr-start": "3× 1.063 s exit 0",
+  "instr-cand": "3× 0.685 s exit 0",
+  "mem-base": "3× 0.236 s exit 0",
+  "mem-start": "3× 0.161 s exit 0",
+  "mem-cand": "3× 0.179 s exit 0",
+  "compare-instr-exact": "1× 0.538 s exit 0",
+  "equiv-cand": "1× 0.091 s exit 0",
+  "heldout-gen": "1× 0.025 s exit 0",
+  "instr-ho-base": "15× 10.255 s exit 0",
+  "instr-ho-start": "15× 9.418 s exit 0",
+  "instr-ho-cand": "15× 9.235 s exit 0",
+  "instr-hoo-base": "15× 30.339 s exit 0",
+  "instr-hoo-start": "15× 15.791 s exit 0",
+  "instr-hoo-cand": "15× 9.362 s exit 0",
+  "pyver-bench": "1× 0.063 s exit 0",
+  "pyver-tool": "1× 0.044 s exit 0",
+  "instr-short": "3× 0.254 s exit 0",
+  "instr-ho-short": "15× 13.252 s exit 0",
+  "guard-tamper": "1× 0.989 s exit 1",
+  "sample-cand_tamper": "1× 1.926 s exit 0",
+  "compare-tamper": "1× 1.341 s exit 2",
+  "tamper-undo": "1× 0.005 s exit 0",
+  "guard-pth": "1× 1.445 s exit 0",
+  "instr-pth-inplace": "3× 0.448 s exit 0",
+  "instr-pth-c2": "3× 2.058 s exit 0",
+  "sample-base_tampered": "1× 3.282 s exit 0",
+  "compare-base-tampered": "1× 0.813 s exit 2",
+  "wb-undo": "1× 0.032 s exit 0",
+  "ref-move": "1× 0.012 s exit 0",
+  "ref-now": "1× 0.005 s exit 0",
+  "trial-list": "3× 0.066 s exit 0",
+  "stash": "1× 0.042 s exit 0",
+  "stash-list": "1× 0.042 s exit 0",
+  "stash-sub": "1× 0.015 s exit 0",
+  "sub-undo": "1× 0.015 s exit 0",
+  "tiny": "3× 0.037 s exit 0",
+  "tiny-stash-all": "1× 0.065 s exit 0",
+  "stash-list2": "1× 0.009 s exit 0",
+  "stash-apply": "1× 0.024 s exit 0",
+  "kept-read": "1× 0.011 s exit 0",
+  "kept-add": "1× 0.010 s exit 0",
+  "kept-tree": "1× 0.011 s exit 0",
+  "kept-commit": "2× 0.028 s exit 0",
+  "head-tree": "1× 0.008 s exit 0",
+  "head": "1× 0.006 s exit 0",
+  "wt-remove": "3× 0.049 s exit 0"
+ }
+}

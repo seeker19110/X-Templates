@@ -362,6 +362,26 @@
     "AUD-DOC-247",
     "AUD-DOC-248"
    ]
+  },
+  {
+   "reason": "Thiết kế ADR-0071 `perf trial` (review #440) — lệnh chưa có mã, các mục sửa chữ ADR/PLAN/nghiên cứu; không phải quyết định cho/chặn của guard, PR hay CI mà bench mô phỏng. Hành vi được khoá bằng ca FLOW-20…23, 27…45 của tests/test_flow.py khi triển khai T-3700…T-3707 (Gate T-3552 STRICT cả các ID đó).",
+   "ids": [
+    "AUD-HAR-230",
+    "AUD-HAR-231",
+    "AUD-HAR-232",
+    "AUD-HAR-233",
+    "AUD-HAR-234",
+    "AUD-HAR-235",
+    "AUD-HAR-236",
+    "AUD-HAR-237",
+    "AUD-HAR-238",
+    "AUD-HAR-239",
+    "AUD-HAR-240",
+    "AUD-HAR-241",
+    "AUD-HAR-242",
+    "AUD-HAR-243",
+    "AUD-HAR-244"
+   ]
   }
  ]
 }
