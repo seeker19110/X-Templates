@@ -30,8 +30,9 @@ DIR_CAPS = {  # nhóm → (pathspec git, trần byte); đo: `git ls-files -z -- 
 }
 # Mốc kích thước (ADR-0050 §Hệ quả, ADR-0072): mỗi nhóm ≤ 2× mốc mới nhất. Vượt → ADR xét lại khai mốc mới ở đây (máy bắt,
 # không chờ audit). Mốc = (ngày, byte theo pathspec của nhóm ở commit ghi trong ADR, ADR ghi mốc); không xoá mốc cũ. MỘT
-# dòng của ADR phải ghi đủ đường nhóm + ngày + byte (review #448). Mốc 2026-10-26 do ADR-0050 khai; ADR-0050 tách nhóm và
-# số qua hai dòng nên trỏ bảng số đo ADR-0072 (ghi nguồn). Chỉ nhóm đã vượt 2× mới có mốc mới (scripts giữ mốc 2026-10-26).
+# dòng của ADR ghi đường nhóm; ngày và byte của mốc cùng một ô bảng (dòng thường là một ô; review #448/#449). Mốc
+# 2026-10-26 do ADR-0050 khai; ADR-0050 tách nhóm và số qua hai dòng nên trỏ bảng số đo ADR-0072 (ghi nguồn). Chỉ nhóm
+# đã vượt 2× mới có mốc mới (scripts giữ mốc 2026-10-26).
 SIZE_MARKS = {
     "scripts (xt.py, install.py, xt_app)": (("2026-10-26", 711824, "ADR-0072"),),
     ".claude/hooks": (("2026-10-26", 369274, "ADR-0072"), ("2026-11-05", 843817, "ADR-0072")),
@@ -110,7 +111,7 @@ class DocsBudgetTest(unittest.TestCase):
                     self.assertTrue(token, f"{group}: pathspec đầu không có thư mục")
                     self.assertTrue(
                         declares_mark(text, token, day, size),
-                        f"{adr}: không dòng nào ghi đủ {token} + {day} + {size} B",
+                        f"{adr}: không dòng nào ghi {token} với {day} và {size} B cùng một ô",
                     )
 
     def test_declares_mark_needs_one_line(self):

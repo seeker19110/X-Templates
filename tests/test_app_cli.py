@@ -134,6 +134,14 @@ class AppCwdTest(unittest.TestCase):
         base = Path(tmp.name).resolve()
         (base / "sub").mkdir()
         os.chdir(base / "sub")
-        with mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(base)}), contextlib.redirect_stdout(io.StringIO()):
+        # Route PR gọi `gh` thật: thư mục tạm không phải repo nên `gh` có thể treo tới hết giờ socket smoke (30 s) khi máy
+        # tải cao → exit 2 đỏ giả. Test này chỉ kiểm cwd: giả `gh` không có, route trả `available: false` ngay.
+        no_gh = mock.Mock(side_effect=xt.PrInputError("không có gh (test)"))
+        with (
+            mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(base)}),
+            mock.patch.object(xt, "_gh_items", no_gh),
+            mock.patch.object(xt, "_pr_stats_fetch", no_gh),
+            contextlib.redirect_stdout(io.StringIO()),
+        ):
             self.assertEqual(xt.main(["app", "--smoke"]), 0)
         self.assertEqual(Path(os.getcwd()).resolve(), base)
