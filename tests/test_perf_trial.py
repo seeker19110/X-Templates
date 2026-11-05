@@ -155,6 +155,11 @@ class TrialConfigTest(unittest.TestCase):
             "≠ primary": trial_config(secondary=[{**sec, "name": "primary"}]),
             "trùng": trial_config(secondary=[sec, sec]),
             '"unlock" ngoài': trial_config(unlock=["bench.py"]),
+            '"metric" = {': trial_config(metric={"cmd": "x", "kind": "cpu"}),
+            "runs: số nguyên": trial_config(metric={"cmd": "x", "kind": "exact", "runs": 0}),
+            "higher_is_better: bool": trial_config(metric={"cmd": "x", "kind": "exact", "higher_is_better": 1}),
+            "kind wall": trial_config(metric={"cmd": "x", "kind": "wall", "runs": 3}),
+            "unit: chuỗi": trial_config(metric={"cmd": "x", "kind": "exact", "rnus": 3}),
         }
         for want, cfg in cases.items():
             with self.subTest(want):
@@ -405,7 +410,12 @@ class TrialBaseTest(TrialCase):
     def test_git_error_is_exit_2_and_todo_commands(self) -> None:
         with unittest.mock.patch.object(xt, "trial_context", side_effect=RuntimeError("git lỗi")):
             self.assertEqual(self.tr("status")[0], 2)
-        for args, task in ((("finish",), "T-3703"), (("status", "--check"), "T-3704")):
+        todo = (
+            (("finish", "--resume"), "T-3706"),
+            (("finish", "--no-apply"), "ADR-0071 §2, chưa giao task"),
+            (("status", "--check"), "T-3704"),
+        )
+        for args, task in todo:
             with self.subTest(args):
                 self.assertIn(f"chưa triển khai ({task})", self.refused(*args))
 
@@ -871,6 +881,137 @@ class TrialReview442Test(TrialCase):
         self.assertFalse(root.exists())
         self.assertEqual(out_dir.stat().st_mode & 0o777, 0o500)
         out_dir.chmod(0o700)
+
+
+class TrialFinishTest(TrialCase):
+    """T-3703: `finish` lõi (ADR-0071 §4) — kiểm/đóng băng, đo xen kẽ, kiểm cây sau lượt, tương đương, quyết, giữ/thu
+    hồi, dòng `decide`. Ca luồng FLOW-20/28/29/33/34/41 ở `tests.test_flow`; đây là các nhánh còn lại."""
+
+    def finish(self, *args: str) -> tuple[int, dict[str, Any], str]:
+        """`finish` → (exit, dòng `decide` cuối, out + err)."""
+        rc, out, err = self.tr("finish", *args)
+        dec = [r for r in self.rows() if r["event"] == "decide"]
+        return rc, dec[-1] if dec else {}, out + err
+
+    def regrounded(self, **over: Any) -> None:
+        self.republish({"perf/trial.json": json.dumps(trial_config(**over))})
+
+    def test_keep_json_records_interleaved_samples(self) -> None:
+        """Giữ (exit 0): `--json` in dòng `decide`; mẫu v2 của ba cây (`exact` 3 lần), hai phép so, `pending-T-3705` cho
+        held-out/falsifier, ⚠ PATH; pha `closed`, `kept_tree` = `candidate_tree`; candidate còn trong cây."""
+        wd = self.ctl / "w"
+        wd.mkdir()
+        self.regrounded(env={"path": f"/usr/bin:/bin:{wd}"})
+        self.started("src/hot.py", "src/other.py")
+        self.put("src/other.py", "EXTRA = 0\n")
+        rc, out, _ = self.tr("finish", "--json")
+        self.assertEqual(rc, 0, out)
+        row = json.loads(out)
+        self.assertEqual((row["verdict"], row["rounds"], row["candidate_files"]), ("kept", 1, ["src/other.py"]))
+        prim = row["measures"]["primary"]
+        self.assertEqual([prim[t]["samples"] for t in ("base", "head", "cand")], [[3500.0] * 3] * 2 + [[3000.0] * 3])
+        self.assertEqual((prim["base"]["schema"], prim["cand"]["kind"]), (2, "exact"))
+        self.assertEqual([prim["compare"][t]["verdict"] for t in ("base", "head")], ["improved"] * 2)
+        self.assertEqual((row["heldout"], row["falsifier_hit"]), ("pending-T-3705",) * 2)
+        self.assertEqual(row["warnings"], [f"PATH có {wd} — uid này ghi được"])
+        st = self.tstate()
+        self.assertEqual((st["phase"], st["kept_tree"]), ("closed", row["candidate_tree"]))
+        self.assertIn("EXTRA = 0", (self.repo / "src" / "other.py").read_text(encoding="utf-8"))
+
+    def test_empty_candidate_closes_without_stash(self) -> None:
+        tid = self.started()
+        rc, row, out = self.finish()
+        self.assertEqual((rc, row["id"], row["verdict"]), (1, tid, "empty"), out)
+        self.assertEqual((self.tstate()["phase"], self.tstate()["stash"]), ("closed", None))
+
+    def test_refusals_before_measuring(self) -> None:
+        """Pha khác `started` → `--resume`; gốc/cấu hình lệch lúc start, dòng `start` lệch state, `start_head^{tree}` ≠
+        cây giữ gần nhất → exit 2, sổ không đổi."""
+        self.started()
+        self.put("src/hot.py", HOT + "# a\n")
+        edits = {
+            "config_sha": lambda st: {**st, "config_sha": "x"},
+            "dòng start": lambda st: {**st, "hypothesis": "khác"},
+        }
+        for want, fn in edits.items():
+            with self.subTest(want):
+                old = self.tstate()
+                xt.trial_update(self.repo, lambda st, fn=fn: (fn(st), None))
+                self.assertIn(want, self.refused("finish"))
+                xt.trial_update(self.repo, lambda st, old=old: ({**old, "rev": st["rev"]}, None))
+        row = {"event": "decide", "id": "PT-0009", "base_sha": self.base, "hotspot": ["a"], "verdict": "kept"}
+        self.append_row({**row, "candidate_tree": "f" * 40, "candidate_files": ["a"]})
+        self.assertIn("start_head^{tree} ≠ cây giữ", self.refused("finish"))
+        (self.repo / ".autopilot" / xt.PERF_TRIALS_LOG).write_text(
+            "".join(json.dumps(r) + "\n" for r in self.rows()[:-1]), encoding="utf-8"
+        )
+        xt.trial_update(self.repo, lambda st: ({**st, "phase": "measuring"}, None))
+        self.assertIn("finish --resume", self.refused("finish"))
+
+    def test_same_candidate_twice_refused(self) -> None:
+        self.started()
+        self.put("src/hot.py", HOT + "# a\n")
+        self.assertEqual(self.finish()[0], 1)
+        self.started()
+        self.put("src/hot.py", HOT + "# a\n")
+        self.assertIn("đã thử ở PT-0001", self.refused("finish"))
+
+    def test_broken_inequivalent_and_tampered_by_measure(self) -> None:
+        """Lệnh đo lỗi ở candidate → `broken`; `equiv` đỏ ở candidate → `inequivalent`; candidate ghi file vào cây đo của
+        nó lúc đo → `tampered`; mỗi lần thu hồi về vân tay lúc start (exit 1)."""
+        cases = {
+            "broken": HOT + "raise SystemExit(3)\n",
+            "inequivalent": HOT.replace("K = 3", "K = 2").replace("total += i", "total += 2 * i"),
+            "tampered": HOT.replace("K = 3", "K = 2") + "open('leak.txt', 'w').close()\n",
+        }
+        for verdict, text in cases.items():
+            with self.subTest(verdict):
+                fp0 = xt.tree_fingerprint(self.repo)
+                self.started()
+                self.put("src/hot.py", text)
+                rc, row, out = self.finish()
+                self.assertEqual((rc, row["verdict"], xt.tree_fingerprint(self.repo)), (1, verdict, fp0), out)
+
+    def test_base_command_or_equiv_or_setup_broken_is_exit_2(self) -> None:
+        for over in ({"metric": {"cmd": "exit 5", "kind": "exact"}}, {"equiv": "exit 1"}, {"setup": "exit 7"}):
+            with self.subTest(over):
+                if (self.repo / ".autopilot" / xt.PERF_TRIAL_FILE).exists():
+                    self.ok("abort", "--reason", "đổi cấu hình")
+                self.regrounded(**over)
+                self.started()
+                self.put("src/hot.py", HOT.replace("K = 3", "K = 2"))
+                self.assertEqual(self.tr("finish")[0], 2)
+                self.assertEqual([r for r in self.rows() if r["event"] == "decide" and r["verdict"] != "aborted"], [])
+
+    def test_unbuildable_and_tree_changed_while_measuring(self) -> None:
+        self.started()
+        self.put("src/hot.py", HOT.replace("K = 3", "K = 2"))
+        with unittest.mock.patch.object(xt, "trial_candidate_problems", return_value=["cand: x khác cây agent"]):
+            self.assertEqual(self.finish()[:2][1]["verdict"], "unbuildable")
+        real, calls = xt.tree_fingerprint, []
+
+        def fp(base: Path, env: dict[str, str] | None = None) -> str | None:
+            calls.append(1)
+            return "đổi" if len(calls) == 2 else real(base, env)
+
+        self.started()
+        self.put("src/hot.py", HOT.replace("K = 3", "K = 2") + "# b\n")
+        with unittest.mock.patch.object(xt, "tree_fingerprint", fp):
+            rc, row, out = self.finish()
+        self.assertEqual((rc, row["verdict"]), (1, "incomplete"), out)
+
+    def test_sample_compare_units(self) -> None:
+        root = self.tmp / "t"
+        root.mkdir()
+        run = xt.TrialRun(xt.TrialTree("cand", "c", root, self.tmp), {"PATH": "/usr/bin:/bin"}, {})
+        self.assertGreater(xt.trial_sample(run, {"cmd": "true", "kind": "wall"}, 10), 0)
+        self.assertEqual(xt.trial_sample(run, {"cmd": "echo a 42", "kind": "exact"}, 10), 42.0)
+        for cmd in ("echo abc", "echo inf", "true"):
+            with self.subTest(cmd), self.assertRaisesRegex(xt.TrialBroken, "không phải số hữu hạn"):
+                xt.trial_sample(run, {"cmd": cmd, "kind": "exact"}, 10)
+        got = xt.trial_compare({"base": [1, 1, 1], "head": [2, 1, 2], "cand": [1, 1, 1]}, {"kind": "exact"})
+        self.assertEqual([got[t]["verdict"] for t in ("base", "head")], ["insufficient"] * 2)
+        self.assertIn("lệch giữa các lần ở head", got["base"]["reason"])
 
 
 class TrialParserTest(unittest.TestCase):
