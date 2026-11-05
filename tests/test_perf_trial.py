@@ -137,6 +137,16 @@ class TrialCase(TmpRepoCase):
 
 
 class TrialConfigTest(unittest.TestCase):
+    def test_doc_example_is_valid(self) -> None:
+        """T-3707: ví dụ `perf/trial.json` trong `optimization-loop.md` (khối ```json đầu tiên) qua kiểm cấu hình, Gate mẫu
+        của PLAN-opt là `perf trial status --check` chạy `xt.py` từ blob gốc."""
+        doc = (ROOT / "framework" / "11-autonomous-loop" / "optimization-loop.md").read_text(encoding="utf-8")
+        block = doc.split("```json\n", 1)[1].split("```", 1)[0]
+        self.assertIsNone(xt.trial_config_problem(json.loads(block)))
+        self.assertIn(
+            "python3 -I <(git cat-file blob origin/HEAD:.xtemplates/scripts/xt.py) perf trial status --check", doc
+        )
+
     def test_valid_config_and_unlock(self) -> None:
         self.assertIsNone(xt.trial_config_problem(trial_config()))
         self.assertIsNone(xt.trial_config_problem(trial_config(unlock=["pyproject.toml", "**/*.lock"])))
@@ -936,7 +946,7 @@ class TrialFinishTest(TrialCase):
         held = row["heldout"]
         self.assertEqual((len(held["seed"]), len(held["inputs"]), row["falsifier_hit"]), (16, 5, False))
         self.assertEqual([held["compare"][t]["verdict"] for t in ("base", "head")], ["improved"] * 2)
-        self.assertLessEqual(set(held["per_input"].values()), {"improved", "neutral"})  # EXTRA −500 ≤ 2 % ở n lớn
+        self.assertEqual(set(held["per_input"].values()), {"improved"})  # EXTRA −500 ≥ 3,2 % ở mọi input (HELD_RANGE)
         self.assertEqual(row["warnings"], [f"PATH có {wd} — uid này ghi được"])
         st = self.tstate()
         self.assertEqual((st["phase"], st["kept_tree"]), ("closed", row["candidate_tree"]))

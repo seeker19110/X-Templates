@@ -3,7 +3,7 @@
 - **Trạng thái:** Đã chấp nhận (2026-11-05, phiên chính tự duyệt — D-356: nhận cả mười bốn đề xuất in đậm ở §Điểm đã chốt;
   chủ repo 2026-11-05 "làm hết đi"; sửa theo review #440 — D-360: baseline do máy tính, không lối ra `--base`, PERF-LOG dựng từ
   sổ, điểm nóng là danh sách file; sửa theo review #442 — D-366: gốc = đầu nhánh máy chủ, không merge-base; sửa theo review #443 — D-368: `status --check`
-  ràng `HEAD^{tree}`, pathspec theo nghĩa đen, môi trường mới mỗi lần chạy lệnh đo, khoá `.venv/`/`node_modules/`). Chưa triển khai — T-3700…T-3707 (PLAN-harden-2026-10-27-loops).
+  ràng `HEAD^{tree}`, pathspec theo nghĩa đen, môi trường mới mỗi lần chạy lệnh đo, khoá `.venv/`/`node_modules/`). Đã triển khai — T-3700…T-3707 (PLAN-harden-2026-10-27-loops); `/optimize` gọi từ T-3707.
 - **Ngày:** 2026-11-05.
 - **Thực hiện:** [ADR-0052 §Quyết định 7](0052-loop-state-rev-progress-perf-v2-next-step.md#quyết-định) (D-203; ràng buộc đầu
   vào — bảng ở §Ràng buộc) và §3 (lần thử tối ưu không đi qua `loop record`), thêm `LOOP-OPT-007` (held-out) và `LOOP-OPT-004`
@@ -316,7 +316,7 @@ của chính task đó và task trước. Số T-3700…T-3707 thay T-3680…T-3
 
 | Task | Phạm vi | Gate |
 |---|---|---|
-| T-3700 | Corpus: FLOW-20…23, 27…45 vào `tests/test_flow.py` với `XFAIL` (tái hiện ghi rõ), không mã | `python3 -m unittest -q tests.test_flow && python3 -c "import sys; sys.path[:0] = ['tests', 'scripts']; import test_flow as t; s = {'FLOW-%d' % n for n in [20, 21, 22, 23, *range(27, 46)]}; sys.exit(bool(s - t.FLOW_IDS or s - t.XFAIL.keys()))"` |
+| T-3700 | Corpus: FLOW-20…23, 27…45 vào `tests/test_flow.py` với `XFAIL` (tái hiện ghi rõ), không mã | `python3 -m unittest -q tests.test_flow && python3 -c "import sys; sys.path[:0] = ['tests', 'scripts']; import test_flow as t; s = {'FLOW-%d' % n for n in [20, 21, 22, 23, *range(27, 46)]}; sys.exit(bool(s - t.FLOW_IDS or s & t.XFAIL.keys()))"` (D-365: T-3707 gỡ mọi ID khỏi `XFAIL`, Gate đổi theo) |
 | T-3701 | Cấu hình gốc + khoá mặc định, `base_sha` merge-base, sổ (khoá, `rev`), `start`/`status`/`abort` (thu hồi stash + vân tay, exit 4), đếm theo đường, `budget`, `log`; `tests/test_perf_trial.py` + `tests/shard-weights.json` | `XT_FLOW_STRICT=FLOW-22,FLOW-37,FLOW-38,FLOW-39,FLOW-40 python3 -m unittest -q tests.test_perf_trial tests.test_flow` |
 | T-3702 | Môi trường đo: cây tạm dựng từ tree object, `setup` allowlist, kiểm trỏ đúng cây, danh sách file đầy đủ, dọn; `prepare` | `XT_FLOW_STRICT=FLOW-32,FLOW-42,FLOW-43 python3 -m unittest -q tests.test_perf_trial tests.test_flow` |
 | T-3703 | `finish` lõi: kiểm trường, đóng băng, khoá/điểm nóng, đo xen kẽ chỉ số chính (`wall`/`exact`), kiểm cây sau lượt, tương đương, quyết, giữ/thu hồi + vân tay, dòng `decide`, `perf-trial.lock` | `XT_FLOW_STRICT=FLOW-20,FLOW-28,FLOW-29,FLOW-33,FLOW-41 python3 -m unittest -q tests.test_perf_trial tests.test_flow` |
