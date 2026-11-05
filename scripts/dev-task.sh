@@ -9,7 +9,7 @@
 #   1) KHAI BÁO: nếu có xt.yaml (YAML phẳng `task: lệnh`, agent đọc được) hoặc
 #      .claude/project-commands.sh (biến bash <task>=lệnh) → chạy lệnh khai báo.
 #   2) TỰ DÒ: nhận diện hệ sinh thái (node/python/go/rust/make) → chạy lệnh quy ước. Test Python chạy song song theo
-#      số nhân (D-367): pytest có xdist → `-n auto`; unittest → mỗi module một tiến trình (`xargs -P`). XT_JOBS=N chọn
+#      số nhân (D-367): pytest có xdist → `python3 -m pytest -n auto`; unittest → mỗi module một tiến trình (`xargs -P`). XT_JOBS=N chọn
 #      số tiến trình (1 = tuần tự như cũ).
 #   3) NO-OP: không có gì khớp → in thông báo skip, exit 0 (KHÔNG làm gãy dự án nào).
 #      Ngoại lệ (ADR-0011): autopilot đang chạy (.autopilot/state.json "active": true) mà `lint`/`test`
@@ -142,7 +142,9 @@ python_test_cmd() { # lệnh test Python tự dò; DT_HINT=1 (run_task) → log 
   if command -v pytest >/dev/null 2>&1; then
     j="$(test_jobs auto)"
     if [ "$j" = 1 ]; then echo "pytest -q"
-    elif python3 -c 'import xdist' >/dev/null 2>&1; then echo "pytest -q -n $j"
+    # `python3 -m pytest`: đúng interpreter vừa import được xdist (xdist phụ thuộc pytest) — `pytest` trên PATH có thể là
+    # pipx/venv khác không có xdist → `-n` lỗi "unrecognized arguments".
+    elif python3 -c 'import xdist' >/dev/null 2>&1; then echo "python3 -m pytest -q -n $j"
     else
       [ "${DT_HINT:-}" = 1 ] && log "gợi ý: cài pytest-xdist để chạy song song theo số nhân (XT_JOBS=1: tuần tự, không gợi ý)"
       echo "pytest -q"

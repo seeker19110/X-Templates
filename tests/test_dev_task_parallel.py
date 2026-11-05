@@ -17,6 +17,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 TOOLS = "bash sh dirname basename grep sed awk tail head mktemp tee rm cat xargs nproc getconf sort ls sleep touch env"
 FAKE_PYTEST = '#!/bin/sh\necho "PYTEST-ARGS: $*"\n'
+# `python3 -m pytest` (có xdist): module giả trên PYTHONPATH — in dấu khác lệnh `pytest` trên PATH để biết lệnh nào chạy.
+FAKE_PYTEST_MODULE = 'import sys\n\nprint("PYTEST-MODULE-ARGS: " + " ".join(sys.argv[1:]))\n'
 # Mỗi module ghi mốc bắt đầu rồi chờ module kia — chạy tuần tự thì module đầu hết hạn và đỏ.
 BARRIER = """import time, unittest
 from pathlib import Path
@@ -61,6 +63,7 @@ class DevTaskParallelTest(unittest.TestCase):
 
     def pytest(self, xdist: bool) -> None:
         self.script(self.bin / "pytest", FAKE_PYTEST)
+        (self.pypath / "pytest.py").write_text(FAKE_PYTEST_MODULE, encoding="utf-8")
         self.xdist(xdist)
 
     def dt(self, *args: str, jobs: str | None = None, **extra: str) -> subprocess.CompletedProcess[str]:
@@ -90,13 +93,17 @@ class DevTaskParallelTest(unittest.TestCase):
 
     # --- pytest ---------------------------------------------------------------------------------------------------
     def test_pytest_with_xdist_runs_n_jobs(self):
+        """Có xdist → `python3 -m pytest`: cùng interpreter vừa import được xdist (pytest trên PATH có thể là pipx/venv
+        khác không có xdist → `-n` lỗi "unrecognized arguments")."""
         self.pytest(xdist=True)
         for jobs, flag in ((None, "-n auto"), ("3", "-n 3"), ("abc", "-n auto"), ("0", "-n auto"), ("-2", "-n auto")):
             with self.subTest(jobs=jobs):
                 r = self.dt("test", jobs=jobs)
                 self.assertEqual(r.returncode, 0, r.stderr)
-                self.assertEqual(self.ran(r), f"pytest -q {flag}")
-                self.assertIn(f"PYTEST-ARGS: -q {flag}", r.stdout)
+                self.assertTrue(self.ran(r).startswith("python3 -m pytest"), self.ran(r))
+                self.assertEqual(self.ran(r), f"python3 -m pytest -q {flag}")
+                self.assertIn(f"PYTEST-MODULE-ARGS: -q {flag}", r.stdout)
+                self.assertNotIn("PYTEST-ARGS", r.stdout)  # không chạy pytest trên PATH
                 self.assertNotIn("pytest-xdist", r.stderr)
         self.assertIn("XT_JOBS='abc' không phải số nguyên dương", self.dt("test", jobs="abc").stderr)
 
@@ -219,7 +226,7 @@ class DevTaskParallelTest(unittest.TestCase):
         self.pytest(xdist=True)
         r = self.dt("test", XT_GUARD_POLICY="strict")
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertIn("PYTEST-ARGS: -q -n auto", r.stdout)
+        self.assertIn("PYTEST-MODULE-ARGS: -q -n auto", r.stdout)
 
 
 if __name__ == "__main__":
