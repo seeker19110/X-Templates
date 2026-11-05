@@ -269,7 +269,7 @@ python3 -m unittest discover -s tests    # chỉ test (cổng test còn đòi co
 - [ADR-0066](docs/adr/0066-guard-written-file-reuse.md) (D-327): tệp do chính lệnh ghi mà tên được nhắc lại ở chỗ khác của lệnh (trừ lệnh chỉ đọc trong danh sách trắng) → `BUDGET` — không liệt kê trình chạy (AUD-SEC-406).
 - [ADR-0067](docs/adr/0067-guard-static-limit-layered-defense.md) (D-331/D-332): tên tệp/mô-đun dựng lúc chạy trong lệnh tự ghi tệp — giới hạn phân tích tĩnh, chấp nhận có hạn 2027-01-21 (thay một phần ADR-0065); dạng nguyên văn vẫn phải chặn.
 - [ADR-0071](docs/adr/0071-perf-trial.md) (D-356, D-360, D-366, D-368, D-370, D-371, D-372): `perf trial` — máy quản lý trọn một lần thử tối ưu: baseline = đầu nhánh mặc định do máy chủ báo, đo xen kẽ base/`start_head`/candidate ở cây dựng lại từ tree object, cấu hình và công cụ chấm từ commit gốc, held-out lúc finish, falsifier ghi trước, giữ/thu hồi tự động, sổ bền `.autopilot/` dựng PERF-LOG; lát 3 của ADR-0052, triển khai T-3700…T-3707.
-- [ADR-0072](docs/adr/0072-review-dir-caps-after-2x.md) (D-373): `.claude/hooks/` vượt 2× mốc 2026-10-26 do bản vá guard #433–#442 — giữ trần `DIR_CAPS`, mốc mới 2026-11-05 cho hooks/`scripts`, cổng máy `SIZE_MARKS` (mỗi nhóm ≤ 2× mốc gần nhất); T-3709 đo chi phí compile `guard.py`.
+- [ADR-0072](docs/adr/0072-review-dir-caps-after-2x.md) (D-373): `.claude/hooks/` vượt 2× mốc 2026-10-26 do bản vá guard #433–#442 — giữ trần `DIR_CAPS`, mốc mới 2026-11-05 cho hooks, cổng máy `SIZE_MARKS` (mỗi nhóm ≤ 2× mốc gần nhất); T-3709 đo chi phí compile `guard.py`.
 
 Nghiên cứu nền ngày 2026-10-13 ở [`research/`](research/): phân tích khung cũ, trích xuất catalog `seeker19110/stored`,
 AI agent và giao thức, cơ chế Claude Code. Khung cũ khôi phục được bằng `git archive 1b80fe4`.

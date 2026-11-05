@@ -21,7 +21,7 @@ Số đo (file git theo dõi, `git ls-tree -r -l <sha>` cộng cột kích thư�
 
 | Nhóm | Mốc 2026-10-26 | 2× mốc | `742434b` | Tỉ lệ | Trần `DIR_CAPS` |
 |---|---:|---:|---:|---:|---:|
-| `.claude/hooks/` | 369 274 | 738 548 | 843 817 | 2,28× | 1 417 969 |
+| `.claude/hooks/` | 369 274 | 738 548 | 843 817 | 2,29× | 1 417 969 |
 | `scripts/*.py` + `scripts/xt_app/` | 711 824 | 1 423 648 | 1 164 066 | 1,64× | 1 760 431 |
 | `framework/11-autonomous-loop/` | 232 297 | 464 594 | 292 202 | 1,26× | 1 280 883 |
 | `docs/ops/` (trừ `*-ARCHIVE.md`) | 771 538 (2026-11-02, D-314) | 1 543 076 | 808 591 | 1,05× | 810 114 |
@@ -59,8 +59,10 @@ Chọn **phương án 1** (D-373):
 - Trần `DIR_CAPS` giữ nguyên. Mức tăng `.claude/hooks/` được chấp nhận vì là bản vá an ninh guard (#433–#442).
 - Bảng mốc `SIZE_MARKS` trong `tests/test_docs_budget.py`: mỗi nhóm `DIR_CAPS` có ít nhất một mốc (ngày, byte, ADR khai).
   Mốc so là mốc có ngày mới nhất; nhóm > 2× mốc đó là test đỏ. Mốc cũ không xoá.
-- Mốc 2026-11-05 cho `.claude/hooks/` (843 817 B) và `scripts` (1 164 066 B), đo ở `0a2583f`. Hai nhóm này không đổi
-  byte tới `742434b` và ở commit thêm ADR này. `framework/11-autonomous-loop/` giữ mốc 2026-10-26 (ADR-0050).
+- Mốc 2026-11-05 chỉ cho `.claude/hooks/` (843 817 B), đo ở `0a2583f`; nhóm không đổi byte tới `742434b` và ở commit thêm
+  ADR này. `scripts` và `framework/11-autonomous-loop/` giữ mốc 2026-10-26 (ADR-0050). Ghi chú (review #448): D-373 và
+  phương án 1 nêu mốc mới cho cả `scripts`; bỏ phần đó vì `scripts` mới 1,64×, chưa vượt 2× nên chưa có gì để xét lại.
+  Đặt mốc sớm sẽ dời điểm báo động lên 2 328 132 B, trên trần. D-373 giữ nguyên vì sổ quyết định chỉ nối thêm.
   `docs/ops/` và `docs/autopilot/` chưa thuộc ADR-0050. Hai nhóm nhận số đo 2026-11-02 (D-314, T-3651) làm mốc; trần riêng
   của chúng (+5 %) vẫn chặt hơn nhiều.
 - `T-3709` (trước 2027-01-21, cùng đợt đánh giá sandbox): đo chi phí compile `guard.py` mỗi lệnh Bash ở kích thước hiện tại,
@@ -70,8 +72,12 @@ Chọn **phương án 1** (D-373):
 ## Hệ quả
 
 - Tốt: lần vượt 2× kế tiếp đỏ ngay ở PR gây ra nó, không chờ audit. Mỗi lần nâng mốc phải có ADR nêu số đo.
-- Xấu: điểm báo động 2× của hooks lùi tới 1 687 634 B, lớn hơn trần 1 417 969 B. Với nhóm này trần lại là chặn chính;
-  điểm 2× của `scripts` (2 328 132 B) cũng nằm trên trần. Bù lại: T-3709 có hạn và có số đo.
+- Xấu: điểm báo động 2× của hooks lùi tới 1 687 634 B, lớn hơn trần 1 417 969 B. Với nhóm này trần lại là chặn chính.
+  Bù lại: T-3709 có hạn và có số đo.
+- Cổng 2× chỉ chặn trước trần ở hai nhóm: `scripts` (2× = 1 423 648 B, trần 1 760 431 B) và
+  `framework/11-autonomous-loop/` (464 594 B, trần 1 280 883 B). Ba nhóm còn lại có 2× mốc nằm trên trần, nên trần là chặn
+  chính: `.claude/hooks/` (1 687 634 > 1 417 969), `docs/ops/` (1 543 076 > 810 114) và `docs/autopilot/`
+  (671 134 > 352 345).
 - Theo dõi: mốc 2027-01-21 của ADR-0050 giữ nguyên; xét lại khi T-3709 có số.
 - Đường lùi: nếu T-3709 đo chi phí compile vượt ngân sách hook, tách `guard.py` (ADR riêng; AUD-ARCH-007). Gỡ cổng máy =
   revert commit thêm `SIZE_MARKS` (trần `DIR_CAPS` không phụ thuộc nó).
