@@ -9,8 +9,8 @@
 #   1) KHAI BÁO: nếu có xt.yaml (YAML phẳng `task: lệnh`, agent đọc được) hoặc
 #      .claude/project-commands.sh (biến bash <task>=lệnh) → chạy lệnh khai báo.
 #   2) TỰ DÒ: nhận diện hệ sinh thái (node/python/go/rust/make) → chạy lệnh quy ước. pytest có xdist chạy song song theo
-#      số nhân (D-367, D-369): `python3 -m pytest -q -n auto`, trừ khi cấu hình tắt xdist; XT_JOBS=N chọn số tiến trình
-#      (1 = `pytest -q` tuần tự; trần 4×số nhân). unittest giữ `discover` tuần tự.
+#      số nhân (D-367, D-369): `python3 -P -m pytest -q -n auto`, trừ khi cấu hình tắt xdist; XT_JOBS=N chọn số
+#      tiến trình (1 = `pytest -q` tuần tự; trần 4×số nhân). unittest giữ `discover` tuần tự.
 #   3) NO-OP: không có gì khớp → in thông báo skip, exit 0 (KHÔNG làm gãy dự án nào).
 #      Ngoại lệ (ADR-0011): autopilot đang chạy (.autopilot/state.json "active": true) mà `lint`/`test`
 #      rỗng hoặc là lệnh không kiểm gì (true, :, exit 0, echo …) → ĐỎ. Cổng rỗng không phải bằng chứng.
@@ -149,15 +149,23 @@ pytest_xdist_off() { # 0 = tắt xdist có chủ ý: PYTEST_DISABLE_PLUGIN_AUTOL
   return 1
 }
 python_test_cmd() { # lệnh test Python tự dò; DT_HINT=1 (run_task) → log gợi ý/XT_JOBS đúng một lần mỗi lần chạy
-  local j
+  local j rc=0
   if command -v pytest >/dev/null 2>&1; then
     if pytest_xdist_off; then echo "pytest -q"; return 0; fi
-    # `python3 -m pytest`: đúng interpreter vừa tìm thấy xdist (xdist phụ thuộc pytest) — `pytest` trên PATH có thể là
-    # pipx/venv khác không có xdist → `-n` lỗi "unrecognized arguments". Khác `pytest`: thêm cwd vào sys.path.
-    if python3 -c 'import importlib.util,sys; sys.exit(importlib.util.find_spec("xdist") is None)' >/dev/null 2>&1; then
+    # `python3 -P -m pytest`: đúng interpreter vừa tìm thấy xdist (xdist phụ thuộc pytest) — `pytest` trên PATH có thể
+    # là pipx/venv khác không có xdist → `-n` lỗi "unrecognized arguments". `-P` (Python ≥ 3.11): không thêm cwd vào
+    # sys.path, như `pytest` — mô-đun ở gốc (`pytest.py`, `_pytest/`, `pluggy.py`, `argparse.py`…) không che pytest
+    # (D-371, review #446). Dò xdist cũng với `-P`; python3 < 3.11 không có `-P` (exit 2) → `pytest -q` như trước #444.
+    python3 -P -c 'import importlib.util as u,sys; sys.exit(u.find_spec("xdist") is None)' >/dev/null 2>&1 || rc=$?
+    if [ "$rc" = 0 ]; then
       j="$(test_jobs)"
-      if [ "$j" = 1 ]; then echo "pytest -q"; else echo "python3 -m pytest -q -n $j"; fi
+      if [ "$j" = 1 ]; then echo "pytest -q"; else echo "python3 -P -m pytest -q -n $j"; fi
       return 0
+    fi
+    if [ "$rc" = 2 ]; then
+      [ "${XT_JOBS:-}" != 1 ] && [ "${DT_HINT:-}" = 1 ] \
+        && log "python3 không có '-P' (< 3.11) — chạy 'pytest -q', không '-n' (cần Python ≥ 3.11 để chạy song song)"
+      echo "pytest -q"; return 0
     fi
     [ "${XT_JOBS:-}" != 1 ] && [ "${DT_HINT:-}" = 1 ] \
       && log "gợi ý: cài pytest-xdist để chạy test song song theo số nhân (XT_JOBS=1: tuần tự, không gợi ý)"

@@ -340,6 +340,9 @@ class CommitGateFastConfigChangeTest(CommitGateFastHookBase):
             "pyproject.toml",
             "pkg/pyproject.toml",
             ".coveragerc",
+            "pytest.py",  # D-371: `python3 -m pytest` (dev-task) thêm cwd vào sys.path → pytest.py gốc giả lệnh test tự dò
+            "conftest.py",
+            "tests/conftest.py",
             "requirements-dev.txt",
             "requirements.txt",
             "scripts/dev-task.sh",
@@ -379,6 +382,27 @@ class CommitGateFastConfigChangeTest(CommitGateFastHookBase):
                 self.assertIn("FULL-RAN", err)
                 self.assertIn("đụng cấu hình cổng", err)
                 subprocess.run([*self.git, "reset", "-q", "--hard"], check=True)
+
+
+class CommitGatePytestConfigChangeTest(CommitGateFastHookBase):
+    """Review #446: cấu hình pytest ở gốc mà `dev-task.sh` đọc (`pytest_xdist_off`: `no:xdist`) và pytest đọc — đổi chúng
+    đổi lệnh/kết quả test, nên là cấu hình cổng như `pyproject.toml`. Lớp riêng để `CommitGateFastConfigChangeTest` không
+    vượt ngân sách thời gian shard."""
+
+    def test_pytest_config_change_forces_full_gate(self):
+        for change in ("pytest.ini", ".pytest.ini", "pytest.toml", ".pytest.toml", "tox.ini", "setup.cfg"):
+            with self.subTest(change=change):
+                code, out, err = self.commit("commit_gate: fast\n", fast="echo FAST-RAN", change=change)
+                self.assertEqual((code, decision(out)), (0, None), err)
+                self.assertIn("FULL-RAN", err)
+                self.assertNotIn("FAST-RAN", err)
+                self.assertIn("đụng cấu hình cổng nên cổng nhanh chạy MỌI lớp test", err)
+                subprocess.run([*self.git, "reset", "-q", "--hard"], check=True)
+                subprocess.run([*self.git, "clean", "-qfd"], check=True)
+        # Chỉ ở gốc (dev-task đọc `$ROOT/<tệp>`; pytest tìm từ thư mục chạy): tên tương tự ở thư mục con → cổng nhanh.
+        code, out, err = self.commit("commit_gate: fast\n", fast="echo FAST-RAN", change="docs/setup.cfg")
+        self.assertIn("FAST-RAN", err)
+        self.assertNotIn("FULL-RAN", err)
 
 
 class CommitGateFastHookTest(CommitGateFastHookBase):
