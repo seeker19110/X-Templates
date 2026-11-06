@@ -460,7 +460,7 @@ def _sync_on_failure(theirs: list[dict[str, Any]], entry: dict[str, Any]) -> lis
 
 
 def _seconds(value: object) -> TypeGuard[int | float]:
-    """`timeout` là số giây (int/float, không phải bool — `true < 1200` đúng trong Python, AUD-HAR-303 🟢)."""
+    """`timeout` là số giây (int/float, không phải bool — `true < 1200` đúng trong Python, review #454, AUD-HAR-309)."""
     return isinstance(value, (int, float)) and not isinstance(value, bool)
 
 
@@ -541,7 +541,6 @@ def _merge_hook_events(
 HOOK_FORM_LABEL = {  # log của `install_settings` (AUD-HAR-306: trước luôn in "dạng tương đối", kể cả khi giữ tuyệt đối)
     "relative": "dạng tương đối",
     "absolute": "giữ dạng ${CLAUDE_PROJECT_DIR} của dự án",
-    "framework": "dạng của khung",
 }
 OWN_PERMISSIONS_RE = re.compile(r"""^harness_permissions:[ \t]*["']?own["']?[ \t]*(?:#.*)?$""", re.M)
 NO_PERMISSION_CHANGES = ("allow_add", "deny_add", "ask_remove", "deny_remove", "ask_unproven")
@@ -582,15 +581,15 @@ def settings_changes(
 ) -> dict[str, Any]:
     """Gộp `ours` vào `theirs` tại chỗ (bộ nhớ) và trả báo cáo: `permissions`, `hooks_added`, `hooks_matcher_updated`,
     `changes` (tổng số thay đổi; 0 = không cần ghi). `own` (`harness_permissions: own`): không đụng quyền, lệnh hook
-    của khung ghi dạng tương đối như dự án."""
-    added, synced = _merge_hook_events(
-        _relative_hooks(ours) if own and not _absolute_form(ours, theirs) else ours, theirs
-    )
+    của khung theo dạng dự án đang dùng — báo thêm `hook_form` (`relative`/`absolute`, ADR-0073)."""
+    relative = own and not _absolute_form(ours, theirs)
+    added, synced = _merge_hook_events(_relative_hooks(ours) if relative else ours, theirs)
     perms = dict.fromkeys(NO_PERMISSION_CHANGES, []) if own else merge_permissions(ours, theirs, prov)
     total = (
         len(added) + len(synced) + sum(len(perms[k]) for k in ("allow_add", "deny_add", "ask_remove", "deny_remove"))
     )
-    return {"permissions": perms, "hooks_added": added, "hooks_matcher_updated": synced, "changes": total}
+    rep = {"permissions": perms, "hooks_added": added, "hooks_matcher_updated": synced, "changes": total}
+    return {**rep, "hook_form": "relative" if relative else "absolute"} if own else rep
 
 
 def read_settings_pair(src: Path, dst: Path) -> tuple[dict[str, Any], dict[str, Any]] | str:
@@ -599,7 +598,10 @@ def read_settings_pair(src: Path, dst: Path) -> tuple[dict[str, Any], dict[str, 
         log(f"  ⚠ bỏ qua symlink {dst}")
         return "skipped-symlink"
     try:
-        return json.loads(src.read_text(encoding="utf-8")), json.loads(dst.read_text(encoding="utf-8"))
+        pair = json.loads(src.read_text(encoding="utf-8")), json.loads(dst.read_text(encoding="utf-8"))
+        if not isinstance(pair[1], dict):  # `[]`/`null` hợp lệ JSON nhưng gộp sẽ ném AttributeError (AUD-HAR-310)
+            raise ValueError("gốc không phải object JSON")
+        return pair
     except (OSError, ValueError) as exc:
         log(
             f"  ⚠ {dst}: không đọc được JSON ({exc}) — HOOK CHƯA ĐĂNG KÝ, gộp tay từ .claude/settings.json.xtemplates-new"
@@ -624,13 +626,12 @@ def merge_hooks(
     if isinstance(pair, str):
         return pair
     ours, theirs = pair
-    form = ("absolute" if _absolute_form(ours, theirs) else "relative") if own else "framework"
     rep = settings_changes(ours, theirs, prov or {}, own)
     if report is not None:
-        report.update(rep, hook_form=form)
+        report.update(rep)
     if not rep["changes"]:
         return "kept"
-    write_atomic(dst, json_preserving(dst.read_text(encoding="utf-8"), theirs) + "\n")
+    write_atomic(dst, settings_text(dst.read_text(encoding="utf-8"), theirs))
     return "merged-hooks"
 
 
@@ -643,6 +644,7 @@ class _JsonSpans:
 
     def __init__(self, text: str) -> None:
         self.text, self.spans = text, dict[JsonPath, tuple[int, int]]()
+        self.nl = "\r\n" if "\r\n" in text else "\n"  # nút dựng lại theo kiểu xuống dòng của file (AUD-HAR-309)
         self.value(0, ())
 
     def skip(self, i: int) -> int:
@@ -681,6 +683,18 @@ def json_preserving(src: str, value: Any) -> str:
     return _render(value, (), _JsonSpans(src), found[1] if found else "  ", 0)
 
 
+def settings_text(src: str, value: Any) -> str:
+    """Nội dung ghi settings.json: `json_preserving` (cùng kiểu xuống dòng cuối file với `src`); nếu nó lỗi với đầu vào
+    chưa lường (phòng thủ, AUD-HAR-309) hoặc ra kết quả không parse lại đúng `value` → `json.dumps(indent=2)` như trước."""
+    try:
+        text = json_preserving(src, value)
+        if _same_json(json.loads(text), value):
+            return text + ("\r\n" if "\r\n" in src else "\n")
+    except (ValueError, IndexError, KeyError, TypeError):
+        pass
+    return json.dumps(value, ensure_ascii=False, indent=2) + "\n"
+
+
 def _same_json(a: Any, b: Any) -> bool:
     """Bằng nhau theo JSON (`1`, `1.0`, `true` khác nhau — `==` của Python coi là bằng)."""
     return json.dumps(a, sort_keys=True) == json.dumps(b, sort_keys=True)
@@ -704,8 +718,8 @@ def _render(value: Any, path: JsonPath, src: _JsonSpans, unit: str, depth: int) 
     if was and old[0] == open_ and "\n" not in old:  # gốc rỗng (`[]`): chưa rõ kiểu — nhiều dòng như `indent=2`
         pad = " " if old[1:2] == " " else ""
         return f"{open_}{pad}{', '.join(parts)}{pad}{close}"
-    inner = unit * (depth + 1)
-    return f"{open_}\n{inner}" + f",\n{inner}".join(parts) + f"\n{unit * depth}{close}"
+    nl, inner = src.nl, unit * (depth + 1)
+    return f"{open_}{nl}{inner}" + f",{nl}{inner}".join(parts) + f"{nl}{unit * depth}{close}"
 
 
 def source_version() -> str:
@@ -1573,10 +1587,28 @@ YAML_QUOTED_RE = re.compile(r""""(?:[^"\\]|\\.)*"|'[^']*'""")  # chuỗi trích 
 def yaml_gap(own: str) -> int:
     """Số dòng trống trước khối nối, theo Prettier (3.9.10, đo 2026-11-06): một dòng; HAI khi dòng nội dung cuối mang
     chú thích cuối dòng (`perf: x # y`) — Prettier dồn khối chú thích cuối file xuống thêm một dòng, một dòng thì
-    `prettier --check` của dự án đỏ (X-Company #98, AUD-HAR-304)."""
-    last = next((ln for ln in reversed(own.splitlines()) if ln.strip()), "#")
+    `prettier --check` của dự án đỏ (X-Company #98, AUD-HAR-304). Dòng cuối thuộc block scalar (`k: |`, `k: >-`, kể cả
+    lồng) là văn bản, `#` trong đó không phải chú thích → một dòng (AUD-HAR-308)."""
+    lines = [ln for ln in own.splitlines() if ln.strip()]
+    last = lines[-1] if lines else "#"
     inline = not last.lstrip().startswith("#") and re.search(r"\s#", YAML_QUOTED_RE.sub("", last)) is not None
-    return 2 if inline else 1
+    return 2 if inline and not _in_block_scalar(lines) else 1
+
+
+YAML_BLOCK_RE = re.compile(r"[:-][ \t]+[|>][-+0-9]*[ \t]*(?:#.*)?$")  # dòng mở block scalar (`k: |-`, `- >`)
+
+
+def _in_block_scalar(lines: list[str]) -> bool:
+    """Dòng cuối (đã bỏ dòng trống) nằm trong block scalar: lùi qua các dòng thụt ít dần (tổ tiên), có dòng nào mở
+    block scalar thì đúng."""
+    depth = len(lines[-1]) - len(lines[-1].lstrip())
+    for ln in reversed(lines[:-1]):
+        indent = len(ln) - len(ln.lstrip())
+        if indent < depth and not ln.lstrip().startswith("#"):  # dòng chú thích không là tổ tiên
+            if YAML_BLOCK_RE.search(ln):
+                return True
+            depth = indent
+    return False
 
 
 def yaml_block(own: str, lines: list[str], label: str) -> str:

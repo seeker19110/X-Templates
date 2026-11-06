@@ -289,6 +289,15 @@ class StageAgentApprovalGuardTest(TmpRepoCase):
         decision = dict(guard.apply_policy(guard.bash_decision(self.PLAIN, str(proj), str(sub)))).get("decision")
         self.assertEqual(decision, "deny")  # đường tương đối ngoài gốc dự án: không phải xt.py của dự án
 
+    def test_variable_subcommand_reason_says_why(self):
+        # AUD-HAR-307: `xt.py $c` trong vòng `for` vẫn chặn (fail-closed), lý do nói rõ lệnh con từ biến — trước chỉ nói
+        # "duyệt giai đoạn" nên agent tưởng chặn oan (hotel-manager, nâng 3.31.0).
+        proj = self.project("human")
+        cmd = 'for c in "harness-check" "progress-check"; do python3 .xtemplates/scripts/xt.py $c; done'
+        out = dict(guard.apply_policy(guard.bash_decision(cmd, str(proj), str(proj))))
+        self.assertEqual(out.get("decision"), "deny")
+        self.assertIn("lấy từ biến", str(out.get("reason")))
+
     def test_key_needs_tree_and_committed(self):
         for committed, tree, push in (("human", "agent", True), ("agent", "human", True), ("agent", None, False)):
             with self.subTest(committed=committed, tree=tree, push=push):
