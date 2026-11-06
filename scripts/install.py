@@ -57,7 +57,7 @@ import tempfile
 import unicodedata
 from collections import Counter
 from collections.abc import Callable
-from typing import Any
+from typing import Any, TypeGuard
 from pathlib import Path
 
 SRC = Path(__file__).resolve().parent.parent
@@ -459,15 +459,20 @@ def _sync_on_failure(theirs: list[dict[str, Any]], entry: dict[str, Any]) -> lis
     return changed
 
 
+def _seconds(value: object) -> TypeGuard[int | float]:
+    """`timeout` là số giây (int/float, không phải bool — `true < 1200` đúng trong Python, AUD-HAR-303 🟢)."""
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
 def _sync_timeout(theirs: list[dict[str, Any]], entry: dict[str, Any]) -> list[dict[str, Any]]:
     """`timeout` của handler khung lớn hơn handler cùng lệnh ở dự án → nâng lên (khung nâng hạn chờ hook guard 600 →
     1200 s, D-382 — giữ hạn cũ thì hook hết giờ chặn commit chạy đủ bộ test); dự án đặt lớn hơn hoặc không đặt thì giữ —
     không bao giờ hạ. Trả danh sách handler đã đổi."""
-    want = {h.get("command"): h["timeout"] for h in entry.get("hooks", []) if isinstance(h.get("timeout"), int)}
+    want = {h.get("command"): h["timeout"] for h in entry.get("hooks", []) if _seconds(h.get("timeout"))}
     changed = []
     for h in (h for e in theirs for h in e.get("hooks", [])):
         have = h.get("timeout")
-        if h.get("command") in want and isinstance(have, int) and have < want[h["command"]]:
+        if h.get("command") in want and _seconds(have) and have < want[h["command"]]:
             h["timeout"] = want[h["command"]]
             changed.append({"command": h["command"], "timeout_from": have, "timeout_to": h["timeout"]})
     return changed
@@ -510,8 +515,8 @@ def _upgrade_legacy_commands(theirs: list[dict[str, Any]], entries: list[dict[st
 def _merge_hook_events(
     ours: dict[str, Any], theirs: dict[str, Any]
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    """Gộp `hooks` của khung vào `theirs` (giữ hook riêng); trả (mục thêm, mục đổi matcher/`onFailure`), mỗi mục kèm
-    `event`."""
+    """Gộp `hooks` của khung vào `theirs` (giữ hook riêng); trả (mục thêm, mục đổi lệnh/matcher/`onFailure`/`timeout`),
+    mỗi mục kèm `event`."""
     hooks = theirs.setdefault("hooks", {})
     added: list[dict[str, Any]] = []
     synced: list[dict[str, Any]] = []
@@ -533,6 +538,11 @@ def _merge_hook_events(
     return added, synced
 
 
+HOOK_FORM_LABEL = {  # log của `install_settings` (AUD-HAR-306: trước luôn in "dạng tương đối", kể cả khi giữ tuyệt đối)
+    "relative": "dạng tương đối",
+    "absolute": "giữ dạng ${CLAUDE_PROJECT_DIR} của dự án",
+    "framework": "dạng của khung",
+}
 OWN_PERMISSIONS_RE = re.compile(r"""^harness_permissions:[ \t]*["']?own["']?[ \t]*(?:#.*)?$""", re.M)
 NO_PERMISSION_CHANGES = ("allow_add", "deny_add", "ask_remove", "deny_remove", "ask_unproven")
 
@@ -614,13 +624,88 @@ def merge_hooks(
     if isinstance(pair, str):
         return pair
     ours, theirs = pair
+    form = ("absolute" if _absolute_form(ours, theirs) else "relative") if own else "framework"
     rep = settings_changes(ours, theirs, prov or {}, own)
     if report is not None:
-        report.update(rep)
+        report.update(rep, hook_form=form)
     if not rep["changes"]:
         return "kept"
-    write_atomic(dst, json.dumps(theirs, ensure_ascii=False, indent=2) + "\n")
+    write_atomic(dst, json_preserving(dst.read_text(encoding="utf-8"), theirs) + "\n")
     return "merged-hooks"
+
+
+JSON_INDENT = re.compile(r"\n([ \t]+)\S")
+JsonPath = tuple[str | int, ...]
+
+
+class _JsonSpans:
+    """Vị trí văn bản (đầu, cuối) của mọi giá trị trong một JSON hợp lệ, theo đường dẫn khoá/chỉ số."""
+
+    def __init__(self, text: str) -> None:
+        self.text, self.spans = text, dict[JsonPath, tuple[int, int]]()
+        self.value(0, ())
+
+    def skip(self, i: int) -> int:
+        while self.text[i] in " \t\r\n":  # chỉ gọi trong object/mảng: sau khoảng trắng luôn còn ký tự
+            i += 1
+        return i
+
+    def value(self, i: int, path: JsonPath) -> int:
+        i = self.skip(i)
+        opener = self.text[i]
+        end = self.members(i, path) if opener in "{[" else json.JSONDecoder().raw_decode(self.text, i)[1]
+        self.spans[path] = (i, end)
+        return end
+
+    def members(self, i: int, path: JsonPath) -> int:
+        """Duyệt object/mảng mở ở `i`; trả vị trí sau dấu đóng."""
+        is_obj, n = self.text[i] == "{", 0
+        i = self.skip(i + 1)
+        while self.text[i] not in "}]":
+            key: str | int = n
+            if is_obj:
+                key, i = json.JSONDecoder().raw_decode(self.text, i)
+                i = self.skip(i) + 1  # bỏ `:`
+            i = self.skip(self.value(i, (*path, key)))
+            i = self.skip(i + 1) if self.text[i] == "," else i
+            n += 1
+        return i + 1
+
+
+def json_preserving(src: str, value: Any) -> str:
+    """`value` dạng JSON, giữ nguyên văn bản của `src` cho mọi nút không đổi (cùng đường dẫn, cùng giá trị) — dự án định
+    dạng `settings.json` theo Prettier (dhcb: object một dòng `{ "type": … }`) thì gộp vài hook không viết lại cả file
+    (dhcb #1481: diff 95 dòng cho 2 giá trị, AUD-HAR-305). Nút đổi: object/mảng gốc nằm một dòng thì giữ một dòng (cùng
+    kiểu khoảng trắng trong ngoặc), còn lại nhiều dòng theo thụt lề của file (mặc định 2 dấu cách)."""
+    found = JSON_INDENT.search(src)
+    return _render(value, (), _JsonSpans(src), found[1] if found else "  ", 0)
+
+
+def _same_json(a: Any, b: Any) -> bool:
+    """Bằng nhau theo JSON (`1`, `1.0`, `true` khác nhau — `==` của Python coi là bằng)."""
+    return json.dumps(a, sort_keys=True) == json.dumps(b, sort_keys=True)
+
+
+def _render(value: Any, path: JsonPath, src: _JsonSpans, unit: str, depth: int) -> str:
+    span = src.spans.get(path)
+    old = src.text[span[0] : span[1]] if span else ""
+    was = json.loads(old) if old else None
+    if old and _same_json(was, value):
+        return old
+    if not isinstance(value, (dict, list)) or not value:
+        return json.dumps(value, ensure_ascii=False)
+    pairs = value.items() if isinstance(value, dict) else enumerate(value)
+    parts = [
+        (json.dumps(k, ensure_ascii=False) + ": " if isinstance(value, dict) else "")
+        + _render(v, (*path, k), src, unit, depth + 1)
+        for k, v in pairs
+    ]
+    open_, close = "{}" if isinstance(value, dict) else "[]"
+    if was and old[0] == open_ and "\n" not in old:  # gốc rỗng (`[]`): chưa rõ kiểu — nhiều dòng như `indent=2`
+        pad = " " if old[1:2] == " " else ""
+        return f"{open_}{pad}{', '.join(parts)}{pad}{close}"
+    inner = unit * (depth + 1)
+    return f"{open_}\n{inner}" + f",\n{inner}".join(parts) + f"\n{unit * depth}{close}"
 
 
 def source_version() -> str:
@@ -765,7 +850,8 @@ def install_settings(
         stats[r] += 1
         if r == "merged-hooks" and own:
             log(
-                "  .claude/settings.json: đã gộp hooks của khung (dạng tương đối); quyền giữ nguyên — harness_permissions: own"
+                f"  .claude/settings.json: đã gộp hooks của khung ({HOOK_FORM_LABEL[report['hook_form']]}); quyền giữ"
+                " nguyên — harness_permissions: own"
             )
         elif r == "merged-hooks":
             log(
@@ -1481,10 +1567,24 @@ def read_own_yaml(path: Path) -> str | None:
         return None
 
 
+YAML_QUOTED_RE = re.compile(r""""(?:[^"\\]|\\.)*"|'[^']*'""")  # chuỗi trích dẫn — `#` bên trong không phải chú thích
+
+
+def yaml_gap(own: str) -> int:
+    """Số dòng trống trước khối nối, theo Prettier (3.9.10, đo 2026-11-06): một dòng; HAI khi dòng nội dung cuối mang
+    chú thích cuối dòng (`perf: x # y`) — Prettier dồn khối chú thích cuối file xuống thêm một dòng, một dòng thì
+    `prettier --check` của dự án đỏ (X-Company #98, AUD-HAR-304)."""
+    last = next((ln for ln in reversed(own.splitlines()) if ln.strip()), "#")
+    inline = not last.lstrip().startswith("#") and re.search(r"\s#", YAML_QUOTED_RE.sub("", last)) is not None
+    return 2 if inline else 1
+
+
 def yaml_block(own: str, lines: list[str], label: str) -> str:
-    """Khối nối cuối xt.yaml: dòng trống ngăn cách, MỘT dòng đánh dấu, rồi `# <dòng mẫu>`; cùng kiểu xuống dòng với file."""
+    """Khối nối cuối xt.yaml: dòng trống ngăn cách (`yaml_gap`; dòng trống sẵn có ở cuối file được tính, không xoá),
+    MỘT dòng đánh dấu, rồi `# <dòng mẫu>`; cùng kiểu xuống dòng với file."""
     nl = "\r\n" if "\r\n" in own else "\n"
-    lead = "" if not own else nl if own.endswith("\n") else nl + nl
+    trailing = own[len(own.rstrip("\r\n")) :].count("\n")
+    lead = nl * max(yaml_gap(own) + 1 - trailing, 0) if own else ""
     return lead + nl.join([YAML_MARKER.format(label=label), *(f"# {ln}" for ln in lines)]) + nl
 
 
@@ -1928,7 +2028,8 @@ def report_stage(target: Path, stage_init: bool) -> None:
 
 
 def plan_settings(target: Path, force_harness: bool, prov: dict[str, list[str]]) -> dict[str, Any]:
-    """Kế hoạch cho .claude/settings.json: quyền thêm/bớt, hook thêm/đổi matcher (không ghi gì)."""
+    """Kế hoạch cho .claude/settings.json: quyền thêm/bớt, hook thêm/đổi lệnh/matcher/`onFailure`/`timeout` (không ghi
+    gì)."""
     src, dst = SRC / ".claude" / "settings.json", target / ".claude" / "settings.json"
     if dst.exists() and not force_harness:
         pair = read_settings_pair(src, dst)

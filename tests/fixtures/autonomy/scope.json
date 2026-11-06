@@ -56,8 +56,7 @@
     "AUD-DOC-271",
     "AUD-CODE-062",
     "AUD-CODE-063",
-    "AUD-HAR-302",
-    "AUD-HAR-303"
+    "AUD-HAR-302"
    ]
   },
   {
@@ -111,7 +110,11 @@
     "AUD-CFG-003",
     "AUD-CODE-025",
     "AUD-SEC-130",
-    "AUD-HAR-125"
+    "AUD-HAR-125",
+    "AUD-HAR-303",
+    "AUD-HAR-304",
+    "AUD-HAR-305",
+    "AUD-HAR-306"
    ]
   },
   {

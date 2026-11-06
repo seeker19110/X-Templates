@@ -1389,6 +1389,16 @@ class InstallPlanTest(unittest.TestCase):
         self.assertTrue(commands)
         self.assertEqual([c for c in commands if "${CLAUDE_PROJECT_DIR}/.claude/hooks/" not in c], [])
         self.assertEqual(self.plan()["settings"]["action"], "kept")
+        # AUD-HAR-306: log nói đúng dạng đã giữ (trước luôn in "dạng tương đối" — thấy ở xboss #710)
+        self.write_settings(perms, hooks={"Stop": [canonical]})
+        err = io.StringIO()
+        with redirect_stderr(err):
+            self.assertEqual(install.main([str(self.target), "--label", "t"]), 0)
+        self.assertIn("đã gộp hooks của khung (giữ dạng ${CLAUDE_PROJECT_DIR} của dự án)", err.getvalue())
+        self.write_settings(perms)
+        with redirect_stderr(err):
+            self.assertEqual(install.main([str(self.target), "--label", "t"]), 0)
+        self.assertIn("đã gộp hooks của khung (dạng tương đối)", err.getvalue())
         for text in ("harness_permissions: build\n", "harness_permissions: own"):
             (self.target / "xt.yaml").write_text(text, encoding="utf-8")
             self.assertEqual(install.own_permissions(self.target), text.endswith("own"))
@@ -1455,6 +1465,64 @@ class InstallPlanTest(unittest.TestCase):
         self.assertEqual([h["timeout"] for h in got if "pre-bash-guard" in h["command"]], [guard["timeout"]])
         self.assertTrue(
             all(h["timeout"] == 99999 for h in got if "timeout" in h and "pre-bash-guard" not in h["command"])
+        )
+
+    def test_sync_timeout_ignores_bool_accepts_float(self):
+        # Review #454 🟢: `true < 1200` đúng trong Python — bool không phải số giây; float là số giây hợp lệ.
+        entry = {"hooks": [{"command": "g", "timeout": 1200}]}
+        theirs = [{"hooks": [{"command": "g", "timeout": True}]}]
+        self.assertEqual(install._sync_timeout(theirs, entry), [])
+        theirs = [{"hooks": [{"command": "g", "timeout": 600.5}]}]
+        self.assertEqual(install._sync_timeout(theirs, entry)[0]["timeout_to"], 1200)
+        self.assertEqual(install._sync_timeout(theirs, {"hooks": [{"command": "g", "timeout": False}]}), [])
+
+    def test_merge_keeps_project_json_formatting(self):
+        """AUD-HAR-305 (dhcb #1481): settings.json định dạng theo Prettier (object một dòng) — gộp chỉ đổi dòng của giá trị
+        đổi, không viết lại cả file theo `indent=2`."""
+        ours = json.loads((ROOT / ".claude" / "settings.json").read_text(encoding="utf-8"))
+        guard = next(h for e in ours["hooks"]["PreToolUse"] for h in e["hooks"] if "pre-bash-guard" in h["command"])
+        lines = []
+        for event, entries in ours["hooks"].items():
+            items = []
+            for e in entries:
+                hs = ", ".join(
+                    "{ "
+                    + ", ".join(
+                        f"{json.dumps(k)}: {json.dumps(600 if h is guard and k == 'timeout' else v)}"
+                        for k, v in h.items()
+                    )
+                    + " }"
+                    for h in e["hooks"]
+                )
+                head = f'"matcher": {json.dumps(e["matcher"])}, ' if "matcher" in e else ""
+                items.append(f'      {{ {head}"hooks": [{hs}] }}')
+            lines.append(f"    {json.dumps(event)}: [\n" + ",\n".join(items) + "\n    ]")
+        perms = json.dumps(ours.get("permissions", {}), indent=2).replace("\n", "\n  ")
+        text = '{\n  "permissions": ' + perms + ',\n  "hooks": {\n' + ",\n".join(lines) + "\n  }\n}\n"
+        self.assertEqual(json.loads(text)["hooks"]["PreToolUse"][0]["hooks"][0].get("timeout", 600), 600)
+        self.settings.parent.mkdir(parents=True)
+        self.settings.write_text(text, encoding="utf-8")
+        self.assertEqual(self.install(), 0)
+        after = self.settings.read_text(encoding="utf-8")
+        changed = [(a, b) for a, b in zip(text.splitlines(), after.splitlines()) if a != b]
+        self.assertEqual(len(text.splitlines()), len(after.splitlines()))
+        self.assertEqual(len(changed), 1, changed)
+        self.assertIn(f'"timeout": {guard["timeout"]}', changed[0][1])
+        self.assertTrue(changed[0][1].lstrip().startswith("{ "))
+
+    def test_json_preserving_shapes(self):
+        src = '{\n    "a": [1,2],\n    "b": {"x": 1},\n    "c": {\n        "y": true\n    },\n    "e": []\n}'
+        self.assertEqual(install.json_preserving(src, json.loads(src)), src)
+        got = install.json_preserving(src, {"a": [1, 2, 3], "b": {"x": 1.0}, "c": {"y": 1}, "e": [], "n": {"z": [4]}})
+        self.assertEqual(
+            got,
+            '{\n    "a": [1, 2, 3],\n    "b": {"x": 1.0},\n    "c": {\n        "y": 1\n    },\n    "e": [],\n'
+            '    "n": {\n        "z": [\n            4\n        ]\n    }\n}',
+        )
+        self.assertEqual(install.json_preserving('{"a": 1}', {"a": "é"}), '{"a": "é"}')
+        self.assertEqual(install.json_preserving("[]", ["s"]), '[\n  "s"\n]')
+        self.assertEqual(
+            install.json_preserving(' { "k\\"q" : {"v": 1} } ', {'k"q': {"v": None}}), '{ "k\\"q": {"v": null} }'
         )
 
     def test_install_plan_unproven_ask_is_kept_and_reported(self):
@@ -2232,6 +2300,20 @@ class InstallUpgradeTest(unittest.TestCase):
         self.assertEqual(install.yaml_block("x: 1", ["a: 1", "b: 2"], "t"), f"\n\n{marker}\n# a: 1\n# b: 2\n")
         self.assertEqual(install.yaml_block("x: 1\r\n", ["a: 1"], "t"), f"\r\n{marker}\r\n# a: 1\r\n")
         self.assertEqual(install.missing_yaml_keys("a: 1\n# b: 2\nc: 3\nc: 4\n", "# a: x\n  c: y\n"), [("c", "c: 3")])
+
+    def test_yaml_block_gap_matches_prettier(self):
+        # AUD-HAR-304: Prettier 3.9.10 đòi hai dòng trống trước khối chú thích cuối file khi dòng nội dung cuối có chú
+        # thích cuối dòng (X-Company #98); `#` trong chuỗi trích dẫn hay dòng chú thích thuần thì một dòng.
+        marker = self.MARKER
+        self.assertEqual(install.yaml_block("perf: x # y\n", ["a: 1"], "t"), f"\n\n{marker}\n# a: 1\n")
+        self.assertEqual(install.yaml_block("b:\n  - 1 # x\n\n", ["a: 1"], "t"), f"\n{marker}\n# a: 1\n")
+        self.assertEqual(install.yaml_block("p: x # y\r\n", ["a: 1"], "t"), f"\r\n\r\n{marker}\r\n# a: 1\r\n")
+        self.assertEqual(install.yaml_block('c: "x #y"\n', ["a: 1"], "t"), f"\n{marker}\n# a: 1\n")
+        self.assertEqual(install.yaml_block("c: 'x #y'\n", ["a: 1"], "t"), f"\n{marker}\n# a: 1\n")
+        self.assertEqual(install.yaml_block("a: 1\n# old: 2 # y\n", ["a: 1"], "t"), f"\n{marker}\n# a: 1\n")
+        # dòng trống sẵn có nhiều hơn mức cần: không xoá (chỉ ghi nối), không thêm
+        self.assertEqual(install.yaml_block("a: 1\n\n\n\n", ["a: 1"], "t"), f"{marker}\n# a: 1\n")
+        self.assertEqual(install.yaml_gap("\n\n"), 1)
 
 
 class CheckLinksTest(unittest.TestCase):
