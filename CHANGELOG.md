@@ -13,6 +13,11 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
 - `install.py` gộp hooks giữ nguyên định dạng `settings.json` của dự án, chỉ viết lại giá trị đổi (AUD-HAR-305, dhcb:
   diff 95 dòng → 1 dòng); log `harness_permissions: own` nói đúng dạng lệnh hook đã giữ (AUD-HAR-306).
 - `_sync_timeout` bỏ qua `timeout` kiểu bool, nhận số thực (review #454).
+- Trả nợ review #455: `#` ở dòng cuối block scalar (`k: |`) không còn tính là chú thích cuối dòng (AUD-HAR-308);
+  `settings.json` là JSON hợp lệ nhưng không phải object → báo `invalid-json`, không ném lỗi (AUD-HAR-310); ghi
+  `settings.json` giữ kiểu xuống dòng CRLF, lùi về `json.dumps` nếu bản giữ định dạng lỗi (AUD-HAR-309).
+- Guard: lý do chặn `STAGE_APPROVE` nói rõ khi lệnh con của `xt.py` lấy từ biến (`for c in …; do xt.py $c`) — trước
+  đó agent tưởng chặn oan (AUD-HAR-307).
 
 ## [3.31.0] - 2026-11-06
 

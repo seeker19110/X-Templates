@@ -6715,7 +6715,7 @@ STAGE_LEDGER = "docs/autopilot/STAGE.json"
 STAGE_APPROVE_WHY = (
     "duyệt giai đoạn sản phẩm (`xt.py stage approve`/`init --adopt`) — chỉ người, ngoài phiên agent (ADR-0058);"
     " `stage approve` dạng chữ rõ được khi xt.yaml ở cây VÀ bản đã commit ở nhánh chính khai `stage_approval: agent`"
-    " (ADR-0069)"
+    " (ADR-0069); lệnh con lấy từ biến (`xt.py $c`) cũng tính — viết rõ từng lệnh (AUD-HAR-307)"
 )
 
 

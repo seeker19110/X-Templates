@@ -849,6 +849,13 @@ class InstallEdgeTest(unittest.TestCase):
         self.assertEqual(dst.read_text(encoding="utf-8"), "{không phải json")  # không đè
         with redirect_stderr(io.StringIO()):
             self.assertEqual(install.merge_hooks(src, self.tmp / "khong-co.json"), "invalid-json")
+        # AUD-HAR-310: JSON hợp lệ nhưng gốc không phải object — trước ném AttributeError ở `_merge_hook_events`
+        for body in ("[]", "null", '"x"'):
+            dst.write_text(body, encoding="utf-8")
+            with self.subTest(body=body), redirect_stderr(io.StringIO()) as err:
+                self.assertEqual(install.merge_hooks(src, dst), "invalid-json")
+                self.assertIn("không phải object JSON", err.getvalue())
+                self.assertEqual(dst.read_text(encoding="utf-8"), body)
 
     def test_install_with_invalid_existing_settings_keeps_it(self):
         settings = self.target / ".claude" / "settings.json"
@@ -1509,6 +1516,20 @@ class InstallPlanTest(unittest.TestCase):
         self.assertEqual(len(changed), 1, changed)
         self.assertIn(f'"timeout": {guard["timeout"]}', changed[0][1])
         self.assertTrue(changed[0][1].lstrip().startswith("{ "))
+
+    def test_settings_text_crlf_and_fallback(self):
+        # AUD-HAR-309: nút dựng lại theo kiểu xuống dòng của file; json_preserving lỗi/ra sai → json.dumps như trước.
+        src = '{\r\n  "a": 1\r\n}\r\n'
+        self.assertEqual(
+            install.settings_text(src, {"a": 1, "b": [2]}), '{\r\n  "a": 1,\r\n  "b": [\r\n    2\r\n  ]\r\n}\r\n'
+        )
+        self.assertEqual(install.settings_text('{"a": 1}\n', {"a": 2}), '{"a": 2}\n')
+        canon = json.dumps({"a": 2}, indent=2) + "\n"
+        for err in (IndexError("x"), ValueError("x")):
+            with self.subTest(err=err), mock.patch.object(install, "json_preserving", side_effect=err):
+                self.assertEqual(install.settings_text('{"a": 1}', {"a": 2}), canon)
+        with mock.patch.object(install, "json_preserving", return_value='{"a": 1}'):
+            self.assertEqual(install.settings_text('{"a": 1}', {"a": 2}), canon)
 
     def test_json_preserving_shapes(self):
         src = '{\n    "a": [1,2],\n    "b": {"x": 1},\n    "c": {\n        "y": true\n    },\n    "e": []\n}'
@@ -2314,6 +2335,26 @@ class InstallUpgradeTest(unittest.TestCase):
         # dòng trống sẵn có nhiều hơn mức cần: không xoá (chỉ ghi nối), không thêm
         self.assertEqual(install.yaml_block("a: 1\n\n\n\n", ["a: 1"], "t"), f"{marker}\n# a: 1\n")
         self.assertEqual(install.yaml_gap("\n\n"), 1)
+
+    def test_yaml_gap_block_scalar_is_text(self):
+        # AUD-HAR-308 (review #455): `#` ở dòng cuối của block scalar là văn bản — Prettier 3.9.10 đòi MỘT dòng trống.
+        for own in (
+            "test: |-\n  pytest -q # nhanh\n",
+            "test: >\n  a\n    b # x\n",
+            "a:\n  test: |\n    pytest # x\n",
+            "l:\n  - |+\n    x # y\n",
+            "test: |2 # chú thích\n  pytest # x\n",
+            "test: >-\n  a # x\n\n  # giữa\n  b # y\n",
+        ):
+            with self.subTest(own=own):
+                self.assertEqual(install.yaml_gap(own), 1)
+        for own in (
+            "a:\n  b: x # y\n",  # tổ tiên không mở block scalar
+            "a: echo x | sort\nb: y # z\n",  # `|` giữa dòng không mở block scalar
+            "# k: |\n  b: x # y\n",  # dòng chú thích không là tổ tiên
+        ):
+            with self.subTest(own=own):
+                self.assertEqual(install.yaml_gap(own), 2)
 
 
 class CheckLinksTest(unittest.TestCase):
