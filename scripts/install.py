@@ -11,6 +11,10 @@ Kết quả trong dự án đích:
   .xtemplates/manifest.json     hash file harness/gốc/GitHub + rule do khung đặt (chỉ gỡ `ask` có trong đây) + chính sách (REC-09)
                                 — hash dạng `sha256:<hex>` (cả `harness.sha256.json`); đọc nhận cả hex trần của bản cũ
   .claude/settings.json, hooks/, skills/, agents/   harness (COPY-IF-ABSENT: không đè file đã có; bản mới ghi .xtemplates-new)
+  <starter/, managed/ của gói>  chỉ khi --pack <id> (framework/templates/packs/<id>/, ADR-0068): starter chỉ vào repo sạch
+                                (chưa có package.json, manifest chưa ghi gói; sau đó là của dự án); managed nâng theo hash
+                                manifest như harness; khoá xt.yaml của gói chỉ đặt khi chép starter (còn lại: gợi ý trong
+                                --plan); lùi bản = cài lại bằng bản khung cũ
   .github/rulesets/main.json, pull_request_template.md, dependabot.yml,
   .github/workflows/{ci,secret-scan,pr-title,merge-gate,pr-steward}.yml   chỉ khi --with-github (copy-if-absent, hash vào manifest;
                                 merge-gate.yml là stub tạm D-122)
@@ -26,8 +30,9 @@ Dự án đã cài bản ≤ 2.x (`.xstored/`, `xs.py`, `xs.yaml`, `XS_*`): ch�
   giữ manifest hash, đổi `xs.yaml` → `xt.yaml`, xoá bản sao `.xstored/`; file người dùng còn nhắc tên cũ được liệt kê để sửa tay.
 
 Dùng:
-  python3 scripts/install.py <thư-mục-dự-án> [--force-harness] [--no-harness] [--no-git-hooks] [--harness codex,…] [--with-github] [--preset safe|autonomous] [--stage-init] [--label v1.0.0] [--plan]
-  --plan: in JSON kế hoạch (quyền thêm/bớt, hook thêm/đổi matcher, file đè/giữ, git hook, adapter), không ghi gì (REC-09)
+  python3 scripts/install.py <thư-mục-dự-án> [--force-harness] [--no-harness] [--no-git-hooks] [--harness codex,…] [--with-github] [--preset safe|autonomous] [--stage-init] [--pack <id>] [--label v1.0.0] [--plan]
+  --plan: in JSON kế hoạch (quyền thêm/bớt, hook thêm/đổi matcher, file đè/giữ, git hook, adapter; gói và drift file
+          managed khi có --pack), không ghi gì (REC-09)
   --no-git-hooks: không cài git hook sàn chung (`pre-commit`/`commit-msg`/`pre-push`); git hook + adapter khung đã ghi
                   được liệt kê trong manifest.json (`git_hooks`, `adapters`) — AUD-HAR-204
   --preset: chính sách merge/review cho xt.yaml mới; cài lại giữ lựa chọn dự án (không cấu hình sandbox).
@@ -130,12 +135,27 @@ def drop_symlink(path: Path) -> None:
         path.unlink()
 
 
-def copy_tree_replace(src: Path, dst: Path) -> None:
+BYTECODE = shutil.ignore_patterns("__pycache__", "*.pyc")
+PACK_PAYLOADS = ("starter", "managed")
+
+
+def framework_ignore(dirpath: str, names: list[str]) -> set[str]:
+    """Bỏ bytecode và cây nội dung của gói sản phẩm (`templates/packs/<id>/starter|managed`) khỏi `.xtemplates/framework`:
+    installer đọc gói từ khung nguồn; chép vào dự án đích thì test `*.test.ts`/`package.json` của gói bị công cụ của dự
+    án (vitest, pnpm workspace…) nhặt nhầm (review lát B 🔴)."""
+    skip = set(BYTECODE(dirpath, names))
+    here = Path(dirpath)
+    if here.parent.name == "packs" and here.parent.parent.name == "templates":
+        skip |= {n for n in names if n in PACK_PAYLOADS}
+    return skip
+
+
+def copy_tree_replace(src: Path, dst: Path, ignore: Callable[[str, list[str]], set[str]] = BYTECODE) -> None:
     """Copy vào thư mục tạm rồi mới thay: lỗi giữa chừng không để dst mất/dở."""
     tmp = dst.with_name(dst.name + ".tmp")
     drop_symlink(tmp)
     shutil.rmtree(tmp, ignore_errors=True)
-    shutil.copytree(src, tmp, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+    shutil.copytree(src, tmp, ignore=ignore)
     drop_symlink(dst)
     if dst.exists():
         shutil.rmtree(dst)
@@ -640,10 +660,24 @@ def github_root_error(target: Path) -> str | None:
     )
 
 
+def pack_root_error(target: Path, pack: dict[str, Any] | None) -> str | None:
+    """`--pack` có file managed dưới `.github/` vào thư mục con của repo git: như `--with-github` (AUD-CI-012), workflow
+    ghi ở đó không bao giờ chạy (AUD-HAR-227) → từ chối trước khi ghi."""
+    if pack is None or not any(rel.startswith(".github/") for rel, _src in pack_tree(pack["id"], "managed")):
+        return None
+    top = git_subdir_of(target)
+    if top is None:
+        return None
+    return (
+        f"✗ --pack {pack['id']}: {target} không phải gốc repo git ({top}) — gói ghi .github/ mà GitHub chỉ chạy workflow "
+        f"ở {top / '.github'}; cài gói ở gốc repo, hoặc chép/gộp workflow vào gốc và đặt `working-directory`"
+    )
+
+
 def install_framework(xt_dir: Path, label: str | None) -> str:
     """Bước 1: framework + research + scripts + VERSION + README vào .xtemplates/ — thay thế toàn bộ (bản chỉ đọc).
     Trả nhãn đã ghi vào VERSION."""
-    copy_tree_replace(SRC / "framework", xt_dir / "framework")
+    copy_tree_replace(SRC / "framework", xt_dir / "framework", framework_ignore)
     # research/: chỉ file module trong framework/ trỏ tới bằng đường dẫn tương đối (AUD-XFEAT-046) — nhật ký nghiên cứu
     # khác của repo khung không phải của dự án đích.
     if (SRC / "research").is_dir():
@@ -797,7 +831,8 @@ def write_manifests(
 MANIFEST_PATH_LISTS = (
     "git_hooks",
     "adapters",
-)  # file khung ghi ngoài `files` (AUD-HAR-204) — giữ qua `write_manifests`
+    "packs",
+)  # file khung ghi ngoài `files` (AUD-HAR-204) + gói đã cài (`packs`, object) — giữ qua `write_manifests`
 
 
 def load_manifest_doc(target: Path) -> dict[str, Any]:
@@ -825,7 +860,9 @@ def install_harness(target: Path, force_harness: bool) -> None:
     new_manifest = copy_harness_files(target, force_harness, manifest, stats)
     # Hash file `.github/` (--with-github) và file gốc (bước sau ghi lại) giữ qua bước này: lần sau file chưa sửa vẫn
     # được cập nhật tại chỗ.
-    new_manifest.update({k: v for k, v in manifest.items() if k in GITHUB_FILES or k in ROOT_TEMPLATES})
+    # File managed của gói (`--pack`) cũng vậy.
+    packed = pack_managed_paths(target)
+    new_manifest.update({k: v for k, v in manifest.items() if k in GITHUB_FILES or k in ROOT_TEMPLATES or k in packed})
     write_manifests(target, new_manifest, rules)
     log("✓ .claude/: " + " · ".join(f"{k} {v}" for k, v in sorted(stats.items())))
     shadowed = shadowed_skills(target)
@@ -1055,6 +1092,311 @@ def install_adapters(target: Path, hosts: list[str]) -> None:
             f"  adapter {host}: {rel} ({status}) — công cụ cần tin cậy hook dự án một lần (xem templates/harness/README.md)"
         )
     record_manifest_paths(target, "adapters", ours)
+
+
+# Gói sản phẩm (`--pack <id>`, ADR-0068 lát B/C): `framework/templates/packs/<id>/` gồm `pack.json` (schema 1, `id` = tên
+# thư mục, owner, hạn hỗ trợ, compat, profile, control ID, khoá `xt_yaml`), `starter/` (mã khởi đầu — chỉ chép vào repo
+# SẠCH: chưa có `package.json` và manifest chưa ghi gói; copy-if-absent; sau lần đầu là của dự án: không cập nhật, không
+# băm) và `managed/` (file gói sở hữu — như harness: hash trong `files` của manifest; chưa sửa → cập nhật, đã sửa →
+# `.xtemplates-new`). Lùi bản = cài lại từ bản khung cũ: file managed còn đúng hash bản mới được đưa về bản cũ.
+PACKS_DIR = Path("framework") / "templates" / "packs"
+PACK_ID_RE = re.compile(r"[a-z0-9][a-z0-9-]*")  # tên thư mục gói — không `/`, `..`: không đọc ra ngoài packs/
+PACK_YAML_KEY_RE = re.compile(r"[A-Za-z_][\w-]*")  # khoá cấp 1 của xt.yaml (cùng dạng `YAML_KEY_RE`)
+PACK_BROWNFIELD = "package.json"  # dự án đã có mã (stack của gói đầu: Node) → không chép starter
+PACK_MODES = {
+    "fresh": "repo sạch — chép starter, đặt khoá xt.yaml của gói",
+    "brownfield": f"dự án đã có {PACK_BROWNFIELD} — không chép starter; khoá xt.yaml chỉ gợi ý",
+    "upgrade": "gói đã cài — starter là của dự án; file managed nâng theo hash manifest",
+}
+STARTER_SKIP = {"upgrade": "owned-by-project", "brownfield": "skipped-brownfield"}
+
+
+def available_packs() -> list[str]:
+    """Id các gói có `pack.json` trong bản khung đang cài."""
+    root = SRC / PACKS_DIR
+    return sorted(d.name for d in root.iterdir() if (d / "pack.json").is_file()) if root.is_dir() else []
+
+
+def _pack_yaml_pair(key: object, value: object) -> bool:
+    """Một khoá `xt_yaml` hợp lệ: khoá YAML cấp 1, giá trị chuỗi MỘT dòng — không chen được dòng lạ vào xt.yaml."""
+    if not isinstance(key, str) or not isinstance(value, str):
+        return False
+    # `yaml_set_keys` ghi nháy JSON; `yaml_get` (dev-task.sh)/`yaml_scalar` (xt.py) không giải escape → chỉ nhận giá trị
+    # mà nháy JSON giữ nguyên chữ: in được, không `"`, không `\` (AUD-HAR-227).
+    return PACK_YAML_KEY_RE.fullmatch(key) is not None and value.isprintable() and not set(value) & {'"', "\\"}
+
+
+def pack_problem(pack_id: str, doc: object) -> str | None:
+    """Lý do `pack.json` không hợp lệ (None nếu hợp lệ): object, `schema` = 1, `id` = tên thư mục, `xt_yaml` là
+    {khoá cấp 1: lệnh một dòng}."""
+    if not isinstance(doc, dict):
+        return "không phải object JSON"
+    schema = doc.get("schema")
+    if schema != 1 or isinstance(schema, bool):
+        return f"schema {schema!r} — chỉ hỗ trợ 1"
+    if doc.get("id") != pack_id:
+        return f"id {doc.get('id')!r} khác tên thư mục {pack_id!r}"
+    keys = doc.get("xt_yaml")
+    if not isinstance(keys, dict) or not all(_pack_yaml_pair(k, v) for k, v in keys.items()):
+        return "xt_yaml phải là object {khoá cấp 1: lệnh một dòng}"
+    return None
+
+
+def load_pack(pack_id: str) -> dict[str, Any]:
+    """`pack.json` đã kiểm của gói `pack_id`; id lạ/thiếu gói/`pack.json` hỏng → ValueError (lý do để báo)."""
+    root = SRC / PACKS_DIR / pack_id
+    if PACK_ID_RE.fullmatch(pack_id) is None or not (root / "pack.json").is_file():
+        raise ValueError(f"không biết gói {pack_id!r} — có: {', '.join(available_packs()) or 'chưa có gói nào'}")
+    try:
+        doc = json.loads((root / "pack.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise ValueError(f"{pack_id}/pack.json không đọc được ({exc})") from exc
+    problem = pack_problem(pack_id, doc)
+    if problem:
+        raise ValueError(f"{pack_id}/pack.json: {problem}")
+    pack: dict[str, Any] = doc
+    return pack
+
+
+def pack_tree(pack_id: str, part: str) -> list[tuple[str, Path]]:
+    """(đường dẫn đích POSIX tương đối gốc dự án, file nguồn) của `starter/` hoặc `managed/`; thiếu thư mục → rỗng."""
+    root = SRC / PACKS_DIR / pack_id / part
+    if not root.is_dir():
+        return []
+    files = (p for p in sorted(root.rglob("*")) if p.is_file() and "__pycache__" not in p.parts)
+    return [(p.relative_to(root).as_posix(), p) for p in files]
+
+
+def _str_list(value: object) -> list[str]:
+    return [v for v in value if isinstance(v, str)] if isinstance(value, list) else []
+
+
+def recorded_packs(target: Path) -> dict[str, Any]:
+    """`packs` của manifest.json (thiếu/hỏng → {})."""
+    packs = load_manifest_doc(target).get("packs")
+    return packs if isinstance(packs, dict) else {}
+
+
+def pack_managed_paths(target: Path) -> set[str]:
+    """Đường dẫn managed của mọi gói đã ghi trong manifest — bước harness giữ hash của chúng (như file gốc/GitHub)."""
+    return {
+        p for rec in recorded_packs(target).values() if isinstance(rec, dict) for p in _str_list(rec.get("managed"))
+    }
+
+
+def pack_mode(target: Path, pack_id: str) -> str:
+    """`upgrade` (manifest đã ghi gói) | `brownfield` (có `package.json`, kể cả symlink) | `fresh`."""
+    if pack_id in recorded_packs(target):
+        return "upgrade"
+    marker = target / PACK_BROWNFIELD
+    return "brownfield" if marker.exists() or marker.is_symlink() else "fresh"
+
+
+def under_symlink(target: Path, rel: str) -> bool:
+    """Đích hoặc một thư mục giữa gốc dự án và đích là symlink — không ghi xuyên liên kết ra ngoài dự án (AUD-HAR-010)."""
+    path = target / rel
+    return any(p.is_symlink() for p in (path, *path.parents) if p != target and p.is_relative_to(target))
+
+
+def starter_action(target: Path, rel: str, src: Path, mode: str) -> str:
+    """Quyết định (không ghi) cho một file starter: repo sạch → 'copied' | 'kept' (giống hệt) | 'kept-own' (file của dự
+    án) | 'skipped-symlink'; brownfield → 'skipped-brownfield'; gói đã cài → 'owned-by-project'."""
+    if mode in STARTER_SKIP:
+        return STARTER_SKIP[mode]
+    dst = target / rel
+    if under_symlink(target, rel):
+        return "skipped-symlink"
+    if not dst.exists():
+        return "copied"
+    if dst.is_file() and dst.read_bytes() == src.read_bytes():
+        return "kept"
+    return "merged" if rel == ".gitignore" and gitignore_missing(dst, src) else "kept-own"
+
+
+def gitignore_missing(dst: Path, src: Path) -> list[str]:
+    """Dòng ignore của starter mà `.gitignore` sẵn có của dự án chưa có (`node_modules/`, `.env`…) — file của dự án giữ
+    nguyên, chỉ nối thêm (review lát B 🟢); không đọc được → rỗng (giữ file, không nối)."""
+    try:
+        have = set(dst.read_text(encoding="utf-8").splitlines())
+    except (OSError, UnicodeDecodeError):
+        return []
+    return [line for line in src.read_text(encoding="utf-8").splitlines() if line and line not in have]
+
+
+def merge_gitignore(dst: Path, src: Path) -> None:
+    text = dst.read_text(encoding="utf-8")
+    lead = "" if not text or text.endswith("\n") else "\n"
+    dst.write_text(text + lead + "\n".join(gitignore_missing(dst, src)) + "\n", encoding="utf-8")
+
+
+def managed_action(target: Path, rel: str, src: Path, files: dict[str, str], mode: str) -> tuple[str, bytes]:
+    """Quyết định (không ghi) cho một file managed: như harness (`classify_copy` với hash manifest). File chưa có ở dự
+    án brownfield — hoặc dự án chưa nhận đề xuất trước (`.xtemplates-new` còn đó) — chỉ thành đề xuất `updated-new`:
+    thêm workflow/script vào dự án đang chạy là đổi hành vi (hotel-manager đòi mọi job PR là required check — lát C)."""
+    if under_symlink(target, rel):
+        return "skipped-symlink", b""
+    dst = target / rel
+    if not dst.exists() and (mode == "brownfield" or dst.with_name(dst.name + ".xtemplates-new").exists()):
+        return "updated-new", source_bytes(src)
+    return classify_copy(src, dst, installed_hash=files.get(rel))
+
+
+def pack_plan(target: Path, pack: dict[str, Any]) -> dict[str, Any]:
+    """Kế hoạch gói cho `--plan` — cùng hàm quyết định với lần cài thật, không ghi gì."""
+    pid, files = pack["id"], load_manifest(target)
+    mode = pack_mode(target, pid)
+    starter = [{"path": r, "action": starter_action(target, r, s, mode)} for r, s in pack_tree(pid, "starter")]
+    managed = [
+        {"path": r, "action": managed_action(target, r, s, files, mode)[0]} for r, s in pack_tree(pid, "managed")
+    ]
+    return {
+        "id": pid,
+        "mode": mode,
+        "starter": starter,
+        "managed": managed,
+        "xt_yaml": pack_yaml_plan(target, mode, dict(pack["xt_yaml"])),
+    }
+
+
+def _action_counts(actions: Counter[str]) -> str:
+    return " · ".join(f"{k} {v}" for k, v in sorted(actions.items())) or "không có file"
+
+
+def install_pack_starter(target: Path, pid: str, mode: str) -> list[str]:
+    """Chép starter (chỉ repo sạch, copy-if-absent); trả đường dẫn đã chép."""
+    actions: Counter[str] = Counter()
+    copied: list[str] = []
+    for rel, src in pack_tree(pid, "starter"):
+        action = starter_action(target, rel, src, mode)
+        actions[action] += 1
+        if action == "copied":
+            (target / rel).parent.mkdir(parents=True, exist_ok=True)
+            copied.append(rel)
+        if action == "merged":
+            merge_gitignore(target / rel, src)
+        write_copy(src, target / rel, action, src.read_bytes())
+    log(f"  gói {pid}/starter: {_action_counts(actions)}")
+    return copied
+
+
+def install_pack_managed(target: Path, pid: str, mode: str) -> list[str]:
+    """File managed như harness: cập nhật theo hash, `.xtemplates-new` khi dự án đã sửa (hoặc file mới ở brownfield);
+    hash mẫu vào `files` của manifest (`HASHED`), `kept-own`/symlink giữ hash cũ. Trả mọi đường dẫn managed của gói."""
+    files = load_manifest(target)
+    actions: Counter[str] = Counter()
+    rels: list[str] = []
+    for rel, src in pack_tree(pid, "managed"):
+        status, data = managed_action(target, rel, src, files, mode)
+        if status in ("copied", "updated-new"):
+            (target / rel).parent.mkdir(parents=True, exist_ok=True)
+        write_copy(src, target / rel, status, data)
+        actions[status] += 1
+        rels.append(rel)
+        if status in HASHED:
+            files[rel] = sha256(data)
+    write_manifests(target, files, load_rules(target))
+    log(f"  gói {pid}/managed: {_action_counts(actions)}")
+    if actions["updated-new"]:
+        log(
+            f"  ⚠ gói {pid}: bản gói ở <file>.xtemplates-new (dự án đã sửa file, hoặc file mới ở dự án đang chạy) — "
+            "so sánh rồi đổi tên/gộp tay để nhận"
+        )
+    return rels
+
+
+def yaml_set_keys(text: str, values: dict[str, str]) -> str:
+    """Đặt giá trị khoá cấp 1 (nháy JSON như các dòng khác): thay dòng `khoá:` đã có, chưa có thì nối cuối; giữ kiểu
+    xuống dòng của file."""
+    nl = "\r\n" if "\r\n" in text else "\n"
+    for key, value in values.items():
+        line = f"{key}: {json.dumps(value, ensure_ascii=False)}"
+        pattern = re.compile(rf"^{re.escape(key)}:[^\r\n]*", re.M)
+        if pattern.search(text):
+            text = pattern.sub(lambda _m: line, text)
+        else:
+            text += ("" if not text or text.endswith("\n") else nl) + line + nl
+    return text
+
+
+YAML_EMPTY_RE = re.compile(r"""^(?:""|'')?[ \t]*(?:#.*)?$""")
+
+
+def yaml_own_value(text: str, key: str) -> str | None:
+    """Giá trị thô (bỏ chú thích cuối dòng) của khoá cấp 1 trong xt.yaml của dự án; vắng → None, rỗng (`""`, `''`,
+    không ghi gì) → ""."""
+    m = re.search(rf"^{re.escape(key)}:[ \t]*([^\r\n]*)", text, re.M)
+    if m is None:
+        return None
+    raw = m[1]
+    return "" if YAML_EMPTY_RE.match(raw) else raw.split(" #", 1)[0].strip()
+
+
+def pack_yaml_split(own: str, values: dict[str, str]) -> tuple[dict[str, str], dict[str, dict[str, str]]]:
+    """(khoá sẽ đặt: vắng/rỗng/đã đúng giá trị gói, khoá giữ của dự án: {khoá: {own, pack}}) — repo sạch vẫn có thể đã
+    điền lệnh riêng (Python, Go…): không ghi đè lệnh của dự án (review lát B 🟠)."""
+    apply: dict[str, str] = {}
+    kept: dict[str, dict[str, str]] = {}
+    for key, value in values.items():
+        cur = yaml_own_value(own, key)
+        if cur in (None, "", json.dumps(value, ensure_ascii=False)):
+            apply[key] = value
+        else:
+            kept[key] = {"own": str(cur), "pack": value}
+    return apply, kept
+
+
+def pack_yaml_plan(target: Path, mode: str, values: dict[str, str]) -> dict[str, Any]:
+    """Phần `xt_yaml` của `--plan`: repo sạch → `apply` (+ `kept` khi dự án đã điền khoá); còn lại → `suggested`."""
+    if mode != "fresh":
+        return {"suggested": dict(values)}
+    path = target / "xt.yaml"
+    own = (read_own_yaml(path) or "") if path.is_file() and not path.is_symlink() else ""
+    apply, kept = pack_yaml_split(own, values)
+    return {"apply": apply, **({"kept": kept} if kept else {})}
+
+
+def install_pack_yaml(target: Path, pid: str, mode: str, values: dict[str, str]) -> None:
+    """Khoá `xt_yaml` của gói: chỉ ghi khi chép starter lần này (repo sạch), và chỉ khoá vắng/rỗng — khoá dự án đã điền
+    giữ nguyên, báo kèm giá trị của gói; dự án đã có cấu hình (brownfield/nâng bản) → chỉ gợi ý."""
+    if not values:
+        return
+    names = ", ".join(values)
+    if mode != "fresh":
+        log(f"  gói {pid}/xt.yaml: gợi ý khoá {names} — không ghi (dự án đã có cấu hình; giá trị ở `--plan`)")
+        return
+    path = target / "xt.yaml"
+    if path.is_symlink():
+        log(f"  ⚠ bỏ qua symlink {path} — tự đặt khoá {names} của gói")
+        return
+    own = read_own_yaml(path) if path.exists() else ""
+    if own is None:
+        return
+    apply, kept = pack_yaml_split(own, values)
+    path.write_bytes(yaml_set_keys(own, apply).encode("utf-8"))
+    log(f"  gói {pid}/xt.yaml: đặt {len(apply)} khoá ({', '.join(apply) or 'không có'})")
+    for key, pair in kept.items():
+        log(f"  ⚠ gói {pid}/xt.yaml: giữ `{key}: {pair['own']}` của dự án — gói đề nghị {json.dumps(pair['pack'])}")
+
+
+def record_pack(target: Path, pid: str, entry: dict[str, Any]) -> None:
+    """Ghi `packs.<id>` vào manifest.json, giữ gói khác và mọi khoá khác."""
+    doc = load_manifest_doc(target)
+    doc["packs"] = {**recorded_packs(target), pid: entry}
+    write_atomic(target / MANIFEST_V2, json.dumps(doc, indent=2, sort_keys=True) + "\n")
+
+
+def install_pack(target: Path, pack: dict[str, Any], version: str) -> None:
+    """Bước 3c (`--pack`): starter (repo sạch) → managed (theo hash) → manifest `packs` → khoá xt.yaml."""
+    pid = pack["id"]
+    mode = pack_mode(target, pid)
+    log(f"  gói {pid}: {mode} — {PACK_MODES[mode]}")
+    prior = recorded_packs(target).get(pid)
+    starter = install_pack_starter(target, pid, mode)
+    if mode == "upgrade":
+        starter = _str_list(prior.get("starter")) if isinstance(prior, dict) else []
+    managed = install_pack_managed(target, pid, mode)
+    record_pack(target, pid, {"version": version, "starter": starter, "managed": managed})
+    install_pack_yaml(target, pid, mode, pack["xt_yaml"])
 
 
 def install_root_templates(
@@ -1579,11 +1921,12 @@ def install_plan(
     stage_init: bool = False,
     adapters: list[str] | None = None,
     no_git_hooks: bool = False,
+    pack: dict[str, Any] | None = None,
 ) -> int:
-    """`--plan`: in JSON kế hoạch (quyền/hook/file/git hook/adapter) ra stdout, KHÔNG ghi gì vào dự án. Thoát 0; 2 nếu
-    đích không hợp lệ."""
+    """`--plan`: in JSON kế hoạch (quyền/hook/file/git hook/adapter; gói khi `--pack`) ra stdout, KHÔNG ghi gì vào dự án.
+    Thoát 0; 2 nếu đích không hợp lệ."""
     target = target.resolve()
-    error = target_error(target, with_github)
+    error = target_error(target, with_github) or pack_root_error(target, pack)
     if error:
         log(error)
         return 2
@@ -1618,6 +1961,8 @@ def install_plan(
             "init": stage_init and not (target / STAGE_LEDGER).exists(),
         },
     }
+    if pack is not None:  # không `--pack` → kế hoạch y như trước (không có khoá `pack`)
+        plan["pack"] = pack_plan(target, pack)
     print(json.dumps(plan, ensure_ascii=False, indent=2, sort_keys=True))
     return 0
 
@@ -1632,9 +1977,10 @@ def install(
     stage_init: bool = False,
     adapters: list[str] | None = None,
     no_git_hooks: bool = False,
+    pack: dict[str, Any] | None = None,
 ) -> int:
     target = target.resolve()
-    error = target_error(target, with_github)
+    error = target_error(target, with_github) or pack_root_error(target, pack)
     if error:
         log(error)
         return 2
@@ -1656,6 +2002,8 @@ def install(
     install_root_templates(target, version, inferred, selected)
     if with_github:
         install_github(target)
+    if pack is not None:
+        install_pack(target, pack, version)
     ensure_gitignore(target)
     stale = legacy_refs(target)
     if stale:
@@ -1710,15 +2058,32 @@ def main(argv: list[str] | None = None) -> int:
         default="",
         help=f"adapter hook cho công cụ khác, cách nhau dấu phẩy: {','.join(ADAPTERS)} (ADR-0064 lát B)",
     )
+    p.add_argument(
+        "--pack",
+        help="gói sản phẩm framework/templates/packs/<id>: starter chỉ vào repo sạch, managed nâng theo hash (ADR-0068)",
+    )
     a = p.parse_args(argv)
     hosts = [h for h in a.harness.split(",") if h]
     bad = [h for h in hosts if h not in ADAPTERS]
     if bad:
         log(f"✗ --harness: không biết {', '.join(bad)} — chọn trong {', '.join(ADAPTERS)}")
         return 2
+    try:
+        pack = load_pack(a.pack) if a.pack else None
+    except ValueError as exc:
+        log(f"✗ --pack: {exc}")
+        return 2
     if a.plan:
         return install_plan(
-            Path(a.target), a.force_harness, a.no_harness, a.with_github, a.preset, a.stage_init, hosts, a.no_git_hooks
+            Path(a.target),
+            a.force_harness,
+            a.no_harness,
+            a.with_github,
+            a.preset,
+            a.stage_init,
+            hosts,
+            a.no_git_hooks,
+            pack,
         )
     return install(
         Path(a.target),
@@ -1730,6 +2095,7 @@ def main(argv: list[str] | None = None) -> int:
         a.stage_init,
         hosts,
         a.no_git_hooks,
+        pack,
     )
 
 

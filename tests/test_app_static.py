@@ -104,7 +104,7 @@ class AppStaticTest(unittest.TestCase):
         self.assertEqual(self.html.errors, [])
 
     def test_nav_matches_views(self):
-        self.assertEqual(len(self.html.nav_hrefs), 7)
+        self.assertEqual(len(self.html.nav_hrefs), 8)
         self.assertEqual(nav_views(self.html.nav_hrefs), view_names())
 
     def test_lang_vi(self):

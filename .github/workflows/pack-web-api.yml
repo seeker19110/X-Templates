@@ -1,0 +1,135 @@
+name: pack-web-api
+
+# ADR-0068 lát B (PLAN-factory-BE T-3687): dựng repo SẠCH từ gói `web-api-ts` bằng `install.py --pack`, chạy lát dọc với
+# Postgres thật (đăng nhập → tenant → migration lùi/tiến → sao lưu/khôi phục → contract → worker → artifact có digest →
+# `release-check` chưa promote khi chưa ký); từng ca sai cố ý của `mutants.json` phải làm bộ nghiệm thu ĐỎ đúng test.
+# Không phải required check (chỉ chạy khi gói/installer đổi); không cần secret.
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+    paths:
+      - framework/templates/packs/**
+      - scripts/install.py
+      - tests/pack_mutants.py
+      - tests/pack_baseline.py
+      - .github/workflows/pack-web-api.yml
+  push:
+    branches: [main]
+    paths:
+      - framework/templates/packs/**
+      - scripts/install.py
+      - tests/pack_mutants.py
+      - tests/pack_baseline.py
+      - .github/workflows/pack-web-api.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  # AUD-SEC-502 (D-377): contract so với baseline.json của NHÁNH GỐC — baseline chỉ được đổi khi PR tăng phiên bản gói
+  # (`VERSION`, ADR-0068); chép đè baseline cùng đổi không tương thích trong một PR thì đỏ.
+  contract-baseline:
+    name: contract-baseline
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false # job không push (AUD-CI-028)
+          fetch-depth: 0 # cần origin/<nhánh gốc>
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.14"
+      - name: baseline.json khớp nhánh gốc hoặc phiên bản gói tăng
+        env:
+          BASE_REF: ${{ github.base_ref }}
+          PACK: framework/templates/packs/web-api-ts
+        run: python3 tests/pack_baseline.py check "$PACK" "origin/$BASE_REF"
+
+  acceptance:
+    name: pack-acceptance (${{ matrix.case }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        # `clean` = repo sạch phải XANH; các ca còn lại phải ĐỎ ở đúng test (mutants.json).
+        case: [clean, tenant-leak, broken-down, contract-runtime, contract-static, contract-request-type]
+    services:
+      postgres:
+        # Cùng tag + digest với dự án đích hotel-manager (BASE-DEP-008: ghim digest).
+        image: postgres:17.11-trixie@sha256:2d2b8998d31037bf721cfdf764d76ba74171b4fab3431b7f72c27c56ddbdf9e3
+        env:
+          # Không literal mật khẩu (BASE-SEC-005): CSDL rỗng dùng một lần trên runner tạm — xác thực trust.
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 2s --health-timeout 5s --health-retries 30
+    env:
+      DATABASE_URL: postgres://postgres@localhost:5432/postgres
+      PG_TOOLS_CONTAINER: ${{ job.services.postgres.id }}
+      PACK: framework/templates/packs/web-api-ts
+      CASE: ${{ matrix.case }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false # job không push (AUD-CI-028)
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.14"
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          version: 12.16.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+      - name: Repo sạch từ gói (install.py --pack)
+        run: |
+          git init -q "$RUNNER_TEMP/app"
+          python3 scripts/install.py "$RUNNER_TEMP/app" --pack web-api-ts --label ci
+          test -f "$RUNNER_TEMP/app/package.json"
+      - name: Cài phụ thuộc theo lock
+        working-directory: ${{ runner.temp }}/app
+        run: pnpm install --frozen-lockfile
+      - name: Áp ca sai cố ý
+        if: matrix.case != 'clean'
+        run: python3 tests/pack_mutants.py apply "$PACK" "$CASE" "$RUNNER_TEMP/app"
+      - name: Cổng tĩnh (lint · typecheck)
+        if: matrix.case == 'clean'
+        working-directory: ${{ runner.temp }}/app
+        run: |
+          pnpm lint
+          pnpm typecheck
+      - name: Lát dọc với Postgres thật
+        working-directory: ${{ runner.temp }}/app
+        run: |
+          set +e
+          pnpm exec vitest run --reporter=default --reporter=junit --outputFile.junit=junit.xml
+          echo "VITEST_EXIT=$?" >> "$GITHUB_ENV"
+      - name: Kết luận ca
+        run: |
+          if [ "$CASE" = clean ]; then
+            test "$VITEST_EXIT" = 0
+          else
+            test "$VITEST_EXIT" != 0
+            python3 tests/pack_mutants.py check "$PACK" "$CASE" "$RUNNER_TEMP/app/junit.xml"
+          fi
+      - name: Build artifact tái lập được + release-check chưa promote khi chưa ký
+        if: matrix.case == 'clean'
+        working-directory: ${{ runner.temp }}/app
+        run: |
+          pnpm build
+          first=$(cat dist/app.tgz.sha256)
+          pnpm build
+          test "$first" = "$(cat dist/app.tgz.sha256)"
+          git add -A
+          git -c user.name=ci -c user.email=ci@example.invalid commit -qm "repo sạch từ gói"
+          python3 .xtemplates/scripts/xt.py release-check --json > "$RUNNER_TEMP/release.json" || true
+          python3 "$GITHUB_WORKSPACE/tests/pack_mutants.py" promotion "$RUNNER_TEMP/release.json"

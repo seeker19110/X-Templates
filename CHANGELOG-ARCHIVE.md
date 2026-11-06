@@ -102,7 +102,7 @@ Phần cũ của [`CHANGELOG.md`](CHANGELOG.md) (T-3651, AUD-DOC-180): mục `##
 - `XT_RECORD_TIMEOUT` = 0 hoặc âm bị từ chối như chữ (trước đây nhận, mọi lệnh Gate/`test-weights` hết giờ ngay).
 
 ### Changed
-- Sổ audit: audit delta `0afa30d..1139662` + A11Y lần đầu ([báo cáo](docs/ops/AUDIT-REPORT-2026-10-22.md), #227) — 0 🔴, 1 🟠 (đã sửa ở bản này), 23 🟢. Bằng chứng blueprint `BASE-DEP-003`, `BASE-CFG-007` viết lại theo mã hiện tại (AUD-HAR-101/102).
+- Sổ audit: audit delta `0afa30d..1139662` + A11Y lần đầu ([báo cáo](docs/archive/ops/AUDIT-REPORT-2026-10-22.md), #227) — 0 🔴, 1 🟠 (đã sửa ở bản này), 23 🟢. Bằng chứng blueprint `BASE-DEP-003`, `BASE-CFG-007` viết lại theo mã hiện tại (AUD-HAR-101/102).
 
 ## [3.15.5] - 2026-10-22
 
@@ -175,7 +175,7 @@ Phần cũ của [`CHANGELOG.md`](CHANGELOG.md) (T-3651, AUD-DOC-180): mục `##
 - E2E trình duyệt cho app (T-1992, D-133, `PRF-WEB-006`): `tests_e2e/` (ngoài `tests/` — bộ test chính vẫn không cần trình duyệt) chạy 7 màn × 2 viewport (1280×800, 390×844): không lỗi console/API, không cuộn ngang, bàn phím (link bỏ qua là điểm Tab đầu), axe-core 4.14.0 0 vi phạm critical/serious ở cả sáng lẫn tối, luồng ghi `BLUEPRINT.md`. Phụ thuộc chỉ ở job CI mới `app-e2e` (`requirements-e2e.txt` ghim hash: Playwright 1.64.0 Apache-2.0 và bắc cầu; `--only-shell chromium`), vào `quality.needs`; `dep-audit` quét thêm file này. axe-core vendored nguyên văn ở `tests_e2e/vendor/axe/` kèm `LICENSE` (MPL-2.0), `SOURCE` (URL, sha256) — `vendor-check --strict` xanh, không phát tán sang dự án đích. App sửa 3 lỗi E2E tìm ra: focus lần tải đầu, vùng cuộn `pre` không focus được, favicon 404. `BLUEPRINT.md` repo khung: mục "Ứng dụng cục bộ" với `PRF-WEB-*` (D-134).
 - `xt.py plan waves [--plan P] [--max N] [--json]` (T-1901, ADR-0038): xếp task mở của PLAN thành đợt chạy song song — đợt k nhận task mà mọi `sau:` đã đóng hoặc thuộc đợt < k, trong đợt `files:` đôi một không giao (`_path_overlap`), ≤ N task (mặc định 5), task thiếu `files:` đứng riêng; task trên chu trình, ghi chú `sau:`/`files:` hỏng, đã defer hoặc chờ task bị chặn → `blocked` kèm lý do. Hàm thuần `plan_waves` dùng chung cho autopilot và màn Kế hoạch của app; không cần vòng đang chạy. `docs/specs/SPEC-app.md`: hợp đồng API của app (T-1911). Dự án đích: chưa phải làm gì (lệnh có sau khi nâng bản).
 - `docs/ops/CI-TIMING-2026-10-21.md`: số đo 20 run CI xanh của repo khung (wall trung vị 94,5 s, P90 151 s; 14 job; chờ runner ≤ 4 s) so với phương án gom 3 job (~200 s ước lượng từ `gate-par` cục bộ) — giữ fan-out theo tiêu chí nhận của kế hoạch tối ưu (D-131), điều kiện xem lại ghi trong file.
-- Audit khung + bộ mẫu tại `ec4c7d2` (`docs/ops/AUDIT-REPORT-2026-10-21.md`, kế hoạch tối ưu `docs/ops/OPTIMIZATION-PLAN-2026-10-21.md`, bằng chứng `docs/ops/evidence/audit-2026-10-21.json`), xác minh lại độc lập (tái hiện + hai lượt bác bỏ mỗi phát hiện): AUD-CODE-014 nâng 🔴, AUD-XFEAT-013 nâng 🟠, AUD-SEC-102 có bằng chứng đo được, mới AUD-XFEAT-020 (sàn M/L không chạy ở CI) và AUD-CI-016 (reviewer CI nhận diff bị cắt). Kế hoạch sửa [`PLAN-3.15-audit-gate.md`](docs/autopilot/PLAN-3.15-audit-gate.md) (D-130); PLAN-3.14-app tạm dừng tới khi Lát 1–3 merge.
+- Audit khung + bộ mẫu tại `ec4c7d2` (`docs/ops/AUDIT-REPORT-2026-10-21.md`, kế hoạch tối ưu `docs/ops/OPTIMIZATION-PLAN-2026-10-21.md`, bằng chứng `docs/ops/evidence/audit-2026-10-21.json`), xác minh lại độc lập (tái hiện + hai lượt bác bỏ mỗi phát hiện): AUD-CODE-014 nâng 🔴, AUD-XFEAT-013 nâng 🟠, AUD-SEC-102 có bằng chứng đo được, mới AUD-XFEAT-020 (sàn M/L không chạy ở CI) và AUD-CI-016 (reviewer CI nhận diff bị cắt). Kế hoạch sửa [`PLAN-3.15-audit-gate.md`](docs/archive/autopilot/PLAN-3.15-audit-gate.md) (D-130); PLAN-3.14-app tạm dừng tới khi Lát 1–3 merge.
 - `dev-task.sh gate-par`: cùng lệnh với `gate` nhưng nhóm độc lập chạy song song (typecheck ∥ lint ∥ build → test → test_floor), log tách nhóm, đỏ khi nhóm nào đỏ (exit code nhóm đỏ đầu tiên), guard hỏi một lần cho mọi lệnh (D-128, test `DevTaskGateParTest`).
 - [ADR-0038](docs/adr/0038-local-app-on-xt.md) (D-126; chủ repo hỏi 2026-10-21 "biến dự án này thành app và phân chia công
   việc"): ứng dụng web cục bộ `xt.py app` — `http.server` stdlib trên 127.0.0.1, HTML/CSS/JS thuần không build, API JSON gọi
@@ -595,7 +595,7 @@ Phần cũ của [`CHANGELOG.md`](CHANGELOG.md) (T-3651, AUD-DOC-180): mục `##
   bằng lệnh trên `19d3aa8`, nghiên cứu bổ sung nguồn sống (required check `skipped`/`neutral`, hook `PermissionRequest`/
   `TaskCompleted`/`SubagentStop`, headless `--json-schema`, Code Review, Routines), thang tự chủ theo loại PR, cơ chế cụ
   thể cho AUTO-01…07; kèm kế hoạch máy đọc cho đợt 3.9.0 → 3.10.0
-  [`docs/autopilot/PLAN-3.9-automation.md`](docs/autopilot/PLAN-3.9-automation.md) (T-1501…T-1522, chạy `loop init --plan`
+  [`docs/autopilot/PLAN-3.9-automation.md`](docs/archive/autopilot/PLAN-3.9-automation.md) (T-1501…T-1522, chạy `loop init --plan`
   sau khi 3.8.0 phát hành — D-066…D-070). Đề xuất tài liệu, chưa thay đổi hành vi công cụ.
 
 ### Security

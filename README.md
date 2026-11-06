@@ -130,7 +130,8 @@ nghe 127.0.0.1, đòi token mỗi lần chạy, kiểm `Host`/`Origin` và đặ
 | `python3 scripts/xt.py merge-watch [--pr N] [--interval 30]` | Chạy nền sau khi mở PR: gọi `merge-check` mỗi 30 giây tới khi PR đã merge hoặc cần hành động (ADR-0021) |
 | `python3 scripts/xt.py merge-check [--pr N] [--json]` | Máy quyết khi nào merge PR đã mở: `merge` · `review` (chưa đủ review sạch ở head, exit 1, không in lệnh merge — ADR-0032) · `wait` · `update` · `fix` · `human` · `closed`; `merge_autonomy`: L3 (mặc định) máy merge ghim head mọi làn (làn nhanh khi CI xanh, làn chuẩn khi CI xanh + review sạch ở đúng head — ADR-0024, ADR-0036; không bật auto-merge của GitHub) trừ ngoại lệ cứng (`merge_hard_exceptions: auto` thì cả ngoại lệ cứng — ADR-0020), L2 chỉ làn nhanh, L1 người merge (ADR-0013, ADR-0015, ADR-0016) |
 | `python3 scripts/xt.py feedback add/collect/list/aggregate` | Phản hồi lỗi do khung + cách khắc phục từ dự án đích (`docs/xtemplates-feedback/FB-NNN.md`, qua `redact`); repo khung gộp theo (loại, ID) — ADR-0010 |
-| `python3 scripts/install.py DỰ_ÁN [--with-github] [--preset safe\|autonomous] [--stage-init] [--plan]` | Cài khung + harness; preset chỉ chọn chính sách cho `xt.yaml` mới, cài lại giữ lựa chọn; `--stage-init` tạo sổ giai đoạn 1 khi chưa có; `--plan` xem trước. `--with-github` thêm ruleset, CI, kiểm tiêu đề PR, quét bí mật và steward ([`framework/templates/`](framework/templates/README.md)) |
+| `python3 scripts/install.py DỰ_ÁN [--with-github] [--preset safe\|autonomous] [--stage-init] [--pack ID] [--plan]` | Cài khung + harness; preset chỉ chọn chính sách cho `xt.yaml` mới, cài lại giữ lựa chọn; `--stage-init` tạo sổ giai đoạn 1 khi chưa có; `--pack` cài gói sản phẩm ([`packs/`](framework/templates/packs/README.md): starter chỉ repo sạch, managed theo hash); `--plan` xem trước. `--with-github` thêm ruleset, CI, kiểm tiêu đề PR, quét bí mật và steward ([`framework/templates/`](framework/templates/README.md)) |
+| `python3 scripts/xt.py registry [--file F] [--json] [--today D] [--strict]` | Registry sản phẩm đích (`docs/ops/registry.json`, schema 1 — ADR-0068 lát E): schema sai → exit 2; lệch core/gói so với `VERSION` (current/patch/minor/major/ahead/unknown); ngoại lệ hết hạn (`until` < hôm nay); `--strict` → exit 1 khi còn lệch/hết hạn; màn Registry ở `xt.py app` |
 | `python3 scripts/xt.py progress-check [FILE]` | `PROGRESS.md` ≤ 8 KB, đúng 4 mục, SHA ở Bàn giao phiên là tổ tiên HEAD và có trên nhánh chính (`XT_PROGRESS_BASE`, mặc định `origin/HEAD` → `origin/main` → `origin/master`; CI cần `fetch-depth: 0`) |
 | `python3 scripts/xt.py changelog-check [FILE]` | `CHANGELOG.md` theo Keep a Changelog 1.1.0: `## [Unreleased]` đầu tiên, bản `## [X.Y.Z] - YYYY-MM-DD` giảm dần, nhóm chuẩn, không trùng nhóm trong Unreleased; bản mới nhất == `VERSION` cùng thư mục (nếu có) |
 | `python3 scripts/xt.py license-check [--requirements F]… [--allow F] [--today D]` | License (`importlib.metadata`) của mọi gói ghim `==` trong `requirements-dev.txt` (hoặc file chỉ định) đối chiếu allowlist SPDX của `license-allow.json`; ngoại lệ cần `approved_by` + `expires`, chỉ khớp đúng license đã duyệt; vi phạm, gói ghim chưa cài hoặc ngoại lệ quá hạn → exit 1 (BASE-DEP-005); chạy trong `lint` |
@@ -268,17 +269,24 @@ python3 -m unittest discover -s tests    # chỉ test (cổng test còn đòi co
 - [ADR-0065](docs/adr/0065-guard-allowlist-dynamic-expansion.md) (D-322): guard xét mở rộng động theo danh sách trắng — từ lệnh dựng lúc chạy, tách/gán theo tên động (`IFS`), heredoc đọc lại, dữ liệu thành mã (`mapfile -C`, `${x@P}`) → `BUDGET`; không suy cấu trúc lệnh để miễn.
 - [ADR-0066](docs/adr/0066-guard-written-file-reuse.md) (D-327): tệp do chính lệnh ghi mà tên được nhắc lại ở chỗ khác của lệnh (trừ lệnh chỉ đọc trong danh sách trắng) → `BUDGET` — không liệt kê trình chạy (AUD-SEC-406).
 - [ADR-0067](docs/adr/0067-guard-static-limit-layered-defense.md) (D-331/D-332): tên tệp/mô-đun dựng lúc chạy trong lệnh tự ghi tệp — giới hạn phân tích tĩnh, chấp nhận có hạn 2027-01-21 (thay một phần ADR-0065); dạng nguyên văn vẫn phải chặn.
+- [ADR-0068](docs/adr/0068-software-factory-direction.md) (D-353): định hướng xưởng phần mềm — lõi hiện có + gói sản phẩm có phiên bản (`framework/templates/packs/<stack>/`, stack hotel-manager) + hợp đồng bằng chứng/phát hành có kiểu (evidence v3 thêm trường, `release-check` thêm `promotion`) + registry file; năm lát A–E, mỗi lát một PLAN/PR riêng.
+- [ADR-0069](docs/adr/0069-agent-stage-approval.md) (D-352): agent tự nghiệm thu giai đoạn sản phẩm khi `xt.yaml` (cây và bản đã commit ở nhánh chính) khai `stage_approval: agent` — duyệt bản trình còn nguyên, `next-step` trả `stage-approve`; `init --adopt`, dạng mờ vẫn chỉ người (thay một phần ADR-0058).
+- [ADR-0070](docs/adr/0070-archive-repo-history.md) (D-354): lịch sử của chính repo khung (PLAN đã đóng, báo cáo audit, GO-NO-GO và ghi chép đo cũ) vào [`docs/archive/`](docs/archive/README.md) — `framework/` giữ nguyên (ID "Ngừng dùng", Nguồn + ngày); số task không tái sử dụng (`xt.py` quét cả kho); `.ignore` để tìm kiếm mặc định bỏ qua kho.
 - [ADR-0071](docs/adr/0071-perf-trial.md) (D-356, D-360, D-366, D-368, D-370, D-371, D-372): `perf trial` — máy quản lý trọn một lần thử tối ưu: baseline = đầu nhánh mặc định do máy chủ báo, đo xen kẽ base/`start_head`/candidate ở cây dựng lại từ tree object, cấu hình và công cụ chấm từ commit gốc, held-out lúc finish, falsifier ghi trước, giữ/thu hồi tự động, sổ bền `.autopilot/` dựng PERF-LOG; lát 3 của ADR-0052, triển khai T-3700…T-3707.
 - [ADR-0072](docs/adr/0072-review-dir-caps-after-2x.md) (D-373): `.claude/hooks/` vượt 2× mốc 2026-10-26 do bản vá guard #433–#442 — giữ trần `DIR_CAPS`, mốc mới 2026-11-05 cho hooks, cổng máy `SIZE_MARKS` (mỗi nhóm ≤ 2× mốc gần nhất); T-3709 đo chi phí compile `guard.py`.
 
 Nghiên cứu nền ngày 2026-10-13 ở [`research/`](research/): phân tích khung cũ, trích xuất catalog `seeker19110/stored`,
 AI agent và giao thức, cơ chế Claude Code. Khung cũ khôi phục được bằng `git archive 1b80fe4`.
 
+Định hướng [xưởng phần mềm từ 34 mục stored](research/2026-11-04-software-factory-direction.md) (4/11/2026, chấp nhận qua
+[ADR-0068](docs/adr/0068-software-factory-direction.md), D-353): gói sản phẩm có phiên bản, bằng chứng phát hành có kiểu, lộ trình
+nghiệm thu A–E; lát A–E đã làm, gộp một PR (#451) theo quyết định chủ dự án (D-358/D-359) thay vì mỗi lát một PR.
+
 ## Đóng góp
 
 Xem [`CONTRIBUTING.md`](CONTRIBUTING.md) và [`framework/00-method/conventions.md`](framework/00-method/conventions.md).
 Bản đề xuất [khắc phục và nâng cấp tự động hóa ngày 2026-10-19](docs/ops/REMEDIATION-PLAN-2026-10-19.md)
 gồm tái hiện, nghiên cứu nguồn sống, thang tự chủ theo loại PR, tiêu chí nghiệm thu và kế hoạch máy đọc
-[`PLAN-3.9-automation.md`](docs/autopilot/PLAN-3.9-automation.md) cho đợt sau 3.8.0.
+[`PLAN-3.9-automation.md`](docs/archive/autopilot/PLAN-3.9-automation.md) cho đợt sau 3.8.0.
 Vận hành: [runbook `pr-steward`](docs/ops/RUNBOOK-PR-STEWARD.md) · [phụ thuộc và license](docs/ops/DEPENDENCIES.md).
 Báo lỗ hổng: [`SECURITY.md`](SECURITY.md). Giấy phép: [MIT](LICENSE).

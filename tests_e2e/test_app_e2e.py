@@ -1,4 +1,4 @@
-"""E2E trình duyệt cho app cục bộ `xt.py app` (T-1992, D-133, PRF-WEB-006): 7 màn × 2 viewport, console sạch, không
+"""E2E trình duyệt cho app cục bộ `xt.py app` (T-1992, D-133, PRF-WEB-006): 8 màn × 2 viewport, console sạch, không
 cuộn ngang ở 390 px, đi được bằng bàn phím, axe 0 vi phạm `critical`/`serious`, một luồng ghi BLUEPRINT.md.
 
 Chạy: `pip install --require-hashes -r requirements-e2e.txt` rồi `python -m playwright install --only-shell chromium`
@@ -45,6 +45,7 @@ SCREENS: Tuple[Tuple[str, str], ...] = (
     ("plan", "Kế hoạch và phân chia việc"),
     ("loop", "Vòng tự động"),
     ("pr", "PR"),
+    ("registry", "Registry sản phẩm"),
 )
 TIMEOUT_MS = 20000
 
@@ -65,6 +66,10 @@ DECISIONS = """# Nhật ký quyết định
 - Đường lùi: đổi sang SQLite
 """
 ADR = "# ADR-0001: Dùng tệp phẳng\n\n- **Trạng thái:** Đã chấp nhận\n"
+REGISTRY = """{"schema": 1, "products": [{"repo": "owner/a-very-long-product-repository-name-for-narrow-table", "owner": "o",
+ "type": "web-api", "risk": "high", "core": "1.0.0", "pack": null, "environments": ["prod"], "slo": "",
+ "release": {"version": "1.0.0", "date": "2026-10-01", "digest": null},
+ "exceptions": [{"id": "EX-1", "until": "2020-01-01", "why": "<script>alert(1)</script>"}]}]}"""
 
 _pw: Optional[Playwright] = None
 _browser: Optional[Browser] = None
@@ -106,6 +111,8 @@ def make_project(base: Path, with_blueprint: bool) -> None:
     (base / "docs" / "autopilot" / "PLAN.md").write_text(PLAN, encoding="utf-8")
     (base / "docs" / "autopilot" / "DECISIONS.md").write_text(DECISIONS, encoding="utf-8")
     (base / "docs" / "adr" / "0001-flat-files.md").write_text(ADR, encoding="utf-8")
+    (base / "docs" / "ops").mkdir(parents=True)
+    (base / "docs" / "ops" / "registry.json").write_text(REGISTRY, encoding="utf-8")  # màn Registry có bảng
     if with_blueprint:
         compose_blueprint(base)
 
@@ -243,6 +250,9 @@ class ScreensTest(AppCase):
     def check_screen(self, page: Page, watch: Watch, route: str) -> None:
         if route == "pr":  # không có gh: màn PR báo rõ, các màn khác vẫn dùng được
             page.get_by_text("Không đọc được GitHub").wait_for()
+        if route == "registry":  # bảng có dòng; lý do ngoại lệ chứa thẻ HTML hiện thành chữ, không thành phần tử
+            page.get_by_text("hết hạn · EX-1", exact=False).wait_for()
+            self.assertEqual(page.locator("main script").count(), 0)
         assert_clean(self, page, watch, self.origin)
 
     def test_catalog_module_detail_mobile(self) -> None:

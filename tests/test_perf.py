@@ -1566,7 +1566,7 @@ class PerfCompareV2Test(unittest.TestCase):
 
 
 GATE_DOC = ROOT / "framework" / "11-autonomous-loop" / "optimization-loop.md"
-SLOWER = "sleep 0.05\n"  # candidate chậm hơn gốc (0,02 s) thật: verdict thật là regressed, không phụ thuộc nhiễu
+SLOWER = "sleep 0.5\n"  # candidate chậm hơn gốc (0,2 s) thật: verdict thật là regressed, không phụ thuộc nhiễu (D-380: giãn ×10 để nhiễu lập lịch khi cổng chạy song song không lật kết quả)
 # Candidate gian lận (AUD-XFEAT-026/027): mã chạy trong lượt đo after, cùng uid với Gate.
 TAMPER_BASELINE = SLOWER + (  # sửa `samples` của mọi before.json tìm được, ngay trong lúc đang đo
     'find "${TMPDIR:-/tmp}" . -name before.json -exec python3 -c \'import json, sys\n'
@@ -1615,7 +1615,7 @@ class PerfGateExampleTest(unittest.TestCase):
             "bench/run.sh": "#!/bin/sh\nexec sh ./app.sh\n",
             "tests/equiv/check.sh": "true\n",
             "scripts/perf-gate.sh": self.script,
-            "app.sh": "sleep 0.02\n",
+            "app.sh": "sleep 0.2\n",
         }
         for rel, body in files.items():
             (repo / rel).parent.mkdir(parents=True, exist_ok=True)
@@ -1713,6 +1713,22 @@ class CpuBudgetTest(unittest.TestCase):
         with self.assertRaises(AssertionError):
             cpu_budget.assert_not_quadratic(self, work, 10_000, clock=clock, ratio=40)
         self.assertGreaterEqual(cpu_budget.cost(lambda n: sum(range(n)), 10), 0.0)  # đồng hồ thật
+
+    def test_transient_spike_remeasured_quadratic_still_fails(self):
+        """D-380: tranh CPU chỉ ở lần đo lớn đầu (tuyến tính, lần đầu ×20) → đo lại thì qua; bậc hai thật đỏ cả hai lượt."""
+        calls = []
+
+        def spike(n: int) -> float:
+            calls.append(n)
+            base = n * 1e-5
+            return base * 20 if len(calls) == 2 else base  # lần thứ hai là lần đo cỡ lớn đầu tiên
+
+        clock, work = self.fake_clock(spike)
+        cpu_budget.assert_not_quadratic(self, work, 10_000, clock=clock)
+        self.assertEqual(len(calls), 4)  # đã đo lại một lượt
+        clock, work = self.fake_clock(lambda n: n * n * 1e-8)
+        with self.assertRaises(AssertionError):
+            cpu_budget.assert_not_quadratic(self, work, 10_000, clock=clock)
 
     def test_no_hard_cpu_thresholds_left(self):
         hard = re.compile(r"assertLess\(\s*time\.process_time\(\)\s*-\s*\w+\s*,\s*[0-9.]+\s*\)")

@@ -39,13 +39,13 @@ test_floor: if command -v python3.11 >/dev/null 2>&1; then XT_PY=python3.11 XT_M
 commit_gate: fast
 # test_fast: `xt.py test-select` đọc XT_CHANGED_FILES (dev-task.sh đặt) → id lớp test liên quan (file không ánh xạ được →
 # cả suite), mỗi lớp một tiến trình như `test`. Module test lỗi import → test-select exit 1 → cổng đỏ.
-test_fast: python3 scripts/xt.py test-select --unittest | xargs -r -P "$(nproc 2>/dev/null || echo 2)" -n 1 python3 -m unittest
+test_fast: python3 scripts/xt.py test-select --unittest | xargs -r -P "$(( ("$(nproc 2>/dev/null || echo 2)" + 1) / 2 ))" -n 1 python3 -m unittest
 # PR quan trọng riêng của repo khung (D-031 → D-080, chủ repo 2026-10-19): chỉ bộ máy merge/ủy quyền/cổng (`scripts/`) và
 # mẫu dự án đích (`framework/templates/` — thành file thật ở dự án đích) và các file PLAN (chứa lệnh Gate mà harness chạy;
 # T-1511) vào làn chuẩn. Tài liệu thuần (ADR, luật vòng tự động,
 # code-review.md) đi làn nhanh: lớp đỡ là `validate` + `check-links` + revert. Khi ngoại lệ cứng giữ người (ADR-0020) các
 # đường dẫn này thành ngoại lệ cứng.
-merge_risk_paths: "scripts/*, framework/templates/*, docs/autopilot/PLAN*.md"
+merge_risk_paths: "scripts/*, framework/templates/*, docs/autopilot/PLAN*.md, docs/archive/autopilot/PLAN*.md"
 # Merge PR (ADR-0013/0014/0015): chủ repo yêu cầu 2026-10-16 "mở PR luôn kèm auto merge" → L3: máy merge GHIM head mọi
 # làn khi `merge-check` = `merge` ở đúng head đó — làn nhanh khi CI xanh, làn chuẩn khi CI xanh + review sạch ở head
 # (ADR-0024; pha build: review ghi nợ); không dùng auto-merge của GitHub (D-122, ADR-0036). L2 = máy chỉ tự merge làn

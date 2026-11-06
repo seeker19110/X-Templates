@@ -213,7 +213,7 @@ class StageCliTest(TmpRepoCase):
                 sha = self.submit()
                 out = self.stage("status")[1]
                 self.assertIn(f"giai đoạn {n} ", out)
-                self.assertIn(f"chờ người duyệt bản {sha[:12]}", out)
+                self.assertIn(f"chờ duyệt bản {sha[:12]}", out)
                 rc, _, err = self.stage("approve", "--sha", sha, "--note", "ok", agent=True)
                 self.assertEqual(rc, 2)
                 self.assertIn("chỉ người duyệt", err)

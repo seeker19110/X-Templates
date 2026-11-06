@@ -1,0 +1,6 @@
+# ripgrep/fd (và công cụ Grep/Glob của agent dựa trên ripgrep) mặc định bỏ qua kho lịch sử — ADR-0070 (D-354).
+# Truy vết thì tìm đích danh: `rg <mẫu> docs/archive/` (đường dẫn chỉ định rõ vẫn được tìm). Git, CI, check-links không đọc file này.
+docs/archive/
+/CHANGELOG-ARCHIVE.md
+docs/ops/AUDIT-STATUS-ARCHIVE.md
+docs/autopilot/DECISIONS-*.md
