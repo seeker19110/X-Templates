@@ -12,6 +12,9 @@ export async function up(db: Kysely<unknown>): Promise<void> {
       IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'app_rw') THEN
         CREATE ROLE app_rw NOLOGIN;
       END IF;
+    -- Vai trò là đối tượng của cả cụm: hai cơ sở dữ liệu migrate cùng lúc trên cụm mới (test chạy song song) cùng
+    -- qua IF NOT EXISTS → bên sau đụng unique pg_authid. Bên đó coi như vai trò đã có.
+    EXCEPTION WHEN duplicate_object OR unique_violation THEN NULL;
     END $$;
     CREATE SCHEMA app;
     CREATE FUNCTION app.current_tenant() RETURNS uuid LANGUAGE plpgsql STABLE AS $f$

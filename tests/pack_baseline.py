@@ -5,9 +5,9 @@
 `starter/contract/baseline.json` là mốc mà bộ nghiệm thu (`contract.test.ts`) so `openapi.json` với nó; sửa được trong
 cùng PR thì đổi không tương thích kèm chép đè baseline lọt. Luật: baseline ở cây làm việc phải CÙNG nội dung JSON với
 bản ở `<base-ref>` (nên test contract thực chất so với baseline của nhánh gốc), trừ khi phiên bản gói TĂNG so với
-`<base-ref>`. Phiên bản gói = `VERSION` của khung ở gốc repo (ADR-0068 quyết định 1, semver `X.Y.Z`). Gói chưa có
-baseline ở gốc (gói mới) → qua.
-Thoát 0 = đạt; 1 = baseline đổi không tăng phiên bản / file hỏng; 2 = tham số sai hay `<base-ref>` không đọc được.
+`<base-ref>` — và khi đó baseline mới phải trùng `openapi.json` (chép nguyên từ contract, không mốc tuỳ ý). Phiên bản
+gói = `VERSION` của khung ở gốc repo (ADR-0068 quyết định 1, semver `X.Y.Z`). Gói chưa có baseline ở gốc (gói mới) → qua.
+Thoát 0 = đạt; 1 = baseline đổi không tăng phiên bản hay không trùng contract / file hỏng; 2 = tham số sai hay `<base-ref>` không đọc được.
 """
 
 from __future__ import annotations
@@ -19,6 +19,7 @@ import sys
 from pathlib import Path
 
 BASELINE = "starter/contract/baseline.json"
+OPENAPI = "starter/contract/openapi.json"
 SEMVER = re.compile(r"(\d+)\.(\d+)\.(\d+)")
 
 
@@ -62,6 +63,13 @@ def check(pack: Path, ref: str) -> str:
             f"{BASELINE} đổi so với {ref} mà phiên bản gói (`VERSION`, ADR-0068) không tăng ({old} → {new}) — đổi"
             " contract phải đi cùng PR tăng phiên bản (AUD-SEC-502)"
         )
+    # Tăng phiên bản chỉ cho chép mốc mới từ chính contract: baseline tuỳ ý (`{"paths": {}}`) làm phép so rỗng mãi mãi.
+    try:
+        spec = json.loads((pack / OPENAPI).read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        return f"{OPENAPI} không đọc được ({exc})"
+    if spec != head:
+        return f"{BASELINE} đổi nhưng không trùng {OPENAPI} — mốc mới phải chép nguyên từ contract (AUD-SEC-502)"
     return ""
 
 

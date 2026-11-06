@@ -121,15 +121,25 @@ function route(method: string, path: string): [Handler, string] | null {
   return null;
 }
 
+function parsePath(url: string | undefined): string {
+  try {
+    return new URL(url ?? "/", "http://localhost").pathname;
+  } catch {
+    throw new HttpError(400, "invalid_url");
+  }
+}
+
 export function createApp(db: Db): Server {
   return createServer(async (req, res) => {
-    const path = new URL(req.url ?? "/", "http://localhost").pathname;
-    if (req.method === "GET" && path === "/healthz") {
-      send(res, 200, { status: "ok" });
-      return;
-    }
-    const found = route(req.method ?? "", path);
+    // Mọi bước, kể cả parse URL, nằm trong try: llhttp nhận request-target mà WHATWG URL không parse được
+    // (`GET http://[::1 HTTP/1.1`) — lỗi lọt ra ngoài handler async là unhandled rejection, Node thoát.
     try {
+      const path = parsePath(req.url);
+      if (req.method === "GET" && path === "/healthz") {
+        send(res, 200, { status: "ok" });
+        return;
+      }
+      const found = route(req.method ?? "", path);
       if (!found) {
         throw new HttpError(404, "not_found");
       }

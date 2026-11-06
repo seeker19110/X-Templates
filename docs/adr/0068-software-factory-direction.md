@@ -11,7 +11,8 @@
   T-3685…3692): gói `framework/templates/packs/web-api-ts/` + workflow `pack-web-api.yml` (lát dọc, 4 ca sai cố ý);
   `install.py --pack` (fresh/brownfield/upgrade, kiểm trên bản clone hotel-manager); worker trong gói (tuyến API/worker);
   `docs/ops/registry.json` + `xt.py registry` + màn app. Còn: fixture payload host thật Codex/Gemini (cần CLI chạy bằng tài
-  khoản của chủ dự án); PR nâng dự án đích (việc người). Ghi lúc chấp nhận: không thêm ID, không đổi mức, không đổi schema/CLI trong PR của ADR này.
+  khoản của chủ dự án); PR nâng dự án đích (việc người). Ghi lúc chấp nhận: không thêm ID, không đổi mức, không đổi schema/CLI trong PR của ADR này. Về sau lát A–E cùng
+  ADR-0069/0070 gộp một PR (#451) theo chủ dự án (D-358/D-359) — lệch Yếu tố 2 "mỗi lát một PR" (nợ AUD-HAR-221).
 - **Ngày:** 2026-11-04.
 - **Nghiên cứu:** research cùng tên (đối chiếu X-Templates `e0ea0a6`/`9c03257` và stored `5d8f8a6` ngày 2026-11-04; nhật ký
   xác minh §10; điều chưa xác minh: trạng thái merge stored#131, stack dự án đích).

@@ -1,7 +1,7 @@
 ---
 title: Mẫu AGENTS.md cho dự án
 kind: template
-updated: 2026-11-01
+updated: 2026-11-05
 ---
 
 # AGENTS.md — luật vận hành cho AI agent trong dự án này

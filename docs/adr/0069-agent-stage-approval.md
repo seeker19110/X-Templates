@@ -48,11 +48,12 @@ cấp quyền cho mình?
 Chọn **phương án 1** (D-352).
 
 - **`xt.yaml`**: `stage_approval: agent` — agent được `stage approve`; vắng/khác → chỉ người (ADR-0058). Có hiệu lực khi
-  **cả** xt.yaml ở cây làm việc **lẫn** bản đã commit ở nhánh chính của remote (`origin/HEAD` → `origin/main` →
-  `origin/master`, ref đầu tiên đọc được) đều khai; không đọc được/không có remote → chỉ người.
+  **cả** xt.yaml ở cây làm việc **lẫn** bản đã commit ở nhánh chính của remote (`origin/main` → `origin/master`, ref
+  đầu tiên đọc được; không `origin/HEAD` — siết 2026-11-05, D-358) đều khai; không đọc được/không có remote → chỉ người.
 - **`xt.py stage approve` trong phiên agent** (`stage_agent_approval` đúng): duyệt đúng bản đã trình (`--sha` khớp) **và**
   bản còn nguyên trên cây (`_stage_changed` = `[]`; file đổi, vân tay lệch hay SHA mất → từ chối, lối ra `stage reopen` rồi
-  trình lại); sự kiện `approve` ghi `by: "agent"`, `session`, `note` (tiêu chí MVP đã đạt). Người duyệt như cũ.
+  trình lại); sự kiện `approve` ghi `by: "agent"`, `session`, `note` (tiêu chí MVP đã đạt). Khoá bật thì người cũng chỉ
+  duyệt được bản còn nguyên (siết 2026-11-05, D-358); khoá tắt → người duyệt như ADR-0058.
 - **`loop next-step`**: `stage_facts` thêm `agent_approval`; MVP đã trình → `stage-approve` (đối chiếu tiêu chí MVP của
   PLAN với bản trình: đạt → `approve`, không đạt → `reopen`) thay `wait-approval`; `stage-submit` và khoá `/complete`
   (`_harden_stage_lock`) ghi lối ra tương ứng. Không có khoá → hành vi ADR-0058 nguyên vẹn.
@@ -71,14 +72,15 @@ Chọn **phương án 1** (D-352).
   nên GO sản xuất có thể không có người nào từng duyệt MVP (lớp đỡ còn lại: chữ ký GO-NO-GO §5, `prod_switch`). Ai có quyền
   ghi nhánh chính đổi được khoá — cùng mức tin cậy với `delivery_phase`/`merge_hard_exceptions` (merge-check coi PR đổi
   `stage_approval` là ngoại lệ cứng từ review harden 2026-11-05). Giới hạn đã biết (D-015): đổi refspec/URL của remote
-  rồi `fetch` vẫn lật được `origin/main` cục bộ; `python3 -c` gọi `xt.main` sau khi gỡ biến agent (có từ trước ADR-0069).
+  rồi `fetch` vẫn lật được `origin/main` cục bộ. Đã đóng: `python3 -c` gọi `xt.main` sau khi gỡ biến agent (AUD-SEC-498,
+  D-377); còn lại script trên đĩa `import xt` (giới hạn mô hình guard, sổ audit).
 - Chưa làm: `stage approve` của agent chưa đòi `loop verify --all` lại lúc duyệt (bản trình còn nguyên nên bằng chứng lúc
   `submit` còn hiệu lực); agent khác Claude có thể không mang biến phiên (ADR-0058 đã ghi) — khi đó `xt.py` coi là người.
 
 ### Xác nhận
 
 - `python3 -m unittest tests.test_stage_agent_approval`: khoá cần cả cây lẫn bản đã commit; agent duyệt được bản còn
-  nguyên; bản đổi → từ chối (người vẫn duyệt được); `init --adopt` từ chối; `next-step` trả `stage-approve`; guard cho
+  nguyên; bản đổi → từ chối với mọi người gọi khi khoá bật; `init --adopt` từ chối; `next-step` trả `stage-approve`; guard cho
   qua dạng chữ rõ, chặn dạng mờ/`--adopt`/strict/khoá chưa commit.
 - Corpus guard (`tests/fixtures/autonomy/guard.json`) không đổi quyết định: repo khung không khai khoá.
 - Mốc xét lại: cùng ADR-0058 — khi có số đo thời gian tới nghiệm thu ở ≥ 1 dự án đích (research xưởng §8).

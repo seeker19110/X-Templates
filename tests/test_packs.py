@@ -240,6 +240,7 @@ class ContractBaselineTest(unittest.TestCase):
             (self.repo / "VERSION").write_text(f"{version}\n", encoding="utf-8")
         if baseline is not None:
             (contract / "baseline.json").write_text(json.dumps(baseline, indent=1), encoding="utf-8")
+            (contract / "openapi.json").write_text(json.dumps(baseline), encoding="utf-8")  # mốc chép từ contract
 
     def run_main(self, *argv: str) -> tuple[int, str]:
         out, err = io.StringIO(), io.StringIO()
@@ -269,6 +270,17 @@ class ContractBaselineTest(unittest.TestCase):
             with self.subTest(version=version):
                 self.write(version=version, baseline={"paths": {}})
                 self.assertEqual(self.check()[0], 0)
+
+    def test_version_bump_with_baseline_not_from_contract_fails(self):
+        """Lách AUD-SEC-502 (review #451): tăng VERSION kèm baseline tuỳ ý (`{"paths": {}}`) làm phép so rỗng mãi mãi."""
+        self.write(version="0.1.1", baseline={"paths": {}})
+        (self.pack / "starter" / "contract" / "openapi.json").write_text(json.dumps(self.BASE), encoding="utf-8")
+        code, out = self.check()
+        self.assertEqual(code, 1, out)
+        self.assertIn("không trùng", out)
+        (self.pack / "starter" / "contract" / "openapi.json").write_text("{", encoding="utf-8")
+        code, out = self.check()
+        self.assertEqual((code, "openapi.json không đọc được" in out), (1, True))
 
     def test_new_pack_or_base_without_version(self):
         self.write(version=None, baseline=self.BASE)

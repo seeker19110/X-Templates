@@ -1,5 +1,6 @@
 // Lát dọc (research §5 của khung): migrate → đăng nhập → tạo dữ liệu → chặn tenant khác (API + RLS) → migration lùi/tiến.
 
+import { connect } from "node:net";
 import type { Kysely } from "kysely";
 import { sql } from "kysely";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -125,5 +126,25 @@ describe("migration", () => {
     } finally {
       await dropDatabase(scratch.db, scratch.name);
     }
+  });
+});
+
+describe("đầu vào thô", () => {
+  it("request-target URL không parse được → 400, server vẫn sống", async () => {
+    const { hostname, port } = new URL(base);
+    const reply = await new Promise<string>((ok, bad) => {
+      const sock = connect(Number(port), hostname, () =>
+        sock.end("GET http://[::1 HTTP/1.1\r\nHost: x\r\n\r\n"),
+      );
+      let data = "";
+      sock.on("data", (c) => {
+        data += String(c);
+      });
+      sock.on("end", () => ok(data));
+      sock.on("error", bad);
+    });
+    expect(reply.split("\r\n")[0]).toBe("HTTP/1.1 400 Bad Request");
+    expect(reply).toContain('"invalid_url"');
+    expect((await call(base, "GET", "/healthz")).status).toBe(200);
   });
 });
