@@ -603,9 +603,7 @@ def read_settings_pair(src: Path, dst: Path) -> tuple[dict[str, Any], dict[str, 
             raise ValueError("gốc không phải object JSON")
         return pair
     except (OSError, ValueError) as exc:
-        log(
-            f"  ⚠ {dst}: không đọc được JSON ({exc}) — HOOK CHƯA ĐĂNG KÝ, gộp tay từ .claude/settings.json.xtemplates-new"
-        )
+        log(f"  ⚠ {dst}: không đọc được JSON ({exc}) — HOOK CHƯA ĐĂNG KÝ, gộp tay từ {src} (AUD-HAR-313)")
         return "invalid-json"
 
 
@@ -631,7 +629,7 @@ def merge_hooks(
         report.update(rep)
     if not rep["changes"]:
         return "kept"
-    write_atomic(dst, settings_text(dst.read_text(encoding="utf-8"), theirs))
+    write_atomic(dst, settings_text(dst.read_bytes().decode("utf-8"), theirs))  # bytes: giữ CRLF (AUD-HAR-311)
     return "merged-hooks"
 
 
@@ -1591,24 +1589,34 @@ def yaml_gap(own: str) -> int:
     lồng) là văn bản, `#` trong đó không phải chú thích → một dòng (AUD-HAR-308)."""
     lines = [ln for ln in own.splitlines() if ln.strip()]
     last = lines[-1] if lines else "#"
-    inline = not last.lstrip().startswith("#") and re.search(r"\s#", YAML_QUOTED_RE.sub("", last)) is not None
-    return 2 if inline and not _in_block_scalar(lines) else 1
+    header = _block_header(lines) if lines else None
+    if header is not None:  # `+` (keep): dòng trống nối vào thành nội dung scalar — không thêm (AUD-HAR-313)
+        return 0 if "+" in header else 1
+    return 2 if not last.lstrip().startswith("#") and re.search(r"\s#", YAML_QUOTED_RE.sub('""', last)) else 1
 
 
-YAML_BLOCK_RE = re.compile(r"[:-][ \t]+[|>][-+0-9]*[ \t]*(?:#.*)?$")  # dòng mở block scalar (`k: |-`, `- >`)
+# Dòng mở block scalar sau khi đã bỏ chú thích (`_yaml_code`): `k: |-`, `- >`, `k: &a !!str |+` (anchor/tag trước chỉ
+# báo — AUD-HAR-313); `-` chỉ là chỉ báo sequence khi đứng đầu dòng (`cmd: x - |` là plain scalar — AUD-HAR-312).
+YAML_BLOCK_RE = re.compile(r"(?:^[ \t]*-|:)(?:[ \t]+[&!]\S*)*[ \t]+([|>][-+0-9]*)[ \t]*$")
 
 
-def _in_block_scalar(lines: list[str]) -> bool:
-    """Dòng cuối (đã bỏ dòng trống) nằm trong block scalar: lùi qua các dòng thụt ít dần (tổ tiên), có dòng nào mở
-    block scalar thì đúng."""
+def _yaml_code(line: str) -> str:
+    """Dòng YAML bỏ chuỗi trích dẫn và chú thích cuối dòng (` #…`)."""
+    return re.sub(r"(?:^|[ \t])#.*$", "", YAML_QUOTED_RE.sub('""', line))
+
+
+def _block_header(lines: list[str]) -> str | None:
+    """Chỉ báo block scalar (`|-`, `>+`…) chứa dòng cuối (đã bỏ dòng trống); None nếu không thuộc block scalar. Lùi
+    qua các dòng thụt ít dần (tổ tiên, bỏ dòng chú thích thuần); chú thích của tổ tiên không tính (AUD-HAR-312)."""
     depth = len(lines[-1]) - len(lines[-1].lstrip())
     for ln in reversed(lines[:-1]):
         indent = len(ln) - len(ln.lstrip())
-        if indent < depth and not ln.lstrip().startswith("#"):  # dòng chú thích không là tổ tiên
-            if YAML_BLOCK_RE.search(ln):
-                return True
+        if indent < depth and not ln.lstrip().startswith("#"):
+            found = YAML_BLOCK_RE.search(_yaml_code(ln))
+            if found:
+                return found[1]
             depth = indent
-    return False
+    return None
 
 
 def yaml_block(own: str, lines: list[str], label: str) -> str:

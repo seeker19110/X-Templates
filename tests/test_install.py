@@ -1483,6 +1483,19 @@ class InstallPlanTest(unittest.TestCase):
         self.assertEqual(install._sync_timeout(theirs, entry)[0]["timeout_to"], 1200)
         self.assertEqual(install._sync_timeout(theirs, {"hooks": [{"command": "g", "timeout": False}]}), [])
 
+    def test_merge_hooks_keeps_crlf(self):
+        # AUD-HAR-311 (review #456): merge_hooks đọc settings.json bằng bytes — `read_text` đổi CRLF → LF trước khi tới
+        # `settings_text` nên file CRLF bị ghi lại toàn LF.
+        src = self.target / "src.json"
+        src.write_text(json.dumps({"hooks": {"Stop": [{"hooks": [{"type": "command", "command": "k"}]}]}}), "utf-8")
+        dst = self.target / "settings.json"
+        dst.write_bytes(b'{\r\n  "hooks": {\r\n    "Stop": []\r\n  }\r\n}\r\n')
+        self.assertEqual(install.merge_hooks(src, dst), "merged-hooks")
+        raw = dst.read_bytes()
+        self.assertEqual(raw.count(b"\n"), raw.count(b"\r\n"))
+        self.assertTrue(raw.endswith(b"}\r\n"))
+        self.assertEqual(json.loads(raw)["hooks"]["Stop"][0]["hooks"][0]["command"], "k")
+
     def test_merge_keeps_project_json_formatting(self):
         """AUD-HAR-305 (dhcb #1481): settings.json định dạng theo Prettier (object một dòng) — gộp chỉ đổi dòng của giá trị
         đổi, không viết lại cả file theo `indent=2`."""
@@ -2342,19 +2355,33 @@ class InstallUpgradeTest(unittest.TestCase):
             "test: |-\n  pytest -q # nhanh\n",
             "test: >\n  a\n    b # x\n",
             "a:\n  test: |\n    pytest # x\n",
-            "l:\n  - |+\n    x # y\n",
+            "l:\n  - |-\n    x # y\n",
             "test: |2 # chú thích\n  pytest # x\n",
             "test: >-\n  a # x\n\n  # giữa\n  b # y\n",
+            "test: &t |\n  pytest # x\n",  # AUD-HAR-313: anchor/tag trước chỉ báo
+            "test: !!str >\n  pytest # x\n",
+            "test: &t !!str |\n  pytest # x\n",
         ):
             with self.subTest(own=own):
                 self.assertEqual(install.yaml_gap(own), 1)
         for own in (
             "a:\n  b: x # y\n",  # tổ tiên không mở block scalar
             "a: echo x | sort\nb: y # z\n",  # `|` giữa dòng không mở block scalar
-            "# k: |\n  b: x # y\n",  # dòng chú thích không là tổ tiên
+            "a: # ghi chú: |\n  b: 2 # c\n",  # AUD-HAR-312: chỉ báo nằm trong chú thích của tổ tiên
+            "a: # ngưỡng: >\n  b: 2 # c\n",
+            "cmd: x - |\n  continuation # z\n",  # plain scalar: `-` giữa dòng không là sequence
+            # thuật toán (không đo được bằng Prettier — Prettier thụt lại cả mapping): chú thích không là tổ tiên
+            "# k: |\n  b: x # y\n",
         ):
             with self.subTest(own=own):
                 self.assertEqual(install.yaml_gap(own), 2)
+
+    def test_yaml_gap_keep_block_adds_no_blank_line(self):
+        # AUD-HAR-313: dòng trống nối sau block scalar `+` (keep) thành nội dung của scalar — đổi giá trị cấu hình.
+        for own in ("l:\n  - |+\n    x # y\n", "k: >+\n  a\n"):
+            with self.subTest(own=own):
+                self.assertEqual(install.yaml_gap(own), 0)
+                self.assertEqual(install.yaml_block(own, ["a: 1"], "t"), f"{self.MARKER}\n# a: 1\n")
 
 
 class CheckLinksTest(unittest.TestCase):

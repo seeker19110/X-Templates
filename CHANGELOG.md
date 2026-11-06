@@ -18,6 +18,9 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
   `settings.json` lùi về `json.dumps` nếu bản giữ định dạng lỗi (AUD-HAR-309).
 - Guard: lý do chặn `STAGE_APPROVE` nói rõ khi lệnh con của `xt.py` lấy từ biến (`for c in …; do xt.py $c`) — trước
   đó agent tưởng chặn oan (AUD-HAR-307).
+- Trả nợ review #456: `install.py` giữ CRLF của `settings.json` khi gộp (AUD-HAR-311); chỉ báo block scalar trong
+  chú thích của dòng cha hay plain scalar (`cmd: x - |`) không còn tính (AUD-HAR-312); anchor/tag trước chỉ báo, block
+  scalar `+` không thêm dòng trống (giữ giá trị), log `invalid-json` trỏ đúng file khung (AUD-HAR-313).
 
 ## [3.31.0] - 2026-11-06
 
