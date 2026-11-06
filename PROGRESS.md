@@ -3,7 +3,7 @@
 > Giai đoạn hiện tại: G8 Vận hành & tiến hoá (khung 3.31.0, pha `harden` — D-136) · Cập nhật: 2026-11-06 · Nhánh: chore/release-3.31.0
 
 ## Đang làm
-- 2026-11-05 **3.30.0 đã cắt**: #448 merge `454d146`, tag `v3.30.0` → `454d146`; `release-check` GO, chờ người: [GO-NO-GO](docs/ops/GO-NO-GO-2026-11-05-v3.30.0.md) §5 ký, `prod_switch` D-126. PR dọn sau phát hành (nhánh `chore/post-3.30.0`): sổ audit 11 nhóm lên `454d146` (phủ bởi review sạch #448, ADR-0057) → T-3557 Gate xanh ở `82e7afa`, tick khi sổ lên SHA merge của #449 (review #449); 🟢 review #448 lượt 2; lưu trữ đợt 18.
+- 2026-11-05 **3.30.0 đã cắt** (`454d146`, tag `v3.30.0`) và **3.30.1** (`fc0674a`, tag `v3.30.1`); chờ người: §5 ký [GO-NO-GO 3.30.0](docs/ops/GO-NO-GO-2026-11-05-v3.30.0.md)/3.30.1, `prod_switch` D-126. #449 (dọn sau 3.30.0) đã merge `80566f7`; T-3557 (`PLAN-harden-2026-10-27-loops.md`) còn `[ ]` — tick qua `loop record` khi chạy lại Gate của nó.
 - PR nâng 3.30.0 ở 4 dự án đích đang mở (hotel-manager, X-Company, dhcb, xboss) — chờ `pr-steward` của từng dự án merge.
 - 2026-11-06 **cắt 3.31.0** (nhánh `chore/release-3.31.0` từ `cb92065`): gồm #451 (ADR-0068 lát A–E, ADR-0069, ADR-0070), #452 (check-links code span, ADR-0073), #453 (nợ gói; workflow gói chạy thật lần đầu — AUD-CI-032). [GO-NO-GO](docs/ops/GO-NO-GO-2026-11-06-v3.31.0.md) §5 chờ người ký. Còn mở (không chặn): AUD-HAR-219, AUD-TEST-061, AUD-SEC-497; fixture host Codex/Gemini (chờ người).
 - Phép đo `LOOP-ORCH-020` tích luỹ; tăng số agent chỉ khi có số (ADR-0061). Phản hồi dự án đích: 10 nhóm `cong-cu` chờ phân loại ([TARGETS](docs/ops/TARGETS.md)).
