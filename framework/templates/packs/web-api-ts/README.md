@@ -17,6 +17,7 @@ updated: 2026-11-06
 | Cô lập tenant | `src/db.ts` `withTenant`, migration `0001`–`0003` | vai trò `app_rw` + `SET LOCAL app.tenant_id`; RLS `ENABLE` + `FORCE`; thiếu ngữ cảnh → lỗi (`slice.test.ts`) |
 | Đăng nhập | `src/auth.ts` | scrypt N=2^17 r=8 p=1 (tham số ghi trong hash — tăng cost không phá hash cũ), token 32 byte chỉ lưu sha256, sai mật khẩu và email không tồn tại trả giống nhau |
 | API | `src/server.ts`, `contract/openapi.json` | phản hồi khớp contract; không đổi không tương thích so với `contract/baseline.json` (`contract.test.ts`) |
+| Kết nối DB | `src/db.ts` `createDb` | chờ kết nối (mở mới hoặc pool cạn) tối đa `PG_CONNECT_TIMEOUT_MS` (5 s), `statement_timeout` của phiên `PG_STATEMENT_TIMEOUT_MS` (15 s) — DB treo thì request lỗi nhanh (`db.test.ts`) |
 | Migration | `src/migrate.ts` (`up`/`down`/`reset`) | lùi hết rồi tiến lại; lùi từng bước (`slice.test.ts`) |
 | Sao lưu/khôi phục | `pg_dump`/`pg_restore` (hoặc `PG_TOOLS_CONTAINER`) | dữ liệu, đăng nhập, RLS còn đúng sau khôi phục (`restore.test.ts`) |
 | Worker | `src/worker.ts` | khoá ý định chống trùng, lease hết hạn → lấy lại, mỗi lần claim một `lease_token` (lần chạy cũ — kể cả cùng workerId — không hoàn tất/reset được lần chạy mới), crash giữa chừng → bản ghi `job_effects` đúng một lần (tác dụng phụ ra ngoài DB là at-least-once — handler phải lũy đẳng phía nhận), chết ở lần thử cuối → `failed` (không kẹt `running`), `reconcile` (`worker.test.ts`) |
