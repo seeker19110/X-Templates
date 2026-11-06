@@ -444,7 +444,8 @@ class RealRegistryTest(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         got = json.loads(r.stdout)
         self.assertEqual(got["version"], (ROOT / "VERSION").read_text(encoding="utf-8").strip())
-        self.assertEqual(len(got["products"]), got["drift"])  # mọi dự án đích đang cài bản cũ hơn
+        # số lệch = số dự án đích có core khác VERSION khung (X-Company bắt kịp 3.31.0 ngày 2026-11-06)
+        self.assertEqual(sum(p["core"] != got["version"] for p in got["products"]), got["drift"])
 
 
 def call(base: Path, framework: Path) -> Dict[str, Any]:
