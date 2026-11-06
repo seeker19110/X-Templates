@@ -459,6 +459,20 @@ def _sync_on_failure(theirs: list[dict[str, Any]], entry: dict[str, Any]) -> lis
     return changed
 
 
+def _sync_timeout(theirs: list[dict[str, Any]], entry: dict[str, Any]) -> list[dict[str, Any]]:
+    """`timeout` của handler khung lớn hơn handler cùng lệnh ở dự án → nâng lên (khung nâng hạn chờ hook guard 600 →
+    1200 s, D-382 — giữ hạn cũ thì hook hết giờ chặn commit chạy đủ bộ test); dự án đặt lớn hơn hoặc không đặt thì giữ —
+    không bao giờ hạ. Trả danh sách handler đã đổi."""
+    want = {h.get("command"): h["timeout"] for h in entry.get("hooks", []) if isinstance(h.get("timeout"), int)}
+    changed = []
+    for h in (h for e in theirs for h in e.get("hooks", [])):
+        have = h.get("timeout")
+        if h.get("command") in want and isinstance(have, int) and have < want[h["command"]]:
+            h["timeout"] = want[h["command"]]
+            changed.append({"command": h["command"], "timeout_from": have, "timeout_to": h["timeout"]})
+    return changed
+
+
 PROJECT_DIR_PREFIX = re.compile(r'"?\$\{?CLAUDE_PROJECT_DIR\}?/')
 
 
@@ -514,6 +528,7 @@ def _merge_hook_events(
                     {"event": event, "commands": cmds, **m}
                     for m in _sync_matcher(hooks.get(event, []), entry, set(cmds))
                     + _sync_on_failure(hooks.get(event, []), entry)
+                    + _sync_timeout(hooks.get(event, []), entry)
                 ]
     return added, synced
 
