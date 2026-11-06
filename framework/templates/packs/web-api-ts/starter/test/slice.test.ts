@@ -4,10 +4,21 @@ import { connect } from "node:net";
 import type { Kysely } from "kysely";
 import { sql } from "kysely";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { purgeExpiredSessions } from "../src/auth.ts";
 import type { Db } from "../src/db.ts";
 import { withTenant } from "../src/db.ts";
 import { MIGRATIONS, migrate } from "../src/migrate.ts";
-import { call, dropDatabase, freshDatabase, loginAs, seedTenant, serve, type Tenant } from "./helpers.ts";
+import { DEFAULT_LOGIN_CONCURRENCY, loginConcurrencyFromEnv, Slots } from "../src/server.ts";
+import {
+  call,
+  dropDatabase,
+  freshDatabase,
+  loginAs,
+  loginBurst,
+  seedTenant,
+  serve,
+  type Tenant,
+} from "./helpers.ts";
 
 let db: Db;
 let name: string;
@@ -39,6 +50,94 @@ describe("đăng nhập", () => {
   it("không token / token giả → 401", async () => {
     expect((await call(base, "GET", "/v1/notes")).status).toBe(401);
     expect((await call(base, "GET", "/v1/notes", undefined, "gia")).status).toBe(401);
+  });
+
+  it("đăng nhập đồng thời vượt giới hạn → 503 busy kèm retry-after; chỗ được trả lại sau 200 và 401", async () => {
+    const small = await serve(db, { loginConcurrency: 1 });
+    try {
+      const burst = await loginBurst(small.base, a, 4);
+      const statuses = burst.map((r) => r.status).sort();
+      expect(statuses[0]).toBe(200);
+      expect(statuses.at(-1)).toBe(503);
+      for (const r of burst.filter((x) => x.status === 503)) {
+        expect(r.json).toEqual({ error: "busy" });
+        expect(r.headers.get("retry-after")).toBe("1");
+      }
+      const wrong = await call(small.base, "POST", "/v1/login", { email: a.email, password: "sai" });
+      expect(wrong.status).toBe(401);
+      expect(typeof (await loginAs(small.base, a))).toBe("string"); // 401 không giữ chỗ
+      expect((await loginBurst(small.base, a, 1))[0]?.status).toBe(200); // 200 không giữ chỗ
+    } finally {
+      await small.close();
+    }
+  });
+
+  it("đầu vào sai bị từ chối trước khi giữ chỗ scrypt", async () => {
+    const small = await serve(db, { loginConcurrency: 1 });
+    try {
+      const bad = await Promise.all(
+        Array.from({ length: 4 }, () => call(small.base, "POST", "/v1/login", { email: "", password: "x" })),
+      );
+      expect(bad.map((r) => r.status)).toEqual([422, 422, 422, 422]);
+    } finally {
+      await small.close();
+    }
+  });
+
+  it("Slots và LOGIN_CONCURRENCY: đầy thì từ chối, trả chỗ thì nhận lại, cấu hình sai thì ném", () => {
+    const s = new Slots(2);
+    expect([s.tryAcquire(), s.tryAcquire(), s.tryAcquire()]).toEqual([true, true, false]);
+    s.release();
+    expect(s.tryAcquire()).toBe(true);
+    s.release();
+    s.release();
+    expect(s.used).toBe(0);
+    expect(() => s.release()).toThrow();
+    for (const bad of [0, -1, 1.5, Number.NaN]) {
+      expect(() => new Slots(bad)).toThrow();
+    }
+    expect(loginConcurrencyFromEnv({})).toBe(DEFAULT_LOGIN_CONCURRENCY);
+    expect(loginConcurrencyFromEnv({ LOGIN_CONCURRENCY: "" })).toBe(DEFAULT_LOGIN_CONCURRENCY);
+    expect(loginConcurrencyFromEnv({ LOGIN_CONCURRENCY: "8" })).toBe(8);
+    for (const bad of ["0", "-1", "1.5", "abc", " 2"]) {
+      expect(() => loginConcurrencyFromEnv({ LOGIN_CONCURRENCY: bad })).toThrow(/LOGIN_CONCURRENCY/);
+    }
+  });
+
+  it("mọi phản hồi mang x-content-type-options: nosniff (200, 401, 404)", async () => {
+    for (const [path, status] of [
+      ["/healthz", 200],
+      ["/v1/notes", 401],
+      ["/khong-co", 404],
+    ] as const) {
+      const res = await fetch(base + path);
+      expect(res.status).toBe(status);
+      expect(res.headers.get("x-content-type-options")).toBe("nosniff");
+      await res.arrayBuffer();
+    }
+  });
+
+  it("phiên hết hạn được dọn: của chính user khi đăng nhập, của mọi user bằng purgeExpiredSessions", async () => {
+    const past = new Date(Date.now() - 3600_000);
+    const expired = (t: Tenant, h: string) => ({
+      token_hash: h,
+      user_id: t.userId,
+      tenant_id: t.id,
+      expires_at: past,
+    });
+    await db
+      .insertInto("sessions")
+      .values([expired(a, "het-han-a"), expired(b, "het-han-b")])
+      .execute();
+    const hashes = async () =>
+      (await db.selectFrom("sessions").select("token_hash").where("expires_at", "<=", past).execute()).map(
+        (r) => r.token_hash,
+      );
+    const ta = await loginAs(base, a);
+    expect(await hashes()).toEqual(["het-han-b"]); // đăng nhập của A chỉ dọn phiên của A
+    expect(await purgeExpiredSessions(db)).toBeGreaterThanOrEqual(1);
+    expect(await hashes()).toEqual([]);
+    expect((await call(base, "GET", "/v1/notes", undefined, ta)).status).toBe(200); // phiên còn hạn không bị xoá
   });
 });
 
@@ -145,6 +244,7 @@ describe("đầu vào thô", () => {
     });
     expect(reply.split("\r\n")[0]).toBe("HTTP/1.1 400 Bad Request");
     expect(reply).toContain('"invalid_url"');
+    expect(reply.toLowerCase()).toContain("x-content-type-options: nosniff");
     expect((await call(base, "GET", "/healthz")).status).toBe(200);
   });
 });

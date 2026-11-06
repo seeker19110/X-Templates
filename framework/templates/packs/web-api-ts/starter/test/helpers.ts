@@ -7,7 +7,7 @@ import pg from "pg";
 import { createUser } from "../src/auth.ts";
 import { createDb, type Db } from "../src/db.ts";
 import { migrate } from "../src/migrate.ts";
-import { createApp } from "../src/server.ts";
+import { type AppOptions, createApp } from "../src/server.ts";
 
 export function adminUrl(): string {
   const url = process.env.DATABASE_URL;
@@ -62,8 +62,11 @@ export async function seedTenant(db: Db, label: string): Promise<Tenant> {
   return { id, userId, email, password };
 }
 
-export async function serve(db: Db): Promise<{ base: string; close: () => Promise<void> }> {
-  const server = createApp(db);
+export async function serve(
+  db: Db,
+  opts: AppOptions = {},
+): Promise<{ base: string; close: () => Promise<void> }> {
+  const server = createApp(db, opts);
   await new Promise<void>((ok) => server.listen(0, "127.0.0.1", ok));
   const { port } = server.address() as AddressInfo;
   return {
@@ -85,6 +88,23 @@ export async function call(
   if (body !== undefined) init.body = JSON.stringify(body);
   const res = await fetch(base + path, init);
   return { status: res.status, json: (await res.json()) as Record<string, unknown> };
+}
+
+// `n` lần đăng nhập gửi cùng lúc (mỗi lần chạy scrypt ~0,3 s) — vượt giới hạn đồng thời thì có phản hồi 503.
+export async function loginBurst(
+  base: string,
+  t: Tenant,
+  n: number,
+): Promise<{ status: number; json: Record<string, unknown>; headers: Headers }[]> {
+  const one = async () => {
+    const res = await fetch(`${base}/v1/login`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ email: t.email, password: t.password }),
+    });
+    return { status: res.status, json: (await res.json()) as Record<string, unknown>, headers: res.headers };
+  };
+  return Promise.all(Array.from({ length: n }, one));
 }
 
 export async function loginAs(base: string, t: Tenant): Promise<string> {

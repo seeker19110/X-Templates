@@ -5,7 +5,7 @@
 import { readFileSync } from "node:fs";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { Db } from "../src/db.ts";
-import { call, dropDatabase, freshDatabase, loginAs, seedTenant, serve } from "./helpers.ts";
+import { call, dropDatabase, freshDatabase, loginAs, loginBurst, seedTenant, serve } from "./helpers.ts";
 
 type Schema = {
   $ref?: string;
@@ -181,5 +181,19 @@ describe("contract khi chạy", () => {
     expect([created.status, bad.status, list.status, one.status, missing.status]).toEqual([
       201, 422, 200, 200, 404,
     ]);
+  });
+
+  it("đăng nhập quá tải (503 busy) khớp schema đã khai", async () => {
+    const t = await seedTenant(db, "d");
+    const small = await serve(db, { loginConcurrency: 1 });
+    try {
+      const busy = (await loginBurst(small.base, t, 4)).filter((r) => r.status === 503);
+      expect(busy.length).toBeGreaterThan(0);
+      for (const r of busy) {
+        expect(conforms(schemaFor("/v1/login", "post", 503), r.json, "post login 503")).toEqual([]);
+      }
+    } finally {
+      await small.close();
+    }
   });
 });

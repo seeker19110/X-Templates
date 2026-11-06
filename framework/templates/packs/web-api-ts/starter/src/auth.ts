@@ -1,6 +1,7 @@
 // Mật khẩu: scrypt (node:crypto) với muối ngẫu nhiên; phiên: token ngẫu nhiên 32 byte, DB chỉ lưu sha256 của token.
 import { createHash, randomBytes, randomUUID, scrypt as scryptCb, timingSafeEqual } from "node:crypto";
 import { promisify } from "node:util";
+import { sql } from "kysely";
 import type { Db } from "./db.ts";
 
 type Cost = { N: number; r: number; p: number; maxmem: number };
@@ -71,7 +72,20 @@ export async function login(db: Db, email: string, password: string): Promise<st
       expires_at: new Date(Date.now() + SESSION_HOURS * 3600_000),
     })
     .execute();
+  // Dọn phiên hết hạn của chính user này (AUD-SEC-532) — bảng không phình theo số lần đăng nhập; user không đăng nhập
+  // lại thì dọn bằng `purgeExpiredSessions` theo lịch.
+  await db
+    .deleteFrom("sessions")
+    .where("user_id", "=", user.id)
+    .where("expires_at", "<=", sql<Date>`now()`)
+    .execute();
   return token;
+}
+
+// Dọn mọi phiên hết hạn (chạy định kỳ, vd cron/worker); trả số phiên đã xoá. Hạn so bằng đồng hồ của DB.
+export async function purgeExpiredSessions(db: Db): Promise<number> {
+  const res = await db.deleteFrom("sessions").where("expires_at", "<=", sql<Date>`now()`).executeTakeFirst();
+  return Number(res.numDeletedRows);
 }
 
 export async function authenticate(db: Db, token: string): Promise<Principal | null> {
