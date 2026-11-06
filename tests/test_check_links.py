@@ -130,6 +130,88 @@ class CheckLinksModuleTest(unittest.TestCase):
         self.write("a.md", "```\n~~~\n[in](a1.md)\n~~~\n```\n[out](a2.md)\n")
         self.assertEqual(self.cl.check(self.repo), ["a.md:6: liên kết hỏng -> a2.md"])
 
+    def test_code_span_links_are_examples_not_links(self):
+        """AUD-CODE-061 (FB-115): cú pháp link trong code span là ví dụ — không kiểm; ngoài span vẫn kiểm."""
+        self.write(
+            "a.md",
+            # Mỗi ca một đoạn (dòng trống giữa): span không vượt đoạn.
+            "Ví dụ `[x](mat0.md)` và ``a ` [y](mat0.md)`` hết.\n\n"  # span 1 và 2 backtick (backtick lẻ bên trong)
+            "a | `[x](mat0.md)` | b\n\n"  # có `|` nhưng không phải bảng (không có dòng phân cách)
+            "\\`[x](mat2.md)\\`\n\n"  # backtick đã escape là chữ thường: link thật
+            "`[x](mat4.md)\n\n"  # backtick không đóng trong đoạn: chữ thường
+            "``[x](mat5.md)`\n\n"  # độ dài chuỗi backtick không khớp: không đóng
+            "\\\\`[x](mat0.md)`\n",  # `\\` là backslash đã escape: backtick sau đó MỞ span
+        )
+        self.assertEqual(
+            self.cl.check(self.repo),
+            [
+                "a.md:5: liên kết hỏng -> mat2.md",
+                "a.md:7: liên kết hỏng -> mat4.md",
+                "a.md:9: liên kết hỏng -> mat5.md",
+            ],
+        )
+
+    def test_code_span_does_not_cross_gfm_table_cells(self):
+        """Hồi quy D-378 F1: backtick lẻ ở hai ô bảng không ghép thành một span che link hỏng ở ô giữa; `\\|` không tách ô."""
+        self.write(
+            "a.md",
+            "| h1 | h2 | h3 |\n"
+            "|---|:-:|---|\n"
+            "| `a | [hỏng](mat1.md) | b` |\n"
+            "| `x\\|[y](mat0.md)` | `[z](mat0.md)` | [w](mat3.md) |\n"
+            "\n"
+            "`a | [ngoài bảng](mat0.md) | b`\n",
+        )
+        self.assertEqual(
+            self.cl.check(self.repo),
+            ["a.md:3: liên kết hỏng -> mat1.md", "a.md:4: liên kết hỏng -> mat3.md"],
+        )
+
+    def test_code_span_across_lines_stays_in_its_block(self):
+        """Review #452 🔴: span ngắt dòng trong cùng đoạn (CommonMark §6.1) đóng ở dòng sau — dấu đóng không được ghép với
+        backtick kế tiếp mà che link thật; span không vượt ranh giới khối (dòng trống, mục danh sách, tiêu đề)."""
+        self.write(
+            "a.md",
+            "text `foo\nbar` and [l](mat1.md) and `baz`\n"  # span `foo\nbar` đóng ở dòng 2: link thật
+            "\n"
+            "x `[y](mat0.md)\nz` w\n"  # span hai dòng che ví dụ
+            "\n"
+            "- a `x\n- b` [l](mat2.md) c\n"  # hai mục danh sách: không có span chung
+            "\n"
+            "`open\n\n[l](mat3.md)`\n",  # dòng trống cắt đoạn: backtick đầu là chữ
+        )
+        self.assertEqual(
+            self.cl.check(self.repo),
+            [
+                "a.md:2: liên kết hỏng -> mat1.md",
+                "a.md:8: liên kết hỏng -> mat2.md",
+                "a.md:12: liên kết hỏng -> mat3.md",
+            ],
+        )
+
+    def test_table_in_quote_and_rows_without_pipe(self):
+        """Review #452 🟠: bảng trong trích dẫn `>` vẫn tách ô; dòng không có `|` là hàng một ô, chưa kết thúc bảng (GFM)."""
+        self.write(
+            "a.md",
+            "> | h1 | h2 | h3 |\n"
+            "> |---|---|---|\n"
+            "> | `a | [l](mat1.md) | b` |\n"
+            "\n"
+            "| h1 | h2 | h3 |\n"
+            "|---|---|---|\n"
+            "row without pipe\n"
+            "| `x | [l](mat2.md) | y` |\n",
+        )
+        self.assertEqual(
+            self.cl.check(self.repo),
+            ["a.md:3: liên kết hỏng -> mat1.md", "a.md:8: liên kết hỏng -> mat2.md"],
+        )
+
+    def test_external_urls_in_table_cells(self):
+        """Review #452 🟠: `--external` không che lần hai dòng đã che theo ô — URL ở ô giữa vẫn được kiểm."""
+        self.write("a.md", "| h1 | h2 | h3 |\n|---|---|---|\n| `a | https://h.org/cell | b` |\n")
+        self.assertEqual(self.cl.external_urls(self.repo), {"https://h.org/cell": "a.md:3"})
+
     def test_main_success_and_failure_output(self):
         self.write("ok.md", "[a](ok.md)\n")
         out = io.StringIO()
