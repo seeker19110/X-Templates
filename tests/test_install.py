@@ -722,6 +722,15 @@ class InstallEdgeTest(unittest.TestCase):
         with redirect_stderr(out):
             install.warn_ignored_framework(self.target)
         self.assertRegex(out.getvalue(), r"và \d+ file khác")  # chỉ liệt kê 5 file đầu
+        # Review #452: file khung đã track thì clone sạch vẫn có — không báo (git không bỏ qua file đã track).
+        gi.write_text("PLAN.md\n", encoding="utf-8")
+        subprocess.run(
+            ["git", "-C", str(self.target), "add", "-f", ".xtemplates/framework/templates/PLAN.md"], check=True
+        )
+        out = io.StringIO()
+        with redirect_stderr(out):
+            install.warn_ignored_framework(self.target)
+        self.assertNotIn("templates/PLAN.md (mẫu", out.getvalue())
         gi.write_text("node_modules/\n", encoding="utf-8")
         code, out = self.install_quiet()
         self.assertNotIn("⚠ .gitignore của dự án che", out)
@@ -1345,7 +1354,9 @@ class InstallPlanTest(unittest.TestCase):
         (self.target / "xt.yaml").write_text("lint: x\nharness_permissions: own  # dhcb\n", encoding="utf-8")
         perms = {"allow": ["Bash(git add:*)"], "ask": ["Read(.env)"], "deny": []}
         relative = {"hooks": [{"type": "command", "command": "bash .claude/hooks/stop-guard.sh"}]}
-        self.write_settings(perms, hooks={"Stop": [relative]})
+        # Hook RIÊNG của dự án dạng tuyệt đối không tính là "dự án dùng dạng tuyệt đối cho hook khung" (review #452).
+        mine = {"hooks": [{"type": "command", "command": 'bash "${CLAUDE_PROJECT_DIR}/.claude/hooks/rieng.sh"'}]}
+        self.write_settings(perms, hooks={"Stop": [relative, mine]})
         plan = self.plan()["settings"]
         self.assertEqual(plan["permissions"], dict.fromkeys(install.NO_PERMISSION_CHANGES, []))
         self.assertEqual(self.install(), 0)
@@ -1353,7 +1364,10 @@ class InstallPlanTest(unittest.TestCase):
         self.assertEqual(data["permissions"], perms)
         commands = [h["command"] for es in data["hooks"].values() for e in es for h in e["hooks"]]
         self.assertTrue(commands)
-        self.assertEqual([c for c in commands if not re.fullmatch(r"bash \.claude/hooks/[a-z0-9-]+\.sh", c)], [])
+        mine_cmd = 'bash "${CLAUDE_PROJECT_DIR}/.claude/hooks/rieng.sh"'
+        self.assertEqual(
+            [c for c in commands if c != mine_cmd and not re.fullmatch(r"bash \.claude/hooks/[a-z0-9-]+\.sh", c)], []
+        )
         self.assertEqual(commands.count("bash .claude/hooks/stop-guard.sh"), 1)
         self.assertEqual(self.plan()["settings"]["action"], "kept")
 

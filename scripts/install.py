@@ -532,11 +532,15 @@ def own_permissions(target: Path) -> bool:
         return False
 
 
-def _absolute_form(theirs: dict[str, Any]) -> bool:
-    """Dự án đang ghi lệnh hook khung dạng `${CLAUDE_PROJECT_DIR}/.claude/hooks/…` (ADR-0073, AUD-HAR-301): `own` giữ
-    dạng đó — dạng tương đối không chạy khi phiên mở ngoài gốc repo. Chưa có lệnh hook khung nào → dạng tương đối."""
+def _absolute_form(ours: dict[str, Any], theirs: dict[str, Any]) -> bool:
+    """Dự án đang ghi lệnh hook KHUNG (cùng khoá `_hook_key` với lệnh của `ours`; hook riêng của dự án không tính) dạng
+    `${CLAUDE_PROJECT_DIR}/…` (ADR-0073, AUD-HAR-301): `own` giữ dạng đó — dạng tương đối không chạy khi phiên mở ngoài
+    gốc repo. Chưa có lệnh hook khung nào → dạng tương đối."""
+    keys = {
+        _hook_key(h.get("command")) for es in ours.get("hooks", {}).values() for e in es for h in e.get("hooks", [])
+    }
     cmds = [h.get("command") for es in theirs.get("hooks", {}).values() for e in es for h in e.get("hooks", [])]
-    return any(isinstance(c, str) and PROJECT_DIR_PREFIX.search(c) is not None and ".claude/hooks/" in c for c in cmds)
+    return any(isinstance(c, str) and PROJECT_DIR_PREFIX.search(c) is not None and _hook_key(c) in keys for c in cmds)
 
 
 def _relative_hooks(ours: dict[str, Any]) -> dict[str, Any]:
@@ -554,7 +558,9 @@ def settings_changes(
     """Gộp `ours` vào `theirs` tại chỗ (bộ nhớ) và trả báo cáo: `permissions`, `hooks_added`, `hooks_matcher_updated`,
     `changes` (tổng số thay đổi; 0 = không cần ghi). `own` (`harness_permissions: own`): không đụng quyền, lệnh hook
     của khung ghi dạng tương đối như dự án."""
-    added, synced = _merge_hook_events(_relative_hooks(ours) if own and not _absolute_form(theirs) else ours, theirs)
+    added, synced = _merge_hook_events(
+        _relative_hooks(ours) if own and not _absolute_form(ours, theirs) else ours, theirs
+    )
     perms = dict.fromkeys(NO_PERMISSION_CHANGES, []) if own else merge_permissions(ours, theirs, prov)
     total = (
         len(added) + len(synced) + sum(len(perms[k]) for k in ("allow_add", "deny_add", "ask_remove", "deny_remove"))
@@ -1597,12 +1603,13 @@ def gitignore_blocks(target: Path, rel: str) -> bool | None:
     return None if hits is None else bool(hits)
 
 
-def gitignore_hits(target: Path, rels: list[str]) -> list[tuple[str, str]] | None:
-    """(đường, mẫu) của các `rels` bị một `.gitignore` TRONG CÂY chặn (mẫu `!` phủ định không tính), một lần gọi
-    `git check-ignore -v -z --stdin`. Không có git/không phải repo → None."""
+def gitignore_hits(target: Path, rels: list[str], no_index: bool = True) -> list[tuple[str, str]] | None:
+    """(đường, mẫu) của các `rels` bị một `.gitignore` TRONG CÂY của dự án chặn (mẫu `!` phủ định không tính;
+    `.gitignore` nằm trong `.xtemplates/` là của khung, không tính), một lần gọi `git check-ignore -v -z --stdin`.
+    `no_index=False`: file đã track không tính (git không bỏ qua file đã track). Không có git/không phải repo → None."""
     if not rels:
         return []
-    cmd = ["git", "-C", str(target), "check-ignore", "-v", "-z", "--stdin", "--no-index"]
+    cmd = ["git", "-C", str(target), "check-ignore", "-v", "-z", "--stdin", *(["--no-index"] if no_index else [])]
     try:
         r = subprocess.run(cmd, input="\0".join(rels) + "\0", capture_output=True, text=True, timeout=30, check=False)
     except (OSError, subprocess.SubprocessError):
@@ -1616,7 +1623,10 @@ def gitignore_hits(target: Path, rels: list[str]) -> list[tuple[str, str]] | Non
     return [
         (path, pattern)
         for src, _, pattern, path in recs
-        if not os.path.isabs(src) and Path(src).name == ".gitignore" and not pattern.startswith("!")
+        if not os.path.isabs(src)
+        and Path(src).name == ".gitignore"
+        and not src.startswith(".xtemplates/")
+        and not pattern.startswith("!")
     ]
 
 
@@ -1627,7 +1637,7 @@ def warn_ignored_framework(target: Path) -> None:
     rels = sorted(
         p.relative_to(target).as_posix() for p in xt_dir.rglob("*") if p.is_file() and "__pycache__" not in p.parts
     )
-    hits = gitignore_hits(target, rels) or []
+    hits = gitignore_hits(target, rels, no_index=False) or []  # file khung đã track: clone sạch vẫn có
     if hits:
         shown = ", ".join(f"{path} (mẫu `{pattern}`)" for path, pattern in hits[:5])
         more = f" và {len(hits) - 5} file khác" if len(hits) > 5 else ""
