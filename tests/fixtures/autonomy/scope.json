@@ -56,7 +56,8 @@
     "AUD-DOC-271",
     "AUD-CODE-062",
     "AUD-CODE-063",
-    "AUD-HAR-302"
+    "AUD-HAR-302",
+    "AUD-HAR-303"
    ]
   },
   {
@@ -209,7 +210,8 @@
    "reason": "Bộ test của chính khung — ngưỡng CPU cứng đỏ ngẫu nhiên, test ghi vùng bằng chứng thật; không phải quyết định của máy; đỡ bằng `tests.test_perf.CpuBudgetTest`, `LoopRecordBranchesTest` (`RealAutopilotUntouchedMixin`)",
    "ids": [
     "AUD-TEST-008",
-    "AUD-TEST-009"
+    "AUD-TEST-009",
+    "AUD-TEST-088"
    ]
   },
   {

@@ -1424,6 +1424,39 @@ class InstallPlanTest(unittest.TestCase):
         self.assertTrue(st["hooks_matcher_updated"])
         self.assertEqual(st["hooks_matcher_updated"][0]["matcher_from"], "Cu")
 
+    def test_install_raises_hook_timeout_never_lowers(self):
+        """Review #454 (D-382): khung nâng `timeout` hook guard 600 → 1200 s — gộp hooks phải nâng `timeout` của hook khung
+        đã có ở dự án khi nhỏ hơn bản khung; giá trị dự án lớn hơn thì giữ (không hạ)."""
+        ours = json.loads((ROOT / ".claude" / "settings.json").read_text(encoding="utf-8"))
+        guard = [h for e in ours["hooks"]["PreToolUse"] for h in e["hooks"] if "pre-bash-guard" in h["command"]][0]
+        old = json.loads(json.dumps(ours))
+        handlers = [h for es in old["hooks"].values() for e in es for h in e["hooks"]]
+        for h in handlers:
+            if "pre-bash-guard" in h["command"]:
+                h["timeout"] = 600
+            elif "timeout" in h:
+                h["timeout"] = 99999  # dự án tự nâng: giữ
+        self.settings.parent.mkdir(parents=True)
+        self.settings.write_text(json.dumps(old), encoding="utf-8")
+        synced = self.plan()["settings"]["hooks_matcher_updated"]
+        self.assertIn(
+            {
+                "event": "PreToolUse",
+                "commands": [guard["command"]],
+                "command": guard["command"],
+                "timeout_from": 600,
+                "timeout_to": guard["timeout"],
+            },
+            synced,
+        )
+        self.assertEqual(self.install(), 0)
+        data = json.loads(self.settings.read_text(encoding="utf-8"))
+        got = [h for es in data["hooks"].values() for e in es for h in e["hooks"]]
+        self.assertEqual([h["timeout"] for h in got if "pre-bash-guard" in h["command"]], [guard["timeout"]])
+        self.assertTrue(
+            all(h["timeout"] == 99999 for h in got if "timeout" in h and "pre-bash-guard" not in h["command"])
+        )
+
     def test_install_plan_unproven_ask_is_kept_and_reported(self):
         # Trùng chuỗi `ask` của khung cũ nhưng không có trong manifest → rule của dự án: giữ + báo (REC-09).
         self.write_settings({"ask": ["Bash(git merge *)", "Bash(make deploy*)"]})

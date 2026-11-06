@@ -219,3 +219,17 @@
 - Chọn: install.py dò git check-ignore trên file vừa cài và cảnh báo, không sửa .gitignore
 - Lý do (tiêu chí chất lượng cuối): (1) an toàn: không đổi luật của dự án; !.xtemplates/** kéo cả file dự án cố ý bỏ qua (__pycache__, file tạm) vào repo
 - Đường lùi: Bỏ warn_ignored_framework khỏi install()
+
+### D-385 · 2026-11-06T03:26:13+00:00 · PR #454 (cắt 3.31.0): review lượt 1 BLOCKING (F1 test timeout đỏ giả ở main; F2–F7 chữ GO-NO-GO/CHANGELOG) — đã sửa hết ở 616f512, CI xanh
+
+- Phương án: (1) Thêm một lượt sửa hết phát hiện rồi review lại chỉ delta 6f416ea..616f512 (ADR-0059 §6) · (2) Tách PR sửa test riêng, PR cắt bản chỉ chữ
+- Chọn: Thêm một lượt sửa hết phát hiện rồi review lại chỉ delta 6f416ea..616f512 (ADR-0059 §6)
+- Lý do (tiêu chí chất lượng cuối): (1) đã sửa hết kèm bằng chứng (0/48 dưới tải, mutant vẫn đỏ); (3) delta nhỏ, tách PR thêm vòng CI mà không giảm rủi ro
+- Đường lùi: Đóng #454, tách PR test rồi cắt lại
+
+### D-386 · 2026-11-06T03:58:20+00:00 · PR #454 (cắt 3.31.0): review lượt 2 BLOCKING chỉ vì F-A (CHANGELOG khai dự án đích nhận timeout hook khi cài lại, nhưng gộp hooks không đồng bộ timeout)
+
+- Phương án: (1) Sửa tận gốc trong PR: install.py _sync_timeout (nâng, không hạ) + test, rồi review delta 6b7fedc..head · (2) Chỉ sửa chữ CHANGELOG thành bước tay, ghi sổ install.py làm sau
+- Chọn: Sửa tận gốc trong PR: install.py _sync_timeout (nâng, không hạ) + test, rồi review delta 6b7fedc..head
+- Lý do (tiêu chí chất lượng cuối): (1) dự án đích nhận đúng hạn chờ hook không cần tay — tránh kẹt hook 600 s như D-382; câu CHANGELOG thành đúng; (3) thay đổi nhỏ theo mẫu _sync_on_failure, có test đỏ trước
+- Đường lùi: Bỏ _sync_timeout khỏi _merge_hook_events, CHANGELOG ghi bước tay

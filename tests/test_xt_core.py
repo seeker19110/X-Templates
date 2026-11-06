@@ -1421,9 +1421,14 @@ class LoopRecordBranchesTest(TmpMixin, RealAutopilotUntouchedMixin, unittest.Tes
         pid_file = self.base / "bg.pid"
         # Thu hồi con trước khi thoát trap: PID1 của container có thể không reap zombie (kill(pid, 0) còn thấy PID).
         # Marker SAU wait cũng bắt mutant chỉ TERM cha: hết grace, KILL không cho trap in marker giả hoàn tất.
-        cmd = f"sleep 30 & echo $! > {pid_file}; trap 'wait; echo don-dep; exit 1' TERM; sleep 30 & wait"
-        # Ân hạn 5 s (không phải 1 s): runner CI tải nặng chưa kịp chạy xong trap trong 1 s → KILL, đỏ giả (CI #451).
-        # Vẫn ≪ 30 s của `sleep` con nên mutant chỉ TERM cha vẫn hết ân hạn và mất marker.
+        # Trap `wait` ĐÚNG hai pid đã ghi, không `wait` trần: TERM tới khi `wait` ngoài đang chờ thì `wait` trần trong
+        # trap lặp "pid … is not a child of this shell" tới khi bị KILL — đỏ giả 15/32 lượt dưới tải (CI #451–#454,
+        # AUD-TEST-088). Trap đặt trước khi chạy con: TERM sớm vẫn vào trap.
+        cmd = (
+            f'trap \'wait "$a" "$b" 2>/dev/null; echo don-dep; exit 1\' TERM; '
+            f"sleep 30 & a=$!; echo $a > {pid_file}; sleep 30 & b=$!; wait"
+        )
+        # Ân hạn 5 s ≪ 30 s của `sleep` con: mutant chỉ TERM cha vẫn hết ân hạn (trap treo ở `wait`) và mất marker.
         with unittest.mock.patch.object(xt, "GATE_KILL_GRACE", 5):
             code, out = xt.run_gate_shell(cmd, self.base, 1)
         self.assertEqual(code, 124)
