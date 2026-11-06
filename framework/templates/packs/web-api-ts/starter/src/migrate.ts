@@ -5,11 +5,13 @@ import { createDb } from "./db.ts";
 import * as m0001 from "./migrations/0001_tenancy.ts";
 import * as m0002 from "./migrations/0002_notes.ts";
 import * as m0003 from "./migrations/0003_jobs.ts";
+import * as m0004 from "./migrations/0004_job_lease_token.ts";
 
 export const MIGRATIONS: Record<string, Migration> = {
   "0001_tenancy": m0001,
   "0002_notes": m0002,
   "0003_jobs": m0003,
+  "0004_job_lease_token": m0004,
 };
 
 function migrator(db: Kysely<unknown>): Migrator {

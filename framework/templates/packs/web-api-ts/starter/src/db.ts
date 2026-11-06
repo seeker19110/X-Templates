@@ -37,6 +37,7 @@ export interface Database {
     attempts: Generated<number>;
     locked_by: string | null;
     locked_until: Date | null;
+    lease_token: string | null;
     last_error: string | null;
     created_at: Generated<Date>;
     updated_at: Generated<Date>;

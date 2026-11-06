@@ -1,7 +1,7 @@
 ---
 title: Gói web-api-ts — API nhiều tenant trên Node 24 + Postgres
 kind: index
-updated: 2026-11-05
+updated: 2026-11-06
 ---
 
 # Gói `web-api-ts`
@@ -19,7 +19,7 @@ updated: 2026-11-05
 | API | `src/server.ts`, `contract/openapi.json` | phản hồi khớp contract; không đổi không tương thích so với `contract/baseline.json` (`contract.test.ts`) |
 | Migration | `src/migrate.ts` (`up`/`down`/`reset`) | lùi hết rồi tiến lại; lùi từng bước (`slice.test.ts`) |
 | Sao lưu/khôi phục | `pg_dump`/`pg_restore` (hoặc `PG_TOOLS_CONTAINER`) | dữ liệu, đăng nhập, RLS còn đúng sau khôi phục (`restore.test.ts`) |
-| Worker | `src/worker.ts` | khoá ý định chống trùng, lease hết hạn → lấy lại, crash giữa chừng → effect đúng một lần, chết ở lần thử cuối → `failed` (không kẹt `running`), `reconcile` (`worker.test.ts`) |
+| Worker | `src/worker.ts` | khoá ý định chống trùng, lease hết hạn → lấy lại, mỗi lần claim một `lease_token` (lần chạy cũ — kể cả cùng workerId — không hoàn tất/reset được lần chạy mới), crash giữa chừng → bản ghi `job_effects` đúng một lần (tác dụng phụ ra ngoài DB là at-least-once — handler phải lũy đẳng phía nhận), chết ở lần thử cuối → `failed` (không kẹt `running`), `reconcile` (`worker.test.ts`) |
 | Artifact | `scripts/build.ts` → `dist/app.tgz` + `.sha256` | cùng commit → cùng digest; `release_artifacts` của `xt.yaml` → hàng `artifacts` của `release-check` |
 
 Chạy cục bộ: `DATABASE_URL=postgres://…/postgres pnpm test` (vai trò có quyền `CREATE DATABASE`; mỗi file test tạo cơ sở
