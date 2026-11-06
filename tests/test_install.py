@@ -705,6 +705,29 @@ class InstallEdgeTest(unittest.TestCase):
         with mock.patch.object(install.subprocess, "run", side_effect=OSError("không có git")):
             self.assertIsNone(install.gitignore_blocks(self.target, "x"))
 
+    def test_warns_when_project_gitignore_hides_framework_files(self):
+        """AUD-HAR-300: mẫu tên trần của dự án (`PLAN.md`) che `.xtemplates/framework/templates/PLAN.md` → clone sạch thiếu
+        file mẫu; install báo (không sửa `.gitignore` của dự án — `!.xtemplates/**` sẽ kéo cả file dự án cố ý bỏ qua)."""
+        subprocess.run(["git", "init", "-q", str(self.target)], check=True)
+        gi = self.target / ".gitignore"
+        gi.write_text("PLAN.md\n!.xtemplates/framework/templates/BLUEPRINT.md\n*.pyc\n", encoding="utf-8")
+        code, out = self.install_quiet()
+        self.assertEqual(code, 0, out)
+        self.assertIn("⚠ .gitignore của dự án che", out)
+        self.assertIn(".xtemplates/framework/templates/PLAN.md (mẫu `PLAN.md`)", out)
+        self.assertNotIn("BLUEPRINT.md (mẫu", out)  # `!` phủ định không tính
+        self.assertEqual(gi.read_text(encoding="utf-8").splitlines()[0], "PLAN.md")  # không sửa luật của dự án
+        gi.write_text("*.md\n", encoding="utf-8")
+        out = io.StringIO()
+        with redirect_stderr(out):
+            install.warn_ignored_framework(self.target)
+        self.assertRegex(out.getvalue(), r"và \d+ file khác")  # chỉ liệt kê 5 file đầu
+        gi.write_text("node_modules/\n", encoding="utf-8")
+        code, out = self.install_quiet()
+        self.assertNotIn("⚠ .gitignore của dự án che", out)
+        self.assertIsNone(install.gitignore_hits(self.tmp / "khong-co", ["x"]))
+        self.assertEqual(install.gitignore_hits(self.target, []), [])
+
     def test_gemini_settings_symlink_and_odd_before_tool(self):
         """AUD-HAR-207: `.gemini/settings.json` là symlink → không ghi xuyên ra ngoài dự án (`skipped-symlink`, như
         AUD-HAR-010); `hooks.BeforeTool` không phải danh sách → giữ nguyên file (`kept`), không thay bằng bản khung im lặng."""
@@ -1317,14 +1340,12 @@ class InstallPlanTest(unittest.TestCase):
         self.assertTrue((hooks / "guard.py").is_file())
 
     def test_own_permissions_keeps_project_permissions_and_relative_hooks(self):
-        """`harness_permissions: own` (dhcb — chủ repo 2026-10-22): không thêm allow/deny của khung; lệnh hook khung ghi
-        dạng `bash .claude/hooks/x.sh` như dự án, kể cả hook đã cài dạng `${CLAUDE_PROJECT_DIR}` trước đó."""
+        """`harness_permissions: own` (dhcb — chủ repo 2026-10-22): không thêm allow/deny của khung; dự án dùng lệnh hook
+        khung dạng tương đối `bash .claude/hooks/x.sh` → mọi lệnh khung ghi dạng đó (ADR-0073)."""
         (self.target / "xt.yaml").write_text("lint: x\nharness_permissions: own  # dhcb\n", encoding="utf-8")
         perms = {"allow": ["Bash(git add:*)"], "ask": ["Read(.env)"], "deny": []}
-        canonical = {
-            "hooks": [{"type": "command", "command": 'bash "${CLAUDE_PROJECT_DIR}/.claude/hooks/stop-guard.sh"'}]
-        }
-        self.write_settings(perms, hooks={"Stop": [canonical]})
+        relative = {"hooks": [{"type": "command", "command": "bash .claude/hooks/stop-guard.sh"}]}
+        self.write_settings(perms, hooks={"Stop": [relative]})
         plan = self.plan()["settings"]
         self.assertEqual(plan["permissions"], dict.fromkeys(install.NO_PERMISSION_CHANGES, []))
         self.assertEqual(self.install(), 0)
@@ -1334,6 +1355,25 @@ class InstallPlanTest(unittest.TestCase):
         self.assertTrue(commands)
         self.assertEqual([c for c in commands if not re.fullmatch(r"bash \.claude/hooks/[a-z0-9-]+\.sh", c)], [])
         self.assertEqual(commands.count("bash .claude/hooks/stop-guard.sh"), 1)
+        self.assertEqual(self.plan()["settings"]["action"], "kept")
+
+    def test_own_permissions_keeps_absolute_hook_form(self):
+        """AUD-HAR-301 (xboss, ADR-0073): dự án `own` đang dùng lệnh hook khung dạng `${CLAUDE_PROJECT_DIR}` (chạy được khi
+        phiên không mở ở gốc repo) → giữ dạng tuyệt đối, không đổi sang tương đối; quyền vẫn không đụng."""
+        (self.target / "xt.yaml").write_text("harness_permissions: own\n", encoding="utf-8")
+        perms = {"allow": ["Bash(git add:*)"], "ask": [], "deny": []}
+        canonical = {
+            "hooks": [{"type": "command", "command": 'bash "${CLAUDE_PROJECT_DIR}/.claude/hooks/stop-guard.sh"'}]
+        }
+        self.write_settings(perms, hooks={"Stop": [canonical]})
+        synced = self.plan()["settings"]["hooks_matcher_updated"]
+        self.assertFalse([s for s in synced if "command_to" in s])  # không lệnh nào bị đổi dạng
+        self.assertEqual(self.install(), 0)
+        data = json.loads(self.settings.read_text(encoding="utf-8"))
+        self.assertEqual(data["permissions"], perms)
+        commands = [h["command"] for es in data["hooks"].values() for e in es for h in e["hooks"]]
+        self.assertTrue(commands)
+        self.assertEqual([c for c in commands if "${CLAUDE_PROJECT_DIR}/.claude/hooks/" not in c], [])
         self.assertEqual(self.plan()["settings"]["action"], "kept")
         for text in ("harness_permissions: build\n", "harness_permissions: own"):
             (self.target / "xt.yaml").write_text(text, encoding="utf-8")

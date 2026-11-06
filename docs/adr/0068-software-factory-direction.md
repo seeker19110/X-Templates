@@ -5,14 +5,16 @@
   **1a · 2a hotel-manager · 3a · 4a** (tiền lệ ADR-0064: nháp cùng PR, chấp nhận cùng ngày; **D-353**). Bản nháp cùng ngày
   chỉ khác ở trạng thái và đoạn "Bốn câu hỏi" ở §Quyết định.
 - **Trạng thái triển khai:** lát A đã làm 2026-11-05 trên nhánh, chưa merge (D-355,
-  [`PLAN-factory-A.md`](../autopilot/PLAN-factory-A.md) T-3675…3677: `report_result`, `<khoá>_report`, `release_artifacts`,
+  [`PLAN-factory-A.md`](../autopilot/PLAN-factory-A.md) T-3675…3679: `report_result`, `<khoá>_report`, `release_artifacts`,
   `subject`/`promotion`, `schema: 3`; test `tests/test_release_contract.py`); evidence v2 của `loop record` giữ nguyên.
   Lát B–E làm 2026-11-05 trên nhánh, chưa merge (D-359, [`PLAN-factory-BE.md`](../autopilot/PLAN-factory-BE.md)
-  T-3685…3692): gói `framework/templates/packs/web-api-ts/` + workflow `pack-web-api.yml` (lát dọc, 4 ca sai cố ý);
+  T-3685…3692): gói `framework/templates/packs/web-api-ts/` + workflow `pack-web-api.yml` (lát dọc, 5 ca sai cố ý);
   `install.py --pack` (fresh/brownfield/upgrade, kiểm trên bản clone hotel-manager); worker trong gói (tuyến API/worker);
   `docs/ops/registry.json` + `xt.py registry` + màn app. Còn: fixture payload host thật Codex/Gemini (cần CLI chạy bằng tài
   khoản của chủ dự án); PR nâng dự án đích (việc người). Ghi lúc chấp nhận: không thêm ID, không đổi mức, không đổi schema/CLI trong PR của ADR này. Về sau lát A–E cùng
-  ADR-0069/0070 gộp một PR (#451) theo chủ dự án (D-358/D-359) — lệch Yếu tố 2 "mỗi lát một PR" (nợ AUD-HAR-221).
+  ADR-0069/0070 gộp một PR (#451) theo chủ dự án (D-358/D-359) — lệch Yếu tố 2 "mỗi lát một PR" (nợ AUD-HAR-221). Merge `13a8aa9` (2026-11-06): chữ "(đề xuất)" ở
+  §Quyết định là chữ bản nháp được chấp nhận nguyên văn; mốc xét lại "lát A xong mà chưa có dự án đích deploy thật" đã tới
+  — xét cùng mốc 2027-01-21.
 - **Ngày:** 2026-11-04.
 - **Nghiên cứu:** research cùng tên (đối chiếu X-Templates `e0ea0a6`/`9c03257` và stored `5d8f8a6` ngày 2026-11-04; nhật ký
   xác minh §10; điều chưa xác minh: trạng thái merge stored#131, stack dự án đích).

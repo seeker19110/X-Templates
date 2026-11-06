@@ -8,7 +8,7 @@
 
 | Thư mục | Nội dung | Còn được máy đọc |
 |---|---|---|
-| [`autopilot/`](autopilot/) | PLAN không còn task mở | `xt.py` quét `PLAN*.md` ở đây khi cấp số task mới — `T-NNN` không tái sử dụng |
+| [`autopilot/`](autopilot/) | PLAN không còn task mở | `xt.py` quét `PLAN*.md` ở đây khi cấp số task mới — `T-NNNN` không tái sử dụng |
 | [`ops/`](ops/) | Báo cáo audit, GO-NO-GO các bản cũ, ghi chép đo CI/mutation/tối ưu | Không |
 
 Dời thêm: chỉ PLAN đã đóng và không được `PROGRESS.md` nhắc; giữ tại chỗ báo cáo audit đầy đủ và delta gần nhất, GO-NO-GO của

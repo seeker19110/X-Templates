@@ -130,6 +130,42 @@ class CheckLinksModuleTest(unittest.TestCase):
         self.write("a.md", "```\n~~~\n[in](a1.md)\n~~~\n```\n[out](a2.md)\n")
         self.assertEqual(self.cl.check(self.repo), ["a.md:6: liên kết hỏng -> a2.md"])
 
+    def test_code_span_links_are_examples_not_links(self):
+        """AUD-CODE-061 (FB-115): cú pháp link trong code span là ví dụ — không kiểm; ngoài span vẫn kiểm."""
+        self.write(
+            "a.md",
+            "Ví dụ `[x](mat0.md)` và ``a ` [y](mat0.md)`` hết.\n"  # span 1 và 2 backtick (có backtick lẻ bên trong)
+            "a | `[x](mat0.md)` | b\n"  # có `|` nhưng không phải bảng (không có dòng phân cách)
+            "\\`[x](mat2.md)\\`\n"  # backtick đã escape là chữ thường: link thật
+            "`[x](mat4.md)\n"  # backtick không đóng: chữ thường
+            "``[x](mat5.md)`\n"  # độ dài chuỗi backtick không khớp: không đóng
+            "\\\\`[x](mat0.md)`\n",  # `\\` là backslash đã escape: backtick sau đó MỞ span
+        )
+        self.assertEqual(
+            self.cl.check(self.repo),
+            [
+                "a.md:3: liên kết hỏng -> mat2.md",
+                "a.md:4: liên kết hỏng -> mat4.md",
+                "a.md:5: liên kết hỏng -> mat5.md",
+            ],
+        )
+
+    def test_code_span_does_not_cross_gfm_table_cells(self):
+        """Hồi quy D-378 F1: backtick lẻ ở hai ô bảng không ghép thành một span che link hỏng ở ô giữa; `\\|` không tách ô."""
+        self.write(
+            "a.md",
+            "| h1 | h2 | h3 |\n"
+            "|---|:-:|---|\n"
+            "| `a | [hỏng](mat1.md) | b` |\n"
+            "| `x\\|[y](mat0.md)` | `[z](mat0.md)` | [w](mat3.md) |\n"
+            "\n"
+            "`a | [ngoài bảng](mat0.md) | b`\n",
+        )
+        self.assertEqual(
+            self.cl.check(self.repo),
+            ["a.md:3: liên kết hỏng -> mat1.md", "a.md:4: liên kết hỏng -> mat3.md"],
+        )
+
     def test_main_success_and_failure_output(self):
         self.write("ok.md", "[a](ok.md)\n")
         out = io.StringIO()

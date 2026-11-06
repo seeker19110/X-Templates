@@ -45,7 +45,8 @@ QUOTE_RE = re.compile(r"^ {0,3}(?:>\s?)+")
 HTML_ANCHOR_RE = re.compile(r"<[a-z][a-z0-9]*\s[^>]*\b(?:id|name)=[\"']?([^\"'\s>]+)", re.IGNORECASE)
 LINE_ANCHOR_RE = re.compile(r"^L\d+(?:-L\d+)?$")  # `#L3`, `#L3-L9`: dòng mã trên GitHub, không phải tiêu đề
 URL_RE = re.compile(r"^https?://[^\s]+$")
-CODE_SPAN_RE = re.compile(r"(`+)(?!`).*?(?<!`)\1(?!`)")  # `x` và ``x ` y``: URL trong đó là ví dụ, không phải nguồn
+# Dòng phân cách bảng GFM (`|---|:-:|`): có `|` để không lẫn đường kẻ setext/`---`.
+TABLE_DELIM_RE = re.compile(r"^\s*\|?\s*:?-+:?\s*(?:\|\s*:?-+:?\s*)*\|?\s*$")
 AUTOLINK_RE = re.compile(r"<(https?://[^\s<>]+)>")
 BARE_URL_RE = re.compile(r"https?://[^\s<>\[\]\"`|]+")
 SKIP_HOSTS = {"localhost", "127.0.0.1", "example.com", "example.org", "example.net"}
@@ -63,17 +64,85 @@ def iter_md(root: Path) -> Iterator[Path]:
         yield p
 
 
+def _closing_run(text: str, start: int, run: int) -> int:
+    """Vị trí chuỗi backtick dài ĐÚNG `run` đầu tiên từ `start` (chuỗi dài/ngắn hơn bỏ qua); không có → -1."""
+    k = text.find("`", start)
+    while k >= 0:
+        end = k
+        while end < len(text) and text[end] == "`":
+            end += 1
+        if end - k == run:
+            return k
+        k = text.find("`", end)
+    return -1
+
+
+def mask_code_spans(text: str) -> str:
+    """Che code span theo CommonMark (AUD-CODE-061): chuỗi N backtick mở span, đóng bằng chuỗi đúng N backtick kế tiếp;
+    ngoài span `\\` escape ký tự sau (backtick đã escape là chữ, `\\\\` là backslash nên backtick sau đó vẫn mở); không
+    đóng → chữ thường. Span (kể cả dấu) thành khoảng trắng: cú pháp link/URL trong đó là ví dụ, không phải link."""
+    out: list[str] = []
+    i = 0
+    while i < len(text):
+        if text[i] == "\\":
+            out.append(text[i : i + 2])
+            i += 2
+            continue
+        if text[i] != "`":
+            out.append(text[i])
+            i += 1
+            continue
+        j = i
+        while j < len(text) and text[j] == "`":
+            j += 1
+        close = _closing_run(text, j, j - i)
+        stop = j if close < 0 else close + (j - i)
+        out.append(text[i:stop] if close < 0 else " " * (stop - i))
+        i = stop
+    return "".join(out)
+
+
+def table_cells(line: str) -> list[str]:
+    """Ô của một dòng bảng GFM: tách theo `|` chưa escape (GFM tách ô TRƯỚC khi xét code span; `\\|` ở lại trong ô)."""
+    cells: list[str] = []
+    cur: list[str] = []
+    i = 0
+    while i < len(line):
+        if line[i] == "\\":
+            cur.append(line[i : i + 2])
+            i += 2
+        elif line[i] == "|":
+            cells.append("".join(cur))
+            cur = []
+            i += 1
+        else:
+            cur.append(line[i])
+            i += 1
+    cells.append("".join(cur))
+    return cells
+
+
 def iter_lines(root: Path) -> Iterator[tuple[Path, int, str]]:
-    """(file, số dòng, dòng) của mọi dòng Markdown nằm ngoài code fence."""
+    """(file, số dòng, dòng đã che code span) của mọi dòng Markdown nằm ngoài code fence. Dòng thuộc bảng GFM (dòng
+    tiêu đề có `|` ngay trên dòng phân cách, rồi các dòng có `|` liền sau) che theo từng ô: backtick lẻ của hai ô không
+    ghép thành một span che mất link ở ô giữa (D-378)."""
     for p in iter_md(root):
+        lines = p.read_text(encoding="utf-8-sig", errors="replace").splitlines()
         fence: str | None = None
-        for n, line in enumerate(p.read_text(encoding="utf-8-sig", errors="replace").splitlines(), start=1):
+        table = False
+        for n, line in enumerate(lines, start=1):
             m = FENCE_RE.match(line)
             if m and (fence is None or m.group(1) == fence):
-                fence = None if fence else m.group(1)
+                fence, table = (None if fence else m.group(1)), False
                 continue
-            if not fence:
-                yield p, n, line
+            if fence:
+                continue
+            if "|" not in line:
+                table = False
+            elif not table and n < len(lines) and "|" in lines[n] and TABLE_DELIM_RE.match(lines[n]):
+                table = True
+            masked = "|".join(map(mask_code_spans, table_cells(line))) if table else mask_code_spans(line)
+            yield p, n, masked
 
 
 def _unangle(target: str) -> str:
@@ -89,7 +158,7 @@ def iter_links(root: Path) -> Iterator[tuple[Path, int, str]]:
 
 def line_urls(line: str) -> list[str]:
     """URL http(s) trong một dòng: đích `[text](url)`, autolink `<url>`, URL trần; bỏ qua mọi thứ trong code span."""
-    rest = CODE_SPAN_RE.sub(" ", line)
+    rest = mask_code_spans(line)
     urls = [_unangle(t) for t in LINK_RE.findall(rest)]
     rest = LINK_RE.sub(" ", rest)
     urls += AUTOLINK_RE.findall(rest)

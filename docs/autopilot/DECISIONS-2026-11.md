@@ -1,6 +1,6 @@
 # Nhật ký quyết định tự duyệt — tháng 11/2026 (phần đầu)
 
-> Bản tháng của [`DECISIONS.md`](DECISIONS.md) (cách T-3651): 60 mục D-292…D-360 (2026-11-01…04; đợt 2 D-311…D-330 dời 2026-11-04, đợt 3 D-331…D-333, đợt 4 D-334…D-338, đợt 5 D-340, đợt 6 D-341…D-343, đợt 7 D-344…D-347 đợt 8 D-348, D-351 đợt 9 D-356 và đợt 10 D-357, D-360 dời 2026-11-05; không có D-339, D-349, D-350, D-352…D-355, D-358, D-359) dời nguyên văn để `docs/autopilot` còn trong trần byte (ADR-0043, không nới trần). `loop decide` vẫn ghi vào `DECISIONS.md`; mọi công cụ đọc cả bản tháng. Không sửa mục cũ — đổi ý ghi quyết định mới "thay D-NNN".
+> Bản tháng của [`DECISIONS.md`](DECISIONS.md) (cách T-3651): 60 mục D-292…D-360 (2026-11-01…04; đợt 2 D-311…D-330 dời 2026-11-04, đợt 3 D-331…D-333, đợt 4 D-334…D-338, đợt 5 D-340, đợt 6 D-341…D-343, đợt 7 D-344…D-347 đợt 8 D-348, D-351 đợt 9 D-356 và đợt 10 D-357, D-360 dời 2026-11-05; không có D-339, D-349, D-350 — số bỏ hẳn; D-352…D-355, D-358, D-359 ở `DECISIONS.md`) dời nguyên văn để `docs/autopilot` còn trong trần byte (ADR-0043, không nới trần). `loop decide` vẫn ghi vào `DECISIONS.md`; mọi công cụ đọc cả bản tháng. Không sửa mục cũ — đổi ý ghi quyết định mới "thay D-NNN".
 
 ### D-292 · 2026-11-01T03:17:20+00:00 · Duyệt PLAN-upgrade-2026-11-01 (ADR-0061 Adaptive Agent theo nhận định chủ dự án; stored ưu tiên 1-3; sửa batch audit delta) và cách máy hoá ADR-0061
 

@@ -524,12 +524,19 @@ NO_PERMISSION_CHANGES = ("allow_add", "deny_add", "ask_remove", "deny_remove", "
 
 def own_permissions(target: Path) -> bool:
     """`harness_permissions: own` trong xt.yaml của dự án: dự án giữ mô hình quyền riêng (dhcb cấm `allow: Bash` trùm —
-    chủ repo 2026-10-22); lệnh hook khung ghi dạng tương đối `bash .claude/hooks/x.sh` (`_relative_hooks`), kể cả khi
-    dự án đang dùng dạng `${CLAUDE_PROJECT_DIR}` (D-375, `harness-files.md`). Thiếu/không đọc được → False."""
+    chủ repo 2026-10-22); lệnh hook khung theo dạng dự án đang dùng — tuyệt đối nếu đã có lệnh khung dạng `${CLAUDE_PROJECT_DIR}`, không thì
+    tương đối `bash .claude/hooks/x.sh` (`_absolute_form`, `_relative_hooks`; ADR-0073). Thiếu/không đọc được → False."""
     try:
         return bool(OWN_PERMISSIONS_RE.search((target / "xt.yaml").read_text(encoding="utf-8-sig")))
     except (OSError, UnicodeDecodeError):
         return False
+
+
+def _absolute_form(theirs: dict[str, Any]) -> bool:
+    """Dự án đang ghi lệnh hook khung dạng `${CLAUDE_PROJECT_DIR}/.claude/hooks/…` (ADR-0073, AUD-HAR-301): `own` giữ
+    dạng đó — dạng tương đối không chạy khi phiên mở ngoài gốc repo. Chưa có lệnh hook khung nào → dạng tương đối."""
+    cmds = [h.get("command") for es in theirs.get("hooks", {}).values() for e in es for h in e.get("hooks", [])]
+    return any(isinstance(c, str) and PROJECT_DIR_PREFIX.search(c) is not None and ".claude/hooks/" in c for c in cmds)
 
 
 def _relative_hooks(ours: dict[str, Any]) -> dict[str, Any]:
@@ -547,7 +554,7 @@ def settings_changes(
     """Gộp `ours` vào `theirs` tại chỗ (bộ nhớ) và trả báo cáo: `permissions`, `hooks_added`, `hooks_matcher_updated`,
     `changes` (tổng số thay đổi; 0 = không cần ghi). `own` (`harness_permissions: own`): không đụng quyền, lệnh hook
     của khung ghi dạng tương đối như dự án."""
-    added, synced = _merge_hook_events(_relative_hooks(ours) if own else ours, theirs)
+    added, synced = _merge_hook_events(_relative_hooks(ours) if own and not _absolute_form(theirs) else ours, theirs)
     perms = dict.fromkeys(NO_PERMISSION_CHANGES, []) if own else merge_permissions(ours, theirs, prov)
     total = (
         len(added) + len(synced) + sum(len(perms[k]) for k in ("allow_add", "deny_add", "ask_remove", "deny_remove"))
@@ -1586,17 +1593,48 @@ def gitignore_blocks(target: Path, rel: str) -> bool | None:
     `*.local.*`, BOM, `!` phủ định; AUD-HAR-179; cùng luật `gitignore_blocks` của xt.py). Chỉ tính `.gitignore` trong cây
     (đường tương đối; exclude toàn cục kể cả `~/.gitignore`, `.git/info/exclude` chỉ có ở máy này). Không có git/không
     phải repo → None."""
+    hits = gitignore_hits(target, [rel])
+    return None if hits is None else bool(hits)
+
+
+def gitignore_hits(target: Path, rels: list[str]) -> list[tuple[str, str]] | None:
+    """(đường, mẫu) của các `rels` bị một `.gitignore` TRONG CÂY chặn (mẫu `!` phủ định không tính), một lần gọi
+    `git check-ignore -v -z --stdin`. Không có git/không phải repo → None."""
+    if not rels:
+        return []
     cmd = ["git", "-C", str(target), "check-ignore", "-v", "-z", "--stdin", "--no-index"]
     try:
-        r = subprocess.run(cmd, input=rel + "\0", capture_output=True, text=True, timeout=10, check=False)
+        r = subprocess.run(cmd, input="\0".join(rels) + "\0", capture_output=True, text=True, timeout=30, check=False)
     except (OSError, subprocess.SubprocessError):
         return None
     if r.returncode not in (0, 1):
         return None
-    src, _, pattern = (r.stdout.split("\0") + ["", "", ""])[:3]
-    # `.gitignore` trong cây: git in đường tương đối; exclude toàn cục (vd `~/.gitignore`) in đường tuyệt đối
-    in_tree = not os.path.isabs(src) and Path(src).name == ".gitignore"
-    return r.returncode == 0 and in_tree and not pattern.startswith("!")
+    f = r.stdout.split("\0")
+    # Mỗi bản ghi: nguồn, số dòng, mẫu, đường. `.gitignore` trong cây: git in đường tương đối; exclude toàn cục (vd
+    # `~/.gitignore`) in đường tuyệt đối.
+    recs = [f[i : i + 4] for i in range(0, len(f) - 3, 4)]
+    return [
+        (path, pattern)
+        for src, _, pattern, path in recs
+        if not os.path.isabs(src) and Path(src).name == ".gitignore" and not pattern.startswith("!")
+    ]
+
+
+def warn_ignored_framework(target: Path) -> None:
+    """AUD-HAR-300: `.gitignore` của dự án che file khung trong `.xtemplates/` (vd mẫu tên trần `PLAN.md` che
+    `templates/PLAN.md`) → clone sạch thiếu file. Chỉ báo — thêm `!.xtemplates/**` sẽ kéo cả file dự án cố ý bỏ qua."""
+    xt_dir = target / ".xtemplates"
+    rels = sorted(
+        p.relative_to(target).as_posix() for p in xt_dir.rglob("*") if p.is_file() and "__pycache__" not in p.parts
+    )
+    hits = gitignore_hits(target, rels) or []
+    if hits:
+        shown = ", ".join(f"{path} (mẫu `{pattern}`)" for path, pattern in hits[:5])
+        more = f" và {len(hits) - 5} file khác" if len(hits) > 5 else ""
+        log(
+            f"  ⚠ .gitignore của dự án che {len(hits)} file khung trong .xtemplates/ — clone sạch sẽ thiếu: {shown}{more};"
+            " sửa mẫu cho hẹp lại (vd `/PLAN.md`) hoặc thêm dòng `!<đường>`"
+        )
 
 
 def _gitignore_has(target: Path, line: str, have: set[str]) -> bool:
@@ -2005,6 +2043,7 @@ def install(
     if pack is not None:
         install_pack(target, pack, version)
     ensure_gitignore(target)
+    warn_ignored_framework(target)
     stale = legacy_refs(target)
     if stale:
         log(
