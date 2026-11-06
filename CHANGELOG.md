@@ -6,6 +6,14 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
 
 ## [Unreleased]
 
+### Fixed
+
+- `install.py` nối khoá mới vào `xt.yaml` với số dòng trống Prettier chấp nhận (hai dòng khi dòng nội dung cuối có chú
+  thích cuối dòng) — trước đó `prettier --check` của dự án đỏ sau khi nâng (AUD-HAR-304, X-Company).
+- `install.py` gộp hooks giữ nguyên định dạng `settings.json` của dự án, chỉ viết lại giá trị đổi (AUD-HAR-305, dhcb:
+  diff 95 dòng → 1 dòng); log `harness_permissions: own` nói đúng dạng lệnh hook đã giữ (AUD-HAR-306).
+- `_sync_timeout` bỏ qua `timeout` kiểu bool, nhận số thực (review #454).
+
 ## [3.31.0] - 2026-11-06
 
 **Dự án đích: chạy lại `install.py`.** Không đổi ID/mức mục checklist — không cần ghép lại blueprint. Đáng chú ý: khoá mới `stage_approval` (ADR-0069, nối dạng chú thích — bỏ `# ` để agent tự nghiệm thu MVP), `acceptance_report`/`release_artifacts`/`release_approval_days` (hợp đồng phát hành có kiểu, ADR-0068 lát A); `harness_permissions: own` giữ dạng lệnh hook sẵn có (ADR-0073); `install.py` cảnh báo khi `.gitignore` của dự án che file khung; gói sản phẩm `install.py --pack web-api-ts` cho repo mới. Mẫu `AGENTS.md` §6 đổi nghĩa (ngoại lệ duyệt giai đoạn), §3/§5 rút gọn chữ (copy-if-absent — gộp tay nếu muốn). Cài mới: `stage_approval: agent` bật sẵn theo mẫu (D-352); nâng: nối dạng chú thích.
