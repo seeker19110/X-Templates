@@ -39,6 +39,8 @@ phải làm đỏ đúng test ghi ở `expect_fail`.
 - Contract tĩnh: ở repo khung, CI `pack-web-api.yml` (job `contract-baseline`, `tests/pack_baseline.py`) chỉ cho
   `baseline.json` khác nhánh gốc khi PR tăng `VERSION` (AUD-SEC-502); ở dự án đích (starter đã là của dự án) baseline vẫn
   sửa được cùng PR — review xem diff `contract/`. `job_effects.job_id` có FK không kèm tenant (RLS vẫn lọc theo tenant).
+- Contract so bằng tập con của OpenAPI (giới hạn ghi ở đầu `contract.test.ts`): không bắt đổi thuộc tính tuỳ chọn,
+  `enum`, ràng buộc — cần bộ so chuyên dụng ở CI của dự án.
 - Phiên đăng nhập không có thu hồi/giới hạn tần suất theo người dùng/IP (chỉ giới hạn số scrypt đồng thời của tiến trình);
   `purgeExpiredSessions` chưa được lên lịch sẵn; không có MFA; không UI; không staging/deploy thật (promote = digest +
   chữ ký GO-NO-GO §5 của khung).

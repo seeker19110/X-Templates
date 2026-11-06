@@ -2,6 +2,14 @@
 // không bỏ đường/phương thức/mã phản hồi thành công, không bỏ trường bắt buộc của phản hồi, không đổi kiểu, không thêm
 // trường bắt buộc vào request. Thêm mới thì được; phát hành bản mới → chép openapi.json đè baseline.json trong cùng PR.
 // (2) Phản hồi thật của server có đủ trường bắt buộc đúng kiểu như openapi.json khai.
+//
+// Giới hạn đã biết (AUD-TEST-086) — bộ so này là tập con của OpenAPI, KHÔNG bắt được:
+// - phản hồi: `responseBreaks` chỉ đi theo thuộc tính trong `required` (và `items`) — đổi kiểu/bỏ thuộc tính TUỲ CHỌN mà
+//   client cũ vẫn đọc, thu hẹp/đổi `enum`, đổi `format`/`pattern`/`nullable`, thêm giá trị client cũ không biết;
+// - request: thắt chặt ràng buộc (`enum`, `maxLength`, `minimum`, `pattern`, `additionalProperties: false`);
+// - `oneOf`/`anyOf`/`allOf`, `headers`, tham số path/query, content type khác `application/json`, mã phản hồi mới;
+// - `conforms` (khi chạy) chỉ kiểm trường bắt buộc + `type`, chỉ trên các phản hồi test gọi tới.
+// Cần đủ hơn → dùng bộ so OpenAPI chuyên dụng (vd oasdiff) ở CI của dự án; review diff `contract/` vẫn bắt buộc.
 import { readFileSync } from "node:fs";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { Db } from "../src/db.ts";
