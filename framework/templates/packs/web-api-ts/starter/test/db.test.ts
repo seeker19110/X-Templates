@@ -16,10 +16,12 @@ describe("timeoutsFromEnv", () => {
       connectMs: 1500,
       statementMs: 250,
     });
-    for (const bad of ["0", "-5", "1.5", "abc", "1e3", " 10"]) {
+    for (const bad of ["0", "-5", "1.5", "abc", "1e3", " 10", "2147483648", "99999999999"]) {
       expect(() => timeoutsFromEnv({ PG_CONNECT_TIMEOUT_MS: bad })).toThrow(/PG_CONNECT_TIMEOUT_MS/);
       expect(() => timeoutsFromEnv({ PG_STATEMENT_TIMEOUT_MS: bad })).toThrow(/PG_STATEMENT_TIMEOUT_MS/);
     }
+    // Trần 2³¹−1 (timer Node, `statement_timeout` của Postgres) vẫn hợp lệ.
+    expect(timeoutsFromEnv({ PG_CONNECT_TIMEOUT_MS: "2147483647" }).connectMs).toBe(2147483647);
   });
 });
 

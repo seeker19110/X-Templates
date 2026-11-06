@@ -62,14 +62,16 @@ export interface Timeouts {
 }
 
 export const DEFAULT_TIMEOUTS: Timeouts = { connectMs: 5_000, statementMs: 15_000 };
+const MAX_MS = 2_147_483_647;
 
 function positiveMs(env: NodeJS.ProcessEnv, key: string, fallback: number): number {
   const raw = env[key];
   if (raw === undefined || raw === "") return fallback;
   const n = Number(raw);
-  // 0 với `pg` nghĩa là KHÔNG giới hạn — không cho tắt giới hạn qua env một cách vô tình.
-  if (!/^\d+$/.test(raw) || !Number.isSafeInteger(n) || n < 1) {
-    throw new Error(`${key} phải là số nguyên mili giây ≥ 1`);
+  // 0 với `pg` nghĩa là KHÔNG giới hạn — không cho tắt giới hạn qua env một cách vô tình. Trần 2³¹−1: lớn hơn thì
+  // timer Node tràn thành 1 ms và Postgres từ chối `statement_timeout` — mọi kết nối hỏng mà `/healthz` vẫn xanh.
+  if (!/^\d+$/.test(raw) || !Number.isSafeInteger(n) || n < 1 || n > MAX_MS) {
+    throw new Error(`${key} phải là số nguyên mili giây trong 1…${MAX_MS}`);
   }
   return n;
 }
@@ -92,7 +94,7 @@ export function createDb(url: string, max = 10, timeouts: Timeouts = timeoutsFro
   return new Kysely<Database>({ dialect: new PostgresDialect({ pool }) });
 }
 
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+export const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 export async function withTenant<T>(db: Db, tenantId: string, fn: (tx: Tx) => Promise<T>): Promise<T> {
   if (!UUID_RE.test(tenantId)) {

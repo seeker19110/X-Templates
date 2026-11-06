@@ -62,6 +62,13 @@ export async function login(db: Db, email: string, password: string): Promise<st
   if (!user || !ok) {
     return null;
   }
+  // Dọn phiên hết hạn của chính user này (AUD-SEC-532) TRƯỚC khi ghi phiên mới — dọn lỗi thì chưa có phiên mồ côi;
+  // bảng không phình theo số lần đăng nhập; user không đăng nhập lại thì dọn bằng `purgeExpiredSessions` theo lịch.
+  await db
+    .deleteFrom("sessions")
+    .where("user_id", "=", user.id)
+    .where("expires_at", "<=", sql<Date>`now()`)
+    .execute();
   const token = randomBytes(32).toString("base64url");
   await db
     .insertInto("sessions")
@@ -69,15 +76,9 @@ export async function login(db: Db, email: string, password: string): Promise<st
       token_hash: tokenHash(token),
       user_id: user.id,
       tenant_id: user.tenant_id,
-      expires_at: new Date(Date.now() + SESSION_HOURS * 3600_000),
+      // Một nguồn giờ (DB) cho cấp hạn, kiểm hạn và dọn: lệch giờ app/DB không làm phiên hết hạn sớm/muộn.
+      expires_at: sql<Date>`now() + make_interval(hours => ${SESSION_HOURS})`,
     })
-    .execute();
-  // Dọn phiên hết hạn của chính user này (AUD-SEC-532) — bảng không phình theo số lần đăng nhập; user không đăng nhập
-  // lại thì dọn bằng `purgeExpiredSessions` theo lịch.
-  await db
-    .deleteFrom("sessions")
-    .where("user_id", "=", user.id)
-    .where("expires_at", "<=", sql<Date>`now()`)
     .execute();
   return token;
 }
@@ -93,7 +94,7 @@ export async function authenticate(db: Db, token: string): Promise<Principal | n
     .selectFrom("sessions")
     .select(["user_id", "tenant_id"])
     .where("token_hash", "=", tokenHash(token))
-    .where("expires_at", ">", new Date())
+    .where("expires_at", ">", sql<Date>`now()`)
     .executeTakeFirst();
   return row ? { userId: row.user_id, tenantId: row.tenant_id } : null;
 }

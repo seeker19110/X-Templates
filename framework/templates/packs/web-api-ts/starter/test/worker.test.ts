@@ -89,6 +89,11 @@ describe("worker", () => {
     const forged = { id, lease: "00000000-0000-4000-8000-000000000000" };
     expect(await complete(db, a.id, forged, "giả")).toBe(false);
     expect(await fail(db, a.id, forged, "giả")).toBe(false);
+    for (const lease of ["", "abc", "00000000-0000-4000-8000-00000000000g"]) {
+      // không phải uuid: trả false như token sai, không để Postgres ném lỗi cú pháp
+      expect(await complete(db, a.id, { id, lease }, "giả")).toBe(false);
+      expect(await fail(db, a.id, { id, lease }, "giả")).toBe(false);
+    }
     await sleep(150); // hết lease nhưng chưa ai claim lại
     expect(await complete(db, a.id, run, "muộn")).toBe(false); // hết lease thì không hoàn tất
     expect(await fail(db, a.id, run, "hết giờ")).toBe(true); // nhưng được trả về hàng đợi

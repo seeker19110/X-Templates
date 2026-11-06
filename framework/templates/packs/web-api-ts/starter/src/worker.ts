@@ -8,7 +8,7 @@
 //   đẳng phía bên kia (vd gửi kèm job id làm khoá ý định). `reconcile` liệt kê job `done` thiếu effect hoặc effect thiếu
 //   job `done` (phải rỗng).
 import { sql } from "kysely";
-import { type Db, type Tx, withTenant } from "./db.ts";
+import { type Db, type Tx, UUID_RE, withTenant } from "./db.ts";
 
 export const MAX_ATTEMPTS = 5;
 
@@ -80,6 +80,9 @@ export async function claim(
 
 // Hoàn tất: chỉ lần chạy còn giữ lease (đúng token, chưa hết hạn) mới được ghi; effect và `done` cùng một transaction.
 export async function complete(db: Db, tenantId: string, job: Lease, effect: string): Promise<boolean> {
+  if (!UUID_RE.test(job.lease)) {
+    return false; // token không phải do `claim` cấp: không có quyền, không để Postgres ném lỗi cú pháp uuid
+  }
   return withTenant(db, tenantId, async (tx: Tx) => {
     const owned = await tx
       .updateTable("jobs")
@@ -100,6 +103,9 @@ export async function complete(db: Db, tenantId: string, job: Lease, effect: str
 // Báo lỗi lần chạy: trả `false` khi lần chạy đã mất quyền (job đã được claim lại, đã xong, hoặc token sai) — không đụng
 // lần chạy khác. Lease đã hết hạn nhưng chưa ai claim lại thì vẫn trả job về hàng đợi (cùng token, không ai khác chạy).
 export async function fail(db: Db, tenantId: string, job: Lease, error: string): Promise<boolean> {
+  if (!UUID_RE.test(job.lease)) {
+    return false;
+  }
   const res = await withTenant(db, tenantId, (tx) =>
     tx
       .updateTable("jobs")
