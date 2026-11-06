@@ -15,7 +15,7 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
 - `_sync_timeout` bỏ qua `timeout` kiểu bool, nhận số thực (review #454).
 - Trả nợ review #455: `#` ở dòng cuối block scalar (`k: |`) không còn tính là chú thích cuối dòng (AUD-HAR-308);
   `settings.json` là JSON hợp lệ nhưng không phải object → báo `invalid-json`, không ném lỗi (AUD-HAR-310); ghi
-  `settings.json` giữ kiểu xuống dòng CRLF, lùi về `json.dumps` nếu bản giữ định dạng lỗi (AUD-HAR-309).
+  `settings.json` lùi về `json.dumps` nếu bản giữ định dạng lỗi (AUD-HAR-309).
 - Guard: lý do chặn `STAGE_APPROVE` nói rõ khi lệnh con của `xt.py` lấy từ biến (`for c in …; do xt.py $c`) — trước
   đó agent tưởng chặn oan (AUD-HAR-307).
 
