@@ -74,7 +74,6 @@ jobs:
           --health-cmd "pg_isready -U postgres" --health-interval 2s --health-timeout 5s --health-retries 30
     env:
       DATABASE_URL: postgres://postgres@localhost:5432/postgres
-      PG_TOOLS_CONTAINER: ${{ job.services.postgres.id }}
       PACK: framework/templates/packs/web-api-ts
       CASE: ${{ matrix.case }}
     steps:
@@ -109,6 +108,9 @@ jobs:
           pnpm typecheck
       - name: Lát dọc với Postgres thật
         working-directory: ${{ runner.temp }}/app
+        env:
+          # Ngữ cảnh `job` chỉ có ở `steps[*].env`, không ở `jobs.<id>.env` — đặt ở job làm cả workflow không hợp lệ.
+          PG_TOOLS_CONTAINER: ${{ job.services.postgres.id }}
         run: |
           set +e
           pnpm exec vitest run --reporter=default --reporter=junit --outputFile.junit=junit.xml

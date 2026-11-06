@@ -24,7 +24,13 @@
           "401": {
             "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
           },
-          "422": { "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+          "422": {
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+          },
+          "503": {
+            "headers": { "retry-after": { "schema": { "type": "string" } } },
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+          }
         }
       }
     },

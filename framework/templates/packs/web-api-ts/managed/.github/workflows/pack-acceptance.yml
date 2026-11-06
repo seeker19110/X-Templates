@@ -33,7 +33,6 @@ jobs:
           --health-cmd "pg_isready -U postgres" --health-interval 2s --health-timeout 5s --health-retries 30
     env:
       DATABASE_URL: postgres://postgres@localhost:5432/postgres
-      PG_TOOLS_CONTAINER: ${{ job.services.postgres.id }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -45,6 +44,9 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - name: Bộ nghiệm thu (lệnh `test` của xt.yaml)
+        env:
+          # Ngữ cảnh `job` chỉ có ở `steps[*].env`, không ở `jobs.<id>.env` — đặt ở job làm cả workflow không hợp lệ.
+          PG_TOOLS_CONTAINER: ${{ job.services.postgres.id }}
         run: .xtemplates/scripts/dev-task.sh test
       - name: Artifact có digest (lệnh `build` của xt.yaml)
         run: .xtemplates/scripts/dev-task.sh build

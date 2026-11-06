@@ -149,6 +149,42 @@ class MutantsTest(unittest.TestCase):
         cases = [c.strip() for c in rows[0].strip("[]").split(",")]
         self.assertEqual(cases, ["clean", *pack_mutants.load(PACK)])
 
+    def test_every_expect_fail_names_an_existing_test(self):
+        """AUD-TEST-086: `expect_fail` đổi tên/gõ sai thì `check` báo "không ở test mong đợi" chỉ khi CI chạy — kiểm sớm
+        rằng chuỗi có trong một tên test của `starter/test/*.ts`."""
+        corpus = "\n".join(p.read_text(encoding="utf-8") for p in (PACK / "starter" / "test").glob("*.ts"))
+        names = re.findall(r"\b(?:it|test|describe)\(\s*\"([^\"]+)\"", corpus)
+        self.assertTrue(names, "không đọc được tên test nào")
+        for mid, m in pack_mutants.load(PACK).items():
+            with self.subTest(mid):
+                self.assertTrue(any(m["expect_fail"] in n for n in names), m["expect_fail"])
+
+    def test_workflow_triggers_on_pack_changes(self):
+        """AUD-TEST-086: bỏ `framework/templates/packs/**` khỏi `paths` thì đổi gói không chạy bộ nghiệm thu."""
+        wf = (ROOT / ".github" / "workflows" / "pack-web-api.yml").read_text(encoding="utf-8")
+        for event in ("pull_request:", "push:"):
+            with self.subTest(event):
+                block = wf.split(f"\n  {event}\n", 1)[1].split("\n  workflow_dispatch:", 1)[0]
+                block = block.split("\n  push:\n", 1)[0]
+                paths = block.split("    paths:\n", 1)[1]
+                self.assertIn("      - framework/templates/packs/**\n", paths)
+
+    def test_workflows_use_job_context_only_in_step_env(self):
+        """Review #453: `${{ job.* }}` ở `jobs.<id>.env` làm CẢ workflow không hợp lệ (GitHub: ngữ cảnh `job` chỉ có ở
+        `steps[*].env`) — run thất bại 0 s, `jobs: []`, mọi cổng trong đó chưa từng chạy. Dòng dùng `job.` phải thụt ≥ 10
+        (khối `env:` của một step)."""
+        files = [
+            ROOT / ".github" / "workflows" / "pack-web-api.yml",
+            PACK / "managed" / ".github" / "workflows" / "pack-acceptance.yml",
+        ]
+        for wf in files:
+            with self.subTest(wf.name):
+                lines = wf.read_text(encoding="utf-8").splitlines()
+                uses = [ln for ln in lines if "${{ job." in ln]
+                self.assertTrue(uses, "workflow phải truyền PG_TOOLS_CONTAINER cho test sao lưu/khôi phục")
+                for ln in uses:
+                    self.assertGreaterEqual(len(ln) - len(ln.lstrip()), 10, ln)
+
     def test_apply_twice_fails(self):
         app = str(self.tmp / "app")
         self.assertEqual(self.run_main("apply", str(PACK), "tenant-leak", app)[0], 0)

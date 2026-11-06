@@ -1,6 +1,7 @@
 // Mật khẩu: scrypt (node:crypto) với muối ngẫu nhiên; phiên: token ngẫu nhiên 32 byte, DB chỉ lưu sha256 của token.
 import { createHash, randomBytes, randomUUID, scrypt as scryptCb, timingSafeEqual } from "node:crypto";
 import { promisify } from "node:util";
+import { sql } from "kysely";
 import type { Db } from "./db.ts";
 
 type Cost = { N: number; r: number; p: number; maxmem: number };
@@ -61,6 +62,13 @@ export async function login(db: Db, email: string, password: string): Promise<st
   if (!user || !ok) {
     return null;
   }
+  // Dọn phiên hết hạn của chính user này (AUD-SEC-532) TRƯỚC khi ghi phiên mới — dọn lỗi thì chưa có phiên mồ côi;
+  // bảng không phình theo số lần đăng nhập; user không đăng nhập lại thì dọn bằng `purgeExpiredSessions` theo lịch.
+  await db
+    .deleteFrom("sessions")
+    .where("user_id", "=", user.id)
+    .where("expires_at", "<=", sql<Date>`now()`)
+    .execute();
   const token = randomBytes(32).toString("base64url");
   await db
     .insertInto("sessions")
@@ -68,10 +76,17 @@ export async function login(db: Db, email: string, password: string): Promise<st
       token_hash: tokenHash(token),
       user_id: user.id,
       tenant_id: user.tenant_id,
-      expires_at: new Date(Date.now() + SESSION_HOURS * 3600_000),
+      // Một nguồn giờ (DB) cho cấp hạn, kiểm hạn và dọn: lệch giờ app/DB không làm phiên hết hạn sớm/muộn.
+      expires_at: sql<Date>`now() + make_interval(hours => ${SESSION_HOURS})`,
     })
     .execute();
   return token;
+}
+
+// Dọn mọi phiên hết hạn (chạy định kỳ, vd cron/worker); trả số phiên đã xoá. Hạn so bằng đồng hồ của DB.
+export async function purgeExpiredSessions(db: Db): Promise<number> {
+  const res = await db.deleteFrom("sessions").where("expires_at", "<=", sql<Date>`now()`).executeTakeFirst();
+  return Number(res.numDeletedRows);
 }
 
 export async function authenticate(db: Db, token: string): Promise<Principal | null> {
@@ -79,7 +94,7 @@ export async function authenticate(db: Db, token: string): Promise<Principal | n
     .selectFrom("sessions")
     .select(["user_id", "tenant_id"])
     .where("token_hash", "=", tokenHash(token))
-    .where("expires_at", ">", new Date())
+    .where("expires_at", ">", sql<Date>`now()`)
     .executeTakeFirst();
   return row ? { userId: row.user_id, tenantId: row.tenant_id } : null;
 }
