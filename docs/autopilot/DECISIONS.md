@@ -205,3 +205,17 @@
 - Chọn: Nâng timeout hook lên 1200 s
 - Lý do (tiêu chí chất lượng cuối): Chủ dự án chọn; giữ hàng rào, chỉ nới thời gian chờ
 - Đường lùi: Đặt lại 600 trong .claude/settings.json
+
+### D-383 · 2026-11-06T01:32:34+00:00 · AUD-HAR-301: harness_permissions own đổi lệnh hook khung dạng CLAUDE_PROJECT_DIR sang tương đối (xboss hỏng khi phiên mở ngoài gốc repo)
+
+- Phương án: (1) own giữ dạng lệnh hook sẵn có của dự án: có lệnh khung dạng CLAUDE_PROJECT_DIR thì giữ tuyệt đối, không có thì tương đối (ADR-0073) · (2) khoá riêng chọn dạng lệnh hook · (3) giữ giao ước, ghi chú dự án cần dạng tuyệt đối không dùng own
+- Chọn: own giữ dạng lệnh hook sẵn có của dự án: có lệnh khung dạng CLAUDE_PROJECT_DIR thì giữ tuyệt đối, không có thì tương đối (ADR-0073)
+- Lý do (tiêu chí chất lượng cuối): (1) đúng: dạng tuyệt đối chạy ở mọi cwd, không bao giờ hạ cấp hook của dự án; giao ước dhcb (tương đối) giữ nguyên vì dhcb không có lệnh tuyệt đối; (3) không thêm khoá cấu hình
+- Đường lùi: Trả settings_changes về luôn _relative_hooks khi own; ADR mới thay ADR-0073
+
+### D-384 · 2026-11-06T01:32:34+00:00 · AUD-HAR-300: .gitignore của dự án che file khung trong .xtemplates/
+
+- Phương án: (1) install.py dò git check-ignore trên file vừa cài và cảnh báo, không sửa .gitignore · (2) install.py thêm !.xtemplates/** vào .gitignore
+- Chọn: install.py dò git check-ignore trên file vừa cài và cảnh báo, không sửa .gitignore
+- Lý do (tiêu chí chất lượng cuối): (1) an toàn: không đổi luật của dự án; !.xtemplates/** kéo cả file dự án cố ý bỏ qua (__pycache__, file tạm) vào repo
+- Đường lùi: Bỏ warn_ignored_framework khỏi install()
