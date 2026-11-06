@@ -1,17 +1,17 @@
 # PROGRESS.md — Khung X-Templates
 
-> Giai đoạn hiện tại: G8 Vận hành & tiến hoá (khung 3.30.1, pha `harden` — D-136) · Cập nhật: 2026-11-05 · Nhánh: fix/3.30.1
+> Giai đoạn hiện tại: G8 Vận hành & tiến hoá (khung 3.31.0, pha `harden` — D-136) · Cập nhật: 2026-11-06 · Nhánh: chore/release-3.31.0
 
 ## Đang làm
 - 2026-11-05 **3.30.0 đã cắt**: #448 merge `454d146`, tag `v3.30.0` → `454d146`; `release-check` GO, chờ người: [GO-NO-GO](docs/ops/GO-NO-GO-2026-11-05-v3.30.0.md) §5 ký, `prod_switch` D-126. PR dọn sau phát hành (nhánh `chore/post-3.30.0`): sổ audit 11 nhóm lên `454d146` (phủ bởi review sạch #448, ADR-0057) → T-3557 Gate xanh ở `82e7afa`, tick khi sổ lên SHA merge của #449 (review #449); 🟢 review #448 lượt 2; lưu trữ đợt 18.
 - PR nâng 3.30.0 ở 4 dự án đích đang mở (hotel-manager, X-Company, dhcb, xboss) — chờ `pr-steward` của từng dự án merge.
-- Nhánh `claude/amazing-brahmagupta-9jqbg1` (PR #451; đã gộp `origin/main` 3.30.1, đưa vào 3.31.0): đã làm ADR-0069 (D-352), ADR-0070 (D-354), ADR-0068 lát A (D-355, `PLAN-factory-A.md` T-3675…3677 xong + sửa review; nợ AUD-HAR-219, AUD-TEST-061, AUD-SEC-497). Lát B–E xong trên nhánh (D-359, `PLAN-factory-BE.md` T-3685…3692): gói `packs/web-api-ts`, `install.py --pack`, worker, `xt.py registry`; AUD-SEC-502 phần baseline đã sửa (D-377). Chờ người: fixture host Codex/Gemini, PR nâng hotel-manager.
+- 2026-11-06 **cắt 3.31.0** (nhánh `chore/release-3.31.0` từ `cb92065`): gồm #451 (ADR-0068 lát A–E, ADR-0069, ADR-0070), #452 (check-links code span, ADR-0073), #453 (nợ gói; workflow gói chạy thật lần đầu — AUD-CI-032). [GO-NO-GO](docs/ops/GO-NO-GO-2026-11-06-v3.31.0.md) §5 chờ người ký. Còn mở (không chặn): AUD-HAR-219, AUD-TEST-061, AUD-SEC-497; fixture host Codex/Gemini (chờ người).
 - Phép đo `LOOP-ORCH-020` tích luỹ; tăng số agent chỉ khi có số (ADR-0061). Phản hồi dự án đích: 10 nhóm `cong-cu` chờ phân loại ([TARGETS](docs/ops/TARGETS.md)).
 - Hoãn tới harden: T-1690/T-1691 (quét lại SEC-091…099). Rà `seeker19110/stored`: chờ chủ repo (HAR-036/041, SEC-026, CI-006/7/9, SEC-043; hạn xét: 2026-12-31).
 
 ## Tiếp theo
 1. **3.30.1** đã cắt (`fc0674a`, tag `v3.30.1`): PR nâng 3.30.1 ở 4 dự án đích, theo dõi tới merge (dự án tự merge); phản hồi qua `xt.py feedback`.
-2. **Kế tiếp — cắt 3.31.0:** PR #451 (ADR-0068 lát A–E, ADR-0069/0070) đã merge `13a8aa9`. Trả nợ trước khi cắt (`audit check --strict`): PR #452 (nhánh `chore/pre-3.31.0-debt`: AUD-CODE-061, AUD-HAR-300/301 — ADR-0073, AUD-DOC-272, AUD-TEST-087); PR gói (nhánh `fix/pack-debt-451`: AUD-DATA-006, AUD-SEC-532, AUD-DATA-008, AUD-TEST-086). Rồi PR cắt bản + nâng 4 dự án đích.
+2. **Kế tiếp:** PR cắt 3.31.0 review → merge → tag (`release-tag.yml`); rồi PR nâng 3.31.0 ở 4 dự án đích (dự án tự merge); xboss (`own`) kiểm hook giữ dạng `${CLAUDE_PROJECT_DIR}` (ADR-0073).
 3. PLAN-harden-2026-10-27-loops còn T-3554 (pilot `next-step`) và T-3555 (lát 5: field trigger, bot nâng bản, worker ngoài phiên). 🟢 mở của `perf trial`/`dev-task.sh` rà ở audit kế (sổ: AUD-HAR-294…297, AUD-TEST-082/083, AUD-PERF-020…025).
 4. Còn: máy hoá `LOOP-HARNESS-031` (dấu hook theo phiên), `LOOP-STOP-030` (ConfigChange); task `[perf]` trong `loop` (D-041); URL phiên do máy chủ MCP gắn vào thân PR; ép báo "đã đo/chưa đo" cho task UI (`LOOP-DESIGN-021`); sàn quyền token; `xt.pyz` (ADR-0010); ca đối kháng cho `autonomy-bench`; `project-commands.sh` được `source` hai lần mỗi task.
 5. Giới hạn guard đã biết: ở sổ audit và `harness-files.md`; tên dựng lúc chạy chấp nhận tới 2027-01-21 (AUD-SEC-406, ADR-0067). Đánh giá sandbox Bash opt-in cho khung trước 2027-01-21 (D-331/D-332); cùng đợt T-3709 đo chi phí compile `guard.py` mỗi lệnh Bash (ADR-0072, hạn 2027-01-21). **Xét lại hàng rào 2027-01-21** hoặc khi đổi model (LOOP-DESIGN-014; Claude Code ≥ `claude_min_version`).
