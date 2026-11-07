@@ -6,6 +6,12 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
 
 ## [Unreleased]
 
+### Security
+
+- Guard chặn agent tự ký GO-NO-GO: Edit/Write thêm hay đổi dòng ký §5 của `GO-NO-GO*.md`, đổi tiêu đề hay dòng
+  `subject:` của file đã ký (chuyển chữ ký người sang ứng viên khác), và lệnh Bash ghi vào file đó — sửa bằng Edit;
+  xoá dòng ký vẫn được (AUD-SEC-497, D-390, D-392; `harness-files.md`).
+
 ## [3.31.1] - 2026-11-07
 
 **Dự án đích: chạy lại `install.py`.** Bản vá installer, lộ ra khi nâng 4 dự án đích lên 3.31.0 (#455…#458). Không đổi ID/mức mục checklist, không khoá `xt.yaml` mới. Nâng từ 3.31.0: `settings.json` giữ định dạng và kiểu xuống dòng của dự án; khối khoá nối cuối `xt.yaml` qua `prettier --check` (trừ block scalar có cả anchor lẫn tag hay kiểu keep `+` ở cuối file — AUD-HAR-313/314).

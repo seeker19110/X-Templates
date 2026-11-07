@@ -738,6 +738,109 @@ def _gitfile_target(path: str, root: str) -> bool:
     return posixpath.basename(_norm_path(path)) == ".git" or posixpath.basename(rel_path(path, root)) == ".git"
 
 
+# AUD-SEC-497 (D-390): dòng ký §5 của `GO-NO-GO*.md` là của người (mẫu: "con người, không phải agent"; ADR-0068 §6) —
+# agent tự ghi thì `release-check` ra `promotion: approved` không người duyệt. Edit/Write làm xuất hiện dòng ký mới hay
+# đổi dòng ký → deny; xoá dòng ký, sửa phần khác → cho chạy. Bash ghi file đó → deny (guard không so được nội dung).
+# Bản sao tối thiểu của `GO_SIGN_ROW_RE`/`_go_sign_rows` ở scripts/xt.py (guard chỉ stdlib, không import xt): dòng bảng
+# `| vai trò | tên | quyết định | YYYY-MM-DD |` có ô tên và ô ngày khác rỗng, trong mục `## 5` tới `## ` kế.
+GO_NO_GO_NAME = "go-no-go*.md"  # so tên chữ thường: hệ tệp không phân biệt hoa thường mở cùng file
+GO_SIGN_ROW_RE = re.compile(r"^\|[^|\n]*\|\s*[^|\s][^|\n]*\|[^|\n]*\|\s*\d{4}-\d{2}-\d{2}\s*\|\s*$", re.M)
+GO_SIGN_HEAD_RE = re.compile(r"^## 5\b.*$", re.M)
+GO_NEXT_HEAD_RE = re.compile(r"^## ", re.M)
+GO_SIGN_WHY = "chữ ký §5 là của người (ADR-0068 §6, AUD-SEC-497)"
+GO_SIGN_BASH_WHY = "ghi GO-NO-GO qua Bash ({}) — " + GO_SIGN_WHY + "; sửa GO-NO-GO bằng Edit để guard so dòng ký"
+GO_GLOB_CHARS = frozenset("*?[")
+GO_DELETERS = frozenset({"rm", "unlink", "shred", "rmdir"})  # xoá cả file chỉ bỏ chữ ký, không thêm (D-390 cho xoá)
+# D-392: chữ ký gắn ứng viên qua tiêu đề `# ` đầu tiên (ngoài frontmatter — `GO_FRONT_RE` của xt.py) và dòng `subject:`
+# (D-389; tiền tố như `SUBJECT_LINE_RE` của xt.py: `>` trích dẫn, một gạch đầu dòng, khoá không phân biệt hoa thường).
+# File đã ký mà đổi hai thứ này (kết quả còn dòng ký) = chuyển chữ ký người sang ứng viên khác → deny.
+GO_FRONT_RE = re.compile(r"\A---\n.*?\n---\n", re.S)
+GO_TITLE_RE = re.compile(r"^# .*$", re.M)
+GO_SUBJECT_RE = re.compile(r"^[ \t]*(?:>[ \t]*)*(?:[-*+][ \t]+)?subject[ \t]*:.*$", re.I | re.M)
+GO_REBIND_WHY = (
+    "file đã ký: đổi tiêu đề/subject chuyển chữ ký người sang ứng viên khác — xoá dòng ký trước, người ký lại"
+)
+GoRow = Tuple[str, ...]
+
+
+def _is_go_no_go(path: str) -> bool:
+    return fnmatch.fnmatchcase(posixpath.basename(path.rstrip("/")).lower(), GO_NO_GO_NAME)
+
+
+def _go_sign_rows(text: str, loose: bool = False) -> Set[GoRow]:
+    """Dòng ký (các ô, bỏ khoảng trắng hai đầu) ở §5 của GO-NO-GO. `loose` (đoạn Edit, không có file để áp) và đoạn
+    không có tiêu đề §5 → mọi dòng khớp (chiều chặt)."""
+    part = GO_SIGN_HEAD_RE.split(text, maxsplit=1)
+    if len(part) == 2:
+        text = GO_NEXT_HEAD_RE.split(part[1], maxsplit=1)[0]
+    elif not loose:
+        return set()
+    return {tuple(c.strip() for c in m[0].strip().strip("|").split("|")) for m in GO_SIGN_ROW_RE.finditer(text)}
+
+
+def _go_read(full: str) -> Optional[str]:
+    """Nội dung file thường trên đĩa; không có/không phải file thường (FIFO làm treo `open`)/lỗi đọc → None."""
+    if not os.path.isfile(full):
+        return None
+    try:
+        with open(full, encoding="utf-8", errors="replace") as f:
+            return f.read()
+    except (OSError, ValueError):
+        return None
+
+
+def _go_pairs(tool_input: Dict[str, object]) -> List[Tuple[str, str, bool]]:
+    """(old, new, replace_all) của Edit/MultiEdit; NotebookEdit `new_source` là đoạn mới không có đoạn cũ."""
+    edits = tool_input.get("edits")
+    if not isinstance(edits, list):
+        new = tool_input.get("new_string", tool_input.get("new_source"))
+        edits = [{**tool_input, "new_string": new}]
+    return [
+        (_text(e.get("old_string")), _text(e.get("new_string")), e.get("replace_all") is True)
+        for e in edits
+        if isinstance(e, dict)
+    ]
+
+
+def _go_texts(disk: Optional[str], tool_input: Dict[str, object]) -> Tuple[str, str, bool]:
+    """(trước, sau, loose) của lần ghi: Write → file trên đĩa `disk` (không đọc được = rỗng) và `content`; Edit/MultiEdit
+    → áp lần lượt old→new lên `disk`; không đọc được file hay `old_string` không có trong đó → chính các đoạn
+    old/new (`loose`)."""
+    if "content" in tool_input:
+        return disk or "", _text(tool_input.get("content")), False
+    pairs, after = _go_pairs(tool_input), disk
+    for old, new, every in pairs:
+        if after is None or not old or old not in after:
+            return "\n".join(p[0] for p in pairs), "\n".join(p[1] for p in pairs), True
+        after = after.replace(old, new, -1 if every else 1)
+    return disk or "", after or "", False
+
+
+def _go_sign_deny(path: str, rel: str, root: str, tool_input: Optional[Dict[str, object]]) -> str:
+    """Lý do deny khi lần ghi vào `GO-NO-GO*.md` (tên hay đích symlink) thêm hoặc đổi dòng ký §5; không thì ''."""
+    if not tool_input or not (_is_go_no_go(path) or _is_go_no_go(rel)):
+        return ""
+    disk = _go_read(os.path.join(root, rel))
+    before, after, loose = _go_texts(disk, tool_input)
+    old_rows, new_rows = _go_sign_rows(before, loose), _go_sign_rows(after, loose)
+    new = sorted(new_rows - old_rows)
+    if new:
+        row = ("| " + " | ".join(new[0]) + " |")[:160]
+        return f"Không ghi dòng ký §5 vào {rel} (`{row}`): {GO_SIGN_WHY} — agent lập phần máy, để trống ô Tên/Ngày."
+    # dòng ký còn lại sau lần ghi; `loose` (không áp được lên file) → của file trừ dòng đoạn cũ bỏ, cộng dòng đoạn mới
+    signed = _go_sign_rows(disk or "")
+    kept = ((signed - old_rows) | new_rows) if loose else new_rows
+    if signed and kept and _go_anchors(before) != _go_anchors(after):
+        return f"Không đổi tiêu đề/dòng `subject:` của {rel}: {GO_REBIND_WHY} (D-392); {GO_SIGN_WHY}."
+    return ""
+
+
+def _go_anchors(text: str) -> Tuple[str, List[str]]:
+    """(tiêu đề `# ` đầu tiên ngoài frontmatter, các dòng `subject:` đã sắp) — thứ gắn chữ ký với ứng viên (D-392)."""
+    title = GO_TITLE_RE.search(GO_FRONT_RE.sub("", text, count=1))
+    return (title[0].strip() if title else ""), sorted(m[0].strip() for m in GO_SUBJECT_RE.finditer(text))
+
+
 def edit_decision(path: str, root: str, tool_input: Optional[Dict[str, object]] = None) -> Tuple[str, str]:
     rel = rel_path(path, root)
     kind = path_kind(rel, root)
@@ -751,6 +854,9 @@ def edit_decision(path: str, root: str, tool_input: Optional[Dict[str, object]] 
         or _git_hook_target(path, root)
     ):
         return "deny", GIT_HOOK_WHY.format(rel) + "."
+    signed = _go_sign_deny(path, rel, root, tool_input)
+    if signed:
+        return "deny", signed
     if kind == "capability":
         return "ask", "Sửa cấu hình " + CAPABILITY_WHY.format(rel) + "."
     if kind == "secret" and not build_local_secret(path, root, root):
@@ -9508,8 +9614,30 @@ def _write_asks(
         for t, k in restored
         if k == "secret" and not build_local_secret(t, root, cwd)
     ]
-    asks += _ledger_asks(n, argv, root, cwd)
+    asks += _ledger_asks(n, argv, root, cwd) + _go_sign_asks(n, targets, root, cwd)
     return asks + [EVIDENCE_WHY.format(f"git {n[1]} {t}") for t, k in restored if k == "evidence"]
+
+
+def _go_glob_hit(x: str) -> bool:
+    """Đích tuyệt đối có glob ở tên (`/…/docs/ops/*.md`) mà shell nở ra được một `GO-NO-GO*.md` đang có trong thư mục
+    (thư mục viết chữ; quá `OUTSIDE_SCAN_MAX` mục hay không đọc được thì không xét — giới hạn ghi ở harness-files)."""
+    d, base = posixpath.split(x)
+    if not GO_GLOB_CHARS & set(base) or GO_GLOB_CHARS & set(d) or not posixpath.isabs(d):
+        return False
+    return any(_is_go_no_go(e) and fnmatch.fnmatchcase(e, base) for e in _outside_names(d) or [])
+
+
+def _go_sign_asks(n: List[str], targets: List[str], root: str, cwd: Optional[str]) -> List[str]:
+    """Bash ghi/dời/khôi phục `GO-NO-GO*.md` (tên, đích symlink có sẵn, glob nở ra file đó) → chặn: guard không so được
+    dòng ký §5 như ở Edit (AUD-SEC-497). Xoá cả file (`rm`, `git rm`) cho chạy."""
+    if n[:1] and n[0] in GO_DELETERS or n[:2] == ["git", "rm"]:
+        return []
+    hits = [
+        t
+        for t in dict.fromkeys([*targets, *_git_file_targets(n)])
+        if any(_is_go_no_go(x) or _go_glob_hit(x) for x in [t, *_where(t, root, cwd), *_real_targets(t, root, cwd)])
+    ]
+    return [GO_SIGN_BASH_WHY.format(t) for t in hits]
 
 
 # sổ giai đoạn và thư mục tổ tiên của nó (`docs/autopilot`, `docs`)
@@ -13381,10 +13509,15 @@ def interp_write_asks(
         # `t.extract(m, "docs")`, `dircopy(…, "docs/autopilot")` — AUD-SEC-340
         asks += [EVIDENCE_WHY.format(lit) for lit in _ledger_dest_hits(script, root, here)]
         hint, ro, probe = bool(WRITE_HINT_RE.search(script)), _ReadOnly(script, families), _WriteProbe(script)
+        lits = _script_literals(script, families) + (_ipython_magic_words(script) if ipython else [])
         asks += [
-            a
-            for raw in _script_literals(script, families) + (_ipython_magic_words(script) if ipython else [])
-            if (a := _interp_literal_ask(script, raw, root, here, hint, ro, probe, pending_bare))
+            a for raw in lits if (a := _interp_literal_ask(script, raw, root, here, hint, ro, probe, pending_bare))
+        ]
+        # AUD-SEC-497: tên `GO-NO-GO*.md` nguyên văn trong script không chỉ đọc (D-105) — như chuyển hướng vào file đó
+        asks += [
+            GO_SIGN_BASH_WHY.format(f"{raw} — script trình thông dịch")
+            for raw in lits
+            if _is_go_no_go(PERL_OPEN_MODE_RE.sub("", raw)) and (not ro or probe(raw))
         ]
     return asks
 
@@ -14615,6 +14748,7 @@ REASON_CODES: Tuple[Tuple[str, str], ...] = (
     ("ghi file bí mật qua Bash", "SECRET_WRITE"),
     ("bằng chứng review", "REVIEW_FORGE"),
     ("duyệt giai đoạn sản phẩm", "STAGE_APPROVE"),  # chỉ người duyệt giai đoạn (ADR-0058; agent khi ADR-0069)
+    (GO_SIGN_WHY, "GO_SIGN"),  # dòng ký §5 của GO-NO-GO là của người (AUD-SEC-497, D-390)
     ("tay bằng chứng", "EVIDENCE_HANDWRITE"),  # ghi/xoá tay `.autopilot/` = bằng chứng giả (ADR-0026)
     ("lệnh đã mã hoá/nén", "OPAQUE_EXEC"),  # `… | base64 -d | sh` từ nguồn guard không giải được
     (BASH_ENV_MARK, "OPAQUE_EXEC"),  # `BASH_ENV=f bash -c true`: bash nạp file guard không đọc (AUD-SEC-250)
