@@ -6,6 +6,16 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
 
 ## [Unreleased]
 
+**Dự án đích:** `promotion: approved` của `release-check` nay cần GO-NO-GO có dòng `subject: content <64 hex>` (và
+`subject: digest <64 hex>` khi khai `release_artifacts`) — `release-check` in sẵn; GO-NO-GO cũ chưa có dòng này ở lại
+`pending_human` tới khi người ký lại.
+
+### Changed
+
+- `release-check`: chữ ký GO-NO-GO §5 gắn với ứng viên bằng dòng `subject: content` (vân tay nội dung trừ
+  GO-NO-GO/DECISIONS/PROGRESS — `subject.content` mới trong JSON) và `subject: digest`, so đủ 64 hex đúng ô; bỏ luật
+  "nhắc 12 hex digest ở bất kỳ đâu". Ký rồi đổi mã → `pending_human` (AUD-HAR-219, D-389; mẫu `GO-NO-GO.md` §1).
+
 ### Fixed
 
 - `release-check`/`report_result`: SARIF của công cụ quét bí mật (gitleaks) không ghi `level` nên report có leak ra
