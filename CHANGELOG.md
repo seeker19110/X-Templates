@@ -18,6 +18,10 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
 
 ### Fixed
 
+- `release-check`: dòng ký GO ở §5 của GO-NO-GO nằm trong khối code, chú thích hay khối HTML thô (`<script>`,
+  `<style>`, `<?`, CDATA) không còn tính là chữ ký; dòng NO-GO đọc cả văn bản thô — ẩn đi vẫn là từ chối
+  (AUD-HAR-323). Bộ lọc phần hiển thị nhận rào trong danh sách, khối thụt, `<!-->`, chú thích trong khối code và
+  code span; tuyến tính theo số chú thích (AUD-HAR-322, AUD-TEST-091).
 - `release-check`: vân tay `subject.content` chỉ loại file ký/sổ ở đúng chỗ (GO-NO-GO ở `docs/ops`, `docs`, gốc;
   sổ DECISIONS chính; `PROGRESS.md` gốc) — mã trong file trùng tên ở thư mục khác đổi sau khi ký không còn
   `approved`; dòng `subject:` trong khối code/chú thích HTML không được nhận; chỉ in dòng `subject:` khi cây sạch
