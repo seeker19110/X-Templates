@@ -33,6 +33,9 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
 
 ### Security
 
+- Guard `GO_SIGN` đóng thêm đường lách (review #464): hard link `ln`/`cp -l`, `patch`/`git apply`/`git am` từ tệp
+  hay stdin, `rename`/`mmv`/`tar --transform`, lệnh ghi lạ có tên GO-NO-GO ở đối số, MCP GitHub ghi file đã ký
+  (AUD-SEC-533…537). Giới hạn còn lại: `harness-files.md`, AUD-SEC-538.
 - Guard chặn agent tự ký GO-NO-GO: Edit/Write thêm hay đổi dòng ký §5 của `GO-NO-GO*.md`, đổi tiêu đề hay dòng
   `subject:` của file đã ký (chuyển chữ ký người sang ứng viên khác), và lệnh Bash ghi vào file đó — sửa bằng Edit;
   xoá dòng ký vẫn được (AUD-SEC-497, D-390, D-392; `harness-files.md`).

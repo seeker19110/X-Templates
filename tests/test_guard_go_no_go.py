@@ -1,5 +1,7 @@
 """AUD-SEC-497 (D-390): agent không tự ghi dòng ký §5 của `GO-NO-GO*.md` — mẫu ghi "con người, không phải agent", chữ ký
-là đầu vào của `release-check` `promotion: approved` (ADR-0068 §6). Payload giả như hook PreToolUse."""
+là đầu vào của `release-check` `promotion: approved` (ADR-0068 §Quyết định 3a). Nợ review #464: liên kết cứng
+(AUD-SEC-533), diff từ tệp/stdin (AUD-SEC-534), lệnh ngoài danh sách trắng/đổi tên theo biểu thức (AUD-SEC-535), MCP ghi
+file (AUD-SEC-536), lý do/touch (AUD-SEC-537). Payload giả như hook PreToolUse."""
 
 from __future__ import annotations
 
@@ -53,13 +55,18 @@ class GoNoGoGuardBase(unittest.TestCase):
         out = guard.apply_policy(guard._rule_decision("bash", payload, str(self.root)))
         return str(out["decision"]), str(out.get("code"))
 
+    def mcp(self, name: str, tool_input: Dict[str, object]) -> Tuple[str, str, str]:
+        payload = {"tool_name": name, "tool_input": tool_input}
+        out = guard.apply_policy(guard._rule_decision("mcp", payload, str(self.root)))
+        return str(out["decision"]), str(out.get("code")), str(out.get("reason", ""))
+
 
 class GoNoGoEditTest(GoNoGoGuardBase):
     """Edit/MultiEdit/Write/NotebookEdit: so tập dòng ký §5 trước và sau."""
 
     def assert_sign_denied(self, got: Tuple[str, str, str]) -> None:
         self.assertEqual(got[:2], ("deny", "GO_SIGN"), got)
-        for part in ("ADR-0068 §6", "AUD-SEC-497", "chữ ký §5 là của người"):
+        for part in ("ADR-0068 §Quyết định 3a", "mẫu GO-NO-GO §5", "AUD-SEC-497", "chữ ký §5 là của người"):
             self.assertIn(part, got[2])
 
     def test_edit_adds_sign_row_denied(self) -> None:
@@ -320,6 +327,312 @@ class GoNoGoBashTest(GoNoGoGuardBase):
         self.assertFalse(guard._go_glob_hit(ops + "/*.txt"))
         with mock.patch.object(guard, "_outside_names", return_value=None):  # thư mục quá lớn: không đọc
             self.assertFalse(guard._go_glob_hit(ops + "/*.md"))
+
+    def test_touch_allowed_truncate_denied(self) -> None:
+        """AUD-SEC-537: `touch` chỉ đổi mtime → cho; chuyển hướng của chính lệnh `touch` vẫn là ghi. `truncate` GIỮ chặn:
+        cắt đuôi không giống xoá dòng ký — nó HOÀN THÀNH được một dòng ký (dòng cuối `| … | 2026-11-07 |x` không khớp
+        regex, Edit cho; cắt 1 byte → dòng ký mới; cùng việc đó qua Edit bị chặn)."""
+        for cmd in (f"touch {GO_REL}", f"touch -d 2026-01-01 {GO_REL}"):
+            self.assertEqual(self.bash(cmd)[0], "", cmd)
+        self.assertEqual(self.bash(f"touch x > {GO_REL}"), ("deny", "GO_SIGN"))
+        bait = SIGN_HEAD + SIGNED_ROW.rstrip("\n") + "x"
+        self.put(GO_REL, TEMPLATE)
+        self.assertEqual(self.edit(GO_REL, {"content": bait})[0], "")  # chưa là dòng ký
+        self.put(GO_REL, bait)
+        got = self.edit(GO_REL, {"old_string": SIGNED_ROW.rstrip("\n") + "x", "new_string": SIGNED_ROW.rstrip("\n")})
+        self.assertEqual(got[:2], ("deny", "GO_SIGN"))  # bỏ đuôi bằng Edit = thêm dòng ký
+        for cmd in (f"truncate -s -1 {GO_REL}", f"truncate -s0 {GO_REL}"):
+            self.assertEqual(self.bash(cmd), ("deny", "GO_SIGN"), cmd)
+
+
+class GoNoGoLinkTest(GoNoGoGuardBase):
+    """AUD-SEC-533: liên kết (cứng) tới GO-NO-GO — ghi tên trung tính là ghi chính file đó."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.put(GO_REL, TEMPLATE)
+        self.put("docs/a.md", "x")
+
+    def test_link_from_go_no_go_denied(self) -> None:
+        for cmd in (
+            f"ln {GO_REL} n.md",
+            f"ln -s {GO_REL} n.md",
+            f"ln -t docs {GO_REL}",
+            f"link {GO_REL} n.md",
+            f"cp -l {GO_REL} n.md",
+            f"cp -al {GO_REL} n.md",
+            f"cp --link {GO_REL} n.md",
+            "ln docs/ops/go-no-go-X.MD n.md",
+        ):
+            self.assertEqual(self.bash(cmd), ("deny", "GO_SIGN"), cmd)
+
+    def test_link_source_through_symlink_denied(self) -> None:
+        os.symlink(self.root / GO_REL, self.root / "s.md")
+        self.assertEqual(self.bash("ln s.md h.md"), ("deny", "GO_SIGN"))
+
+    def test_link_reason_names_source(self) -> None:
+        payload = {"tool_input": {"command": f"ln {GO_REL} n.md"}, "cwd": str(self.root)}
+        reason = str(guard._rule_decision("bash", payload, str(self.root))["reason"])
+        self.assertIn("nguồn liên kết", reason)
+
+    def test_other_links_and_copies_allowed(self) -> None:
+        for cmd in ("ln docs/a.md n.md", "cp -l docs/a.md n.md", "link docs/a.md n.md", f"cp {GO_REL} /tmp/b.md"):
+            self.assertEqual(self.bash(cmd)[0], "", cmd)
+        self.assertEqual(guard._go_link_sources(["cp", "-r", "a", "b"]), [])
+
+
+class GoNoGoArgvTest(GoNoGoGuardBase):
+    """AUD-SEC-535 (ADR-0066): lệnh ngoài danh sách trắng chỉ đọc nêu tên GO-NO-GO → chặn; đổi tên theo biểu thức/archive
+    đổi tên thành viên có chữ `go-no-go` → chặn; đọc → cho."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.put(GO_REL, TEMPLATE)
+        self.put("docs/ops/tmp.md", SIGNED)
+
+    def test_unknown_writers_denied(self) -> None:
+        for cmd in (
+            f"cat /tmp/signed.md | sponge {GO_REL}",
+            f"ruby -pi -e 'sub(/x/,\"y\")' {GO_REL}",
+            f"ex -s +'%s/a/b/' +wq {GO_REL}",
+            f"vim -es +'%s/a/b/' +wq {GO_REL}",
+            f"gsed -i s/a/b/ {GO_REL}",
+            f"python3 -c \"import sys;open(sys.argv[1],'a').write('x')\" {GO_REL}",
+            f'perl -e \'open(F,">>",$ARGV[0]);print F "x"\' {GO_REL}',
+            f"prettier --write {GO_REL}",
+            "prettier --write docs/ops/*.md",
+            "npx prettier --check docs/ops/GO-NO-GO-x.md",  # lệnh bọc: mất miễn (chiều chặt)
+            f"mytool --out={GO_REL}",
+            "mytool out:GO-NO-GO-y.md",
+            "mytool docs/ops/go-no-go-y.MD",
+            f"tar -xf /tmp/a.tar {GO_REL}",
+            f"LESSOPEN='|x' less {GO_REL}",
+            f"env GIT_EXTERNAL_DIFF=sh git diff {GO_REL}",
+            f"git -C . diff {GO_REL}",
+            f"git stash push -- {GO_REL}",
+            "find docs -name 'GO-NO-GO*.md' -exec sed -i s/a/b/ {} +",
+        ):
+            self.assertEqual(self.bash(cmd), ("deny", "GO_SIGN"), cmd)
+
+    def test_rename_family_denied(self) -> None:
+        for cmd in (
+            "rename 's/tmp/GO-NO-GO-z/' docs/ops/tmp.md",
+            "rename.ul tmp GO-NO-GO-z docs/ops/tmp.md",
+            "echo docs/ops/tmp.md | xargs rename 's/tmp/go-no-go-z/'",  # từ đổi tên không đứng đầu lệnh
+            "mmv 'docs/ops/tmp.md' 'docs/ops/GO-NO-GO-z.md'",
+            "tar -cf /tmp/a.tar --transform 's/tmp.md/GO-NO-GO-y.md/' -C docs/ops tmp.md",
+            "tar -cf /tmp/a.tar --xform=s,tmp,GO-NO-GO-y, -C docs/ops tmp.md",
+            "bsdtar -cf /tmp/a.tar -s ',tmp,GO-NO-GO-y,' docs/ops/tmp.md",
+        ):
+            self.assertEqual(self.bash(cmd), ("deny", "GO_SIGN"), cmd)
+
+    def test_rename_and_archive_without_go_allowed(self) -> None:
+        for cmd in (
+            "rename 's/tmp/notes/' docs/ops/tmp.md",
+            "tar -cf /tmp/a.tar --transform 's/tmp/x/' docs/ops/tmp.md",
+            "tar -czf /tmp/a.tgz docs",
+            "curl -s https://example.com/go-no-go",  # `-s` ngoài tar: không phải biểu thức đổi tên
+        ):
+            self.assertEqual(self.bash(cmd)[0], "", cmd)
+
+    def test_readers_allowed(self) -> None:
+        for cmd in (
+            f"cat {GO_REL}",
+            f"grep -n Ký {GO_REL}",
+            f"head -20 {GO_REL}",
+            f"less {GO_REL}",
+            f"more {GO_REL}",
+            f"wc -l {GO_REL}",
+            f"diff {GO_REL} docs/ops/tmp.md",
+            f"md5sum {GO_REL}",
+            f"stat {GO_REL}",
+            f"chmod 644 {GO_REL}",
+            f"echo {GO_REL}",
+            f"git show HEAD:{GO_REL}",
+            f"git log --oneline -- {GO_REL}",
+            f"git diff -- {GO_REL}",
+            f"git add {GO_REL}",
+            f"git commit -m 'docs(release): GO-NO-GO v9' -- {GO_REL}",
+            f"git blame {GO_REL}",
+            f"git restore --staged {GO_REL}",
+            "python3 scripts/xt.py release-check --json",
+            f"sed -n 1,5p {GO_REL}",
+            f"sed 's/a/b/' {GO_REL} > /tmp/out.md",
+            f"cp {GO_REL} /tmp/b.md",
+            f"prettier --check {GO_REL}",
+            "markdownlint docs/ops/*.md",
+            "find docs -name 'GO-NO-GO*.md'",
+            "find docs -name 'GO-NO-GO*.md' -exec cat {} +",
+            "ls docs/ops/GO-NO-GO*",
+            f"gh issue comment 5 --body 'đã lập {GO_REL}'",  # câu chữ kết thúc bằng đường dẫn: không phải tên tệp
+            # lệnh bọc `normalize` bóc là trong suốt (bất biến fuzz `allow-kept`); gán biến không đổi chương trình
+            f"XT_FUZZ=1 cat {GO_REL}",
+            f"command less {GO_REL}",
+            f"nice -n 5 git show HEAD:{GO_REL}",
+            f"timeout 60 command git log -- {GO_REL}",
+            f"env A=1 touch {GO_REL}",
+        ):
+            self.assertEqual(self.bash(cmd)[0], "", cmd)
+
+    def test_word_is_path(self) -> None:
+        self.assertTrue(guard._go_word("docs/ops/GO-NO-GO v3.md"))  # tên tệp có khoảng trắng vẫn là đường dẫn
+        self.assertTrue(guard._go_word("--out=docs/ops/GO-NO-GO-x.md"))
+        self.assertFalse(guard._go_word("đã lập docs/ops/GO-NO-GO-x.md"))
+        self.assertFalse(guard._go_word("docs(release): lập GO-NO-GO-x.md"))
+
+    def test_reader_helper_branches(self) -> None:
+        self.assertFalse(guard._go_reader(["prettier", "-w", "a"], ["prettier", "-w", "a"]))
+        self.assertFalse(guard._go_reader(["markdownlint", "--fix=true"], ["markdownlint", "--fix=true"]))
+        self.assertTrue(guard._go_reader(["tee", "a"], ["tee", "a"]))  # đích đã mô hình ở write_targets
+        self.assertEqual(guard._go_argv_hits([], [], str(self.root), str(self.root)), [])
+
+
+class GoNoGoPatchTest(GoNoGoGuardBase):
+    """AUD-SEC-534: `patch`/`git apply`/`git am` với diff từ tệp/stdin ở dự án có GO-NO-GO — đọc được header và không chạm
+    GO-NO-GO → cho; còn lại → chặn."""
+
+    GO_DIFF = f"--- a/{GO_REL}\n+++ b/{GO_REL}\n@@ -1 +1 @@\n-a\n+b\n"
+    OK_DIFF = "--- a/docs/a.md\n+++ b/docs/a.md\n@@ -1 +1 @@\n-a\n+b\n"
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.put(GO_REL, TEMPLATE)
+        self.put("go.diff", self.GO_DIFF)
+        self.put("ok.diff", self.OK_DIFF)
+        self.put("go.mbox", "From x\nSubject: [PATCH] x\n\n---\n" + self.GO_DIFF)
+        self.put("ok.mbox", "From x\nSubject: [PATCH] x\n\n---\n" + self.OK_DIFF)
+        self.put("b64.mbox", "From x\nContent-Transfer-Encoding: base64\n\nLS0tIGEv\n")
+
+    def test_blind_patch_touching_or_unreadable_denied(self) -> None:
+        for cmd in (
+            "git apply go.diff",
+            "git apply < go.diff",
+            "git -C . apply --directory sub go.diff",
+            "patch -p1 < go.diff",
+            "patch -p1 -i go.diff",
+            "patch -p1 --input=go.diff",
+            "patch -p1 -i missing.diff",
+            "patch -p1 < fix.diff && git diff",  # tệp diff không có: không đọc được → chặn (ca đối chứng cũ AUD-SEC-414)
+            "patch -p1 -i -",
+            "git apply -",
+            "cat ok.diff | git apply",
+            "git am go.mbox",
+            "git am b64.mbox",
+            "git am",
+            "git am --continue",
+            "git apply --stat --apply go.diff",
+            "git apply docs",  # thư mục: không phải tệp thường
+            "git apply <<'EOF'\nkhông có header\nEOF",
+            "sh -c 'git apply go.diff'",
+            f"git apply {self.root}/go.diff",
+        ):
+            self.assertEqual(self.bash(cmd), ("deny", "GO_SIGN"), cmd)
+
+    def test_readable_clean_patch_allowed(self) -> None:
+        for cmd in (
+            "git apply ok.diff",
+            "git apply < ok.diff",
+            "git apply -p1 --whitespace fix ok.diff",
+            "patch -p1 < ok.diff",
+            "patch -p1 -i ok.diff",
+            "git am ok.mbox",
+            "git apply --check go.diff",
+            "git apply --stat go.diff",
+            "patch --dry-run -p1 -i go.diff",
+            "git am --abort",
+            "patch docs/a.md go.diff",  # file gốc nêu ở toán hạng: đích đã mô hình
+            "git apply <<'EOF'\n" + self.OK_DIFF + "EOF",
+        ):
+            self.assertEqual(self.bash(cmd)[0], "", cmd)
+
+    def test_project_without_go_no_go_allowed(self) -> None:
+        (self.root / GO_REL).unlink()
+        (self.root / "docs" / "GO-NO-GO.txt").write_text("x", encoding="utf-8")
+        self.assertEqual(self.bash("git apply go.diff")[0], "")  # đích GO-NO-GO mới tạo: luật tên ở Edit sau đó
+        self.assertFalse(guard._go_on_disk(str(self.root)))
+        self.put("GO-NO-GO.md", TEMPLATE)  # mẫu dự án đích ở gốc
+        self.assertTrue(guard._go_on_disk(str(self.root)))
+
+    def test_go_on_disk_errors(self) -> None:
+        (self.root / GO_REL).unlink()
+        shutil.rmtree(self.root / "docs")
+        (self.root / "docs").write_text("tệp, không phải thư mục", encoding="utf-8")
+        self.assertFalse(guard._go_on_disk(str(self.root)))
+        with mock.patch.object(guard.os, "scandir", side_effect=PermissionError("x")):
+            self.assertTrue(guard._go_on_disk(str(self.root)))  # không đọc được: coi như có
+
+    def test_diff_size_cap_and_unknown_dir(self) -> None:
+        with mock.patch.object(guard, "GO_PATCH_MAX", len(self.OK_DIFF) - 1):
+            self.assertEqual(self.bash("git apply ok.diff"), ("deny", "GO_SIGN"))
+        with mock.patch.object(guard, "GO_PATCH_MAX", len(self.OK_DIFF)):
+            self.assertEqual(self.bash("git apply ok.diff")[0], "")
+        self.assertFalse(guard._go_diff_clear("ok.diff", None, False))
+        self.assertTrue(guard._go_diff_clear(str(self.root / "ok.diff"), None, False))
+        with mock.patch.dict(os.environ, {"HOME": str(self.root)}):
+            self.assertTrue(guard._go_diff_clear("~/ok.diff", None, False))
+
+    def test_unmatched_placement_fails_closed(self) -> None:
+        root = str(self.root)
+        got = guard._go_patch_asks("git apply ok.diff", [], root, root, False)
+        self.assertEqual(len(got), 1)
+        self.assertIn("git apply ok.diff", got[0])
+        self.assertEqual(guard._go_patch_asks("ls", [], root, root, False), [])
+
+    def test_yields_to_allowlist_budget(self) -> None:
+        """Lớp danh sách trắng đã chặn chắc (`_patch_file_why`: áp diff mù rồi chạy tệp) → giữ mã BUDGET của nó; bỏ phần
+        chạy → luật GO-NO-GO chặn."""
+        cmd, root = "git apply go.diff; bash s.sh", str(self.root)
+        placed = guard._commands_with_cwds(guard.tokenize(cmd), root)
+        self.assertEqual(guard._go_patch_asks(cmd, placed, root, root, True), [])
+        self.assertEqual(len(guard._go_patch_asks(cmd, placed, root, root, False)), 1)  # ngoài tập con: không nhường
+        self.assertEqual(self.bash(cmd), ("deny", "BUDGET"))
+        self.assertEqual(self.bash("git apply go.diff"), ("deny", "GO_SIGN"))
+
+    def test_concurrent_decisions_consistent(self) -> None:
+        """Quyết định đọc tệp diff/thư mục: chạy song song cho cùng kết quả như tuần tự."""
+        from concurrent.futures import ThreadPoolExecutor
+
+        cmds = ["git apply go.diff", "git apply ok.diff", "patch -p1 -i go.diff", "git am ok.mbox"] * 6
+        want = [self.bash(c)[0] for c in cmds]
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            got = list(pool.map(lambda c: self.bash(c)[0], cmds))
+        self.assertEqual(got, want)
+        self.assertEqual(want[:4], ["deny", "", "deny", ""])
+
+
+class GoNoGoMcpTest(GoNoGoGuardBase):
+    """AUD-SEC-536: tool MCP ghi file (GitHub `create_or_update_file`/`push_files`) ghi GO-NO-GO có dòng ký §5 → deny."""
+
+    def test_signed_content_denied(self) -> None:
+        got = self.mcp("mcp__github__create_or_update_file", {"path": GO_REL, "content": SIGNED, "branch": "main"})
+        self.assertEqual(got[:2], ("deny", "GO_SIGN"), got)
+        self.assertIn("ADR-0068 §Quyết định 3a", got[2])
+        files = [{"path": "README.md", "content": "x"}, {"path": "go-no-go-v1.MD", "content": SIGNED}]
+        self.assertEqual(self.mcp("mcp__github__push_files", {"files": files})[:2], ("deny", "GO_SIGN"))
+        self.assertEqual(self.mcp("mcp__gh2__push_files", {"files": files})[:2], ("deny", "GO_SIGN"))
+
+    def test_unsigned_other_or_odd_payload_allowed(self) -> None:
+        for name, ti in (
+            ("mcp__github__create_or_update_file", {"path": GO_REL, "content": TEMPLATE}),
+            ("mcp__github__create_or_update_file", {"path": "NOTES.md", "content": SIGNED}),
+            ("mcp__github__create_or_update_file", {"path": GO_REL, "content": SIGN_HEAD.encode().hex()}),
+            ("mcp__github__create_or_update_file", {"path": 5, "content": SIGNED}),
+            ("mcp__github__push_files", {"files": "rác"}),
+            ("mcp__github__push_files", {"files": ["rác", {"path": GO_REL}]}),
+            ("mcp__github__delete_file", {"path": GO_REL, "content": SIGNED}),
+            ("mcp__github__get_file_contents", {"path": GO_REL}),
+        ):
+            self.assertEqual(self.mcp(name, ti)[0], "", (name, ti))
+
+
+class GoNoGoReadTest(unittest.TestCase):
+    def test_read_limit(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "f.diff"
+            p.write_text("abcd", encoding="utf-8")
+            self.assertEqual(guard._go_read(str(p), 4), "abcd")
+            self.assertIsNone(guard._go_read(str(p), 3))
+            self.assertEqual(guard._go_read(str(p)), "abcd")
 
 
 if __name__ == "__main__":
