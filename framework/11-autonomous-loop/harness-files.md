@@ -112,7 +112,9 @@ OS/devcontainer có egress allowlist (`LOOP-HARNESS-022`) và việc phiên chí
   GO-NO-GO. Áp diff (AUD-SEC-534): `patch`/`git apply`/`git am` lấy diff từ tệp/stdin ở dự án có `GO-NO-GO*.md` trong
   `docs/ops`, `docs` hay gốc → deny, trừ khi mọi diff là tệp thường nêu ở đối số/`-i`/`< tệp` (≤ 1 MiB, đọc được ở mọi thư
   mục ứng viên) không có header `GO-NO-GO*.md` (mbox mã hoá base64/quoted-printable → deny; `--check`/`--stat`/
-  `--dry-run`/`git am --abort` cho chạy). Lệnh lạ (AUD-SEC-535, theo ADR-0066): lệnh ngoài danh sách trắng chỉ đọc (của
+  `--dry-run`/`git am --abort` cho chạy); tệp diff đọc được có header `GO-NO-GO*.md` (tạo mới, đổi tên tới) → deny cả ở
+  dự án chưa có GO-NO-GO (AUD-SEC-539) — ở đó diff không đọc được vẫn cho chạy (không chặn oan dự án không dùng
+  GO-NO-GO; còn lọt: stdin/mbox mã hoá tạo GO-NO-GO đầu tiên). Lệnh lạ (AUD-SEC-535, theo ADR-0066): lệnh ngoài danh sách trắng chỉ đọc (của
   ADR-0066, thêm `less`/`more`, `git add|commit|diff|show|log|blame|status|ls-files|grep|cat-file|reset|restore|checkout`,
   `find` không hành động ghi, `prettier`/`markdownlint` không cờ sửa, lệnh đã mô hình đích `cp`/`mv`/`sed`/`tee`/`dd`/
   `rsync`/`curl`…) có từ khớp `go-no-go*.md` (không phân biệt hoa thường, sau bỏ nháy, phần sau `=`/`:`; phần thư mục có

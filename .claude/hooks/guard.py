@@ -3011,9 +3011,49 @@ def _patch_cmd(argv: List[str]) -> bool:
     return n[:1] in (["patch"], ["gpatch"]) or n[:2] in (["git", "apply"], ["git", "am"])
 
 
+# Review #469 🔴: git/GNU patch giải tên có nháy kiểu C (`"b/\107O-NO-GO.md"` = `GO-NO-GO.md` — git `unquote_c_style`,
+# patch `parse_c_string`) và cắt timestamp cách tên bằng DẤU CÁCH (`+++ b/x.md 2026-11-07 10:00:00 +0700`); `diff --git`
+# không nháy được có dấu cách trong tên (`a/x y.md b/x y.md`). Ứng viên THÊM vào kết quả của `PATCH_HEADER_RE` (không
+# bớt — luật AUD-SEC-414 dùng chung): mọi đoạn có nháy đã giải; phần không nháy (tới tab đầu) cắt ở khoảng trắng — tiền tố
+# (cả dòng `diff --git`: hậu tố), tối đa `PATCH_HEADER_CUTS` chỗ đầu và 4 chỗ cuối (tên dài bị chặn đường quét).
+PATCH_HEADER_LINE_RE = re.compile(
+    r"^((?:\+\+\+|---|\*\*\*|Index:) |(?:rename|copy) (?:from|to) |diff --git )(.*?)\r?$", re.M
+)
+PATCH_QUOTED_RE = re.compile(r"\"((?:[^\"\\\n]|\\.)*)\"")
+PATCH_HEADER_CUTS = 16
+C_ESCAPES = {"a": 7, "b": 8, "t": 9, "n": 10, "v": 11, "f": 12, "r": 13}
+C_OCTAL_RE = re.compile(r"\\([0-7]{1,3})|\\(.)|([^\\]+)|\\$", re.S)
+
+
+def _c_unquote(s: str) -> str:
+    """Giải phần trong nháy kiểu C của git: `\\NNN` bát phân → byte (ghép UTF-8), `\\t \\n \\a \\b \\f \\r \\v`, `\\x` khác
+    → `x`; byte không phải UTF-8 → ký tự thay thế."""
+    out = bytearray()
+    for m in C_OCTAL_RE.finditer(s):
+        octal, esc, plain = m.groups()
+        if octal:
+            out.append(int(octal, 8) & 0xFF)
+        elif esc:
+            out += bytes([C_ESCAPES[esc]]) if esc in C_ESCAPES else esc.encode()
+        else:
+            out += (plain or "\\").encode()
+    return out.decode("utf-8", "replace")
+
+
+def _header_cuts(value: str, suffixes: bool) -> List[str]:
+    """Tên có thể của phần không nháy: cắt ở khoảng trắng (tiền tố, `suffixes` thì cả hậu tố)."""
+    head = value.split("\t", 1)[0].rstrip()
+    spaces = [m.start() for m in re.finditer(r"\s", head)]
+    spaces = list(dict.fromkeys(spaces[:PATCH_HEADER_CUTS] + spaces[-4:]))
+    return [head[:i].rstrip() for i in spaces] + ([head[i + 1 :].strip() for i in spaces] if suffixes else [])
+
+
 def _patch_header_paths(text: str) -> List[str]:
     out = [g for m in PATCH_HEADER_RE.finditer(text) for g in m.groups() if g]
-    return [p for p in dict.fromkeys(out) if _norm_path(p) != "/dev/null"]
+    for m in PATCH_HEADER_LINE_RE.finditer(text):
+        out += [_c_unquote(q) for q in PATCH_QUOTED_RE.findall(m[2])]
+        out += [] if m[2].startswith('"') else _header_cuts(m[2], m[1] == "diff --git ")
+    return [p for p in dict.fromkeys(out) if p and _norm_path(p) != "/dev/null"]
 
 
 def _patch_candidates(path: str) -> List[str]:
@@ -9720,12 +9760,14 @@ def _go_word(a: str) -> bool:
 # `GO-NO-GO*.md` ở `GO_NO_GO_DIRS` (như `release-check` tìm) → chặn, TRỪ khi mọi diff là tệp nêu nguyên văn, đọc được
 # (tệp thường ≤ `GO_PATCH_MAX` ký tự, mọi thư mục ứng viên) và không header nào là `GO-NO-GO*.md`; mbox mã hoá MIME
 # (`git am`) không đọc được header → chặn. Diff trong thân heredoc/chữ đổ qua ống do `_patch_fence_scripts` xét.
+# AUD-SEC-539: tệp diff đọc được có header `GO-NO-GO*.md` (tạo mới, đổi tên tới) → chặn cả ở dự án chưa có GO-NO-GO.
 GO_NO_GO_DIRS = ("docs/ops", "docs", "")
 GO_PATCH_MAX = 1 << 20
 GIT_PATCH_VALS: Tuple[str, ...] = ("-p", "-C", "--exclude", "--include", "--directory", "--whitespace")
 GIT_PATCH_VALS += ("--build-fake-ancestor", "--patch-format", "--resolvemsg")
 PATCH_VALS = ("-p", "-i", "-o", "-d", "-B", "-r", "-z", "-V", "-D", "-F", "-g", "--output", "--input")
 PATCH_DRY = frozenset("--check --stat --numstat --summary --dry-run --abort --quit --show-current-patch".split())
+GO_DIFF_CLEAR, GO_DIFF_BLIND, GO_DIFF_TOUCHES = "clear", "blind", "touches"  # trạng thái tệp diff (`_go_diff_state`)
 MIME_ENCODED_RE = re.compile(r"^content-transfer-encoding:[ \t]*(?:base64|quoted-printable)", re.I | re.M)
 GO_PATCH_WHY = (
     "`patch`/`git apply`/`git am` với diff guard không đọc được hay chạm GO-NO-GO ({}) — "
@@ -9738,20 +9780,23 @@ GO_PATCH_WHY = (
 def _go_patch_asks(
     cmd: str, placed: List[Tuple[List[str], Cands]], root: str, cwd: Optional[str], strict: bool
 ) -> List[str]:
-    """AUD-SEC-534: lệnh áp diff không thấy đích (như `_patch_file_why`) ở dự án có GO-NO-GO → chặn trừ diff đọc được
-    không chạm GO-NO-GO (`_go_patch_clear`). Lớp danh sách trắng (`strict` + `_allowlist_why`) đã chặn chắc lệnh này
-    (BUDGET kèm cách viết lại — `_argv_shell_check`) → nhường, giữ mã đó."""
+    """AUD-SEC-534: lệnh áp diff không thấy đích (như `_patch_file_why`): diff đọc được có header `GO-NO-GO*.md` → chặn
+    bất kể dự án đã có GO-NO-GO chưa (AUD-SEC-539: diff tạo mới GO-NO-GO đã ký); diff không đọc được → chặn chỉ ở dự án
+    có GO-NO-GO (`_go_on_disk` — không chặn oan dự án không dùng). Lớp danh sách trắng (`strict` + `_allowlist_why`) đã
+    chặn chắc lệnh này (BUDGET kèm cách viết lại — `_argv_shell_check`) → nhường, giữ mã đó."""
     if not PATCH_WORD_RE.search(cmd):
         return []
     cmds = _reuse_cmds(cmd, 0)
     blind = [c for j, c in enumerate(cmds) if c.top and _patch_applies(c.argv) and not _patch_targets_at(cmds, j)]
-    if not blind or not _go_on_disk(root):
+    if not blind:
         return []
-    mine = [(a, cands) for a, cands in placed if _patch_applies(a)]
-    unclear = [a for a, cands in mine if not _go_patch_clear(a, cands)]
-    if mine and not unclear or strict and _allowlist_why(cmd, root, cwd):
+    states = [(a, _go_patch_state(a, cands)) for a, cands in placed if _patch_applies(a)]
+    bad = [a for a, s in states if s == GO_DIFF_TOUCHES]
+    if not bad and _go_on_disk(root):
+        bad = [a for a, s in states if s == GO_DIFF_BLIND] or ([] if states else [blind[0].argv])
+    if not bad or strict and _allowlist_why(cmd, root, cwd):
         return []
-    return [GO_PATCH_WHY.format(" ".join((unclear or [blind[0].argv])[0])[:160])]
+    return [GO_PATCH_WHY.format(" ".join(bad[0])[:160])]
 
 
 def _patch_applies(argv: List[str]) -> bool:
@@ -9790,25 +9835,27 @@ def _patch_sources(argv: List[str]) -> List[str]:
     return [] if "-" in srcs else srcs
 
 
-def _go_patch_clear(argv: List[str], cands: Cands) -> bool:
-    """Mọi tệp diff của lệnh (ở mọi thư mục ứng viên) đọc được và không header nào là `GO-NO-GO*.md`."""
+def _go_patch_state(argv: List[str], cands: Cands) -> str:
+    """Trạng thái diff của một lệnh áp diff: có tệp diff (ở thư mục ứng viên nào) có header `GO-NO-GO*.md` → `touches`;
+    không thì có diff không đọc được (stdin, không có, quá lớn, mbox mã hoá) → `blind`; còn lại `clear`."""
     srcs = _patch_sources(argv)
     if srcs == [""]:
-        return True
+        return GO_DIFF_CLEAR
     am = normalize(argv)[1:2] == ["am"]
-    return bool(srcs) and all(_go_diff_clear(s, d, am) for s in srcs for d in cands)
+    states = {_go_diff_state(s, d, am) for s in srcs for d in cands} if srcs else {GO_DIFF_BLIND}
+    return GO_DIFF_TOUCHES if GO_DIFF_TOUCHES in states else GO_DIFF_BLIND if GO_DIFF_BLIND in states else GO_DIFF_CLEAR
 
 
-def _go_diff_clear(src: str, here: Optional[str], am: bool) -> bool:
+def _go_diff_state(src: str, here: Optional[str], am: bool) -> str:
     path = os.path.expanduser(src)
     if not posixpath.isabs(path):
         if here is None:  # thư mục không biết (D-106): không biết đọc tệp nào
-            return False
+            return GO_DIFF_BLIND
         path = posixpath.join(here, path)
     text = _go_read(path, GO_PATCH_MAX)
     if text is None or am and MIME_ENCODED_RE.search(text):
-        return False
-    return not any(_is_go_no_go(p) for p in _patch_header_paths(text))
+        return GO_DIFF_BLIND
+    return GO_DIFF_TOUCHES if any(_is_go_no_go(p) for p in _patch_header_paths(text)) else GO_DIFF_CLEAR
 
 
 # sổ giai đoạn và thư mục tổ tiên của nó (`docs/autopilot`, `docs`)

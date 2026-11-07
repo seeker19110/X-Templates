@@ -158,6 +158,10 @@ CWD_RELATIVE: Dict[str, str] = {
     "t3672-462-pax-read": "cd gd tương đối → /tmp/gd không có Git dir sau cd /tmp (AUD-SEC-462)",
     "t3672-462-tar-cluster-C": "cd gd tương đối → /tmp/gd không có Git dir sau cd /tmp (AUD-SEC-462)",
     "t3672-449-scp-into-bare": "gd/ tương đối → /tmp/gd không có Git dir sau cd /tmp (AUD-SEC-449)",
+    "aud539-fresh-git-apply-creates-go-no-go": "new.diff tương đối → /tmp/new.diff không đọc được; dự án chưa có "
+    "GO-NO-GO → diff không đọc được cho chạy (AUD-SEC-539)",
+    "aud539-fresh-git-am-creates-go-no-go": "new.mbox tương đối → /tmp/new.mbox không đọc được; dự án chưa có "
+    "GO-NO-GO → diff không đọc được cho chạy (AUD-SEC-539)",
     "t3633-248-cp-T": "docs/autopilot tương đối → /tmp/docs/autopilot (AUD-SEC-248)",
     "t3633-248-tar-C": "docs tương đối → /tmp/docs (AUD-SEC-248)",
     "t3633-248-glob": "docs/autopilot/* tương đối (AUD-SEC-248)",
