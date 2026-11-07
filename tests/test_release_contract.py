@@ -363,8 +363,9 @@ class ReleaseArtifactTest(ReleaseCase):
 
 
 class PromotionTest(ReleaseCase):
-    """T-3678: `promotion` — chỉ `approved` khi không FAIL, không N/A BLOCKER, GO-NO-GO của VERSION ký GO còn hạn và nhắc
-    digest (khi có artifact); máy không nâng `pending_human`. `go`/`verdict`/exit giữ nghĩa cũ."""
+    """T-3678: `promotion` — chỉ `approved` khi không FAIL, không N/A BLOCKER, GO-NO-GO của VERSION ký GO còn hạn và có
+    dòng `subject: content` (+ `subject: digest` khi có artifact) khớp đủ 64 hex (D-389); máy không nâng `pending_human`.
+    `go`/`verdict`/exit giữ nghĩa cũ."""
 
     SIGN = "## 5. Ký\n\n| Vai trò | Tên | Quyết định | Ngày |\n|---|---|---|---|\n"
 
@@ -372,10 +373,14 @@ class PromotionTest(ReleaseCase):
         super().setUp()
         (self.repo / "VERSION").write_text("1.2.0\n", encoding="utf-8")
 
-    def go_no_go(self, decision: str = "GO", date: str = "", extra: str = "") -> None:
+    def go_no_go(self, decision: str = "GO", date: str = "", extra: str = "", content: bool = True) -> None:
+        """GO-NO-GO v1.2.0 ký §5; `content` = ghi dòng `subject: content` của cây hiện tại (D-389) — file GO-NO-GO nằm
+        ngoài vân tay nội dung nên tính trước khi ghi vẫn đúng sau commit."""
+        line = f"subject: content {xt.evidence_fingerprint(self.repo)}\n" if content else ""
         doc = self.repo / "docs" / "ops" / "GO-NO-GO-v1.2.0.md"
         doc.write_text(
-            f"# GO/NO-GO v1.2.0\n\n{extra}\n{self.SIGN}| Chủ repo | An | {decision} | {date or today()} |\n", "utf-8"
+            f"# GO/NO-GO v1.2.0\n\n{line}{extra}\n{self.SIGN}| Chủ repo | An | {decision} | {date or today()} |\n",
+            "utf-8",
         )
         self.commit()
 
@@ -468,11 +473,15 @@ class PromotionTest(ReleaseCase):
         self.assertEqual((d["verdict"], p["state"]), ("GO", "pending_human"))
         self.assertIn("hết hạn", p["reasons"][0])
         self.setup_xt(release_approval_days="60")
+        self.go_no_go(date=today(-40))  # xt.yaml đổi = nội dung đổi: ký lại (D-389)
         self.assertEqual(self.promotion()[2]["state"], "approved")
         for bad in ("0", "x"):  # sai → mặc định 30 ngày
             with self.subTest(bad=bad):
                 self.setup_xt(release_approval_days=bad)
-                self.assertEqual(self.promotion()[2]["state"], "pending_human")
+                self.go_no_go(date=today(-40))
+                _, _, p = self.promotion()
+                self.assertEqual(p["state"], "pending_human")
+                self.assertIn("hết hạn", p["reasons"][0])
         self.setup_xt()
         self.go_no_go(date=today(1))  # người ký ở múi giờ đi trước UTC (review lát A 🟢11)
         self.assertEqual(self.promotion()[2]["state"], "approved")
@@ -481,16 +490,126 @@ class PromotionTest(ReleaseCase):
         self.assertEqual(p["state"], "pending_human")
         self.assertIn("tương lai", p["reasons"][0])
 
-    def test_subject_digest_must_be_named(self):
+    def test_content_line_required_and_formats(self):
+        """D-389: chữ ký gắn ứng viên bằng dòng `subject: content <64 hex>` — thiếu → chờ người, lý do nói rõ dòng cần ghi
+        kèm giá trị; dạng trích dẫn/gạch đầu dòng/backtick, khoá không phân biệt hoa thường đều nhận."""
+        self.setup_xt()
+        self.go_no_go(content=False)
+        _, d, p = self.promotion()
+        fp = d["subject"]["content"]
+        self.assertRegex(fp, r"^[0-9a-f]{64}$")
+        self.assertEqual(fp, xt.evidence_fingerprint(self.repo))
+        self.assertEqual(p["state"], "pending_human")
+        self.assertIn(f"thiếu dòng `subject: content {fp}`", p["reasons"][0])
+        for line in (
+            f"subject: content {fp}",
+            f"> subject: content `{fp}`",
+            f"> > - Subject: Content {fp}",
+            f"* SUBJECT:content `{fp}`  ",
+            f"  + subject : content {fp.upper()}",
+        ):
+            with self.subTest(line=line):
+                self.go_no_go(extra=line, content=False)
+                self.assertEqual(self.promotion()[2]["state"], "approved")
+        for line in (
+            f"subject: content {fp} (ký)",  # chữ thừa sau hex: không phải dòng subject
+            f"Ghi chú subject: content {fp}",  # không ở đầu dòng
+            f"subject: tree {fp}",
+        ):
+            with self.subTest(line=line):
+                self.go_no_go(extra=line, content=False)
+                _, _, p = self.promotion()
+                self.assertEqual(p["state"], "pending_human")
+                self.assertIn("thiếu dòng `subject: content", p["reasons"][0])
+
+    def test_content_must_match_all_64_hex(self):
+        """So đủ 64 hex: 12 ký tự đầu (luật cũ) hay một dòng lệch trong nhiều dòng cùng loại → ứng viên khác."""
+        self.setup_xt()
+        fp = xt.evidence_fingerprint(self.repo)
+        other = hashlib.sha256(b"khac").hexdigest()
+        for extra in (
+            "",  # chỉ có dòng do helper ghi: không lặp
+            f"subject: content {fp[:12]}",
+            f"subject: content {other}",
+            f"subject: content {fp}0",
+        ):
+            with self.subTest(extra=extra):
+                self.go_no_go(extra=extra, content=not extra)
+                _, _, p = self.promotion()
+                if not extra:
+                    self.assertEqual(p["state"], "approved", p)
+                    continue
+                self.assertEqual(p["state"], "pending_human")
+                self.assertIn("chữ ký gắn ứng viên khác", p["reasons"][0])
+                self.assertIn(f"`subject: content {fp}`", p["reasons"][0])
+        self.go_no_go(extra=f"subject: content {other}")  # dòng đúng (helper) + dòng lệch → lệch
+        _, _, p = self.promotion()
+        self.assertEqual(p["state"], "pending_human")
+        self.assertIn("chữ ký gắn ứng viên khác", p["reasons"][0])
+
+    def test_code_change_after_signing_is_not_approved(self):
+        """AUD-HAR-219: ký ở commit A rồi đổi mã (commit B, không khai `release_artifacts`) → không còn `approved`."""
+        self.setup_xt()
+        self.go_no_go()
+        self.assertEqual(self.promotion()[2]["state"], "approved")
+        (self.repo / "app.py").write_text("print('khac')\n", encoding="utf-8")
+        self.commit()
+        rc, d, p = self.promotion()
+        self.assertEqual((rc, d["verdict"], p["state"]), (0, "GO", "pending_human"), p)
+        self.assertIn("chữ ký gắn ứng viên khác", p["reasons"][0])
+
+    def test_signoff_only_commits_keep_approval(self):
+        """Commit chỉ sửa GO-NO-GO/DECISIONS/PROGRESS (commit ký, ghi quyết định) không đổi vân tay nội dung."""
+        self.setup_xt()
+        self.go_no_go()
+        doc = self.repo / "docs" / "ops" / "GO-NO-GO-v1.2.0.md"
+        doc.write_text(doc.read_text(encoding="utf-8") + "\nGhi chú sau ký.\n", encoding="utf-8")
+        (self.repo / "docs" / "autopilot").mkdir(parents=True)
+        (self.repo / "docs" / "autopilot" / "DECISIONS.md").write_text("# Quyết định\n", encoding="utf-8")
+        (self.repo / "PROGRESS.md").write_text("# Tiến độ\n", encoding="utf-8")
+        self.commit()
+        rc, d, p = self.promotion()
+        self.assertEqual((rc, p["state"]), (0, "approved"), p)
+
+    def test_subject_digest_line_with_artifacts(self):
+        """Khai `release_artifacts` → thêm dòng `subject: digest <64 hex>`: thiếu, 12 hex, lệch → chờ người; đủ → duyệt."""
         (self.repo / "dist").mkdir()
         (self.repo / "dist" / "a.tar.gz").write_bytes(b"x")
         self.setup_xt(release_artifacts="dist/a.tar.gz")
         self.go_no_go()
         _, d, p = self.promotion()
+        digest = d["subject"]["digest"]
+        self.assertRegex(digest, r"^[0-9a-f]{64}$")
         self.assertEqual(p["state"], "pending_human")
-        self.assertIn("không nhắc digest", p["reasons"][0])
-        self.go_no_go(extra=f"Subject: `{d['subject']['digest'][:12]}`")
+        self.assertIn(f"thiếu dòng `subject: digest {digest}`", p["reasons"][0])
+        for extra in (f"Subject: `{digest[:12]}`", f"subject: digest {digest[:12]}", f"subject: digest {digest[::-1]}"):
+            with self.subTest(extra=extra):
+                self.go_no_go(extra=extra)
+                _, _, p = self.promotion()
+                self.assertEqual(p["state"], "pending_human")
+        self.go_no_go(extra=f"- subject: digest `{digest}`")
         self.assertEqual(self.promotion()[2]["state"], "approved")
+        self.go_no_go(extra=f"subject: digest {digest}", content=False)  # digest đúng không thay dòng content
+        _, _, p = self.promotion()
+        self.assertEqual(p["state"], "pending_human")
+        self.assertIn("thiếu dòng `subject: content", p["reasons"][0])
+        _, out, _ = run_main("release-check")
+        self.assertIn(f"\nsubject: content {d['subject']['content']}\n", out)
+        self.assertIn(f"\nsubject: digest {digest}\n", out)
+
+    def test_text_output_prints_subject_lines(self):
+        self.setup_xt()
+        _, d, _ = self.promotion()
+        _, out, _ = run_main("release-check")
+        self.assertIn(f"\nsubject: content {d['subject']['content']}\n", out)
+        self.assertNotIn("subject: digest", out)
+
+    def test_no_content_fingerprint_never_approved(self):
+        """Không tính được vân tay nội dung (không phải repo git/chưa commit) → không gắn được ứng viên, không duyệt."""
+        text = f"# GO/NO-GO v1.2.0\n\n{self.SIGN}| Chủ repo | An | GO | {today()} |\n"
+        why = xt._approval_problem(self.repo, "G.md", text, {"content": None, "digest": None})
+        self.assertIn("không tính được vân tay nội dung", why)
+        self.assertEqual(xt.subject_lines({"content": None, "digest": None}), [])
 
     def test_blocked_and_no_version(self):
         self.setup_xt(acceptance="false")
