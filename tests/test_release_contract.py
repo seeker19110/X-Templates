@@ -84,6 +84,53 @@ class ReportAdapterTest(TmpDirCase):
         self.assertEqual((r["status"], r["total"]), ("PENDING", 0))
         self.assertIn("0 gói được quét", r["detail"])
 
+    def test_pip_audit_counts_unique_ids(self):
+        """AUD-HAR-317: mục cùng `id` trong một gói đếm một lần; id trùng ở hai gói là hai lỗ hổng (mỗi gói một bản
+        vá); mục không có `id` chuỗi đếm riêng từng mục (không gộp nhầm thành một)."""
+        dup = [{"id": "PYSEC-1"}, {"id": "PYSEC-1", "fix_versions": ["2"]}, {"id": "GHSA-x"}]
+        deps = [
+            {"name": "a", "version": "1", "vulns": dup},
+            {"name": "b", "version": "1", "vulns": [{"id": "PYSEC-1"}]},
+            {"name": "c", "version": "1", "vulns": [{}, {"id": 7}, "x", "x"]},
+        ]
+        r = self.result({"dependencies": deps})
+        self.assertEqual((r["status"], r["total"], r["failed"]), ("FAIL", 3, 7))
+        self.assertIn("3 gói, 7 lỗ hổng", r["detail"])
+
+    def test_sarif_suppressions(self):
+        """AUD-HAR-316, D-394 (SARIF §3.27.23, §3.35.3): kết quả error có `suppressions` khác rỗng mà mọi mục ghi
+        `status` accepted không tính; vắng `status` (mặc định chưa xác minh — cách hiểu chặt), underReview/rejected,
+        mảng rỗng, mục sai dạng → vẫn tính."""
+        ok = [{"kind": "inSource", "status": "accepted"}]
+        for sups, failed in (
+            (ok, 0),
+            ([{"kind": "external", "status": "accepted"}, *ok], 0),
+            ([{"kind": "inSource"}], 1),  # vắng status: vẫn tính (D-394)
+            ([*ok, {"kind": "external"}], 1),  # một mục vắng status → không bị chặn
+            ([{"kind": "inSource", "status": "underReview"}], 1),
+            ([{"kind": "inSource", "status": "rejected"}], 1),
+            ([*ok, {"kind": "external", "status": "rejected"}], 1),  # một mục từ chối → không bị chặn
+            ([], 1),  # mảng rỗng: không bị chặn
+            (None, 1),
+            ("accepted", 1),
+            (["accepted"], 1),
+            ([{"status": "Accepted"}], 1),  # giá trị khác enum (phân biệt hoa thường)
+        ):
+            with self.subTest(sups=sups):
+                res = {"level": "error", "ruleId": "r", "suppressions": sups}
+                r = self.result({"runs": [{"tool": {"driver": {"name": "codeql"}}, "results": [res]}]})
+                self.assertEqual((r["status"], r["total"], r["failed"]), ("FAIL" if failed else "PASS", 1, failed))
+                if failed:
+                    self.assertNotIn("bỏ qua", r["detail"])
+                else:
+                    self.assertIn("1 đã chấp nhận (suppression) bỏ qua", r["detail"])
+        for name in ("gitleaks", "GitLeaks"):  # công cụ quét bí mật: suppression không bao giờ bỏ qua (D-391, D-394)
+            with self.subTest(name=name):
+                res = {"ruleId": "r", "suppressions": ok}
+                r = self.result({"runs": [{"tool": {"driver": {"name": name}}, "results": [res]}]})
+                self.assertEqual((r["status"], r["total"], r["failed"]), ("FAIL", 1, 1))
+                self.assertNotIn("bỏ qua", r["detail"])
+
     def test_sarif_level_from_rule(self):
         """Review lát A 🔴2: kết quả không ghi `level` lấy mức theo rule (§3.27.10) — override của invocation, rồi
         `defaultConfiguration` theo chỉ số hay id; `kind` khác `fail` là `none`; không gì cả → `warning`."""
@@ -376,7 +423,7 @@ class PromotionTest(ReleaseCase):
     def go_no_go(self, decision: str = "GO", date: str = "", extra: str = "", content: bool = True) -> None:
         """GO-NO-GO v1.2.0 ký §5; `content` = ghi dòng `subject: content` của cây hiện tại (D-389) — file GO-NO-GO nằm
         ngoài vân tay nội dung nên tính trước khi ghi vẫn đúng sau commit."""
-        line = f"subject: content {xt.evidence_fingerprint(self.repo)}\n" if content else ""
+        line = f"subject: content {xt.subject_fingerprint(self.repo)}\n" if content else ""
         doc = self.repo / "docs" / "ops" / "GO-NO-GO-v1.2.0.md"
         doc.write_text(
             f"# GO/NO-GO v1.2.0\n\n{line}{extra}\n{self.SIGN}| Chủ repo | An | {decision} | {date or today()} |\n",
@@ -498,7 +545,7 @@ class PromotionTest(ReleaseCase):
         _, d, p = self.promotion()
         fp = d["subject"]["content"]
         self.assertRegex(fp, r"^[0-9a-f]{64}$")
-        self.assertEqual(fp, xt.evidence_fingerprint(self.repo))
+        self.assertEqual(fp, xt.subject_fingerprint(self.repo))
         self.assertEqual(p["state"], "pending_human")
         self.assertIn(f"thiếu dòng `subject: content {fp}`", p["reasons"][0])
         for line in (
@@ -525,7 +572,7 @@ class PromotionTest(ReleaseCase):
     def test_content_must_match_all_64_hex(self):
         """So đủ 64 hex: 12 ký tự đầu (luật cũ) hay một dòng lệch trong nhiều dòng cùng loại → ứng viên khác."""
         self.setup_xt()
-        fp = xt.evidence_fingerprint(self.repo)
+        fp = xt.subject_fingerprint(self.repo)
         other = hashlib.sha256(b"khac").hexdigest()
         for extra in (
             "",  # chỉ có dòng do helper ghi: không lặp
@@ -571,6 +618,100 @@ class PromotionTest(ReleaseCase):
         rc, d, p = self.promotion()
         self.assertEqual((rc, p["state"]), (0, "approved"), p)
 
+    def test_subject_excludes_only_signoff_files(self):
+        """AUD-HAR-319 (D-393): `subject.content` chỉ loại GO-NO-GO*.md nằm trực tiếp ở `GO_NO_GO_DIRS`, sổ
+        `DECISIONS_LOG`, `PROGRESS.md` gốc và `.autopilot/` — file cùng TÊN ở chỗ khác là mã/tài liệu dự án: đổi sau khi
+        ký → chờ người ký lại. Vân tay gói stage (`evidence_fingerprint`) giữ luật cũ."""
+        self.setup_xt()
+        for rel in (
+            "src/DECISIONS.md",
+            "src/x/GO-NO-GO-y.md",
+            "docs/PROGRESS.md",
+            "docs/research/DECISIONS.md",
+            "docs/ops/old/GO-NO-GO-a.md",
+            "docs/autopilot/DECISIONS-2026-11.md",  # bản tháng: ngoài tập loại trừ (chặt)
+        ):
+            with self.subTest(rel=rel):
+                self.go_no_go()
+                self.assertEqual(self.promotion()[2]["state"], "approved")
+                before = xt.evidence_fingerprint(self.repo)
+                f = self.repo / rel
+                f.parent.mkdir(parents=True, exist_ok=True)
+                f.write_text(f"mã {rel}\n", encoding="utf-8")
+                self.commit()
+                _, _, p = self.promotion()
+                self.assertEqual(p["state"], "pending_human", p)
+                self.assertIn("chữ ký gắn ứng viên khác", p["reasons"][0])
+                if xt._signoff_excluded(rel):
+                    self.assertEqual(xt.evidence_fingerprint(self.repo), before)  # luật cũ: loại theo tên
+        self.go_no_go()
+        for rel in (
+            "docs/ops/GO-NO-GO-x.md",
+            "docs/GO-NO-GO-w.md",
+            "GO-NO-GO-z.md",
+            "docs/autopilot/DECISIONS.md",
+            "PROGRESS.md",
+            ".autopilot/note.txt",
+        ):
+            with self.subTest(rel=rel):
+                f = self.repo / rel
+                f.parent.mkdir(parents=True, exist_ok=True)
+                f.write_text(f"ghi {rel}\n", encoding="utf-8")
+                self.git("add", "-f", rel)
+                self.commit()
+                _, _, p = self.promotion()
+                self.assertEqual(p["state"], "approved", p)
+        before = xt.subject_fingerprint(self.repo)
+        (self.repo / "src" / "DECISIONS.md").write_text("đổi chưa commit\n", encoding="utf-8")
+        self.assertNotEqual(xt.subject_fingerprint(self.repo), before)  # diff chưa commit cũng tính
+
+    def test_subject_fingerprint_without_git(self):
+        self.assertIsNone(xt.subject_fingerprint(self.tmp))
+
+    def test_subject_line_hidden_in_markdown_not_accepted(self):
+        """AUD-HAR-320: dòng `subject:` trong khối rào ``` / ~~~ hay chú thích HTML (kể cả nhiều dòng, chưa đóng) người
+        ký không thấy khi xem — không nhận; sau khi rào/chú thích đóng thì nhận lại."""
+        self.setup_xt()
+        fp = xt.subject_fingerprint(self.repo)
+        line = f"subject: content {fp}"
+        for hidden in (
+            f"```\n{line}\n```",
+            f"```markdown\n{line}\n```",
+            f"~~~\n{line}\n~~~",
+            f"> ```\n> {line}\n> ```",
+            f"````\n```\n{line}\n````",  # rào ngắn hơn không đóng rào dài
+            f"```\n~~~\n{line}\n~~~\n```",  # rào khác ký tự không đóng
+            f"```\n``` x\n{line}\n```",  # rào đóng không có chữ sau
+            f"```\n{line}",  # rào chưa đóng: tới hết file
+            f"<!-- {line} -->",
+            f"<!--\n{line}\n-->",
+            f"<!--\n{line}",  # chú thích chưa đóng
+        ):
+            with self.subTest(hidden=hidden):
+                self.go_no_go(extra=hidden, content=False)
+                _, _, p = self.promotion()
+                self.assertEqual(p["state"], "pending_human", p)
+                self.assertIn("thiếu dòng `subject: content", p["reasons"][0])
+        for shown in (f"```\nx\n```\n{line}", f"~~~~\n```\n~~~~~\n{line}", f"<!-- ghi chú -->\n{line}"):
+            with self.subTest(shown=shown):
+                self.go_no_go(extra=shown, content=False)
+                self.assertEqual(self.promotion()[2]["state"], "approved")
+
+    def test_subject_line_bom_and_mismatch_message(self):
+        """AUD-HAR-320: BOM đầu file không che dòng `subject:` ở dòng 1; dòng lệch in nguyên văn (repr, cắt khi dài) —
+        hex kèm dấu câu không hiện ra như hai chuỗi giống nhau."""
+        fp = hashlib.sha256(b"x").hexdigest()
+        subject = {"content": fp, "digest": None}
+        self.assertEqual(xt._subject_problem("G.md", f"\ufeffsubject: content {fp}\n# T\n", subject), "")
+        why = xt._subject_problem("G.md", f"- subject: content `{fp}`.\n", subject)
+        self.assertIn(repr(f"- subject: content `{fp}`."), why)
+        self.assertIn(f"ứng viên này: `subject: content {fp}`", why)
+        long = f"subject: content {fp}{'0' * 200}"
+        why = xt._subject_problem("G.md", long, subject)
+        self.assertIn(repr(long)[:100], why)
+        self.assertNotIn(repr(long), why)
+        self.assertIn("…", why)
+
     def test_subject_digest_line_with_artifacts(self):
         """Khai `release_artifacts` → thêm dòng `subject: digest <64 hex>`: thiếu, 12 hex, lệch → chờ người; đủ → duyệt."""
         (self.repo / "dist").mkdir()
@@ -603,6 +744,21 @@ class PromotionTest(ReleaseCase):
         _, out, _ = run_main("release-check")
         self.assertIn(f"\nsubject: content {d['subject']['content']}\n", out)
         self.assertNotIn("subject: digest", out)
+        self.assertNotIn("commit rồi chạy lại", out)
+
+    def test_text_output_dirty_tree_withholds_subject_lines(self):
+        """AUD-HAR-318: cây bẩn (hàng `tree` FAIL) — vân tay gồm diff chưa commit, lệch sau commit: không in dòng
+        `subject:` để chép, in nhắc commit rồi chạy lại; JSON vẫn có `subject.content` (máy đọc, không phải để chép)."""
+        self.setup_xt()
+        (self.repo / "VERSION").write_text("1.2.1\n", encoding="utf-8")
+        rc, out, _ = run_main("release-check")
+        self.assertEqual(rc, 1)
+        self.assertNotIn("subject: content", out)
+        self.assertNotIn("chép nguyên", out)
+        self.assertIn("cây chưa sạch", out)
+        self.assertIn("commit rồi chạy lại", out)
+        _, d = self.release()
+        self.assertRegex(d["subject"]["content"], r"^[0-9a-f]{64}$")
 
     def test_no_content_fingerprint_never_approved(self):
         """Không tính được vân tay nội dung (không phải repo git/chưa commit) → không gắn được ứng viên, không duyệt."""
