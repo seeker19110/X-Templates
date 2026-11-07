@@ -278,12 +278,14 @@
    ]
   },
   {
-   "reason": "Hàng `release-check` của cổng phát hành G7 (`go_no_go`: GO-NO-GO khớp VERSION, đã ký; adapter report của `report_result`) — không thuộc nhóm ca PR/rollup/review/guard; đỡ bằng Gate unittest tests.test_xt_cli -k go_no_go và tests.test_report_fixtures (AUD-HAR-315: output thật của gitleaks), tests.test_release_contract (AUD-HAR-318: dòng subject chỉ in khi cây sạch)",
+   "reason": "Hàng `release-check` của cổng phát hành G7 (`go_no_go`: GO-NO-GO khớp VERSION, đã ký; adapter report của `report_result`) — không thuộc nhóm ca PR/rollup/review/guard; đỡ bằng Gate unittest tests.test_xt_cli -k go_no_go và tests.test_report_fixtures (AUD-HAR-315: output thật của gitleaks), tests.test_release_contract (AUD-HAR-318: dòng subject chỉ in khi cây sạch; AUD-HAR-323: dòng ký trong khối code; AUD-TEST-091: pathspec vân tay subject)",
    "ids": [
     "AUD-HAR-197",
     "AUD-HAR-200",
     "AUD-HAR-315",
-    "AUD-HAR-318"
+    "AUD-HAR-318",
+    "AUD-HAR-323",
+    "AUD-TEST-091"
    ]
   },
   {
