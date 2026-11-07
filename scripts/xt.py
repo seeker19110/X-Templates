@@ -12547,12 +12547,17 @@ def _sarif_rule_hit(desc: Dict[str, Any], idx: Any, rid: Any) -> bool:
 SECRET_SCANNERS = ("gitleaks",)
 
 
+def _secret_scanner(run: Dict[str, Any]) -> bool:
+    """Run của công cụ quét bí mật (`SECRET_SCANNERS`, tên driver so không phân biệt hoa thường)."""
+    name = _dict(_dict(run.get("tool")).get("driver")).get("name")
+    return isinstance(name, str) and name.lower() in SECRET_SCANNERS
+
+
 def _sarif_level(run: Dict[str, Any], x: Dict[str, Any]) -> str:
     """Mức hiệu lực của một kết quả SARIF: run của công cụ quét bí mật (`SECRET_SCANNERS`, so không phân biệt hoa thường)
     → `error`; còn lại `level` ghi trên kết quả; không có và `kind` khác `fail` → `none`; rồi theo rule
     (`_sarif_rule_level`), mặc định `warning` (§3.27.10) — CodeQL không ghi `level` trên từng kết quả."""
-    name = _dict(_dict(run.get("tool")).get("driver")).get("name")
-    if isinstance(name, str) and name.lower() in SECRET_SCANNERS:
+    if _secret_scanner(run):
         return "error"
     if "level" in x:
         return str(x["level"])
@@ -12573,9 +12578,23 @@ def _sarif_result(doc: Dict[str, Any]) -> Dict[str, Any]:
     if any(not isinstance(r.get("results"), list) for r in runs):
         return _report("sarif", "PENDING", 0, 0, "run không có `results` — scan chưa xác định kết quả")
     found = [(r, x) for r in runs for x in r["results"] if isinstance(x, dict)]
-    errors = sum(1 for r, x in found if _sarif_level(r, x) == "error")
+    live = [(r, x) for r, x in found if not _sarif_suppressed(r, x)]
+    errors = sum(1 for r, x in live if _sarif_level(r, x) == "error")
     status = "FAIL" if errors else "PASS"
-    return _report("sarif", status, len(found), errors, f"{len(found)} kết quả, {errors} mức error")
+    muted = len(found) - len(live)
+    note = f", {muted} đã chấp nhận (suppression) bỏ qua" if muted else ""
+    return _report("sarif", status, len(found), errors, f"{len(found)} kết quả, {errors} mức error{note}")
+
+
+def _sarif_suppressed(run: Dict[str, Any], x: Dict[str, Any]) -> bool:
+    """Kết quả bị chặn (AUD-HAR-316, D-394): `suppressions` là mảng khác rỗng (§3.27.23: rỗng/vắng = không bị chặn) và
+    MỌI mục ghi `status` đúng `accepted`. Vắng `status` → vẫn tính: SARIF 2.1.0 errata01 §3.35.3 không ghi mặc định
+    (chưa xác minh) nên lấy cách hiểu chặt; `underReview`/`rejected`/giá trị lạ/mục sai dạng → vẫn tính. Run của công cụ
+    quét bí mật (`SECRET_SCANNERS`) không bao giờ bỏ qua theo suppression (D-391, D-394)."""
+    sups = x.get("suppressions")
+    if _secret_scanner(run) or not isinstance(sups, list) or not sups:
+        return False
+    return all(isinstance(s, dict) and s.get("status") == "accepted" for s in sups)
 
 
 def _pip_audit_dep(d: Any) -> bool:
@@ -12585,13 +12604,20 @@ def _pip_audit_dep(d: Any) -> bool:
     return "skip_reason" in d or (isinstance(d.get("version"), str) and isinstance(d.get("vulns"), list))
 
 
+def _pip_audit_vulns(vulns: List[Any]) -> int:
+    """Số lỗ hổng khác nhau của một gói (AUD-HAR-317): mục cùng `id` (pip-audit lặp mục từ nhiều nguồn) đếm một lần;
+    mục không có `id` chuỗi đếm riêng từng mục (không gộp nhầm)."""
+    keys = {v["id"] if isinstance(v, dict) and isinstance(v.get("id"), str) else i for i, v in enumerate(vulns)}
+    return len(keys)
+
+
 def _pip_audit_result(deps: List[Any]) -> Dict[str, Any]:
     """pip-audit JSON (`{"dependencies": [...]}` hay danh sách cũ): mọi phần tử phải đúng dạng (ESLint, CycloneDX, `[{}]`
     → INCONCLUSIVE); gói có `skip_reason` không được quét; vuln = FAIL; không gói nào được quét = scan chưa xong."""
     if not all(_pip_audit_dep(d) for d in deps):
         return _unknown("không nhận dạng được report: `dependencies` không đúng dạng pip-audit (name, version, vulns)")
     audited = [d for d in deps if "skip_reason" not in d]
-    vulns = sum(len(d["vulns"]) for d in audited)
+    vulns = sum(_pip_audit_vulns(d["vulns"]) for d in audited)
     if not audited:
         return _report("pip-audit", "PENDING", 0, 0, "0 gói được quét")
     status = "FAIL" if vulns else "PASS"
@@ -12855,10 +12881,38 @@ def _release_artifacts(base: Path) -> Tuple[Optional[Dict[str, str]], List[Dict[
     return _release_row("artifacts", "PASS", f"{len(arts)} artifact, digest khớp sidecar (nếu có)"), arts
 
 
+def _subject_excluded(path: str) -> bool:
+    """File ngoài `subject.content` (D-393): `GO-NO-GO*.md` nằm TRỰC TIẾP ở `GO_NO_GO_DIRS`, sổ `DECISIONS_LOG`,
+    `PROGRESS.md` gốc, `.autopilot/` — hẹp hơn `_signoff_excluded` (theo tên ở mọi cấp: `src/DECISIONS.md` là mã)."""
+    folder, _, name = path.rpartition("/")
+    if path.startswith(".autopilot/") or path in ("PROGRESS.md", DECISIONS_LOG):
+        return True
+    return (folder or ".") in GO_NO_GO_DIRS and fnmatch.fnmatchcase(name, "GO-NO-GO*.md")
+
+
+SUBJECT_EXCLUDE = [  # pathspec cùng tập `_subject_excluded`; `glob`: `*` không qua `/`
+    *(f":(exclude,glob){'' if d == '.' else d + '/'}GO-NO-GO*.md" for d in GO_NO_GO_DIRS),
+    f":(exclude,literal){DECISIONS_LOG}",
+    ":(exclude,literal)PROGRESS.md",
+]
+
+
+def subject_fingerprint(base: Path) -> Optional[str]:
+    """`subject.content` (D-389, D-393): sha256 nội dung cây — blob của HEAD (`ls-tree`, không SHA commit) + diff so HEAD
+    + file chưa track — trừ đúng các file ký/sổ máy đọc (`_subject_excluded`): không đổi qua commit ký và squash, đổi
+    khi bất kỳ file khác đổi. Đường dẫn tính từ dự án (như `evidence_fingerprint`). Không phải repo git/chưa commit → None."""
+    tree = _git(base, "ls-tree", "-r", "-z", "HEAD", "--", ".")
+    if tree.returncode != 0:
+        return None
+    paths = ((e, e.partition("\t")[2]) for e in tree.stdout.split("\0") if e)
+    kept = "\0".join(e for e, p in paths if not _subject_excluded(p))
+    return tree_hash(base, kept, lambda *a: _git(base, *a).stdout, SUBJECT_EXCLUDE)[0]
+
+
 def _release_subject(base: Path, arts: List[Dict[str, Any]]) -> Dict[str, Any]:
     """Ứng viên được chứng nhận: HEAD, vân tay cây, digest gộp của artifact (None khi không khai hay có artifact lỗi) và
-    `content` = `evidence_fingerprint` — vân tay nội dung trừ GO-NO-GO/DECISIONS/PROGRESS: không đổi qua commit ký và
-    squash, đổi khi mã đổi; chữ ký §5 gắn vào nó (D-389, AUD-HAR-219). Chỉ thêm khoá nên `RELEASE_SCHEMA` giữ 3."""
+    `content` = `subject_fingerprint` — vân tay nội dung trừ file ký/sổ máy đọc: không đổi qua commit ký và squash,
+    đổi khi mã đổi; chữ ký §5 gắn vào nó (D-389, AUD-HAR-219, D-393). Chỉ thêm khoá nên `RELEASE_SCHEMA` giữ 3."""
     ok = bool(arts) and not any(a["problem"] for a in arts)
     lines = "".join(f"{a['path']}\0{a['sha256']}\n" for a in sorted(arts, key=lambda a: str(a["path"])))
     digest = hashlib.sha256(lines.encode()).hexdigest() if ok else None
@@ -12866,7 +12920,7 @@ def _release_subject(base: Path, arts: List[Dict[str, Any]]) -> Dict[str, Any]:
         "head": _git_head(base),
         "tree": tree_fingerprint(base),
         "digest": digest,
-        "content": evidence_fingerprint(base),
+        "content": subject_fingerprint(base),
     }
 
 
@@ -12882,20 +12936,47 @@ def subject_lines(subject: Dict[str, Any]) -> List[str]:
     return [f"subject: {kind} {subject[kind]}" for kind in SUBJECT_KINDS if subject.get(kind)]
 
 
+HTML_COMMENT_RE = re.compile(r"<!--.*?(?:-->|\Z)", re.S)  # chưa đóng: tới hết file (CommonMark khối HTML loại 2)
+SHOWN_FENCE_RE = re.compile(r"^[ \t]*(?:>[ \t]*)*(`{3,}|~{3,})")  # rào mở/đóng khối code, kể cả trong trích dẫn
+
+
+def _markdown_shown(text: str) -> str:
+    """Phần Markdown người ký thấy khi xem (AUD-HAR-320): bỏ BOM, chú thích HTML `<!-- … -->` (kể cả nhiều dòng) và
+    khối rào ``` / ~~~ — rào đóng cùng ký tự, dài ít nhất bằng rào mở, không chữ sau; chưa đóng → tới hết file."""
+    kept: List[str] = []
+    fence = ""
+    for line in HTML_COMMENT_RE.sub("", text.lstrip("\ufeff")).split("\n"):
+        m = SHOWN_FENCE_RE.match(line)
+        if fence:
+            if m and m[1][0] == fence[0] and len(m[1]) >= len(fence) and not line[m.end() :].strip():
+                fence = ""
+        elif m:
+            fence = m[1]
+        else:
+            kept.append(line)
+    return "\n".join(kept)
+
+
+def _short_repr(text: str, limit: int = 120) -> str:
+    r = repr(text)
+    return r if len(r) <= limit else r[: limit - 1] + "…"
+
+
 def _subject_problem(rel: str, text: str, subject: Dict[str, Any]) -> str:
-    """Lý do dòng `subject:` của `rel` không gắn chữ ký với ứng viên hiện tại; rỗng = gắn đúng. So đủ 64 hex từng ô;
-    nhiều dòng cùng ô mà một dòng lệch → lệch (chặt). Không có vân tay nội dung → không gắn được, không duyệt."""
+    """Lý do dòng `subject:` của `rel` không gắn chữ ký với ứng viên hiện tại; rỗng = gắn đúng. Chỉ xét phần người ký
+    thấy (`_markdown_shown`); so đủ 64 hex từng ô; nhiều dòng cùng ô mà một dòng lệch → lệch (chặt), in nguyên văn dòng
+    lệch. Không có vân tay nội dung → không gắn được, không duyệt."""
     if not subject.get("content"):
         return f"{rel}: không tính được vân tay nội dung (không phải repo git có commit) — chữ ký không gắn ứng viên"
-    found: Dict[str, List[str]] = {}
-    for m in SUBJECT_LINE_RE.finditer(text):
-        found.setdefault(m[1].lower(), []).append(m[2].strip("`").lower())
+    found: Dict[str, List[Tuple[str, str]]] = {}
+    for m in SUBJECT_LINE_RE.finditer(_markdown_shown(text)):
+        found.setdefault(m[1].lower(), []).append((m[2].strip("`").lower(), m[0].strip()))
     for line in subject_lines(subject):
         kind, want = line.split()[1:]
-        bad = [got for got in found.get(kind, []) if got != want]
+        bad = [shown for got, shown in found.get(kind, []) if got != want]
         if bad:
             return (
-                f"{rel}: `subject: {kind} {bad[0][:64]}` — chữ ký gắn ứng viên khác; ứng viên này: `{line}` "
+                f"{rel}: dòng {_short_repr(bad[0])} — chữ ký gắn ứng viên khác; ứng viên này: `{line}` "
                 "(người xem lại và ký lại)"
             )
         if kind not in found:
@@ -13035,11 +13116,24 @@ def cmd_release_check(args: argparse.Namespace) -> int:
             print("Chờ người: " + ", ".join(out["human"]) + " — máy không thay được chữ ký (GO-NO-GO.md §5)")
         promo = out["promotion"]
         print(f"promotion: {promo['state']} — " + "; ".join(promo["reasons"]))
-        lines = subject_lines(out["subject"])
-        if lines:
-            print("Dòng gắn chữ ký §5 với ứng viên này — chép nguyên vào GO-NO-GO (D-389):")
-            print("\n".join(lines))
+        _print_subject_lines(out)
     return 0 if out["go"] else 1
+
+
+def _print_subject_lines(out: Dict[str, Any]) -> None:
+    """Dòng `subject:` để chép vào GO-NO-GO — chỉ khi hàng `tree` PASS (AUD-HAR-318): cây bẩn thì vân tay gồm diff chưa
+    commit, lệch sau commit (người ký phải ký lại) → in nhắc commit rồi chạy lại."""
+    lines = subject_lines(out["subject"])
+    if not lines:
+        return
+    if any(r["id"] == "tree" and r["result"] == "PASS" for r in out["rows"]):
+        print("Dòng gắn chữ ký §5 với ứng viên này — chép nguyên vào GO-NO-GO (D-389):")
+        print("\n".join(lines))
+    else:
+        print(
+            "Dòng `subject:` chưa in: cây chưa sạch (vân tay gồm diff chưa commit) — commit rồi chạy lại để lấy dòng "
+            "đúng (commit VERSION/CHANGELOG trước khi soạn GO-NO-GO)"
+        )
 
 
 WATCH_ERROR_LIMIT = 3  # lần lỗi đọc PR liên tiếp tối đa trước khi merge-watch bỏ cuộc (mạng chập chờn không đáng dừng)

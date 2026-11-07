@@ -15,9 +15,11 @@ Sinh ngày 2026-11-07 trên Linux (WSL2), Python 3.14.6, venv tạm; không thê
 
 Ghi chú sinh:
 - gitleaks dùng cấu hình tối giản một luật `aws-access-key-id` (regex `\b(AKIA[A-Z0-9]{16})\b`): bộ luật mặc định làm
-  SARIF ~48 KB toàn danh sách rule. Khoá ví dụ chính thức `AKIAIOSFODNN7EXAMPLE` bị allowlist mặc định của gitleaks
-  bỏ qua nên dùng khoá giả ngẫu nhiên khác (không phải khoá thật); `--redact` che nội dung. `partialFingerprints`
-  chứa tác giả giả `t` / `t@example.com`.
+  SARIF ~48 KB toàn danh sách rule. Khoá ví dụ chính thức của AWS bị allowlist mặc định của gitleaks bỏ qua nên
+  dùng khoá giả ngẫu nhiên khác (không phải khoá thật); `--redact` che nội dung. `partialFingerprints` chứa tác giả
+  giả `t` / `t@example.com`.
+- SARIF của gitleaks ghi `tool.driver.semanticVersion` là `v8.0.0` — giá trị gitleaks ghi cứng, không phải bản chạy
+  (bản thật 8.30.1); tên file mang bản thật.
 - Rút gọn thủ công duy nhất (pytest XML): `hostname` đổi thành `localhost`, và đường tuyệt đối của thư mục tạm bị
   cắt khỏi nội dung `<skipped>`/`<failure>`. Mọi thứ khác nguyên văn.
 - CodeQL: chưa có fixture (không chạy được cục bộ; không giả lập).

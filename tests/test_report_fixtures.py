@@ -51,8 +51,9 @@ class RealReportFixtureTest(unittest.TestCase):
 
     def test_pip_audit_json(self):
         self.check("pip-audit-2.10.1-clean.json", ("pip-audit", "PASS", 1, 0))
-        # 10 mục `vulns` (5 id duy nhất — pip-audit lặp mục từ nhiều nguồn): adapter đếm từng mục
-        self.check("pip-audit-2.10.1-vuln.json", ("pip-audit", "FAIL", 1, 10))
+        # 10 mục `vulns` nhưng 5 id duy nhất — pip-audit lặp mục từ nhiều nguồn; adapter đếm id (AUD-HAR-317)
+        r = self.check("pip-audit-2.10.1-vuln.json", ("pip-audit", "FAIL", 1, 5))
+        self.assertIn("5 lỗ hổng", r["detail"])
 
 
 if __name__ == "__main__":
