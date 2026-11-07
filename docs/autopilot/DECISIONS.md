@@ -233,3 +233,17 @@
 - Chọn: Sửa tận gốc trong PR: install.py _sync_timeout (nâng, không hạ) + test, rồi review delta 6b7fedc..head
 - Lý do (tiêu chí chất lượng cuối): (1) dự án đích nhận đúng hạn chờ hook không cần tay — tránh kẹt hook 600 s như D-382; câu CHANGELOG thành đúng; (3) thay đổi nhỏ theo mẫu _sync_on_failure, có test đỏ trước
 - Đường lùi: Bỏ _sync_timeout khỏi _merge_hook_events, CHANGELOG ghi bước tay
+
+### D-387 · 2026-11-07T01:35:11+00:00 · Đưa sửa installer #455…#458 tới dự án đích thế nào
+
+- Phương án: (1) Cắt 3.31.1 ngay (bản vá, chỉ installer), cập nhật các PR nâng 3.31.0 đang mở lên 3.31.1 · (2) Chờ gom vào 3.32.0
+- Chọn: Cắt 3.31.1 ngay (bản vá, chỉ installer), cập nhật các PR nâng 3.31.0 đang mở lên 3.31.1
+- Lý do (tiêu chí chất lượng cuối): (1) dự án đích đang nâng 3.31.0 gặp đúng các lỗi này (Prettier đỏ ở X-Company, diff settings.json phình ở dhcb); (2) bản vá nhỏ, không đổi ID/khoá, lùi được bằng cài lại 3.31.0; (3) theo semver patch
+- Đường lùi: Dự án đích cài lại bằng bản khung 3.31.0
+
+### D-388 · 2026-11-07T02:00:01+00:00 · PR #461 (cắt 3.31.1): review lượt 1 REQUEST CHANGES — 2 🟠 lời khai sai (trạng thái dự án đích; nguyên nhân review_debt) + 3 🟢
+
+- Phương án: (1) Sửa hết trên nhánh (ADR-0059 §6: PR cắt bản không mang nợ) rồi review lại delta · (2) Ghi nợ và cắt bản như hiện tại
+- Chọn: Sửa hết trên nhánh (ADR-0059 §6: PR cắt bản không mang nợ) rồi review lại delta
+- Lý do (tiêu chí chất lượng cuối): (1) GO-NO-GO là tài liệu người ký — lời khai sai không được ship; review_debt sẽ đỏ cả trên main nếu không dời SHA nhóm 4; (3) sửa nhỏ, chỉ tài liệu/sổ/1 test
+- Đường lùi: Revert commit sửa của lượt 2
