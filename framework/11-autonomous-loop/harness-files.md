@@ -3,7 +3,7 @@ title: File harness: PLAN · PROGRESS · BLUEPRINT · evidence · state
 kind: module
 prefix: LOOP-HARNESS
 applies_to: [all]
-updated: 2026-11-06
+updated: 2026-11-07
 ---
 
 # File harness: PLAN · PROGRESS · BLUEPRINT · evidence · state
@@ -98,6 +98,18 @@ OS/devcontainer có egress allowlist (`LOOP-HARNESS-022`) và việc phiên chí
   `exec`/`eval`/`compile`, `spec_from_file_location`) với đối số không phải chữ nguyên văn hay trỏ `xt`, và
   `-m runpy xt` bị chặn; thư viện đọc (`xt.parse_plan`, `xt.review_debt`) vẫn qua. Còn lọt: tên dựng qua đường guard không
   thấy (tệp `.py` ghi bằng Write rồi chạy).
+- **Chữ ký GO-NO-GO §5** (AUD-SEC-497, D-390, ADR-0068 §6; mã `GO_SIGN`): Edit/MultiEdit/Write/NotebookEdit vào file tên
+  `GO-NO-GO*.md` (mọi thư mục, không phân biệt hoa thường, cả qua symlink) làm xuất hiện hay đổi dòng ký ở §5 (ô tên + ô
+  ngày `YYYY-MM-DD` khác rỗng — cùng regex với `release-check`) → deny; xoá dòng ký, sửa phần khác, bảng mẫu trống → cho
+  chạy. File trên đĩa đã ký mà lần ghi đổi tiêu đề `# ` đầu tiên (ngoài frontmatter) hay tập dòng `subject:` (thêm/sửa/
+  xoá) và kết quả còn dòng ký → deny cùng mã (D-392: chuyển chữ ký người sang ứng viên khác) — xoá dòng ký trước (cùng lần
+  ghi cũng được), người ký lại; file chưa ký sửa tự do. Edit áp `old_string`→`new_string` lên file trên đĩa; không đọc
+  được file hay đoạn cũ không có → so chính hai đoạn, dòng ký ở đâu cũng tính. Bash ghi/dời/khôi phục file đó (chuyển hướng, `tee`, `sed -i`, đích `cp`/`mv`, `git checkout|restore
+  <rev> --`, glob ở tên nở ra file có sẵn, symlink có sẵn, chuỗi nguyên văn trong script trình thông dịch không chỉ đọc)
+  → deny, sửa bằng Edit; đọc và xoá cả file (`rm`, `git rm`) cho chạy. Còn lọt: tên dựng lúc chạy (biến, `$(…)`, đường
+  ghép trong script, đích từ `xargs`/stdin — như AUD-SEC-406), glob ở thư mục (`docs/*/*.md`), symlink tạo trong cùng
+  lệnh, thư mục quá `OUTSIDE_SCAN_MAX` mục; đổi tên file đã ký sang `-v<bản khác>.md` bằng Bash bị chặn, nhưng nội dung
+  khác ngoài tiêu đề/`subject:` của file đã ký không bị xét — lớp sau là review PR.
 - **Dấu review đăng tay** (AUD-SEC-069/156/157): guard chặn lệnh `gh` đăng chữ khi dấu `xt-review v1` ở argv, ở bất
   kỳ đâu trong chuỗi lệnh (heredoc, `printf`), hay trong nguồn thân của chính lệnh đó (`-F f`, `--body-file`, `-F k=@f`,
   `--input`, `< f`, file đọc trong `$(…)`/backtick, `cat f |`, `$(cat)` đọc stdin; cả chuỗi JSON, cả khoá) — nguồn có mà
