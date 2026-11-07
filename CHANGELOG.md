@@ -18,6 +18,11 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
 
 ### Fixed
 
+- `release-check`: vân tay `subject.content` chỉ loại file ký/sổ ở đúng chỗ (GO-NO-GO ở `docs/ops`, `docs`, gốc;
+  sổ DECISIONS chính; `PROGRESS.md` gốc) — mã trong file trùng tên ở thư mục khác đổi sau khi ký không còn
+  `approved`; dòng `subject:` trong khối code/chú thích HTML không được nhận; chỉ in dòng `subject:` khi cây sạch
+  (AUD-HAR-318…320, D-393). SARIF: bỏ qua kết quả có suppression `accepted` (trừ công cụ quét bí mật); pip-audit
+  đếm id lỗ hổng duy nhất (AUD-HAR-316/317, D-394).
 - `release-check`/`report_result`: SARIF của công cụ quét bí mật (gitleaks) không ghi `level` nên report có leak ra
   PASS; nay mọi kết quả của run gitleaks tính là error (AUD-HAR-315, D-391). Lộ ra nhờ fixture output thật pytest
   9.2.0, gitleaks 8.30.1, pip-audit 2.10.1 ở `tests/fixtures/reports/` (AUD-TEST-061).

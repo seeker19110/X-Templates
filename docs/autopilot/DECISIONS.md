@@ -275,3 +275,17 @@
 - Chọn: File trên đĩa đã có dòng ký §5: deny Edit/Write đổi dòng '# ' đầu tiên hoặc dòng 'subject:' (thêm/sửa/xoá)
 - Lý do (tiêu chí chất lượng cuối): (1) đúng và an toàn: sau AUD-HAR-219 (D-389) chữ ký gắn ứng viên qua dòng subject — agent đổi được dòng đó là lách được cả hai sửa; agent cần đổi thì xoá dòng ký trước (được phép), người ký lại. (2) đường lùi: xoá dòng ký vẫn mở
 - Đường lùi: Revert commit; guard chỉ chặn dòng ký
+
+### D-393 · 2026-11-07T05:11:40+00:00 · AUD-HAR-319: subject.content loại file theo TÊN ở mọi cấp (src/DECISIONS.md, src/x/GO-NO-GO-y.md đổi mã vẫn approved) — sửa thế nào?
+
+- Phương án: (1) Vân tay riêng cho subject: chỉ loại GO-NO-GO*.md ở GO_NO_GO_DIRS, sổ DECISIONS_LOG, PROGRESS.md gốc và .autopilot/; giữ evidence_fingerprint cũ cho gói stage · (2) Thu hẹp _signoff_excluded chung · (3) Chấp nhận, ghi giới hạn ở mẫu §1
+- Chọn: Vân tay riêng cho subject: chỉ loại GO-NO-GO*.md ở GO_NO_GO_DIRS, sổ DECISIONS_LOG, PROGRESS.md gốc và .autopilot/; giữ evidence_fingerprint cũ cho gói stage
+- Lý do (tiêu chí chất lượng cuối): (1) đúng và an toàn: approved phải phủ mọi mã; tập loại trừ hẹp đúng các file ký/sổ máy đọc. (2) đường lùi và không hồi quy: không đổi evidence_fingerprint/_changed_since mà gói stage và AUD-HAR-164 dựa vào. (3) test được bằng repo tạm
+- Đường lùi: Revert; subject.content quay về evidence_fingerprint
+
+### D-394 · 2026-11-07T05:35:38+00:00 · Nợ #462/#463: SARIF suppression vắng status, suppression của gitleaks, bản tháng DECISIONS trong vân tay subject — luật nào?
+
+- Phương án: (1) Chặt: chỉ bỏ qua khi mọi suppression ghi rõ status accepted; công cụ quét bí mật không bao giờ bỏ qua (D-391); bản tháng DECISIONS vẫn tính vào vân tay · (2) Lỏng: vắng status = accepted, gitleaks cũng bỏ qua, loại bản tháng
+- Chọn: Chặt: chỉ bỏ qua khi mọi suppression ghi rõ status accepted; công cụ quét bí mật không bao giờ bỏ qua (D-391); bản tháng DECISIONS vẫn tính vào vân tay
+- Lý do (tiêu chí chất lượng cuối): (1) đúng và an toàn: mặc định khi vắng status chưa xác minh được trong SARIF 2.1.0 errata01 §3.35.3 — cách hiểu chặt; lệch về đỏ giả an toàn hơn xanh giả; bí mật bị chặn trong report vẫn là bí mật trong lịch sử. (2) nới sau được khi có nguồn
+- Đường lùi: Đổi một biểu thức trong _sarif_suppressed / bỏ nhánh SECRET_SCANNERS
