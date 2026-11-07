@@ -281,7 +281,8 @@
    "reason": "Hàng `release-check` của cổng phát hành G7 (`go_no_go`: GO-NO-GO khớp VERSION, đã ký) — không thuộc nhóm ca PR/rollup/review/guard; đỡ bằng Gate unittest tests.test_xt_cli -k go_no_go",
    "ids": [
     "AUD-HAR-197",
-    "AUD-HAR-200"
+    "AUD-HAR-200",
+    "AUD-HAR-315"
    ]
   },
   {

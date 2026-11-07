@@ -254,3 +254,10 @@
 - Chọn: Dòng 'subject: content <64 hex>' (evidence_fingerprint — vân tay nội dung trừ GO-NO-GO/DECISIONS/PROGRESS) và, khi khai release_artifacts, 'subject: digest <64 hex>'; so đủ 64 hex đúng ô
 - Lý do (tiêu chí chất lượng cuối): (1) đúng và an toàn: SHA HEAD đổi ngay khi commit chữ ký nên không ký được; vân tay nội dung đã loại file ký nên ổn định qua commit ký và squash, đổi khi mã đổi; so đúng ô đủ 64 hex bỏ khớp ngẫu nhiên. (2) đường lùi: khoá tuỳ chọn cũ giữ nguyên, chỉ thêm dòng. (3) tái dùng evidence_fingerprint có test
 - Đường lùi: Revert PR; promotion quay về so 12 hex digest
+
+### D-391 · 2026-11-07T04:05:22+00:00 · AUD-TEST-061 lộ ra: SARIF thật của gitleaks 8.30.1 không ghi level, adapter coi là warning nên report có leak ra PASS — xử lý thế nào?
+
+- Phương án: (1) Kết quả của công cụ quét bí mật (tool.driver.name gitleaks) là error bất kể level · (2) Giữ theo SARIF §3.27.10, dựa exit code công cụ · (3) Mọi warning là FAIL
+- Chọn: Kết quả của công cụ quét bí mật (tool.driver.name gitleaks) là error bất kể level
+- Lý do (tiêu chí chất lượng cuối): (1) đúng và an toàn: một leak ra PASS là xanh giả; release-check đọc report, không đọc exit code, nên --exit-code 0 làm cổng xanh. Phương án 3 làm FAIL giả với CodeQL/ruff warning. (3) hẹp, test được bằng fixture thật
+- Đường lùi: Revert commit; gitleaks quay về luật level mặc định SARIF
