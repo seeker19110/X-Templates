@@ -12792,7 +12792,9 @@ def _release_unchecked_must(base: Path, blueprint: str, mode: str) -> Dict[str, 
 ARTIFACTS_KEY = "release_artifacts"  # đường file cách nhau bởi khoảng trắng; sidecar `<file>.sha256` (sha256sum) nếu có
 APPROVAL_DAYS_KEY = "release_approval_days"  # chữ ký GO-NO-GO còn hiệu lực bao nhiêu ngày (mặc định 30)
 APPROVAL_DAYS = 30
-RELEASE_SCHEMA = 3  # schema của `release-check --json`: 3 = thêm subject/artifacts/results/promotion, giữ trường cũ
+# schema của `release-check --json`: 3 = thêm subject/artifacts/results/promotion, giữ trường cũ; `subject.content`
+# (D-389) chỉ thêm trường — không tăng (người đọc schema 3 bỏ qua khoá lạ)
+RELEASE_SCHEMA = 3
 
 
 SHA256_HEX_RE = re.compile(r"[0-9a-f]{64}")
@@ -12846,11 +12848,51 @@ def _release_artifacts(base: Path) -> Tuple[Optional[Dict[str, str]], List[Dict[
 
 
 def _release_subject(base: Path, arts: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """Ứng viên được chứng nhận: HEAD, vân tay cây, digest gộp của artifact (None khi không khai hay có artifact lỗi)."""
+    """Ứng viên được chứng nhận: HEAD, vân tay cây, digest gộp của artifact (None khi không khai hay có artifact lỗi) và
+    `content` = `evidence_fingerprint` — vân tay nội dung trừ GO-NO-GO/DECISIONS/PROGRESS: không đổi qua commit ký và
+    squash, đổi khi mã đổi; chữ ký §5 gắn vào nó (D-389, AUD-HAR-219). Chỉ thêm khoá nên `RELEASE_SCHEMA` giữ 3."""
     ok = bool(arts) and not any(a["problem"] for a in arts)
     lines = "".join(f"{a['path']}\0{a['sha256']}\n" for a in sorted(arts, key=lambda a: str(a["path"])))
     digest = hashlib.sha256(lines.encode()).hexdigest() if ok else None
-    return {"head": _git_head(base), "tree": tree_fingerprint(base), "digest": digest}
+    return {
+        "head": _git_head(base),
+        "tree": tree_fingerprint(base),
+        "digest": digest,
+        "content": evidence_fingerprint(base),
+    }
+
+
+SUBJECT_KINDS = ("content", "digest")  # ô của dòng `subject:` trong GO-NO-GO, theo thứ tự xét (D-389)
+# `subject: content <hex>` cả dòng; trước có thể là `>` trích dẫn và một gạch đầu dòng, hex có thể trong backtick
+SUBJECT_LINE_RE = re.compile(
+    r"^[ \t]*(?:>[ \t]*)*(?:[-*+][ \t]+)?subject[ \t]*:[ \t]*(content|digest)[ \t]+(\S+?)[ \t]*$", re.I | re.M
+)
+
+
+def subject_lines(subject: Dict[str, Any]) -> List[str]:
+    """Dòng GO-NO-GO phải ghi để chữ ký §5 gắn ứng viên này (D-389): `content` luôn, `digest` khi khai artifact."""
+    return [f"subject: {kind} {subject[kind]}" for kind in SUBJECT_KINDS if subject.get(kind)]
+
+
+def _subject_problem(rel: str, text: str, subject: Dict[str, Any]) -> str:
+    """Lý do dòng `subject:` của `rel` không gắn chữ ký với ứng viên hiện tại; rỗng = gắn đúng. So đủ 64 hex từng ô;
+    nhiều dòng cùng ô mà một dòng lệch → lệch (chặt). Không có vân tay nội dung → không gắn được, không duyệt."""
+    if not subject.get("content"):
+        return f"{rel}: không tính được vân tay nội dung (không phải repo git có commit) — chữ ký không gắn ứng viên"
+    found: Dict[str, List[str]] = {}
+    for m in SUBJECT_LINE_RE.finditer(text):
+        found.setdefault(m[1].lower(), []).append(m[2].strip("`").lower())
+    for line in subject_lines(subject):
+        kind, want = line.split()[1:]
+        bad = [got for got in found.get(kind, []) if got != want]
+        if bad:
+            return (
+                f"{rel}: `subject: {kind} {bad[0][:64]}` — chữ ký gắn ứng viên khác; ứng viên này: `{line}` "
+                "(người xem lại và ký lại)"
+            )
+        if kind not in found:
+            return f"{rel}: thiếu dòng `{line}` — chữ ký chưa gắn ứng viên (D-389)"
+    return ""
 
 
 def _signed_go_no_go(base: Path) -> List[Tuple[str, str]]:
@@ -12885,9 +12927,9 @@ def _decision(cell: str) -> str:
     return "go" if GO_DECISION_RE.fullmatch(text) else "?"
 
 
-def _approval_problem(base: Path, rel: str, text: str, digest: Optional[str]) -> str:
+def _approval_problem(base: Path, rel: str, text: str, subject: Dict[str, Any]) -> str:
     """Lý do chữ ký §5 của `rel` chưa đủ cho promotion; rỗng = đủ. Dòng ký từ chối → `rejected:`; ô không phải GO, ngày
-    không hợp lệ/ở tương lai (quá 1 ngày — múi giờ người ký)/quá hạn, hay có digest mà văn bản không nhắc → chờ người."""
+    không hợp lệ/ở tương lai (quá 1 ngày — múi giờ người ký)/quá hạn, hay dòng `subject:` thiếu/lệch → chờ người."""
     rows = _go_sign_rows(text)
     kinds = [(_decision(d), d) for d, _ in rows]
     no = [d for k, d in kinds if k == "no"]
@@ -12906,19 +12948,17 @@ def _approval_problem(base: Path, rel: str, text: str, digest: Optional[str]) ->
         return f"{rel}: ngày ký {max(dates)} ở tương lai"
     if (today - min(dates)).days > days:
         return f"{rel}: chữ ký {min(dates)} hết hạn ({days} ngày — `{APPROVAL_DAYS_KEY}`)"
-    if digest and digest[:12] not in text:
-        return f"{rel}: không nhắc digest ứng viên `{digest[:12]}` — chữ ký chưa gắn subject"
-    return ""
+    return _subject_problem(rel, text, subject)
 
 
-def _release_promotion(base: Path, fails: List[str], human: List[str], digest: Optional[str]) -> Dict[str, Any]:
+def _release_promotion(base: Path, fails: List[str], human: List[str], subject: Dict[str, Any]) -> Dict[str, Any]:
     """`blocked` (hàng BLOCKER FAIL) · `rejected` (một dòng ký từ chối ở bất kỳ GO-NO-GO nào của VERSION) ·
     `pending_human` (còn việc người, chữ ký thiếu/không phải GO/hết hạn/chưa gắn subject) · `approved`. Máy không nâng
     `pending_human` (ADR-0068 câu 3): "đã duyệt" vẫn là chữ ký người."""
     if fails:
         return {"state": "blocked", "reasons": fails}
     docs = _signed_go_no_go(base)
-    problems = [_approval_problem(base, rel, text, digest) for rel, text in docs]
+    problems = [_approval_problem(base, rel, text, subject) for rel, text in docs]
     rejected = [p.removeprefix("rejected:") for p in problems if p.startswith("rejected:")]
     if rejected:
         return {"state": "rejected", "reasons": rejected}
@@ -12969,7 +13009,7 @@ def release_check(base: Path, blueprint: str, status: str, unchecked_must: str =
         "subject": subject,
         "artifacts": arts,
         "results": [res for _, res in runs.values() if res],
-        "promotion": _release_promotion(base, fails, human, subject["digest"]),
+        "promotion": _release_promotion(base, fails, human, subject),
     }
 
 
@@ -12987,6 +13027,10 @@ def cmd_release_check(args: argparse.Namespace) -> int:
             print("Chờ người: " + ", ".join(out["human"]) + " — máy không thay được chữ ký (GO-NO-GO.md §5)")
         promo = out["promotion"]
         print(f"promotion: {promo['state']} — " + "; ".join(promo["reasons"]))
+        lines = subject_lines(out["subject"])
+        if lines:
+            print("Dòng gắn chữ ký §5 với ứng viên này — chép nguyên vào GO-NO-GO (D-389):")
+            print("\n".join(lines))
     return 0 if out["go"] else 1
 
 

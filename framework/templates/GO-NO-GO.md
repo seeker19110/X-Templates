@@ -1,7 +1,7 @@
 ---
 title: Mẫu GO-NO-GO
 kind: template
-updated: 2026-11-05
+updated: 2026-11-07
 ---
 
 # Mẫu GO-NO-GO.md — báo cáo phát hành
@@ -17,8 +17,11 @@ updated: 2026-11-05
 > Commit: `<SHA>` · Blueprint: `xt.py blueprint-status BLUEPRINT.md --strict --run` → exit <0/1> (MUST mở: <n>, lệnh kiểm đỏ: <n>, MUST tick không có lệnh kiểm: <n>) · CI: <link, xanh/đỏ>
 > Người kiểm: <tên/agent> (report-only) · Phạm vi: <web/mobile/API — bỏ phần không áp dụng, ghi lý do>
 
+subject: content <64 hex — dòng `release-check` in>
+subject: digest <64 hex — chỉ khi khai `release_artifacts`>
+
 ## 1. Đếm
-> Phần máy: `xt.py release-check --json` (blueprint `--strict --run` · sổ audit `--strict` · kiểm lại cuối · cây git · `attack`/`perf` · cổng production `migration_check`/`acceptance`/`rollback` (ADR-0062) · `go_no_go`: file này nhắc `v<VERSION>` và mục 5 đã ký — chưa ký là BLOCKER chờ người · đề xuất "Khi chạy thật") → dán `verdict` và từng hàng FAIL vào mục 3; NO-GO của máy là NO-GO. Người vẫn ký mục 5. `promotion` (schema 3, ADR-0068): `approved` chỉ khi không FAIL/việc người, mục 5 ký GO (không chữ NO-GO) còn hạn `release_approval_days` và — khi khai `release_artifacts` — file này nhắc 12 ký tự đầu của `subject.digest`.
+> Phần máy: `xt.py release-check --json` (blueprint `--strict --run` · sổ audit `--strict` · kiểm lại cuối · cây git · `attack`/`perf` · cổng production `migration_check`/`acceptance`/`rollback` (ADR-0062) · `go_no_go`: file này nhắc `v<VERSION>` và mục 5 đã ký — chưa ký là BLOCKER chờ người · đề xuất "Khi chạy thật") → dán `verdict` và từng hàng FAIL vào mục 3; NO-GO của máy là NO-GO. Người vẫn ký mục 5. `promotion` (schema 3, ADR-0068): `approved` chỉ khi không FAIL/việc người, mục 5 ký GO (không chữ NO-GO) còn hạn `release_approval_days` và file này có dòng `subject: content <64 hex>` (= `subject.content`: vân tay nội dung trừ GO-NO-GO/DECISIONS/PROGRESS — giữ nguyên qua commit ký và squash, đổi khi mã đổi) cùng — khi khai `release_artifacts` — `subject: digest <64 hex>` (= `subject.digest`); so đủ 64 hex, thiếu hay lệch = chờ người xem lại và ký lại (D-389). `release-check` dạng chữ in sẵn các dòng này để chép vào đầu file (được đặt sau `>`/gạch đầu dòng, hex trong backtick).
 | Mức | PASS | FAIL | N/A |
 |---|---|---|---|
 | BLOCKER | | | |
