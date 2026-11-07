@@ -7,7 +7,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent / "scripts"))
 
-import xt  # noqa: E402
+import xt
 
 FIX = HERE / "fixtures" / "reports"
 
