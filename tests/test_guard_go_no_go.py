@@ -546,12 +546,31 @@ class GoNoGoPatchTest(GoNoGoGuardBase):
             self.assertEqual(self.bash(cmd)[0], "", cmd)
 
     def test_project_without_go_no_go_allowed(self) -> None:
+        """Dự án chưa có `GO-NO-GO*.md`: diff KHÔNG đọc được (stdin, tệp không có) cho chạy — không chặn oan dự án không
+        dùng GO-NO-GO; diff đọc được không chạm GO-NO-GO cho chạy."""
         (self.root / GO_REL).unlink()
         (self.root / "docs" / "GO-NO-GO.txt").write_text("x", encoding="utf-8")
-        self.assertEqual(self.bash("git apply go.diff")[0], "")  # đích GO-NO-GO mới tạo: luật tên ở Edit sau đó
         self.assertFalse(guard._go_on_disk(str(self.root)))
+        for cmd in ("git apply ok.diff", "cat ok.diff | git apply", "patch -p1 -i missing.diff", "git am b64.mbox"):
+            self.assertEqual(self.bash(cmd)[0], "", cmd)
         self.put("GO-NO-GO.md", TEMPLATE)  # mẫu dự án đích ở gốc
         self.assertTrue(guard._go_on_disk(str(self.root)))
+
+    def test_fresh_project_diff_creating_go_no_go_denied(self) -> None:
+        """AUD-SEC-539: dự án chưa có GO-NO-GO, diff ĐỌC ĐƯỢC tạo mới/đổi tên thành `GO-NO-GO*.md` (đã ký) → chặn — header
+        diff xét bất kể `_go_on_disk` (như `echo … > GO-NO-GO.md` bị luật tên chặn)."""
+        (self.root / GO_REL).unlink()
+        signed = SIGN_HEAD + SIGNED_ROW
+        hunk = "".join("+" + line + "\n" for line in signed.splitlines())
+        new = f"diff --git a/{GO_REL} b/{GO_REL}\nnew file mode 100644\n--- /dev/null\n+++ b/{GO_REL}\n@@ -0,0 +1 @@\n{hunk}"
+        self.put("new.diff", new)
+        self.put("new.mbox", "From x\nSubject: [PATCH] x\n\n---\n" + new)
+        ren = "diff --git a/docs/a.md b/GO-NO-GO.md\nsimilarity index 100%\nrename from docs/a.md\nrename to GO-NO-GO.md\n"
+        self.put("ren.diff", ren)
+        self.assertFalse(guard._go_on_disk(str(self.root)))
+        for cmd in ("git apply new.diff", "patch -p1 -i new.diff", "git am new.mbox", "git apply ren.diff"):
+            self.assertEqual(self.bash(cmd), ("deny", "GO_SIGN"), cmd)
+        self.assertEqual(self.bash("git apply new.diff ok.diff"), ("deny", "GO_SIGN"))  # một tệp chạm là đủ
 
     def test_go_on_disk_errors(self) -> None:
         (self.root / GO_REL).unlink()
@@ -566,10 +585,20 @@ class GoNoGoPatchTest(GoNoGoGuardBase):
             self.assertEqual(self.bash("git apply ok.diff"), ("deny", "GO_SIGN"))
         with mock.patch.object(guard, "GO_PATCH_MAX", len(self.OK_DIFF)):
             self.assertEqual(self.bash("git apply ok.diff")[0], "")
-        self.assertFalse(guard._go_diff_clear("ok.diff", None, False))
-        self.assertTrue(guard._go_diff_clear(str(self.root / "ok.diff"), None, False))
+        self.assertEqual(guard._go_diff_state("ok.diff", None, False), guard.GO_DIFF_BLIND)
+        self.assertEqual(guard._go_diff_state(str(self.root / "ok.diff"), None, False), guard.GO_DIFF_CLEAR)
+        self.assertEqual(guard._go_diff_state(str(self.root / "go.diff"), None, False), guard.GO_DIFF_TOUCHES)
         with mock.patch.dict(os.environ, {"HOME": str(self.root)}):
-            self.assertTrue(guard._go_diff_clear("~/ok.diff", None, False))
+            self.assertEqual(guard._go_diff_state("~/ok.diff", None, False), guard.GO_DIFF_CLEAR)
+
+    def test_patch_state_priority(self) -> None:
+        """Một tệp chạm GO-NO-GO thắng tệp không đọc được; không đọc được thắng sạch."""
+        cands = (str(self.root),)
+        self.assertEqual(guard._go_patch_state(["git", "apply", "missing.diff", "go.diff"], cands), "touches")
+        self.assertEqual(guard._go_patch_state(["git", "apply", "missing.diff", "ok.diff"], cands), "blind")
+        self.assertEqual(guard._go_patch_state(["git", "apply", "ok.diff"], cands), "clear")
+        self.assertEqual(guard._go_patch_state(["git", "apply"], cands), "blind")
+        self.assertEqual(guard._go_patch_state(["patch", "docs/a.md", "go.diff"], cands), "clear")
 
     def test_unmatched_placement_fails_closed(self) -> None:
         root = str(self.root)

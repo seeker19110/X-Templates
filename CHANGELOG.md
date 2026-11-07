@@ -29,6 +29,8 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
 
 ### Security
 
+- Guard `GO_SIGN`: `git apply`/`patch`/`git am` một diff đọc được tạo mới hay đổi tên thành GO-NO-GO bị chặn cả ở
+  dự án chưa có GO-NO-GO (AUD-SEC-539).
 - Guard `GO_SIGN` đóng thêm đường lách (review #464): hard link `ln`/`cp -l`, `patch`/`git apply`/`git am` từ tệp
   hay stdin, `rename`/`mmv`/`tar --transform`, lệnh ghi lạ có tên GO-NO-GO ở đối số, MCP GitHub ghi file đã ký
   (AUD-SEC-533…537). Giới hạn còn lại: `harness-files.md`, AUD-SEC-538.
