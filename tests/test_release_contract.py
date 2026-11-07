@@ -813,8 +813,39 @@ class PromotionTest(ReleaseCase):
                 self.assertEqual(xt._go_sign_rows(text), [("GO", today())])
                 rc, d, p = self.promotion()
                 self.assertEqual((rc, self.by_id(d)["go_no_go"]["result"], p["state"]), (0, "PASS", "approved"), p)
-        text = self.sign_doc(f"{self.SIGN}```\n| Bảo mật | Chi | NO-GO | {today()} |\n```\n{row}")
-        self.assertEqual(xt._go_sign_rows(text), [("GO", today())])  # NO-GO trong khối code: không phải dòng ký
+        for hidden in (
+            f"<style>\n{row}</style>\n",
+            f"<script>\n{row}</script>\n",
+            f"<?\n{row}?>\n",
+            f"<![CDATA[\n{row}]]>\n",
+            f"<!X\n{row}>\n",
+        ):
+            with self.subTest(raw_html=hidden):  # review #467 🟠2: raw HTML người không thấy
+                self.sign_doc(f"{self.SIGN}{hidden}")
+                _, d, p = self.promotion()
+                self.assertEqual((self.by_id(d)["go_no_go"]["result"], p["state"]), ("N/A", "pending_human"))
+
+    def test_no_go_row_read_from_raw_section(self):
+        """Review #467 🔴1: dòng NO-GO lấy từ §5 THÔ (mọi mục `## 5`) cộng phần hiển thị — bộ lọc Markdown lệch với
+        trình xem (ẩn thừa) không được làm mất lời từ chối; GO vẫn chỉ tính phần người thấy."""
+        self.setup_xt()
+        go = f"| Chủ repo | An | GO | {today()} |\n"
+        nogo = f"| Bảo mật | Chi | NO-GO | {today()} |\n"
+        for sign in (
+            f"{self.SIGN}{go}<!-->\n{nogo}",  # `<!-->`, `<!--->`: chú thích trọn (CommonMark 0.31.2 §4.6)
+            f"{self.SIGN}{go}<!--->\n{nogo}",
+            f"{self.SIGN}{go}Ghi chú: `<!--` mở chú thích.\n\n{nogo}",  # `<!--` trong code span
+            f"{self.SIGN}```\n{nogo}```\n{go}",  # NO-GO trong khối code
+            f"{self.SIGN}<!--\n{nogo}-->\n",  # chỉ có NO-GO, bị ẩn: file vẫn được xét
+            f"{self.SIGN}{go}```\n## 6. giả\n```\n{nogo}",  # NO-GO hiện, thô nằm sau `## 6` giả
+            f"```\n## 5. Ký\n{nogo}```\n\n{self.SIGN}{go}",  # NO-GO ở §5 thô thứ nhất
+        ):
+            with self.subTest(sign=sign):
+                self.sign_doc(sign)
+                rc, d, p = self.promotion()
+                self.assertEqual((rc, p["state"]), (0, "rejected"), p)
+                self.assertIn("NO-GO", p["reasons"][0])
+        self.sign_doc(f"{self.SIGN}{go}| Bảo mật | Chi | NO-GO | |\n")  # không ngày: không phải dòng ký
         self.assertEqual(self.promotion()[2]["state"], "approved")
 
     def test_no_content_fingerprint_never_approved(self):
@@ -942,6 +973,15 @@ class MarkdownShownTest(unittest.TestCase):
             f"```\nx\n```\n    {s}",
             f"\t{s}",
             f"\n    x\n\n    {s}",
+            f"---\n    {s}",  # review #467: sau đường kẻ, gạch setext, bảng, định nghĩa link, HTML, tiêu đề trong trích dẫn
+            f"* * *\n    {s}",
+            f"para\n===\n    {s}",
+            f"| a | b |\n|---|---|\n| 1 | 2 |\n    {s}",
+            f"[a]: /u\n    {s}",
+            f"<pre>\n</pre>\n    {s}",
+            f"para\n<style>x</style>\n    {s}",  # sau khối HTML ẩn
+            f"para\n```\nx\n```\n    {s}",  # sau rào đóng
+            f"> ## H\n    {s}",
             f"    ```\n```\n{s}\n```",  # rào trong khối thụt là nội dung — dòng sau là rào mở
         ):
             with self.subTest(text=text):
@@ -971,6 +1011,74 @@ class MarkdownShownTest(unittest.TestCase):
 
     def test_shown_text_keeps_original_line(self):
         self.assertEqual(xt._markdown_shown("﻿a\t<!-- x -->b\r\n```\nc\n```\r\nd"), "a\tb\r\nd")
+        self.assertEqual(xt._markdown_shown("    \nx <!-- a --> y <!-- b --> z"), "    \nx  y  z")
+
+    def test_reviewer_mutants(self):
+        """Review #467: mutant sống M2/M18/M20/M29."""
+        s = self.LINE
+        self.assert_shown(f"``` a`b\n{s}")  # M2: info có backtick — không phải rào
+        self.assert_hidden(f"  ```\n{s}\n  ```")  # M18: rào thụt không dấu mục — dòng thụt ít hơn vẫn trong rào
+        self.assert_shown(f"   {s}")  # M20: 3 cách là đoạn văn
+        self.assert_shown(f"> ```\n> x\n> ```\n> {s}")  # M29: rào đóng xét sau tiền tố `>`
+
+    def test_comment_edges(self):
+        """Review #467 🔴1(b)(c): `<!-->`/`<!--->` đóng cùng dòng; `<!--` trong code span một dòng không mở chú thích."""
+        s = self.LINE
+        for text in (
+            f"<!-->\n{s}",
+            f"<!--->\n{s}",
+            f"<!-- a --->{s}",
+            f"<!-- a <!-->{s}",  # `-->` của `<!-->` đóng chú thích đang mở
+            f"a --> {s}",  # `-->` không có chú thích mở: chữ thường
+            f"`<!--` {s}",
+            f"``a ` <!-- b`` {s}",
+            f"`x` <!-- a --> `<!--` {s}",
+        ):
+            with self.subTest(text=text):
+                self.assert_shown(text)
+        for text in (f"` <!-- {s}", f"`` <!-- ` {s}", f"x `a` <!--\n{s}", f"`<!--\n{s}`"):
+            with self.subTest(text=text):
+                self.assert_hidden(text)
+
+    def test_raw_html_blocks(self):
+        """Review #467 🟠2: khối HTML trình xem không hiện (CommonMark loại 1 script/style, 3 `<?`, 4 `<!X`, 5 CDATA) bị
+        ẩn tới dòng có đuôi đóng; `<pre>`/`<textarea>` vẫn hiện; dòng sau khối đóng hiện lại."""
+        s = self.LINE
+        for text in (
+            f"<style>\n{s}\n</style>",
+            f"<SCRIPT type=x>\n{s}\n</Script>",
+            f"<script>\n{s}",
+            f"<?\n{s}\n?>",
+            f"<![CDATA[\n{s}\n]]>",
+            f"<!X\n{s}\n>",
+            f"   <style>\n{s}",
+            f"> <style>\n> {s}\n> </style>",
+            f"para\n<style>\n{s}\n</style>",
+            f"<style>x</style> {s}",
+        ):
+            with self.subTest(text=text):
+                self.assert_hidden(text)
+        for text in (
+            f"<pre>\n{s}\n</pre>",
+            f"<textarea>\n{s}\n</textarea>",
+            f"<style>\nx\n</style>\n{s}",
+            f"<style>x</style>\n{s}",
+            f"<!DOCTYPE html>\n{s}",
+            f"<styles>\n{s}",
+            f"<scriptx\n{s}",
+            f"<!-- a -->\n{s}",
+            f"```\n<style>\n```\n{s}",
+            f"<!--\n<style>\n-->\n{s}",
+        ):
+            with self.subTest(text=text):
+                self.assert_shown(text)
+
+    def test_comment_scan_linear(self):
+        """Review #467 🟠1: dòng 200k chú thích / code span — duyệt một lượt, không cắt chuỗi mỗi lần (bậc hai)."""
+        for text in ("<!-- -->" * 200_000 + "x", "`a` " * 200_000 + "x", "<!-- a -->`b`" * 100_000 + "`" + "x"):
+            start = time.perf_counter()
+            self.assertTrue(xt._markdown_shown(text).endswith("x"))
+            self.assertLess(time.perf_counter() - start, 1.0)
 
 
 class FenceRegexIsolationTest(unittest.TestCase):

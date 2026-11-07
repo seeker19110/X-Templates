@@ -12730,13 +12730,25 @@ GO_SIGN_ROW_RE = re.compile(r"^\|[^|\n]*\|\s*[^|\s][^|\n]*\|[^|\n]*\|\s*\d{4}-\d
 def _go_sign_rows(text: str) -> List[Tuple[str, str]]:
     """(quyết định, ngày) của các dòng ký có tên + ngày ở §5 (Ký) của GO-NO-GO — chỉ phần người ký thấy
     (`_markdown_shown`, AUD-HAR-323): dòng ký, tiêu đề `## ` trong khối code/chú thích HTML không tính. Guard `GO_SIGN`
-    giữ luật riêng, chặt hơn (đọc văn bản thô)."""
+    giữ luật riêng, chặt hơn (đọc văn bản thô). Lời từ chối thì đọc cả văn bản thô: `_go_no_go_refusals`."""
     part = re.split(r"^## 5\b.*$", _markdown_shown(text), maxsplit=1, flags=re.M)
     if len(part) != 2:
         return []
-    section = re.split(r"^## ", part[1], maxsplit=1, flags=re.M)[0]
+    return _sign_rows_in(re.split(r"^## ", part[1], maxsplit=1, flags=re.M)[0])
+
+
+def _sign_rows_in(section: str) -> List[Tuple[str, str]]:
     cells = [m[0].strip().strip("|").split("|") for m in GO_SIGN_ROW_RE.finditer(section)]
     return [(c[2].strip(), c[3].strip()) for c in cells]
+
+
+def _go_no_go_refusals(text: str) -> List[str]:
+    """Ô quyết định NO-GO của mọi dòng ký ở §5 hiển thị VÀ ở mọi mục `## 5` của văn bản thô (review #467): bộ lọc
+    `_markdown_shown` lệch trình xem (ẩn thừa, hay `## ` giả trong khối code cắt mục thô) không được làm mất lời từ
+    chối người thấy — ẩn thêm chỉ an toàn cho GO."""
+    raw = [s for s in re.split(r"^## ", text, flags=re.M)[1:] if re.match(r"5\b", s)]
+    rows = [r for s in raw for r in _sign_rows_in(s)] + _go_sign_rows(text)
+    return [d for d, _ in rows if _decision(d) == "no"]
 
 
 def _go_no_go_signed(text: str) -> bool:
@@ -12942,7 +12954,9 @@ def subject_lines(subject: Dict[str, Any]) -> List[str]:
 # Lượng từ chiếm hữu: không quay lui theo số dấu `>` (ReDoS).
 SHOWN_FENCE_RE = re.compile(r"^((?:[ ]*+(?:>|(?:[-*+]|\d{1,9}[.)])(?=[ ])))*+)[ ]*+(`{3,}|~{3,})(.*)$")
 SHOWN_CLOSE_RE = re.compile(r"(`{3,}|~{3,})\s*\Z")  # rào đóng: không chữ sau
-SHOWN_HEADING_RE = re.compile(r"[ ]{0,3}#{1,6}(?:[ \t]|\s*\Z)")
+# Dòng không phải đoạn văn (khối code thụt mở được ngay sau): tiêu đề, đường kẻ/gạch setext, dòng bảng, định nghĩa
+# link, dòng HTML — kể cả trong trích dẫn; nhận rộng (ẩn thêm) vì dòng sau đoạn văn mới là dòng tiếp.
+SHOWN_BLOCK_LINE_RE = re.compile(r"[ >]*+(?:#{1,6}(?:[ \t]|\s*\Z)|(?:[-*_=][ \t]*+)++\s*\Z|\||\[[^\]]*\]:|<)")
 
 
 class _ShownFence(NamedTuple):
@@ -12974,20 +12988,104 @@ def _shown_fence_step(fence: _ShownFence, line: str) -> Tuple[bool, bool]:
     return True, True
 
 
+# Token của một dòng cho chú thích HTML: `<!-->`/`<!--->` (chú thích trọn, CommonMark 0.31.2 §6.6), mở, đóng, chuỗi
+# backtick (code span) — một lượt `finditer`, không cắt chuỗi (review #467: bậc hai).
+HTML_COMMENT_TOKEN_RE = re.compile(r"<!---?>|<!--|-->|`+")
+
+
+def _code_span_closers(toks: List["re.Match[str]"]) -> Dict[int, int]:
+    """Chỉ số token chuỗi backtick → chỉ số chuỗi backtick cùng độ dài kế sau nó (đóng code span)."""
+    closers: Dict[int, int] = {}
+    after: Dict[str, int] = {}
+    for i in range(len(toks) - 1, -1, -1):
+        tok = toks[i][0]
+        if tok[0] == "`":
+            if tok in after:
+                closers[i] = after[tok]
+            after[tok] = i
+    return closers
+
+
 def _strip_html_comments(line: str, inside: bool) -> Tuple[str, bool]:
     """(phần ngoài chú thích HTML của `line`, dòng kết thúc vẫn trong chú thích?) — `inside`: dòng mở đầu trong chú
-    thích; `<!--` chưa đóng ẩn tới `-->` sau đó hay hết file (CommonMark khối HTML loại 2)."""
-    shown = ""
-    while True:
+    thích; `<!--` chưa đóng ẩn tới `-->` sau đó hay hết file (CommonMark khối HTML loại 2); `<!-->`, `<!--->` là chú
+    thích trọn. `<!--` trong code span (backtick, đóng trên cùng dòng) là chữ, không mở chú thích; code span nhiều
+    dòng không nhận (ẩn thêm)."""
+    toks = list(HTML_COMMENT_TOKEN_RE.finditer(line))
+    closers = _code_span_closers(toks)
+    parts: List[str] = []
+    last = i = 0
+    while i < len(toks):
+        tok = toks[i][0]
         if inside:
-            end = line.find("-->")
-            if end < 0:
-                return shown, True
-            line = line[end + 3 :]
-        start = line.find("<!--")
-        if start < 0:
-            return shown + line, False
-        shown, line, inside = shown + line[:start], line[start + 4 :], True
+            if tok != "<!--" and tok[0] != "`":  # `-->` hay `<!--->` (có `-->`) đóng chú thích
+                inside, last = False, toks[i].end()
+        elif tok[0] == "`":
+            i = closers.get(i, i)  # bỏ qua nội dung code span; không đóng → backtick là chữ
+        elif tok != "-->":
+            parts.append(line[last : toks[i].start()])
+            inside, last = tok == "<!--", toks[i].end()
+        i += 1
+    if not inside:
+        parts.append(line[last:])
+    return "".join(parts), inside
+
+
+# Khối HTML trình xem không hiện (CommonMark §4.6 loại 1 `script`/`style`, 3 `<?`, 5 CDATA, 4 `<!X`) — sau tiền tố
+# cách/`>`; `<pre>`/`<textarea>` (cũng loại 1) hiện nên không ẩn.
+HTML_HIDDEN_RE = re.compile(r"[ >]*+<(?:(script|style)(?=[\s>]|\Z)|(\?)|!(\[CDATA\[)|![A-Za-z])", re.I)
+
+
+def _html_hidden_start(line: str) -> Optional[str]:
+    """Khối HTML ẩn mở ở `line`: đuôi đóng còn chờ ("" = đóng ngay dòng này); None = không mở khối."""
+    m = HTML_HIDDEN_RE.match(line)
+    if not m:
+        return None
+    end = f"</{m[1].lower()}>" if m[1] else "?>" if m[2] else "]]>" if m[3] else ">"
+    return "" if end in line[m.end() :].lower() else end
+
+
+class _ShownView:
+    """Trạng thái duyệt từng dòng của `_markdown_shown`."""
+
+    def __init__(self) -> None:
+        self.fence: Optional[_ShownFence] = None
+        self.html = ""  # đuôi đóng của khối HTML ẩn đang mở
+        self.comment = False
+        self.block_start = True  # khối code thụt mở được ở dòng này
+
+    def _inside_block(self, line: str) -> bool:
+        """Dòng thuộc khối HTML ẩn/rào đang mở (cập nhật trạng thái khi khối đóng)."""
+        if self.html:
+            self.html = "" if self.html in line.lower() else self.html
+            return True
+        if self.fence is None:
+            return False
+        still, inside = _shown_fence_step(self.fence, line)
+        self.fence, self.block_start = (self.fence if still else None), True
+        return inside
+
+    def _opens_block(self, line: str) -> bool:
+        """Dòng mở (hoặc thuộc) khối ẩn: khối code thụt, rào, khối HTML ẩn — không xét khi đang trong chú thích."""
+        if self.comment:
+            return False
+        if self.block_start and line.strip() and len(line) - len(line.lstrip(" ")) >= 4:
+            return True
+        self.fence = _shown_fence_open(line)
+        end = None if self.fence else _html_hidden_start(line)
+        if end is None:
+            return self.fence is not None
+        self.html, self.block_start = end, True
+        return True
+
+    def shown(self, raw: str) -> Optional[str]:
+        """Phần hiện của dòng `raw`; None = cả dòng thuộc khối ẩn."""
+        line = raw.expandtabs(4)
+        if self._inside_block(line) or self._opens_block(line):
+            return None
+        shown, self.comment = _strip_html_comments(raw, self.comment)
+        self.block_start = not shown.strip() or bool(SHOWN_BLOCK_LINE_RE.match(shown.expandtabs(4)))
+        return shown
 
 
 def _markdown_shown(text: str) -> str:
@@ -12995,31 +13093,19 @@ def _markdown_shown(text: str) -> str:
     chú thích không nuốt nhau (`<!--` trong khối code không ẩn phần sau; rào trong chú thích không mở khối). Bỏ BOM; bỏ
     chú thích HTML `<!-- … -->` (cả nhiều dòng, chưa đóng → tới hết file); bỏ khối rào ``` / ~~~ (cả trong trích dẫn
     và mục danh sách, chưa đóng → hết file — `_shown_fence_step`); bỏ khối code thụt ≥ 4 cách (tab = 4) ở đầu văn bản
-    hay sau dòng trống, tiêu đề, khối rào/thụt/chú thích — không sau dòng đoạn văn/mục danh sách (dòng tiếp của nó).
+    hay sau dòng trống, khối rào/thụt/HTML/chú thích, dòng không phải đoạn văn (`SHOWN_BLOCK_LINE_RE`) — không sau dòng
+    đoạn văn/mục danh sách (dòng tiếp của nó). Khối HTML trình xem không hiện (`<script>`, `<style>`, `<?`,
+    `<![CDATA[`, `<!X` đầu dòng) ẩn tới hết dòng có đuôi đóng; HTML nội dòng (trừ chú thích) không xét.
     Giới hạn (phần lớn lệch về phía ẩn thêm): không theo dõi mục danh sách qua nhiều dòng — dòng thụt sau dòng trống
     trong mục bị coi là khối code, rào mở ở dòng tiếp của mục (không có dấu mục) chỉ đóng bằng rào đóng; khối thụt chỉ
-    nhận ở cấp gốc; dòng thụt ngay sau dòng bảng coi là dòng hiện. Markdown cố tình đánh lừa vẫn có thể lệch — dòng ký §5
-    còn có guard `GO_SIGN` chặn agent ghi."""
+    nhận ở cấp gốc. Markdown cố tình đánh lừa vẫn có thể lệch — dòng ký §5 còn có guard `GO_SIGN` chặn agent ghi, và
+    lời từ chối NO-GO đọc cả văn bản thô (`_go_no_go_refusals`)."""
+    view = _ShownView()
     kept: List[str] = []
-    fence: Optional[_ShownFence] = None
-    comment = False
-    block_start = True  # khối code thụt mở được ở dòng này
     for raw in text.lstrip("\ufeff").split("\n"):
-        line = raw.expandtabs(4)
-        if fence:
-            still, inside = _shown_fence_step(fence, line)
-            fence, block_start = (fence if still else None), True
-            if inside:
-                continue
-        if not comment:
-            if block_start and line.strip() and len(line) - len(line.lstrip(" ")) >= 4:
-                continue
-            fence = _shown_fence_open(line)
-            if fence:
-                continue
-        shown, comment = _strip_html_comments(raw, comment)
-        kept.append(shown)
-        block_start = not shown.strip() or bool(SHOWN_HEADING_RE.match(shown.expandtabs(4)))
+        shown = view.shown(raw)
+        if shown is not None:
+            kept.append(shown)
     return "\n".join(kept)
 
 
@@ -13051,11 +13137,13 @@ def _subject_problem(rel: str, text: str, subject: Dict[str, Any]) -> str:
 
 
 def _signed_go_no_go(base: Path) -> List[Tuple[str, str]]:
-    """MỌI GO-NO-GO đã ký §5 của `VERSION` (cùng luật hàng `go_no_go`) — xét hết để kết quả không phụ thuộc thứ tự file
-    (review lát A); không có/không đọc được → rỗng."""
+    """MỌI GO-NO-GO đã ký §5 của `VERSION` (cùng luật hàng `go_no_go`) hay có dòng ký NO-GO ở §5 thô
+    (`_go_no_go_refusals`) — xét hết để kết quả không phụ thuộc thứ tự file (review lát A); không có/không đọc được →
+    rỗng."""
     try:
         version = (base / "VERSION").read_text(encoding="utf-8").strip()
-        return [(r, t) for r, t in _go_no_go_docs(base, version) if _go_no_go_signed(t)]
+        docs = _go_no_go_docs(base, version)
+        return [(r, t) for r, t in docs if _go_no_go_signed(t) or _go_no_go_refusals(t)]
     except (OSError, ValueError):
         return []
 
@@ -13083,14 +13171,14 @@ def _decision(cell: str) -> str:
 
 
 def _approval_problem(base: Path, rel: str, text: str, subject: Dict[str, Any]) -> str:
-    """Lý do chữ ký §5 của `rel` chưa đủ cho promotion; rỗng = đủ. Dòng ký từ chối → `rejected:`; ô không phải GO, ngày
-    không hợp lệ/ở tương lai (quá 1 ngày — múi giờ người ký)/quá hạn, hay dòng `subject:` thiếu/lệch → chờ người."""
-    rows = _go_sign_rows(text)
-    kinds = [(_decision(d), d) for d, _ in rows]
-    no = [d for k, d in kinds if k == "no"]
+    """Lý do chữ ký §5 của `rel` chưa đủ cho promotion; rỗng = đủ. Dòng ký từ chối (§5 hiển thị hay thô —
+    `_go_no_go_refusals`) → `rejected:`; ô không phải GO, ngày không hợp lệ/ở tương lai (quá 1 ngày — múi giờ người
+    ký)/quá hạn, hay dòng `subject:` thiếu/lệch → chờ người."""
+    no = _go_no_go_refusals(text)
     if no:
         return f"rejected:{rel}: quyết định ký §5 ghi `{no[0]}` (NO-GO)"
-    other = [d for k, d in kinds if k != "go"]
+    rows = _go_sign_rows(text)
+    other = [d for d, _ in rows if _decision(d) != "go"]
     if other:
         return f"{rel}: ô quyết định `{other[0] or '(trống)'}` không phải GO — người ký ghi GO hoặc NO-GO"
     today = _dt.datetime.now(_dt.timezone.utc).date()
