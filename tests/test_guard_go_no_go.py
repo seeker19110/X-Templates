@@ -591,6 +591,63 @@ class GoNoGoPatchTest(GoNoGoGuardBase):
         with mock.patch.dict(os.environ, {"HOME": str(self.root)}):
             self.assertEqual(guard._go_diff_state("~/ok.diff", None, False), guard.GO_DIFF_CLEAR)
 
+    def test_header_quoted_octal_and_space_timestamp_denied(self) -> None:
+        """Review #469 🔴: tên có nháy kiểu C của git (`\\107` = `G`, cả `rename to`/`copy to`/`diff --git`) và timestamp
+        cách tên bằng DẤU CÁCH — git apply/GNU patch đều ghi GO-NO-GO; guard phải thấy ở mọi dự án."""
+        body = "".join("+" + line + "\n" for line in (SIGN_HEAD + SIGNED_ROW).splitlines())
+        q = '"b/docs/ops/\\107O-NO-GO-v1.md"'
+        variants = {
+            "v3": f'diff --git "a/docs/ops/\\107O-NO-GO-v1.md" {q}\nnew file mode 100644\n--- /dev/null\n+++ {q}\n'
+            f"@@ -0,0 +1 @@\n{body}",
+            "v4": "--- /dev/null 2026-11-07 10:00:00.000000000 +0700\n"
+            "+++ b/docs/ops/GO-NO-GO-v1.md 2026-11-07 10:00:00.000000000 +0700\n"
+            f"@@ -0,0 +1 @@\n{body}",
+            "v26": 'diff --git a/docs/a.md "b/docs/ops/\\107O-NO-GO-v1.md"\nsimilarity index 100%\n'
+            'rename from docs/a.md\nrename to "docs/ops/\\107O-NO-GO-v1.md"\n',
+            "v27": f"--- /dev/null 2026-11-07 10:00:00 +0700\n+++ b/docs/ops/GO-NO-GO-v1.md 2026-11-07 10:00:00 +0700\n"
+            f"@@ -0,0 +1 @@\n{body}",
+            "copy": 'diff --git a/docs/a.md "b/\\107O-NO-GO.md"\ncopy from docs/a.md\ncopy to "\\107O-NO-GO.md"\n',
+            "space-name": f"--- /dev/null\n+++ b/docs/ops/GO-NO-GO v1.md 2026-11-07 10:00:00 +0700\n@@ -0,0 +1 @@\n{body}",
+            "binary": "diff --git a/docs/ops/GO-NO-GO v1.md b/docs/ops/GO-NO-GO v1.md\nnew file mode 100644\n"
+            "GIT binary patch\nliteral 3\nKcmZ?wfB*mj0RR91\n",
+        }
+        for fresh in (False, True):
+            if fresh:
+                (self.root / GO_REL).unlink()
+            for name, text in variants.items():
+                self.put(f"{name}.diff", text)
+                for cmd in (f"git apply {name}.diff", f"patch -p1 -i {name}.diff"):
+                    self.assertEqual(self.bash(cmd), ("deny", "GO_SIGN"), (fresh, cmd))
+
+    def test_header_clean_space_timestamp_and_base64_line_allowed(self) -> None:
+        """Đối chứng: diff sạch có timestamp cách bằng dấu cách cho chạy; dòng `Content-Transfer-Encoding: base64` trong
+        diff của `git apply` (không phải mbox của `git am`) không làm diff thành không đọc được (mutant M9)."""
+        self.put(
+            "ts.diff",
+            "--- a/docs/a.md 2026-11-07 10:00:00 +0700\n+++ b/docs/a.md 2026-11-07 10:00:00 +0700\n"
+            "@@ -1 +1 @@\n-a\n+b\n",
+        )
+        self.put("b64.diff", "Content-Transfer-Encoding: base64\n" + self.OK_DIFF)
+        for cmd in ("git apply ts.diff", "patch -p1 -i ts.diff", "git apply b64.diff"):
+            self.assertEqual(self.bash(cmd)[0], "", cmd)
+        self.assertEqual(self.bash("git am b64.diff"), ("deny", "GO_SIGN"))  # mbox mã hoá: không đọc được
+
+    def test_c_unquote(self) -> None:
+        self.assertEqual(guard._c_unquote("\\107O"), "GO")
+        self.assertEqual(guard._c_unquote("v\\303\\251.md"), "vé.md")
+        self.assertEqual(guard._c_unquote('\\t\\n\\\\\\"\\a\\b\\f\\r\\v'), '\t\n\\"\a\b\f\r\v')
+        self.assertEqual(guard._c_unquote("\\q\\7x"), "q\x07x")  # thoát lạ: giữ chữ; octal ngắn vẫn giải
+        self.assertEqual(guard._c_unquote("\\377"), "\ufffd")  # byte không phải UTF-8
+        self.assertEqual(guard._c_unquote("x\\"), "x\\")  # gạch chéo cuối chuỗi
+
+    def test_header_paths_superset(self) -> None:
+        """Chỉ THÊM ứng viên so với regex cũ (luật AUD-SEC-414 dùng chung)."""
+        text = 'diff --git a/x y.md b/x y.md\n+++ b/n.md 2026-01-01 1 +0700\nrename to "a\\142"\ncopy from "c\\144"\n'
+        got = guard._patch_header_paths(text)
+        cands = ("a/x", "y.md", "a/x y.md", "b/x y.md", "b/n.md 2026-01-01 1 +0700", "b/n.md", "a\\142", "ab", "cd")
+        for want in cands:
+            self.assertIn(want, got)
+
     def test_patch_state_priority(self) -> None:
         """Một tệp chạm GO-NO-GO thắng tệp không đọc được; không đọc được thắng sạch."""
         cands = (str(self.root),)

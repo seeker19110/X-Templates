@@ -3011,9 +3011,49 @@ def _patch_cmd(argv: List[str]) -> bool:
     return n[:1] in (["patch"], ["gpatch"]) or n[:2] in (["git", "apply"], ["git", "am"])
 
 
+# Review #469 🔴: git/GNU patch giải tên có nháy kiểu C (`"b/\107O-NO-GO.md"` = `GO-NO-GO.md` — git `unquote_c_style`,
+# patch `parse_c_string`) và cắt timestamp cách tên bằng DẤU CÁCH (`+++ b/x.md 2026-11-07 10:00:00 +0700`); `diff --git`
+# không nháy được có dấu cách trong tên (`a/x y.md b/x y.md`). Ứng viên THÊM vào kết quả của `PATCH_HEADER_RE` (không
+# bớt — luật AUD-SEC-414 dùng chung): mọi đoạn có nháy đã giải; phần không nháy (tới tab đầu) cắt ở khoảng trắng — tiền tố
+# (cả dòng `diff --git`: hậu tố), tối đa `PATCH_HEADER_CUTS` chỗ đầu và 4 chỗ cuối (tên dài bị chặn đường quét).
+PATCH_HEADER_LINE_RE = re.compile(
+    r"^((?:\+\+\+|---|\*\*\*|Index:) |(?:rename|copy) (?:from|to) |diff --git )(.*?)\r?$", re.M
+)
+PATCH_QUOTED_RE = re.compile(r"\"((?:[^\"\\\n]|\\.)*)\"")
+PATCH_HEADER_CUTS = 16
+C_ESCAPES = {"a": 7, "b": 8, "t": 9, "n": 10, "v": 11, "f": 12, "r": 13}
+C_OCTAL_RE = re.compile(r"\\([0-7]{1,3})|\\(.)|([^\\]+)|\\$", re.S)
+
+
+def _c_unquote(s: str) -> str:
+    """Giải phần trong nháy kiểu C của git: `\\NNN` bát phân → byte (ghép UTF-8), `\\t \\n \\a \\b \\f \\r \\v`, `\\x` khác
+    → `x`; byte không phải UTF-8 → ký tự thay thế."""
+    out = bytearray()
+    for m in C_OCTAL_RE.finditer(s):
+        octal, esc, plain = m.groups()
+        if octal:
+            out.append(int(octal, 8) & 0xFF)
+        elif esc:
+            out += bytes([C_ESCAPES[esc]]) if esc in C_ESCAPES else esc.encode()
+        else:
+            out += (plain or "\\").encode()
+    return out.decode("utf-8", "replace")
+
+
+def _header_cuts(value: str, suffixes: bool) -> List[str]:
+    """Tên có thể của phần không nháy: cắt ở khoảng trắng (tiền tố, `suffixes` thì cả hậu tố)."""
+    head = value.split("\t", 1)[0].rstrip()
+    spaces = [m.start() for m in re.finditer(r"\s", head)]
+    spaces = list(dict.fromkeys(spaces[:PATCH_HEADER_CUTS] + spaces[-4:]))
+    return [head[:i].rstrip() for i in spaces] + ([head[i + 1 :].strip() for i in spaces] if suffixes else [])
+
+
 def _patch_header_paths(text: str) -> List[str]:
     out = [g for m in PATCH_HEADER_RE.finditer(text) for g in m.groups() if g]
-    return [p for p in dict.fromkeys(out) if _norm_path(p) != "/dev/null"]
+    for m in PATCH_HEADER_LINE_RE.finditer(text):
+        out += [_c_unquote(q) for q in PATCH_QUOTED_RE.findall(m[2])]
+        out += [] if m[2].startswith('"') else _header_cuts(m[2], m[1] == "diff --git ")
+    return [p for p in dict.fromkeys(out) if p and _norm_path(p) != "/dev/null"]
 
 
 def _patch_candidates(path: str) -> List[str]:
