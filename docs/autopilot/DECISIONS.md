@@ -296,3 +296,10 @@
 - Chọn: 3.32.0 (minor): đổi việc dự án đích phải làm (dòng subject GO-NO-GO, D-389) và guard chặn ký §5; không phá tương thích ngược dữ liệu
 - Lý do (tiêu chí chất lượng cuối): (1) đúng: SemVer — #463 thêm yêu cầu mới với dự án đích (GO-NO-GO cũ ở lại pending_human tới khi ký lại), không phải vá lỗi thuần; (3) theo chuẩn; nợ review đã trả hết (audit check --strict exit 0), release-check GO chờ người
 - Đường lùi: Không merge PR cắt bản; hoặc cắt bản vá sau đó
+
+### D-396 · 2026-11-07T12:18:23+00:00 · PR #470 (cắt 3.32.0): review lượt 1 APPROVE với 1 🟢 — câu GO-NO-GO khai sai trạng thái AUD-SEC-538, sót AUD-HAR-321
+
+- Phương án: (1) Sửa một dòng GO-NO-GO trên nhánh theo đề xuất reviewer (ngoài vân tay subject) · (2) Ghi nhận, giữ nguyên
+- Chọn: Sửa một dòng GO-NO-GO trên nhánh theo đề xuất reviewer (ngoài vân tay subject)
+- Lý do (tiêu chí chất lượng cuối): (1) GO-NO-GO là tài liệu người ký — không ship lời khai sai; sửa không đổi subject.content (GO-NO-GO ngoài vân tay, đã kiểm)
+- Đường lùi: Revert commit sửa
