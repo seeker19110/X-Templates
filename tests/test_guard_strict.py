@@ -2461,7 +2461,9 @@ class GuardLiteralFormsT3663Test(unittest.TestCase):
                 "git apply fix.patch && python3 -m x",
                 "git apply fix.patch && make",
             ),
-            ("git apply --check p.diff && git diff --stat", "patch -p1 < fix.diff && git diff"),
+            # `patch -p1 < fix.diff` (áp thật) ở repo này bị AUD-SEC-534 chặn: repo có `docs/ops/GO-NO-GO*.md` và
+            # `fix.diff` không đọc được — ca đó ở tests.test_guard_go_no_go.GoNoGoPatchTest
+            ("git apply --check p.diff && git diff --stat", "patch --dry-run -p1 < fix.diff && git diff"),
             "AUD-SEC-414",
             guard._patch_file_why,
         )
