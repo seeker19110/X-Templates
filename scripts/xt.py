@@ -12743,11 +12743,11 @@ def _sign_rows_in(section: str) -> List[Tuple[str, str]]:
 
 
 def _go_no_go_refusals(text: str) -> List[str]:
-    """Ô quyết định NO-GO của mọi dòng ký ở §5 hiển thị VÀ ở mọi mục `## 5` của văn bản thô (review #467): bộ lọc
-    `_markdown_shown` lệch trình xem (ẩn thừa, hay `## ` giả trong khối code cắt mục thô) không được làm mất lời từ
-    chối người thấy — ẩn thêm chỉ an toàn cho GO."""
-    raw = [s for s in re.split(r"^## ", text, flags=re.M)[1:] if re.match(r"5\b", s)]
-    rows = [r for s in raw for r in _sign_rows_in(s)] + _go_sign_rows(text)
+    """Ô quyết định NO-GO của mọi dòng ký ở §5 hiển thị VÀ ở văn bản thô từ dòng `## 5` đầu tiên tới HẾT FILE (review
+    #467): bộ lọc `_markdown_shown` lệch trình xem (ẩn thừa) hay `## ` giả trong khối code (cắt mục nếu tách theo tiêu
+    đề thô) không được làm mất lời từ chối người thấy — ẩn thêm chỉ an toàn cho GO; NO-GO thì đọc rộng (chặt)."""
+    head = re.search(r"^## 5\b", text, flags=re.M)
+    rows = (_sign_rows_in(text[head.start() :]) if head else []) + _go_sign_rows(text)
     return [d for d, _ in rows if _decision(d) == "no"]
 
 
@@ -12988,9 +12988,10 @@ def _shown_fence_step(fence: _ShownFence, line: str) -> Tuple[bool, bool]:
     return True, True
 
 
-# Token của một dòng cho chú thích HTML: `<!-->`/`<!--->` (chú thích trọn, CommonMark 0.31.2 §6.6), mở, đóng, chuỗi
-# backtick (code span) — một lượt `finditer`, không cắt chuỗi (review #467: bậc hai).
-HTML_COMMENT_TOKEN_RE = re.compile(r"<!---?>|<!--|-->|`+")
+# Token của một dòng cho chú thích HTML: `<!-->`/`<!--->` (chú thích trọn, CommonMark 0.31.2 §6.6), mở, đóng (`-->`,
+# và `--!>` — trình duyệt HTML5 cũng đóng ở đó, CodeQL py/bad-tag-filter), chuỗi backtick (code span) — một lượt
+# `finditer`, không cắt chuỗi (review #467: bậc hai).
+HTML_COMMENT_TOKEN_RE = re.compile(r"<!---?>|<!--|--!?>|`+")
 
 
 def _code_span_closers(toks: List["re.Match[str]"]) -> Dict[int, int]:
@@ -13008,8 +13009,8 @@ def _code_span_closers(toks: List["re.Match[str]"]) -> Dict[int, int]:
 
 def _strip_html_comments(line: str, inside: bool) -> Tuple[str, bool]:
     """(phần ngoài chú thích HTML của `line`, dòng kết thúc vẫn trong chú thích?) — `inside`: dòng mở đầu trong chú
-    thích; `<!--` chưa đóng ẩn tới `-->` sau đó hay hết file (CommonMark khối HTML loại 2); `<!-->`, `<!--->` là chú
-    thích trọn. `<!--` trong code span (backtick, đóng trên cùng dòng) là chữ, không mở chú thích; code span nhiều
+    thích; `<!--` chưa đóng ẩn tới `-->`/`--!>` sau đó hay hết file (CommonMark khối HTML loại 2, HTML5); `<!-->`,
+    `<!--->` là chú thích trọn. `<!--` trong code span (backtick, đóng trên cùng dòng) là chữ, không mở chú thích; code span nhiều
     dòng không nhận (ẩn thêm)."""
     toks = list(HTML_COMMENT_TOKEN_RE.finditer(line))
     closers = _code_span_closers(toks)
@@ -13018,11 +13019,11 @@ def _strip_html_comments(line: str, inside: bool) -> Tuple[str, bool]:
     while i < len(toks):
         tok = toks[i][0]
         if inside:
-            if tok != "<!--" and tok[0] != "`":  # `-->` hay `<!--->` (có `-->`) đóng chú thích
+            if tok != "<!--" and tok[0] != "`":  # `-->`, `--!>` hay `<!--->` (có `-->`) đóng chú thích
                 inside, last = False, toks[i].end()
         elif tok[0] == "`":
             i = closers.get(i, i)  # bỏ qua nội dung code span; không đóng → backtick là chữ
-        elif tok != "-->":
+        elif tok[0] == "<":  # `<!--` mở, `<!-->`/`<!--->` trọn; `-->`/`--!>` lẻ là chữ
             parts.append(line[last : toks[i].start()])
             inside, last = tok == "<!--", toks[i].end()
         i += 1

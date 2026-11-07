@@ -4,6 +4,7 @@ Ca âm ở ADR-0068 §Xác nhận A (sai digest, report thiếu, 0 test, scan ch
 `approved`; `go`/`verdict`/`human` và exit code giữ nghĩa cũ."""
 
 import datetime as dt
+import gc
 import hashlib
 import json
 import os
@@ -839,6 +840,13 @@ class PromotionTest(ReleaseCase):
             f"{self.SIGN}<!--\n{nogo}-->\n",  # chỉ có NO-GO, bị ẩn: file vẫn được xét
             f"{self.SIGN}{go}```\n## 6. giả\n```\n{nogo}",  # NO-GO hiện, thô nằm sau `## 6` giả
             f"```\n## 5. Ký\n{nogo}```\n\n{self.SIGN}{go}",  # NO-GO ở §5 thô thứ nhất
+            # review #467 lượt 2: `## x` trong rào không cắt §5 thô (thô = từ `## 5` đầu tiên tới hết file), dù phần
+            # hiển thị ẩn thừa NO-GO
+            f"{self.SIGN}{go}```\n## x\n```\n- a\n  ```\n{nogo}",  # rào chưa đóng trong mục danh sách
+            f"{self.SIGN}{go}```\n## x\n```\nx <!--\n\n{nogo}",  # chú thích nội dòng + dòng trống
+            f"{self.SIGN}{go}```\n## x\n```\n> para\n>     ```\n{nogo}",
+            f"{self.SIGN}{go}```\n## x\n```\n<!-- ghi chú --!>\n{nogo}",  # `--!>` đóng chú thích (HTML5)
+            f"{self.SIGN}{go}```\n## x\n```\n<!--\n{nogo}",  # ẩn thật, vẫn tính từ chối (chặt)
         ):
             with self.subTest(sign=sign):
                 self.sign_doc(sign)
@@ -1012,6 +1020,7 @@ class MarkdownShownTest(unittest.TestCase):
     def test_shown_text_keeps_original_line(self):
         self.assertEqual(xt._markdown_shown("﻿a\t<!-- x -->b\r\n```\nc\n```\r\nd"), "a\tb\r\nd")
         self.assertEqual(xt._markdown_shown("    \nx <!-- a --> y <!-- b --> z"), "    \nx  y  z")
+        self.assertEqual(xt._markdown_shown("a --> b --!> c"), "a --> b --!> c")  # đuôi lẻ là chữ, không bị bỏ
 
     def test_reviewer_mutants(self):
         """Review #467: mutant sống M2/M18/M20/M29."""
@@ -1030,6 +1039,9 @@ class MarkdownShownTest(unittest.TestCase):
             f"<!-- a --->{s}",
             f"<!-- a <!-->{s}",  # `-->` của `<!-->` đóng chú thích đang mở
             f"a --> {s}",  # `-->` không có chú thích mở: chữ thường
+            f"a --!> {s}",
+            f"<!-- a --!>\n{s}",  # `--!>` đóng chú thích (HTML5; CodeQL py/bad-tag-filter)
+            f"<!--\na --!> {s}",
             f"`<!--` {s}",
             f"``a ` <!-- b`` {s}",
             f"`x` <!-- a --> `<!--` {s}",
@@ -1062,6 +1074,7 @@ class MarkdownShownTest(unittest.TestCase):
             f"<pre>\n{s}\n</pre>",
             f"<textarea>\n{s}\n</textarea>",
             f"<style>\nx\n</style>\n{s}",
+            f"<script>\nx\n</SCRIPT>\n{s}",  # đuôi đóng không phân biệt hoa thường (mutant R9)
             f"<style>x</style>\n{s}",
             f"<!DOCTYPE html>\n{s}",
             f"<styles>\n{s}",
@@ -1074,11 +1087,28 @@ class MarkdownShownTest(unittest.TestCase):
                 self.assert_shown(text)
 
     def test_comment_scan_linear(self):
-        """Review #467 🟠1: dòng 200k chú thích / code span — duyệt một lượt, không cắt chuỗi mỗi lần (bậc hai)."""
-        for text in ("<!-- -->" * 200_000 + "x", "`a` " * 200_000 + "x", "<!-- a -->`b`" * 100_000 + "`" + "x"):
-            start = time.perf_counter()
-            self.assertTrue(xt._markdown_shown(text).endswith("x"))
-            self.assertLess(time.perf_counter() - start, 1.0)
+        """Review #467 🟠1: dòng nhiều chú thích / code span — duyệt một lượt, không cắt chuỗi mỗi lần (bậc hai). So thời
+        gian N và 4N (đo xen kẽ, tốt nhất 5 lần, tắt GC — GC theo số đối tượng làm tuyến tính trông như ≈ 6×): tuyến tính
+        ≈ 4×, bậc hai ≈ 16× (đo được 21–31×) — ngưỡng 8× chừa lề cả hai phía khi máy bận (gate chạy song song); không
+        dùng trần tuyệt đối (chập chờn theo máy)."""
+
+        def timed(text: str) -> float:
+            gc.disable()
+            try:
+                start = time.perf_counter()
+                shown = xt._markdown_shown(text)
+                spent = time.perf_counter() - start
+            finally:
+                gc.enable()
+            self.assertTrue(shown.endswith("x"))
+            return spent
+
+        for unit in ("<!-- -->", "`a` ", "<!-- a -->`b`"):
+            with self.subTest(unit=unit):
+                small, big = unit * 25_000 + "`x", unit * 100_000 + "`x"
+                rounds = [(timed(small), timed(big)) for _ in range(5)]
+                one, four = min(a for a, _ in rounds), min(b for _, b in rounds)
+                self.assertLess(four, 8 * one, (one, four))
 
 
 class FenceRegexIsolationTest(unittest.TestCase):
