@@ -12543,9 +12543,17 @@ def _sarif_rule_hit(desc: Dict[str, Any], idx: Any, rid: Any) -> bool:
     return (idx is not None and desc.get("index") == idx) or (rid is not None and desc.get("id") == rid)
 
 
+# D-391: công cụ quét bí mật không ghi `level` (gitleaks) — mọi phát hiện là lộ bí mật, nên tính là error dù level/rule.
+SECRET_SCANNERS = ("gitleaks",)
+
+
 def _sarif_level(run: Dict[str, Any], x: Dict[str, Any]) -> str:
-    """Mức hiệu lực của một kết quả SARIF: `level` ghi trên kết quả; không có và `kind` khác `fail` → `none`; còn lại theo
-    rule (`_sarif_rule_level`), mặc định `warning` (§3.27.10) — CodeQL không ghi `level` trên từng kết quả."""
+    """Mức hiệu lực của một kết quả SARIF: run của công cụ quét bí mật (`SECRET_SCANNERS`, so không phân biệt hoa thường)
+    → `error`; còn lại `level` ghi trên kết quả; không có và `kind` khác `fail` → `none`; rồi theo rule
+    (`_sarif_rule_level`), mặc định `warning` (§3.27.10) — CodeQL không ghi `level` trên từng kết quả."""
+    name = _dict(_dict(run.get("tool")).get("driver")).get("name")
+    if isinstance(name, str) and name.lower() in SECRET_SCANNERS:
+        return "error"
     if "level" in x:
         return str(x["level"])
     if x.get("kind", "fail") != "fail":
