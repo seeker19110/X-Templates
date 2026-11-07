@@ -255,12 +255,26 @@
 - Lý do (tiêu chí chất lượng cuối): (1) đúng và an toàn: SHA HEAD đổi ngay khi commit chữ ký nên không ký được; vân tay nội dung đã loại file ký nên ổn định qua commit ký và squash, đổi khi mã đổi; so đúng ô đủ 64 hex bỏ khớp ngẫu nhiên. (2) đường lùi: khoá tuỳ chọn cũ giữ nguyên, chỉ thêm dòng. (3) tái dùng evidence_fingerprint có test
 - Đường lùi: Revert PR; promotion quay về so 12 hex digest
 
+### D-390 · 2026-11-07T04:00:30+00:00 · AUD-SEC-497: chặn agent tự ghi dòng ký §5 của GO-NO-GO*.md ở đâu?
+
+- Phương án: (1) Guard: Edit/Write/MultiEdit vào GO-NO-GO*.md làm xuất hiện dòng ký mới (tên + ngày) ở §5 → deny; Bash ghi vào GO-NO-GO*.md → deny (sửa bằng Edit để guard so được) · (2) Chỉ dựa review PR · (3) Chặn mọi sửa GO-NO-GO*.md
+- Chọn: Guard: Edit/Write/MultiEdit vào GO-NO-GO*.md làm xuất hiện dòng ký mới (tên + ngày) ở §5 → deny; Bash ghi vào GO-NO-GO*.md → deny (sửa bằng Edit để guard so được)
+- Lý do (tiêu chí chất lượng cuối): (1) đúng và an toàn: mẫu ghi chữ ký là của người, agent tự ký được thì promotion approved không còn nghĩa; chặn mọi sửa thì agent không lập được phần máy. (3) đơn giản, test bằng payload giả. Giới hạn còn lại (script ghi file với tên dựng lúc chạy) ghi ở harness-files như AUD-SEC-406
+- Đường lùi: Revert PR; guard thôi chặn, lớp sau là review PR
+
 ### D-391 · 2026-11-07T04:05:22+00:00 · AUD-TEST-061 lộ ra: SARIF thật của gitleaks 8.30.1 không ghi level, adapter coi là warning nên report có leak ra PASS — xử lý thế nào?
 
 - Phương án: (1) Kết quả của công cụ quét bí mật (tool.driver.name gitleaks) là error bất kể level · (2) Giữ theo SARIF §3.27.10, dựa exit code công cụ · (3) Mọi warning là FAIL
 - Chọn: Kết quả của công cụ quét bí mật (tool.driver.name gitleaks) là error bất kể level
 - Lý do (tiêu chí chất lượng cuối): (1) đúng và an toàn: một leak ra PASS là xanh giả; release-check đọc report, không đọc exit code, nên --exit-code 0 làm cổng xanh. Phương án 3 làm FAIL giả với CodeQL/ruff warning. (3) hẹp, test được bằng fixture thật
 - Đường lùi: Revert commit; gitleaks quay về luật level mặc định SARIF
+
+### D-392 · 2026-11-07T04:49:32+00:00 · AUD-SEC-497 (tiếp): agent sửa tiêu đề phiên bản hay dòng subject của GO-NO-GO đã ký → chữ ký người chuyển sang ứng viên mới; guard có chặn?
+
+- Phương án: (1) File trên đĩa đã có dòng ký §5: deny Edit/Write đổi dòng '# ' đầu tiên hoặc dòng 'subject:' (thêm/sửa/xoá) · (2) Giữ cho sửa, review PR là lớp sau
+- Chọn: File trên đĩa đã có dòng ký §5: deny Edit/Write đổi dòng '# ' đầu tiên hoặc dòng 'subject:' (thêm/sửa/xoá)
+- Lý do (tiêu chí chất lượng cuối): (1) đúng và an toàn: sau AUD-HAR-219 (D-389) chữ ký gắn ứng viên qua dòng subject — agent đổi được dòng đó là lách được cả hai sửa; agent cần đổi thì xoá dòng ký trước (được phép), người ký lại. (2) đường lùi: xoá dòng ký vẫn mở
+- Đường lùi: Revert commit; guard chỉ chặn dòng ký
 
 ### D-393 · 2026-11-07T05:11:40+00:00 · AUD-HAR-319: subject.content loại file theo TÊN ở mọi cấp (src/DECISIONS.md, src/x/GO-NO-GO-y.md đổi mã vẫn approved) — sửa thế nào?
 
