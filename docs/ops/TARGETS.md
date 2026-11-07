@@ -8,8 +8,8 @@
 
 ## Danh sách
 
-- seeker19110/hotel-manager — có `.xtemplates/` (3.30.1), kiểm 2026-11-07; 2026-10-23: 188 FB-*.md
-- seeker19110/X-Company — có `.xtemplates/` (3.31.0), kiểm 2026-11-07; 2026-10-23: 91 FB-*.md
+- seeker19110/hotel-manager — có `.xtemplates/` (3.31.1), kiểm 2026-11-07; 2026-10-23: 188 FB-*.md
+- seeker19110/X-Company — có `.xtemplates/` (3.31.1), kiểm 2026-11-07; 2026-10-23: 91 FB-*.md
 - seeker19110/xboss — có `.xtemplates/` (3.31.1), kiểm 2026-11-07; 2026-10-23: 4 FB-*.md
 - seeker19110/dhcb — có `.xtemplates/` (3.31.1), kiểm 2026-11-07; 2026-10-23: chưa có phản hồi
 
