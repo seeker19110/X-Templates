@@ -778,5 +778,16 @@ class PromotionTest(ReleaseCase):
         self.assertIn("chưa có GO-NO-GO đã ký", p["reasons"][0])
 
 
+class FenceRegexIsolationTest(unittest.TestCase):
+    """Review #466 🔴: rào của bộ lọc dòng `subject:` không được đè `FENCE_RE` của PROGRESS/PLAN/bảng audit."""
+
+    def test_progress_and_plan_fences_unchanged(self):
+        for text in ("## A\n```\nx\n````\n## B\n", "## A\n> ```\n## B\n"):
+            with self.subTest(text=text):
+                self.assertEqual([n for n, _ in xt.progress_sections(text)], ["A", "B"])
+        self.assertIsNot(xt.FENCE_RE, xt.SHOWN_FENCE_RE)
+        self.assertEqual(xt.FENCE_RE.pattern, r"^\s*(```|~~~)")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -12937,7 +12937,7 @@ def subject_lines(subject: Dict[str, Any]) -> List[str]:
 
 
 HTML_COMMENT_RE = re.compile(r"<!--.*?(?:-->|\Z)", re.S)  # chưa đóng: tới hết file (CommonMark khối HTML loại 2)
-FENCE_RE = re.compile(r"^[ \t]*(?:>[ \t]*)*(`{3,}|~{3,})")  # rào mở/đóng khối code, kể cả trong trích dẫn
+SHOWN_FENCE_RE = re.compile(r"^[ \t]*(?:>[ \t]*)*(`{3,}|~{3,})")  # rào mở/đóng khối code, kể cả trong trích dẫn
 
 
 def _markdown_shown(text: str) -> str:
@@ -12946,7 +12946,7 @@ def _markdown_shown(text: str) -> str:
     kept: List[str] = []
     fence = ""
     for line in HTML_COMMENT_RE.sub("", text.lstrip("\ufeff")).split("\n"):
-        m = FENCE_RE.match(line)
+        m = SHOWN_FENCE_RE.match(line)
         if fence:
             if m and m[1][0] == fence[0] and len(m[1]) >= len(fence) and not line[m.end() :].strip():
                 fence = ""
