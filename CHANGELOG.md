@@ -6,14 +6,18 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
 
 ## [Unreleased]
 
-### Changed
+### Added
 
-- Mẫu `GO-NO-GO.md` #18: chủ dự án quyết một đề xuất "Khi chạy thật" thì đổi nhãn dòng đó thành `Khi chạy thật (chủ
-  dự án đã quyết YYYY-MM-DD — <quyết định>): đề xuất gốc — …` — hàng `prod_switch` của `release-check` chỉ đếm nhãn
-  chưa quyết (trước đây chưa có cách đóng). Repo khung: D-126 đã quyết giữ tự host (2026-11-08).
+- `xt.py loop decide-prod --ref D-NNN --choice …`: ghi quyết định của chủ dự án cho một đề xuất "Khi chạy thật" bằng
+  mục THÊM mới (dòng `- Khi chạy thật đã quyết (D-NNN): …`) — sổ vẫn chỉ thêm (`LOOP-STOP-019`); hàng `prod_switch`
+  của `release-check` đếm đề xuất chưa quyết theo ID trên sổ và mọi bản tháng (trước đây chưa có cách đóng —
+  AUD-HAR-327, D-399). Mẫu GO-NO-GO #18 và `LOOP-STOP-020` trỏ lệnh này. Repo khung: D-126 quyết giữ tự host
+  (chủ repo, 2026-11-08; D-400).
 
 ### Fixed
 
+- `subject.content` trừ cả bản tháng `DECISIONS-YYYY-MM.md` cạnh sổ chính — ghi quyết định G7 vào bản tháng không còn
+  làm GO-NO-GO đã ký về chờ người (AUD-HAR-329); lệnh bằng chứng mẫu #18 đúng cách máy đếm (AUD-HAR-328).
 - `install.py` chạy trên git worktree không còn ghi đường tuyệt đối của git hook (`/home/…/.git/hooks/*`) vào
   `git_hooks` của `.xtemplates/manifest.json`: ghi `.git/hooks/*` (git common dir) hay `core.hooksPath/<tên>` khi
   thư mục hook ở ngoài (AUD-HAR-325, D-397).
