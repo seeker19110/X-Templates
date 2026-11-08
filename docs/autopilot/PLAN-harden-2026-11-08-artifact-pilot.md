@@ -40,7 +40,7 @@ Mốc dài hạn là ít nhất 18/20 loại bước có tự động hóa đư�
 
 - [x] `T-3710` Chốt scope staging cô lập, contract biên nhận và danh mục đo — Gate: `python3 scripts/check-links.py`
 - [x] `T-3711` Release-check chặn Git đọc lỗi và cờ index che thay đổi, giữ hợp đồng JSON cũ (files: scripts/xt.py, tests/test_release_contract.py, CHANGELOG.md) — Gate: `gh pr checks 474 -R seeker19110/X-Templates --required`
-- [x] `T-3712` xboss đóng gói và kiểm archive, dùng marker/asset từ bản đang phục vụ và phát biên nhận (sau: T-3710) — Gate: `gh api 'repos/seeker19110/xboss/actions/runs?branch=ci%2Fstaging-artifact-pilot&per_page=30' --jq '[.workflow_runs[] | select(.name == "Staging artifact pilot" and .conclusion == "success") | .id] | unique | length >= 2' | grep -qx true`
+- [x] `T-3712` xboss đóng gói và kiểm archive, dùng marker/asset từ bản đang phục vụ và phát biên nhận (sau: T-3710) — Gate: `gh api 'repos/seeker19110/xboss/actions/runs?head_sha=7e831ce123bc638217770d4ee1e32692977f1eee' --jq '[.workflow_runs[] | select(.name == "Staging artifact pilot" and .conclusion == "success") | .id] | unique | length >= 2' | grep -qx true`
 - [x] `T-3713` Rà hai biên nhận staging từ hai run khác nhau, kiểm ca đối kháng và ghi số liệu baseline (sau: T-3712) — Gate: `test -s docs/ops/ARTIFACT-PILOT-2026-11-08.md`
 
 ## Mốc sau
