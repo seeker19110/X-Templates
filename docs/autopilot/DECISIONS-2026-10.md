@@ -895,7 +895,7 @@
 - Chọn: Ứng dụng web cục bộ xt.py app: http.server stdlib trên 127.0.0.1, HTML/CSS/JS thuần không build, API JSON gọi đúng hàm xt.py của CLI, app không chạy lệnh; thêm xt.py plan waves xếp task thành đợt song song; PLAN-3.14-app 11 lát 29 task (ADR-0038)
 - Lý do (tiêu chí chất lượng cuối): Tiêu chí 1: một nguồn sự thật (cùng hàm với CLI), app không chạy lệnh nên không vòng qua guard, loopback + token + kiểm Host/Origin chặn trang khác đọc dữ liệu. Tiêu chí 2: gói tách rời, import lười, xoá là về hiện trạng; API JSON dùng lại được cho phương án 3. Tiêu chí 3: 0 phụ thuộc runtime mới, giữ stdlib và coverage 100 %. Tiêu chí 4: một lệnh, offline, chạy cả ở dự án đích. Mặc định tự host (AGENTS.md §4)
 - Đường lùi: Revert PR Lát 0 (ADR-0038 + PLAN-3.14-app); nếu chủ repo muốn web app lưu trữ hay mobile: ADR mới thay ADR-0038, giữ Lát 1 (plan waves) vì độc lập với giao diện
-- Khi chạy thật (đề xuất, chủ dự án quyết ở G7): Khi cần nhiều người hoặc dùng trên điện thoại: web app lưu trữ (phương án 3) dùng lại API JSON của SPEC-app, cần chủ repo chọn hosting và đăng nhập
+- Khi chạy thật (chủ dự án đã quyết 2026-11-08 — giữ tự host `xt.py app`, chưa chuyển; xét lại khi thật sự cần nhiều người hay dùng trên điện thoại): đề xuất gốc — Khi cần nhiều người hoặc dùng trên điện thoại: web app lưu trữ (phương án 3) dùng lại API JSON của SPEC-app, cần chủ repo chọn hosting và đăng nhập
 
 ### D-127 · 2026-10-21T11:30:11+00:00 · Chủ repo 2026-10-21: giữ tối thiểu job CI trên dự án đích, ruleset chỉ quality + gitleaks (sau khi đo e2e X-Company chờ runner 6 phút vì ~40 job hai repo cùng tài khoản tranh trần job đồng thời)
 
