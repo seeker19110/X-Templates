@@ -310,3 +310,10 @@
 - Chọn: Trong cây dự án → tương đối dự án (như cũ); trong git common dir → '.git/' + đường tương đối common dir (vd .git/hooks/pre-commit, đúng với mọi bản sao); ngoài cả hai → 'core.hooksPath/<tên>' (không ghi đường máy)
 - Lý do (tiêu chí chất lượng cuối): (1) đúng và an toàn: manifest.json được commit — không lộ đường máy, giống nhau giữa bản sao chính và worktree; (2) giữ dạng tương đối cũ cho ca thường; (3) git_hooks chỉ để ghi nhận (AUD-HAR-204), không nơi nào đọc lại nên đổi dạng không phá
 - Đường lùi: Revert PR; shown_path ghi tuyệt đối như cũ
+
+### D-398 · 2026-11-08T01:54:45+00:00 · Dùng nguồn nào để xác minh artifact sau deploy trong pilot xboss?
+
+- Phương án: (1) Dùng SHA và health do workflow deploy báo. · (2) Staging cô lập tải archive đúng run, kiểm hash và đối chiếu HTTP với bản cài.
+- Chọn: Staging cô lập tải archive đúng run, kiểm hash và đối chiếu HTTP với bản cài.
+- Lý do (tiêu chí chất lượng cuối): Chủ dự án chọn staging cô lập ngày 2026-11-08. Hash archive và probe HTTP độc lập kiểm được lỗi tráo artifact hoặc route cũ trong khi dùng dữ liệu giả.
+- Đường lùi: Gỡ workflow pilot và bỏ biên nhận staging. Luồng production giữ quyền duyệt hiện hành.
