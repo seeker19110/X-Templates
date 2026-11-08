@@ -2352,6 +2352,98 @@ class DecisionLogsTest(unittest.TestCase):
         (self.dir / "DECISIONS.md").mkdir()  # không đọc được (thư mục): có thể giấu đề xuất → FAIL như trước
         self.assertEqual(xt._release_prod_switch(self.base)["result"], "FAIL")
 
+    def test_prod_switch_counts_undecided_by_id(self):
+        """AUD-HAR-327 (D-399): nhãn ghim nguyên văn; đề xuất CHƯA quyết = D-NNN có `PROD_SWITCH_LABEL` trừ D-NNN đã có
+        dòng `- Khi chạy thật đã quyết (D-NNN): …` ở sổ hoặc bản tháng bất kỳ; thông điệp nêu ID chờ và file thật."""
+        self.assertEqual(xt.PROD_SWITCH_LABEL, "Khi chạy thật (đề xuất, chủ dự án quyết ở G7):")
+        self.assertEqual(xt.PROD_DECIDED_LABEL, "Khi chạy thật đã quyết")
+        month = self.dir / "DECISIONS-2026-10.md"
+        month.write_text(f"### D-001 · t · q\n- {xt.PROD_SWITCH_LABEL} dịch vụ trả phí\n", encoding="utf-8")
+        main = self.dir / "DECISIONS.md"
+        head = main.read_text(encoding="utf-8")
+
+        def row() -> dict:
+            return xt._release_prod_switch(self.base)
+
+        r = row()
+        self.assertEqual((r["result"], r["level"]), ("N/A", "BLOCKER"))
+        self.assertIn("1 đề xuất", r["evidence"])
+        self.assertIn("D-001 (docs/autopilot/DECISIONS-2026-10.md)", r["evidence"])
+        self.assertIn("loop decide-prod --ref D-NNN", r["evidence"])
+        main.write_text(head + "### D-004 · t · q\n- Khi chạy thật đã quyết (D-003): giữ\n", encoding="utf-8")
+        self.assertEqual(row()["result"], "N/A")  # dòng quyết cho ID khác: vẫn chờ
+        for bad in (
+            "Khi chạy thật đã quyết (D-001): ",
+            "  - Khi chạy thật đã quyết (D-001): x",
+            "Khi chạy thật đã quyết (D-001): x",
+        ):
+            with self.subTest(bad=bad):
+                main.write_text(head + f"### D-004 · t · q\n{bad}\n", encoding="utf-8")
+                self.assertEqual(row()["result"], "N/A")  # không đúng dạng dòng máy đọc: vẫn chờ
+        main.write_text(head + "### D-004 · t · q\n- Khi chạy thật đã quyết (D-001): giữ tự host\n", encoding="utf-8")
+        r = row()
+        self.assertEqual(r["result"], "PASS", r)
+        self.assertIn("bản tháng", r["evidence"])
+        month.write_text(
+            f"- {xt.PROD_SWITCH_LABEL} ngoài mục\n### D-001 · t · q\n- {xt.PROD_SWITCH_LABEL} dịch vụ trả phí\n",
+            encoding="utf-8",
+        )
+        r = row()  # dòng đề xuất trước mọi tiêu đề `### D-NNN`: không quyết được theo ID → luôn chờ
+        self.assertEqual(r["result"], "N/A")
+        self.assertIn("1 đề xuất", r["evidence"])
+        self.assertIn("ngoài mục D-NNN (docs/autopilot/DECISIONS-2026-10.md)", r["evidence"])
+
+    def test_prod_proposals_and_pending(self):
+        text = (
+            f"x {xt.PROD_SWITCH_LABEL} a\n### D-007 · t · q {xt.PROD_SWITCH_LABEL} b\n"
+            f"- {xt.PROD_SWITCH_LABEL} c {xt.PROD_SWITCH_LABEL} d\n## D-009\n- {xt.PROD_SWITCH_LABEL} e\n"
+        )
+        got = xt.prod_proposals(text)
+        self.assertEqual(got, [(None, "a"), ("D-007", "b"), ("D-007", "c"), ("D-007", "d"), ("D-007", "e")])
+        texts = {"a.md": text, "b.md": "### D-008 · t · q\n- Khi chạy thật đã quyết (D-007): giữ\n"}
+        self.assertEqual(xt.prod_pending(texts), [(None, "a.md", "a")])
+        self.assertEqual(xt.prod_pending({"a.md": text})[1:2], [("D-007", "a.md", "b")])
+        self.assertEqual(xt.prod_pending({}), [])
+
+    def test_prod_decided_only_shown_and_after_proposal(self):
+        """AUD-HAR-331: dòng quyết chỉ tính khi người đọc thấy (`_markdown_shown`) và nằm trong mục `### D-MMM` có MMM
+        lớn hơn số ref (sổ chỉ thêm → quyết luôn sau đề xuất). Giả: (a) trong khối code/chú thích HTML, (b) mục trước
+        đề xuất, (c) ghi trước cho ID chưa có rồi đề xuất mới lấy ID đó, ngoài mọi mục → vẫn N/A."""
+        month = self.dir / "DECISIONS-2026-10.md"
+        month.write_text(f"### D-005 · t · q\n- {xt.PROD_SWITCH_LABEL} dịch vụ trả phí\n", encoding="utf-8")
+        main = self.dir / "DECISIONS.md"
+        head = main.read_text(encoding="utf-8")  # có `### D-003`
+        line = "- Khi chạy thật đã quyết (D-005): giữ tự host"
+        fakes = {
+            "rào ```": f"### D-006 · t · q\n```\n{line}\n```\n",
+            "rào ~~~": f"### D-006 · t · q\n~~~ md\n{line}\n~~~\n",
+            "chú thích HTML": f"### D-006 · t · q\n<!--\n{line}\n-->\n",
+            "chú thích một dòng": f"### D-006 · t · q\n<!-- {line} -->\n",
+            "mục trước đề xuất": f"### D-004 · t · q\n{line}\n",
+            "cùng mục đề xuất": f"### D-005 · t · q\n{line}\n",
+            "ngoài mọi mục": f"{line}\n",
+            "tiêu đề trong khối code": f"```\n### D-009 · t · q\n```\n{line}\n",
+        }
+        for name, extra in fakes.items():
+            with self.subTest(name):
+                file = main if name != "ngoài mọi mục" else month
+                base = head if file is main else month.read_text(encoding="utf-8")
+                file.write_text(extra + base if name == "ngoài mọi mục" else base + extra, encoding="utf-8")
+                self.assertEqual(xt._release_prod_switch(self.base)["result"], "N/A")
+                file.write_text(base, encoding="utf-8")
+        # (c): mục D-002 ghi trước dòng quyết cho D-005 khi D-005 chưa tồn tại; D-005 (đề xuất) đến sau
+        month.write_text(f"### D-002 · t · q\n{line}\n" + month.read_text(encoding="utf-8"), encoding="utf-8")
+        self.assertEqual(xt._release_prod_switch(self.base)["result"], "N/A")
+        main.write_text(head + f"### D-010 · t · q\n{line}\n", encoding="utf-8")  # hợp lệ: mục sau, hiện
+        self.assertEqual(xt._release_prod_switch(self.base)["result"], "PASS")
+        self.assertEqual(xt.prod_decided({"a.md": main.read_text(encoding="utf-8")}), {"D-005"})
+
+    def test_prod_decided_real_repo(self):
+        """Repo khung: đề xuất D-126 (bản tháng 2026-10) được quyết bởi D-400 (sổ chính) — vẫn tính theo luật mới."""
+        texts = xt.decision_texts(ROOT, ROOT / xt.DECISIONS_LOG)
+        self.assertIn("D-126", xt.prod_decided(texts))
+        self.assertNotIn("D-126", [i for i, _, _ in xt.prod_pending(texts)])
+
     def test_decision_at_reads_month_files(self):
         (self.dir / "DECISIONS-2026-10.md").write_text(
             "### D-002 · 2026-10-30T01:00:00+00:00 · PR #7: tách hay đóng?\n", encoding="utf-8"

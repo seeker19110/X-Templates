@@ -8451,11 +8451,17 @@ def _loop_block(args: argparse.Namespace, base: Path) -> int:
 
 DECISION_ID_RE = re.compile(r"^### D-(\d{3,})\b", re.M)
 PROD_SWITCH_LABEL = "Khi chạy thật (đề xuất, chủ dự án quyết ở G7):"
+# Dòng máy đọc chủ dự án quyết một đề xuất (D-399, AUD-HAR-327): `- Khi chạy thật đã quyết (D-NNN): <quyết định>` — đầu
+# dòng, D-NNN là mục chứa đề xuất, quyết định không rỗng. Chỉ `loop decide-prod` ghi, trong một mục D-NNN mới.
+PROD_DECIDED_LABEL = "Khi chạy thật đã quyết"
+PROD_DECIDED_RE = re.compile(rf"^- {re.escape(PROD_DECIDED_LABEL)} \((D-[0-9]{{3,}})\): \S", re.M)
+DECISION_REF_RE = re.compile(r"D-[0-9]{3,}")
 DECISIONS_HEADER = (
     "# Nhật ký quyết định tự duyệt\n\n"
     "> Ghi bởi `xt.py loop decide`. Phiên chính tự duyệt điểm quyết định theo tiêu chí chất lượng cuối "
     "(`LOOP-STOP-018`, ADR-0008 của khung). Người xem lại bất cứ lúc nào; đổi ý → quyết định mới ghi "
-    '"thay D-NNN", không sửa mục cũ.\n'
+    '"thay D-NNN", không sửa mục cũ. Chủ dự án quyết đề xuất "Khi chạy thật" bằng `xt.py loop decide-prod` '
+    "(mục mới), không đổi nhãn dòng cũ.\n"
 )
 
 
@@ -8483,6 +8489,52 @@ def decision_logs(log: Path) -> List[Path]:
     không). Tên sổ có ký tự glob (`[a]`) khớp nguyên văn. Mọi chỗ đọc DECISIONS đi qua đây; `loop decide` chỉ ghi `log`."""
     pattern = glob.escape(log.stem) + DECISION_MONTH_GLOB + glob.escape(log.suffix)
     return [*sorted(p for p in log.parent.glob(pattern) if p.is_file()), log]
+
+
+def decision_texts(base: Path, log: Path) -> Dict[str, str]:
+    """Nội dung sổ `log` và bản tháng (`decision_logs`), khoá là đường tính từ `base`; file vắng bỏ qua từng file
+    (AUD-HAR-214). Lỗi đọc khác (thư mục, quyền, không phải UTF-8) ném OSError/ValueError — người gọi quyết."""
+    texts: Dict[str, str] = {}
+    for p in decision_logs(log):
+        with contextlib.suppress(FileNotFoundError):
+            texts[p.relative_to(base).as_posix()] = p.read_text(encoding="utf-8")
+    return texts
+
+
+def prod_proposals(text: str) -> List[Tuple[Optional[str], str]]:
+    """Đề xuất "Khi chạy thật" (`loop decide --prod`) của một sổ: (D-NNN của mục `### D-NNN` chứa nó, nội dung sau
+    nhãn) cho MỖI lần `PROD_SWITCH_LABEL` xuất hiện (cả trong tiêu đề — chặt như đếm chuỗi cũ); trước mọi tiêu đề
+    D-NNN → ID None: không quyết được theo ID nên luôn chờ."""
+    out: List[Tuple[Optional[str], str]] = []
+    cur: Optional[str] = None
+    for line in text.splitlines():
+        if m := DECISION_ID_RE.match(line):
+            cur = f"D-{m.group(1)}"
+        out += [(cur, _one_line(rest)) for rest in line.split(PROD_SWITCH_LABEL)[1:]]
+    return out
+
+
+def prod_decided(texts: Dict[str, str]) -> Set[str]:
+    """D-NNN đã có dòng quyết HỢP LỆ ở bất kỳ sổ nào (AUD-HAR-331): dòng `PROD_DECIDED_RE` người đọc thấy
+    (`_markdown_shown` — không trong khối code/chú thích HTML, như dòng ký GO AUD-HAR-323), nằm trong mục `### D-MMM`
+    (tiêu đề cũng phải hiện) có MMM > NNN — sổ chỉ thêm nên quyết luôn sau đề xuất; `loop decide-prod` tự thoả. Dòng
+    ngoài mục, ở mục trước/cùng đề xuất (kể cả ghi trước cho ID chưa có) → không tính."""
+    out: Set[str] = set()
+    for text in texts.values():
+        cur = -1
+        for line in _markdown_shown(text).split("\n"):
+            if m := DECISION_ID_RE.match(line):
+                cur = int(m[1])
+            elif (d := PROD_DECIDED_RE.match(line)) and cur > int(d[1][2:]):
+                out.add(d[1])
+    return out
+
+
+def prod_pending(texts: Dict[str, str]) -> List[Tuple[Optional[str], str, str]]:
+    """Đề xuất CHƯA quyết qua mọi sổ `texts` (file → nội dung): (D-NNN hoặc None, file, nội dung) của các đề xuất trừ
+    D-NNN có dòng quyết hợp lệ (`prod_decided`) ở BẤT KỲ sổ nào (quyết ở sổ hiện hành, đề xuất ở bản tháng — D-399)."""
+    decided = prod_decided(texts)
+    return [(i, f, p) for f, t in texts.items() for i, p in prod_proposals(t) if i is None or i not in decided]
 
 
 def _git_glob_escape(text: str) -> str:
@@ -8542,22 +8594,81 @@ def _loop_decide(args: argparse.Namespace, base: Path) -> int:
     if problems:
         print("✗ " + "; ".join(problems), file=sys.stderr)
         return 2
-    log = (base / args.log).resolve()
-    if not log.is_relative_to(base.resolve()) or log.is_dir():  # không ghi ra ngoài dự án / vào thư mục
-        print(f"✗ --log phải là file trong dự án: {args.log}", file=sys.stderr)
+    log = _decision_log(base, args.log)
+    if log is None:
         return 2
-    text = log.read_text(encoding="utf-8") if log.exists() else DECISIONS_HEADER
-    did = f"D-{_last_decision(text, base, log.relative_to(base.resolve())) + 1:03d}"
-    entry = (
-        f"\n### {did} · {now_iso()} · {question}\n\n"
-        f"- Phương án: " + " · ".join(f"({i}) {o}" for i, o in enumerate(options, 1)) + "\n"
+    body = (
+        "- Phương án: " + " · ".join(f"({i}) {o}" for i, o in enumerate(options, 1)) + "\n"
         f"- Chọn: {chosen}\n- Lý do (tiêu chí chất lượng cuối): {why}\n- Đường lùi: {revert}\n"
     )
     prod = _one_line(args.prod or "")
     if prod:  # mặc định tự host khi phát triển; đề xuất dịch vụ cho chạy thật gom ở đây cho G7 (ADR-0008)
-        entry += f"- {PROD_SWITCH_LABEL} {prod}\n"
-    write_atomic(log, text.rstrip("\n") + "\n" + entry)
+        body += f"- {PROD_SWITCH_LABEL} {prod}\n"
+    did = _append_decision(base, log, question, body)
     print(f"✓ {did} tự duyệt: {chosen} → {args.log}")
+    return 0
+
+
+def _decision_log(base: Path, rel: str) -> Optional[Path]:
+    """`--log` đã resolve khi là file trong dự án (không ghi ra ngoài dự án / vào thư mục); không → in lỗi, None."""
+    log = (base / rel).resolve()
+    if not log.is_relative_to(base.resolve()) or log.is_dir():
+        print(f"✗ --log phải là file trong dự án: {rel}", file=sys.stderr)
+        return None
+    return log
+
+
+def _append_decision(base: Path, log: Path, title: str, body: str) -> str:
+    """CHỈ THÊM mục `### D-NNN · <giờ> · title` + `body` vào cuối `log` (chưa có → tạo kèm DECISIONS_HEADER); số
+    D-NNN kế tiếp qua `_last_decision`. Trả D-NNN."""
+    text = log.read_text(encoding="utf-8") if log.exists() else DECISIONS_HEADER
+    did = f"D-{_last_decision(text, base, log.relative_to(base.resolve())) + 1:03d}"
+    write_atomic(log, text.rstrip("\n") + "\n" + f"\n### {did} · {now_iso()} · {title}\n\n{body}")
+    return did
+
+
+def _prod_ref_problem(texts: Dict[str, str], ref: str, where: str) -> Tuple[Optional[str], str]:
+    """(lý do từ chối hoặc None, nội dung đề xuất) cho `loop decide-prod --ref`: `ref` đúng dạng D-NNN, có đề xuất
+    `PROD_SWITCH_LABEL` trong mục đó ở sổ/bản tháng, chưa có dòng quyết hợp lệ (`prod_decided`) ở bất kỳ file nào."""
+    if not DECISION_REF_RE.fullmatch(ref):
+        return f"--ref phải là D-NNN (vd D-126): {ref}", ""
+    found = [p for t in texts.values() for i, p in prod_proposals(t) if i == ref]
+    if not found:
+        return f'không có đề xuất "Khi chạy thật" của {ref} trong {where} và bản tháng', ""
+    if ref in prod_decided(texts):
+        return f"{ref} đã quyết (có dòng `- {PROD_DECIDED_LABEL} ({ref}): …`) — không ghi lần hai", ""
+    return None, " · ".join(found)
+
+
+def _loop_decide_prod(args: argparse.Namespace, base: Path) -> int:
+    """Chủ dự án quyết một đề xuất "Khi chạy thật" (GO-NO-GO #18, D-399): THÊM mục D-NNN mới vào sổ hiện hành với dòng
+    máy đọc `- Khi chạy thật đã quyết (D-ref): <quyết định>` (`PROD_DECIDED_RE`); mục cũ giữ nguyên (`LOOP-STOP-019`)."""
+    ref, choice = _one_line(args.ref), _one_line(args.choice)
+    if not choice:
+        print("✗ --choice không được rỗng — ghi quyết định của chủ dự án", file=sys.stderr)
+        return 2
+    log = _decision_log(base, args.log)
+    if log is None:
+        return 2
+    try:
+        texts = decision_texts(base.resolve(), log)
+    except (OSError, ValueError) as exc:  # bản tháng hỏng có thể giấu dòng quyết → không ghi
+        print(f"✗ không đọc được sổ quyết định: {exc}", file=sys.stderr)
+        return 2
+    problem, proposal = _prod_ref_problem(texts, ref, args.log)
+    if problem:
+        print(f"✗ {problem}", file=sys.stderr)
+        return 2
+    title = f'Chủ dự án quyết đề xuất "Khi chạy thật" của {ref}: {proposal}'
+    body = (  # đủ trường như `loop decide` (app SPEC-app §3 và người đọc dùng chung một dạng mục)
+        f"- Phương án: (1) Chuyển theo đề xuất của {ref} · (2) Giữ tự host\n- Chọn: {choice}\n"
+        "- Lý do (tiêu chí chất lượng cuối): chủ dự án quyết ở G7 (GO-NO-GO #18) — điểm dừng về hành động, "
+        "không phải phiên tự duyệt\n"
+        f"- Đường lùi: đổi ý → `loop decide` mới nhắc mục này và {ref} (kèm `--prod` nếu chuyển dịch vụ)\n"
+        f"- {PROD_DECIDED_LABEL} ({ref}): {choice}\n"
+    )
+    did = _append_decision(base, log, title, body)
+    print(f"✓ {did} chủ dự án quyết đề xuất {ref}: {choice} → {args.log}")
     return 0
 
 
@@ -9395,6 +9506,7 @@ LOOP_HANDLERS: Dict[str, Callable[[argparse.Namespace, Path], int]] = {
     "run": _loop_run,
     "block": _loop_block,
     "decide": _loop_decide,
+    "decide-prod": _loop_decide_prod,
     "defer": _loop_defer,
     "ci-triage": _loop_ci_triage,
     "triage-local": _loop_triage_local,
@@ -12304,14 +12416,12 @@ def _release_tree(base: Path) -> Dict[str, str]:
 
 
 def _release_prod_switch(base: Path, log: str = DECISIONS_LOG) -> Dict[str, str]:
-    """Đề xuất "Khi chạy thật" (`loop decide --prod`) là việc chủ dự án quyết ở G7 (GO-NO-GO #18) — máy chỉ đếm, trên sổ
-    và các bản tháng của nó (T-3651). File vắng bỏ qua từng file (AUD-HAR-214: sổ chính dời hết sang bản tháng vẫn đếm
-    bản tháng); N/A "không có" chỉ khi không file nào tồn tại."""
-    texts: List[str] = []
+    """Đề xuất "Khi chạy thật" (`loop decide --prod`) là việc chủ dự án quyết ở G7 (GO-NO-GO #18) — máy chỉ đếm đề xuất
+    CHƯA quyết (`prod_pending`: trừ D-NNN có dòng `loop decide-prod`, D-399), trên sổ và các bản tháng của nó (T-3651).
+    File vắng bỏ qua từng file (AUD-HAR-214: sổ chính dời hết sang bản tháng vẫn đếm bản tháng); N/A "không có" chỉ
+    khi không file nào tồn tại. Thông điệp nêu ID chờ và file thật."""
     try:
-        for p in decision_logs(base / log):
-            with contextlib.suppress(FileNotFoundError):
-                texts.append(p.read_text(encoding="utf-8"))
+        texts = decision_texts(base, base / log)
     except (
         OSError,
         ValueError,
@@ -12319,15 +12429,17 @@ def _release_prod_switch(base: Path, log: str = DECISIONS_LOG) -> Dict[str, str]
         return _release_row("prod_switch", "FAIL", f"không đọc được {log}: {exc}")
     if not texts:
         return _release_row("prod_switch", "N/A", f"không có {log}", "SHOULD")
-    n = "".join(texts).count(PROD_SWITCH_LABEL)
-    if n:
+    pending = prod_pending(texts)
+    if pending:
+        where = ", ".join(f"{i or 'ngoài mục D-NNN'} ({f})" for i, f, _ in pending)
         return _release_row(
             "prod_switch",
             "N/A",
-            f'{n} đề xuất "Khi chạy thật" trong {log} — chủ dự án quyết từng mục (người, GO-NO-GO #18)',
+            f'{len(pending)} đề xuất "Khi chạy thật" chờ quyết: {where} — chủ dự án quyết từng mục, ghi bằng '
+            "`xt.py loop decide-prod --ref D-NNN --choice …` (người, GO-NO-GO #18)",
             "BLOCKER",
         )
-    return _release_row("prod_switch", "PASS", f'không có đề xuất "Khi chạy thật" chờ quyết trong {log}')
+    return _release_row("prod_switch", "PASS", f'không có đề xuất "Khi chạy thật" chờ quyết trong {log} và bản tháng')
 
 
 def _release_phase(base: Path) -> Dict[str, str]:
@@ -12895,11 +13007,20 @@ def _release_artifacts(base: Path) -> Tuple[Optional[Dict[str, str]], List[Dict[
     return _release_row("artifacts", "PASS", f"{len(arts)} artifact, digest khớp sidecar (nếu có)"), arts
 
 
+_DECISIONS_STEM, _DECISIONS_SUFFIX = os.path.splitext(DECISIONS_LOG)
+# Bản tháng của sổ chính (`decision_logs`, T-3651): `docs/autopilot/DECISIONS-YYYY-MM.md` — mẫu glob không có `*`,
+# cùng nghĩa ở `fnmatch` và pathspec `:(glob)`; chỉ thư mục sổ chính (AUD-HAR-329).
+DECISIONS_MONTH = _DECISIONS_STEM + DECISION_MONTH_GLOB + _DECISIONS_SUFFIX
+
+
 def _subject_excluded(path: str) -> bool:
-    """File ngoài `subject.content` (D-393): `GO-NO-GO*.md` nằm TRỰC TIẾP ở `GO_NO_GO_DIRS`, sổ `DECISIONS_LOG`,
-    `PROGRESS.md` gốc, `.autopilot/` — hẹp hơn `_signoff_excluded` (theo tên ở mọi cấp: `src/DECISIONS.md` là mã)."""
+    """File ngoài `subject.content` (D-393): `GO-NO-GO*.md` nằm TRỰC TIẾP ở `GO_NO_GO_DIRS`, sổ `DECISIONS_LOG` và bản
+    tháng của nó (`DECISIONS_MONTH`, AUD-HAR-329), `PROGRESS.md` gốc, `.autopilot/` — hẹp hơn `_signoff_excluded` (theo
+    tên ở mọi cấp: `src/DECISIONS.md`, `src/DECISIONS-2026-10.md` là mã)."""
     folder, _, name = path.rpartition("/")
     if path.startswith(".autopilot/") or path in ("PROGRESS.md", DECISIONS_LOG):
+        return True
+    if fnmatch.fnmatchcase(path, DECISIONS_MONTH):
         return True
     return (folder or ".") in GO_NO_GO_DIRS and fnmatch.fnmatchcase(name, "GO-NO-GO*.md")
 
@@ -12907,6 +13028,7 @@ def _subject_excluded(path: str) -> bool:
 SUBJECT_EXCLUDE = [  # pathspec cùng tập `_subject_excluded`; `glob`: `*` không qua `/`
     *(f":(exclude,glob){'' if d == '.' else d + '/'}GO-NO-GO*.md" for d in GO_NO_GO_DIRS),
     f":(exclude,literal){DECISIONS_LOG}",
+    f":(exclude,glob){DECISIONS_MONTH}",
     ":(exclude,literal)PROGRESS.md",
 ]
 
@@ -19101,7 +19223,14 @@ def build_parser() -> argparse.ArgumentParser:
     ld.add_argument("--why", required=True, help="lý do theo tiêu chí chất lượng cuối")
     ld.add_argument("--revert", required=True, help="đường lùi nếu người đổi ý")
     ld.add_argument("--prod", help="đề xuất chuyển sang dịch vụ khác khi chạy thật (phương án chọn là tự host)")
-    ld.add_argument("--log", default="docs/autopilot/DECISIONS.md")
+    ld.add_argument("--log", default=DECISIONS_LOG)
+    ldp = lsub.add_parser(
+        "decide-prod",
+        help='chủ dự án quyết một đề xuất "Khi chạy thật" (GO-NO-GO #18): THÊM mục D-NNN mới, không sửa mục cũ (D-399)',
+    )
+    ldp.add_argument("--ref", required=True, help="D-NNN của mục có đề xuất `--prod` (sổ hoặc bản tháng)")
+    ldp.add_argument("--choice", required=True, help="quyết định của chủ dự án (chuyển dịch vụ nào / giữ tự host)")
+    ldp.add_argument("--log", default=DECISIONS_LOG, help="sổ hiện hành để ghi (đọc kèm bản tháng)")
     lrs = lsub.add_parser("resume")
     lrs.add_argument("--reason", default="người đã xử lý điểm dừng")
     lat = lsub.add_parser("attach", help="gắn phiên hiện tại vào vòng đang chạy; giữ việc chờ, đếm lỗi (ADR-0051)")
