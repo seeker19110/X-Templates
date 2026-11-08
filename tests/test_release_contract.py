@@ -8,6 +8,7 @@ import gc
 import hashlib
 import json
 import os
+import subprocess
 import sys
 import time
 import unittest
@@ -447,6 +448,120 @@ class PromotionTest(ReleaseCase):
         self.assertEqual(p["reasons"], ["docs/ops/GO-NO-GO-v1.2.0.md"])
         _, out, _ = run_main("release-check")
         self.assertIn("promotion: approved", out)
+
+    def test_unreadable_git_index_blocks_promotion(self):
+        tracked = self.repo / "app.py"
+        tracked.write_text("print(1)\n", encoding="utf-8")
+        self.setup_xt()
+        self.go_no_go()
+        self.assertEqual(self.promotion()[2]["state"], "approved")
+
+        tracked.write_text("print(2)\n", encoding="utf-8")
+        self.assertEqual(self.promotion()[2]["reasons"], ["tree"])
+        (self.repo / ".git" / "index").write_bytes(b"corrupt index\n")
+
+        rc, result, promotion = self.promotion()
+        tree = self.by_id(result)["tree"]
+        self.assertEqual((rc, result["verdict"], promotion["state"], tree["result"]), (1, "NO-GO", "blocked", "FAIL"))
+        self.assertIn("git status", tree["evidence"])
+        self.assertIsNone(result["subject"]["tree"])
+        self.assertIsNone(result["subject"]["content"])
+
+    def test_index_visibility_flags_block_promotion(self):
+        tracked = self.repo / "app.py"
+        tracked.write_text("print(1)\n", encoding="utf-8")
+        self.setup_xt()
+        self.go_no_go()
+        for flag in ("assume-unchanged", "skip-worktree"):
+            with self.subTest(flag=flag):
+                self.git("update-index", f"--{flag}", tracked.name)
+                tracked.write_text("print(2)\n", encoding="utf-8")
+                self.assertEqual(self.git("status", "--porcelain"), "")
+                rc, result, promotion = self.promotion()
+                self.assertEqual((rc, result["fails"], promotion["state"]), (1, ["tree"], "blocked"))
+                self.assertIn(flag, self.by_id(result)["tree"]["evidence"])
+                self.assertIsNone(result["subject"]["tree"])
+                self.assertIsNone(result["subject"]["content"])
+                self.git("update-index", f"--no-{flag}", tracked.name)
+                self.git("restore", "--", tracked.name)
+                self.assertEqual(self.promotion()[2]["state"], "approved")
+
+    def test_sparse_checkout_blocks_promotion(self):
+        source = self.repo / "src"
+        source.mkdir()
+        tracked = source / "app.py"
+        tracked.write_text("print(1)\n", encoding="utf-8")
+        self.setup_xt()
+        self.go_no_go()
+        self.git("sparse-checkout", "set", "docs")
+        self.assertFalse(tracked.exists())
+        rc, result, promotion = self.promotion()
+        self.assertEqual((rc, result["fails"], promotion["state"]), (1, ["tree"], "blocked"))
+        self.assertIn("checkout đầy đủ", self.by_id(result)["tree"]["evidence"])
+        self.git("sparse-checkout", "disable")
+        self.assertEqual(self.promotion()[2]["state"], "approved")
+
+    def test_failed_release_git_reads_block_promotion(self):
+        self.setup_xt()
+        self.go_no_go()
+        real_git = xt._git
+        for command, flag in (
+            ("ls-files", "-v"),
+            ("ls-tree", "-z"),
+            ("diff", "--binary"),
+            ("ls-files", "--others"),
+        ):
+            with self.subTest(command=command, flag=flag):
+
+                def failed_read(cwd, *args, **kwargs):
+                    params = args[2:] if args[0] == "-c" else args
+                    if cwd == self.repo and params[0] == command and flag in params:
+                        return subprocess.CompletedProcess(params, 128, "", "read failed")
+                    return real_git(cwd, *args, **kwargs)
+
+                with unittest.mock.patch.object(xt, "_git", side_effect=failed_read):
+                    rc, result, promotion = self.promotion()
+                self.assertEqual((rc, result["fails"], promotion["state"]), (1, ["tree"], "blocked"))
+                self.assertIn(f"git {command}", self.by_id(result)["tree"]["evidence"])
+                self.assertIsNone(result["subject"]["tree"])
+                self.assertIsNone(result["subject"]["content"])
+
+    def test_git_launch_error_blocks_promotion(self):
+        self.setup_xt()
+        self.go_no_go()
+        real_git = xt._git
+
+        def failed_status(cwd, *args, **kwargs):
+            if cwd == self.repo and args[:3] == ("-c", "core.quotePath=false", "status"):
+                raise OSError("git unavailable")
+            return real_git(cwd, *args, **kwargs)
+
+        with unittest.mock.patch.object(xt, "_git", side_effect=failed_status):
+            rc, result, promotion = self.promotion()
+        self.assertEqual((rc, result["fails"], promotion["state"]), (1, ["tree"], "blocked"))
+        self.assertIn("không chạy được `git status`", self.by_id(result)["tree"]["evidence"])
+
+    def test_head_change_during_fingerprint_blocks_promotion(self):
+        self.setup_xt()
+        self.go_no_go()
+        real_read = xt._release_git_stdout
+        for changed_read in (2, 3):
+            with self.subTest(changed_read=changed_read):
+                reads = 0
+
+                def moving_head(cwd, command, *args):
+                    nonlocal reads
+                    if command == "rev-parse":
+                        reads += 1
+                        if reads == changed_read:
+                            return "0" * 40 + "\n"
+                    return real_read(cwd, command, *args)
+
+                with unittest.mock.patch.object(xt, "_release_git_stdout", side_effect=moving_head):
+                    rc, result, promotion = self.promotion()
+                self.assertEqual((rc, result["fails"], promotion["state"]), (1, ["tree"], "blocked"))
+                self.assertIn("HEAD đổi", self.by_id(result)["tree"]["evidence"])
+                self.assertIsNone(result["subject"]["content"])
 
     def test_decision_allowlist(self):
         """Review lát A 🔴1: chỉ ô đúng GO (kèm phiên bản được) là duyệt; biến thể NO-GO/từ chối → `rejected`; ô trống,

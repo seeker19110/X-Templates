@@ -11,6 +11,8 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
 - `install.py` chạy trên git worktree không còn ghi đường tuyệt đối của git hook (`/home/…/.git/hooks/*`) vào
   `git_hooks` của `.xtemplates/manifest.json`: ghi `.git/hooks/*` (git common dir) hay `core.hooksPath/<tên>` khi
   thư mục hook ở ngoài (AUD-HAR-325, D-397).
+- `release-check` chặn phát hành và để trống vân tay Git trong JSON khi lỗi đọc Git, HEAD đổi trong lúc kiểm, hoặc index
+  có `assume-unchanged`/`skip-worktree` che tệp tracked. Dùng checkout đầy đủ, sạch cho cổng phát hành.
 
 ## [3.32.0] - 2026-11-07
 
