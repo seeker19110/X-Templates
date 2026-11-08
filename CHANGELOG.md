@@ -6,6 +6,12 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
 
 ## [Unreleased]
 
+### Changed
+
+- Mẫu `GO-NO-GO.md` #18: chủ dự án quyết một đề xuất "Khi chạy thật" thì đổi nhãn dòng đó thành `Khi chạy thật (chủ
+  dự án đã quyết YYYY-MM-DD — <quyết định>): đề xuất gốc — …` — hàng `prod_switch` của `release-check` chỉ đếm nhãn
+  chưa quyết (trước đây chưa có cách đóng). Repo khung: D-126 đã quyết giữ tự host (2026-11-08).
+
 ### Fixed
 
 - `install.py` chạy trên git worktree không còn ghi đường tuyệt đối của git hook (`/home/…/.git/hooks/*`) vào

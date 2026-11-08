@@ -1,7 +1,7 @@
 ---
 title: Mẫu GO-NO-GO
 kind: template
-updated: 2026-11-07
+updated: 2026-11-08
 ---
 
 # Mẫu GO-NO-GO.md — báo cáo phát hành
@@ -53,7 +53,7 @@ subject: digest <64 hex — chỉ khi khai `release_artifacts`>
 | 15 | SHOULD | Runbook được người không xây chạy thử | | | docs/handover/runbook-test-<ngày>.md | |
 | 16 | SHOULD | Sự kiện đo cho tính năng mới có schema, dashboard baseline ghi | | | analytics/events.schema.json; METRICS.md | |
 | 17 | SHOULD | Tài liệu khớp code (README, PROJECT, ADR không lỗi thời) | | | review <ngày> | |
-| 18 | BLOCKER | Mọi đề xuất "Khi chạy thật" (dịch vụ thay phần tự host) đã được chủ dự án quyết: chuyển (khoá/tài khoản đã cấu hình qua secret store) hoặc giữ tự host (có người vận hành, backup) | | | `rg -n "Khi chạy thật" docs/autopilot/DECISIONS.md` → từng D-NNN có quyết định ghi ở mục 4 | |
+| 18 | BLOCKER | Mọi đề xuất "Khi chạy thật" (dịch vụ thay phần tự host) đã được chủ dự án quyết: chuyển (khoá/tài khoản đã cấu hình qua secret store) hoặc giữ tự host (có người vận hành, backup) | | | `rg -n "Khi chạy thật" docs/autopilot/DECISIONS.md` → từng D-NNN có quyết định ghi ở mục 4; quyết xong, đổi nhãn dòng đó thành `Khi chạy thật (chủ dự án đã quyết YYYY-MM-DD — <quyết định>): đề xuất gốc — …` (giữ đề xuất làm dấu vết) — hàng `prod_switch` chỉ đếm nhãn chưa quyết | |
 | 19 | NICE | Tối ưu mã nguồn: dead code/dependency thừa đã rà | | | knip/depcheck output | |
 | 20 | BLOCKER (M/L) · SHOULD (S) | **Người** đã dùng thử luồng chính trên bản ứng viên và đọc SPEC (ca biên) + `THREAT-MODEL.md` — xác nhận spec, UX, bảo mật một lần tại đây, không ở giữa `/complete` (ADR-0048); máy không điền được | — | real-path | <bản/URL đã thử, ngày> | <tên · ngày — bắt buộc> |
 | 21 | <mức> | <mục đặc thù hồ sơ/ngành> | | | | |
