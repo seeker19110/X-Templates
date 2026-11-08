@@ -17,11 +17,26 @@ Cả hai lượt cùng scope `staging-isolated`, dùng PostgreSQL dùng một l�
 - [PR xboss #719](https://github.com/seeker19110/xboss/pull/719) là nhánh pilot. So diff với main xác nhận workflow VPS, release, `deploy.sh` và GO-NO-GO giữ nguyên. GitHub không ghi deployment Preview hoặc Production cho SHA pilot.
 - PR X-Templates #474 gia cố cổng release riêng. 67 test trên Python 3.14 và 38 test mục tiêu trên Python 3.11 exit 0. Dòng và nhánh thay đổi đều được đo coverage. Cả hai job GitHub Actions `quality` và `coverage` đều đạt. Bản vá ở checkout gốc được giữ nguyên. [PR #474](https://github.com/seeker19110/X-Templates/pull/474) · [Run 42436533849](https://github.com/seeker19110/X-Templates/actions/runs/42436533849)
 
+## Xác minh lại sau khi gia cố PR
+
+Trên commit pilot ban đầu, CI chung báo lệch định dạng đặc tả và kiểm kê route tự sinh. CodeQL nêu một khoảng đua giữa kiểm tra và đọc manifest cùng một lời gọi handler theo khóa HTTP trong fixture. Bản sửa đọc và kiểm loại manifest trên cùng file descriptor với `O_NOFOLLOW`, dùng `Map.get` cho fixture và sinh lại kiểm kê theo `main` đã cập nhật. [CI ban đầu](https://github.com/seeker19110/xboss/actions/runs/42436772424) · [Bản sửa](https://github.com/seeker19110/xboss/commit/7e149760)
+
+Commit `c64020edc1ae9c3049273d33b962d5df9804885f` đạt thêm hai lượt độc lập. Cả hai biên nhận `verified` khớp SHA nguồn, run/attempt, digest archive, digest manifest, Build ID và đủ bốn probe HTTP 200.
+
+| Run | Trigger | Giờ Việt Nam | SHA-256 archive đã đối chiếu | Build ID quan sát | Probe HTTP đạt |
+| --- | ------- | ------------ | --------------------------- | ----------------- | -------------- |
+| [42438366638](https://github.com/seeker19110/xboss/actions/runs/42438366638) | `push` | 09:26:21 | `3bab7126315b5209e59349f2ccaf580b44da767f07d61d31dd8bdc281ad8ad8c` | `Ym9AqRS7ArSR9TzrjlPQT` | 4/4 |
+| [42438370093](https://github.com/seeker19110/xboss/actions/runs/42438370093) | `pull_request` | 09:26:34 | `254d6c413f97e319d12d0e86f836b21e131e370ade2d2272e6f186fcf13625dd` | `EeH125OO2XUtf50UQ3YYC` | 4/4 |
+
+Workflow duyệt và triển khai production tiếp tục theo cấu hình trên `main`. [CI chung](https://github.com/seeker19110/xboss/actions/runs/42438370125) · [CodeQL](https://github.com/seeker19110/xboss/actions/runs/42438370186)
+
 ## Diễn tập sau khi pilot đạt
+
+Hai diễn tập dùng commit đã đạt pilot ban đầu `ab7389aa9901d329cd7f1081311e498c3c4ba5ed`.
 
 ### Rollback ứng dụng
 
-Hai archive CI trong bảng được tải và cài riêng, kiểm digest archive, manifest và Build ID với biên nhận gốc. A dùng run `42436743483`, B dùng run `42436772427`. Cả hai chạy Next trên cùng PostgreSQL giả đã migrate. Tuyến loopback phục vụ A rồi B và verifier xác nhận đủ bốn probe ở cả hai lượt.
+Hai archive CI của lượt pilot ban đầu được tải và cài riêng, kiểm digest archive, manifest và Build ID với biên nhận gốc. A dùng run `42436743483`, B dùng run `42436772427`. Cả hai chạy Next trên cùng PostgreSQL giả đã migrate. Tuyến loopback phục vụ A rồi B và verifier xác nhận đủ bốn probe ở cả hai lượt.
 
 Dừng B khiến readiness qua tuyến chung trả HTTP 502. Chuyển lại A đang chạy sẵn khôi phục HTTP 200 sau 0,022 giây và trả `verified` sau 1,437 giây. Digest, Build ID và cả bốn probe của A khớp lượt trước khi chuyển. Lượt tải đầu hết hạn ở 120 giây. Lượt tải lại hoàn tất và đo thời gian kể từ lúc dừng B, sau khi cả hai bản đã sẵn sàng. Hai archive khác nhau cùng SHA nguồn, nên tương thích schema giữa các commit và rollback trên VPS là phép kiểm riêng.
 
@@ -35,6 +50,6 @@ Lượt sau đạt trên hai container PostgreSQL 16 dùng một lần. SHA-256 
 
 ## Phạm vi phép đo
 
-Hai lượt xác nhận bốn bước nhóm deploy trong PLAN trên staging cô lập. Mẫu này chưa đủ cho tỷ lệ vận hành 90% của cả vòng đời. Pilot dùng artifact cùng workflow run và SHA-256 metadata nối giữa hai job. Việc ký provenance và kiểm trên môi trường deploy bền là mốc riêng.
+Bốn lượt xác nhận bốn bước nhóm deploy trong PLAN trên staging cô lập. Mốc 90% của cả vòng đời cần đo qua các chu kỳ thật như đã định trong PLAN. Pilot dùng artifact cùng workflow run và SHA-256 metadata nối giữa hai job. Việc ký provenance và kiểm trên môi trường deploy bền là mốc riêng.
 
 PLAN tại [đây](../autopilot/PLAN-harden-2026-11-08-artifact-pilot.md). Quyết định D-398 ghi trong [sổ quyết định](../autopilot/DECISIONS.md).
