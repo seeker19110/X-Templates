@@ -25,6 +25,16 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
   chặn như AUD-SEC-498.
 - Nghiên cứu [nâng tự động hoá tới mức máy làm được](research/2026-11-08-full-automation.md): kiểm kê 247 điểm chờ
   người, định nghĩa "máy không thể", phân loại, lát triển khai.
+
+## [3.33.0] - 2026-11-08
+
+**Dự án đích: chạy lại `install.py`.** Đề xuất "Khi chạy thật" nay đóng bằng `xt.py loop decide-prod --ref D-NNN
+--choice …` (mục thêm mới, sổ chỉ thêm) — mẫu GO-NO-GO #18 và `LOOP-STOP-020` trỏ lệnh này; ghi quyết định vào bản tháng
+`DECISIONS-YYYY-MM.md` không còn làm GO-NO-GO đã ký về `pending_human`. Không đổi ID/mức mục checklist, không khoá
+`xt.yaml` mới.
+
+### Added
+
 - `xt.py loop decide-prod --ref D-NNN --choice …`: ghi quyết định của chủ dự án cho một đề xuất "Khi chạy thật" bằng
   mục THÊM mới (dòng `- Khi chạy thật đã quyết (D-NNN): …`) — sổ vẫn chỉ thêm (`LOOP-STOP-019`); hàng `prod_switch`
   của `release-check` đếm đề xuất chưa quyết theo ID trên sổ và mọi bản tháng (trước đây chưa có cách đóng —
