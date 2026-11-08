@@ -13331,7 +13331,8 @@ def _release_promotion(base: Path, fails: List[str], human: List[str], subject: 
     """`blocked` (hàng BLOCKER FAIL) · `rejected` (một dòng ký từ chối ở bất kỳ GO-NO-GO nào của VERSION) ·
     `pending_human` (còn việc người, chữ ký thiếu/không phải GO/hết hạn/chưa gắn subject) · `approved`. Máy không nâng
     `pending_human` (ADR-0068 câu 3): "đã duyệt" là một dòng ký §5 — của người, hoặc của agent qua `release-sign` khi
-    dự án khai `release_signoff: agent` (ADR-0074); `by` của `approved` liệt kê ô tên đã ký (`agent` = agent ký)."""
+    dự án khai `release_signoff: agent` (ADR-0074); `by` của `approved` liệt kê ô tên đã ký (`agent` = agent ký). Dòng
+    ô tên `agent` khi khoá không có hiệu lực (`release_agent_signoff`) → `pending_human` (review #480)."""
     if fails:
         return {"state": "blocked", "reasons": fails}
     docs = _signed_go_no_go(base)
@@ -13347,6 +13348,14 @@ def _release_promotion(base: Path, fails: List[str], human: List[str], subject: 
     if pending:
         return {"state": "pending_human", "reasons": pending}
     by = sorted({name for _, text in docs for name in _go_signers(text)})
+    if any(name.casefold() == RELEASE_AGENT_NAME for name in by) and not release_agent_signoff(base):
+        return {
+            "state": "pending_human",
+            "reasons": [
+                f"dòng ký ô tên `{RELEASE_AGENT_NAME}`: `{RELEASE_SIGNOFF_KEY}: agent` chưa có hiệu lực (cần ở cả xt.yaml"
+                " cây làm việc lẫn nhánh chính, ADR-0074) — người ký"
+            ],
+        }
     return {"state": "approved", "reasons": [rel for rel, _ in docs], "by": by}
 
 
@@ -13456,8 +13465,9 @@ def release_agent_signoff(base: Path) -> bool:
     return _main_key_is(base, RELEASE_SIGNOFF_KEY, RELEASE_AGENT_NAME)
 
 
-def _sign_doc(base: Path, file: str) -> Tuple[str, str]:
-    """(đường tương đối, nội dung) của GO-NO-GO `v<VERSION>` sẽ ký: `--file` phải là một trong các file đó; vắng → đúng một."""
+def _sign_doc(base: Path, file: str) -> Tuple[str, str, str]:
+    """(đường tương đối, nội dung, VERSION) của GO-NO-GO `v<VERSION>` sẽ ký: `--file` phải là một trong các file đó;
+    vắng → đúng một."""
     try:
         version = (base / "VERSION").read_text(encoding="utf-8").strip()
         docs = list(_go_no_go_docs(base, version))
@@ -13469,7 +13479,43 @@ def _sign_doc(base: Path, file: str) -> Tuple[str, str]:
     if len(docs) != 1:
         names = ", ".join(rel for rel, _ in docs) or "không có"
         raise ReleaseSignError(f"cần đúng một GO-NO-GO của v{version} (`--file`); thấy: {names}")
-    return docs[0]
+    return docs[0][0], docs[0][1], version
+
+
+def _main_go_no_go_text(base: Path, ref: str, rel: str, version: str) -> str:
+    """Nội dung `ref:rel` khi `rel` là GO-NO-GO của `version` ở `GO_NO_GO_DIRS` (cùng tập `_go_no_go_docs`); khác → rỗng.
+    Có tên trong cây mà không đọc được → từ chối (có thể giấu lời từ chối)."""
+    path = posixpath.dirname(rel) or "."
+    name = posixpath.basename(rel)
+    if path not in GO_NO_GO_DIRS or not fnmatch.fnmatchcase(name, "GO-NO-GO*.md"):
+        return ""
+    r = _git(base, "show", f"{ref}:{rel}")
+    if r.returncode != 0:
+        raise ReleaseSignError(f"không đọc được {ref}:{rel} để kiểm lời từ chối NO-GO — agent không ký")
+    return r.stdout if _go_no_go_names_version(name, r.stdout, version) else ""
+
+
+def _main_go_no_go_refusals(base: Path, version: str) -> List[str]:
+    """`ref:đường` của mọi GO-NO-GO `v<version>` có lời từ chối NO-GO (`_go_no_go_refusals`) ở MỌI nhánh chính đọc được
+    (`STAGE_MAIN_REFS`) — xoá/đổi file ở cây làm việc không gỡ được lời từ chối người đã đưa lên nhánh chính (review
+    #480). Không đọc được nhánh chính nào → từ chối (fail-closed)."""
+    found: List[str] = []
+    seen = False
+    for ref in STAGE_MAIN_REFS:
+        r = _git(base, "ls-tree", "-r", "-z", "--full-tree", "--name-only", ref)
+        if r.returncode != 0:
+            continue
+        seen = True
+        found += [
+            f"{ref}:{rel}"
+            for rel in r.stdout.split("\0")
+            if _go_no_go_refusals(_main_go_no_go_text(base, ref, rel, version))
+        ]
+    if not seen:
+        raise ReleaseSignError(
+            f"không đọc được nhánh chính ({', '.join(STAGE_MAIN_REFS)}) để kiểm lời từ chối NO-GO — agent không ký"
+        )
+    return found
 
 
 def _sign_scope_check(base: Path) -> None:
@@ -13505,8 +13551,9 @@ def _sign_insert(text: str, row: str, note: str) -> str:
 
 def release_sign(base: Path, file: str, note: str, rc: Dict[str, Any]) -> str:
     """Agent ký §5 (ADR-0074) khi: khoá `release_signoff: agent` có hiệu lực; `release-check` (`rc`) không FAIL BLOCKER
-    nào (cây sạch, sổ audit, nợ review…); việc người còn lại chỉ là chữ ký (`RELEASE_SIGN_HUMAN_OK`); file chưa có dòng
-    ký hay lời từ chối; dòng `subject:` gắn đúng ứng viên. Ghi rồi đọc lại: dòng ký phải hiện và đủ cho `promotion`, không
+    nào (cây sạch, sổ audit, nợ review…); `promotion` không `rejected`; việc người còn lại chỉ là chữ ký
+    (`RELEASE_SIGN_HUMAN_OK`); file chưa có dòng ký hay lời từ chối; nhánh chính không có lời từ chối NO-GO cho VERSION
+    (`_main_go_no_go_refusals`); dòng `subject:` gắn đúng ứng viên. Ghi rồi đọc lại: dòng ký phải hiện và đủ cho `promotion`, không
     thì trả file về như cũ. Trả đường tương đối đã ký."""
     if not release_agent_signoff(base):
         raise ReleaseSignError(
@@ -13514,6 +13561,10 @@ def release_sign(base: Path, file: str, note: str, rc: Dict[str, Any]) -> str:
         )
     if rc["fails"]:
         raise ReleaseSignError(f"release-check NO-GO (FAIL {', '.join(rc['fails'])}) — agent không ký")
+    if rc["promotion"]["state"] == "rejected":
+        raise ReleaseSignError(
+            "người đã từ chối (NO-GO): " + "; ".join(rc["promotion"]["reasons"]) + " — agent không ký đè lời từ chối"
+        )
     extra = [h for h in rc["human"] if h not in RELEASE_SIGN_HUMAN_OK]
     if extra:
         raise ReleaseSignError(f"còn việc người ngoài chữ ký: {', '.join(extra)} — agent không ký")
@@ -13521,9 +13572,15 @@ def release_sign(base: Path, file: str, note: str, rc: Dict[str, Any]) -> str:
     if not clean:
         raise ReleaseSignError("`--note` rỗng — ghi vì sao GO (bằng chứng máy đã xét)")
     _sign_scope_check(base)
-    rel, text = _sign_doc(base, file)
+    rel, text, version = _sign_doc(base, file)
     if _go_no_go_signed(text) or _go_no_go_refusals(text):
         raise ReleaseSignError(f"{rel}: §5 đã có dòng ký hoặc lời từ chối — không ký thêm")
+    refused = _main_go_no_go_refusals(base, version)
+    if refused:
+        raise ReleaseSignError(
+            f"người đã từ chối ở nhánh chính: {', '.join(refused)} ghi NO-GO cho v{version} — agent không ký đè (xoá/đổi"
+            " file ở cây làm việc không gỡ được lời từ chối)"
+        )
     problem = _subject_problem(rel, text, rc["subject"])
     if problem:
         raise ReleaseSignError(problem)
@@ -13551,7 +13608,7 @@ RELEASE_SIGN_STATUS = "docs/ops/AUDIT-STATUS.md"  # làm giả được `release
 def cmd_release_sign(args: argparse.Namespace) -> int:
     base = project_dir()
     try:
-        rc = release_check(base, RELEASE_SIGN_BLUEPRINT, RELEASE_SIGN_STATUS)
+        rc = release_check(base, RELEASE_SIGN_BLUEPRINT, RELEASE_SIGN_STATUS, unchecked_must="fail")
         rel = release_sign(base, args.file, args.note, rc)
     except ReleaseSignError as exc:
         print(f"✗ {exc}", file=sys.stderr)

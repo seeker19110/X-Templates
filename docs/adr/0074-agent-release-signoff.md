@@ -43,11 +43,16 @@ Chọn **phương án 1** (D-401).
 - **Khoá** `release_signoff: agent` có hiệu lực khi xt.yaml ở cây làm việc **và** bản đã commit ở `origin/main` (→
   `origin/master`) đều khai; nằm trong `HARD_GATED_KEYS` nên PR đổi khoá luôn người merge.
 - **`xt.py release-sign --note … [--file …]`** chạy `release-check` với blueprint và sổ audit ở **đường mặc định** (không
-  nhận đường khác — làm giả được) rồi chỉ ký khi: không hàng BLOCKER nào FAIL (gồm cây sạch, sổ audit, nợ review); việc
-  người còn lại chỉ là `go_no_go`; `BLUEPRINT.md` khai `scale: S` (M/L có GO-NO-GO dòng 20 BLOCKER — người dùng thử thật);
-  không còn việc `loop defer`; GO-NO-GO của `VERSION` chưa có dòng ký hay lời từ chối; dòng `subject:` khớp ứng viên. Dòng ghi: `| Agent (`release_signoff`, ADR-0074) | agent | GO | <ngày UTC> |` cùng một dòng
+  nhận đường khác — làm giả được) và `--unchecked-must fail` (MUST tick không `— Kiểm:` chặn ký), rồi chỉ ký khi: không
+  hàng BLOCKER nào FAIL (gồm cây sạch, sổ audit, nợ review); `promotion` không `rejected` (người đã NO-GO ở một GO-NO-GO
+  khác của `VERSION` — agent không ký đè); việc người còn lại chỉ là `go_no_go`; `BLUEPRINT.md` khai `scale: S` (M/L có
+  GO-NO-GO dòng 20 BLOCKER — người dùng thử thật); không còn việc `loop defer`; GO-NO-GO của `VERSION` chưa có dòng ký
+  hay lời từ chối; nhánh chính (mọi ref đọc được của `origin/main` → `origin/master`) không có GO-NO-GO của `VERSION`
+  (cùng tập thư mục hàng `go_no_go`) mang lời từ chối NO-GO — xoá/đổi file ở nhánh làm việc không gỡ được, không đọc
+  được nhánh chính thì không ký; dòng `subject:` khớp ứng viên. Dòng ghi: `| Agent (`release_signoff`, ADR-0074) | agent | GO | <ngày UTC> |` cùng một dòng
   giải trình dưới bảng. Ghi xong đọc lại; dòng không hiện hoặc chưa đủ cho `promotion` thì trả file như cũ.
-- **`promotion.by`** liệt kê ô tên đã ký — người đọc phân biệt được bản do agent ký.
+- **`promotion.by`** liệt kê ô tên đã ký — người đọc phân biệt được bản do agent ký. Dòng ký ô tên `agent` chỉ là duyệt
+  khi khoá có hiệu lực; khoá tắt → `pending_human` (tắt khoá thu hồi luôn chữ ký agent chưa phát hành).
 - **Guard** chỉ cho `[python3] <xt.py của dự án> release-sign` là **một lệnh đơn chữ rõ** chỉ với `--file`/`--note`,
   khi khoá có hiệu lực; mọi dạng khác → `GO_SIGN`. `XT_GUARD_POLICY=strict` không nới. Script Python nạp `xt` kèm tên
   chứa `sign`/`release` bị chặn như AUD-SEC-498 (vá biến/hàm trong tiến trình). Đổi nhánh mặc định
@@ -74,8 +79,9 @@ Chọn **phương án 1** (D-401).
 ### Xác nhận
 
 - `python3 -m unittest tests.test_release_signoff`: khoá cần cả cây lẫn nhánh chính; từ chối khi FAIL, còn việc người
-  khác, quy mô khác S, còn `loop defer`, ghi chú rỗng, subject lệch, đã ký, §5 sai dạng; ký thành công ra
-  `promotion.by = ["agent"]`; guard cho dạng chữ rõ, chặn dạng nối lệnh, `env -u`, token mờ, `--status`/`--blueprint`,
+  khác, quy mô khác S, còn `loop defer`, ghi chú rỗng, subject lệch, đã ký, §5 sai dạng, `promotion` rejected, NO-GO chỉ
+  còn ở nhánh chính sau `git rm`, nhánh chính không đọc được, MUST không lệnh kiểm (với `release-check` thật); ký thành
+  công ra `promotion.by = ["agent"]`, dòng `agent` khi khoá tắt → `pending_human`; guard cho dạng chữ rõ, chặn dạng nối lệnh, `env -u`, token mờ, `--status`/`--blueprint`,
   tuỳ chọn lạ, xt.py ngoài dự án, strict, gọi trong tiến trình, đổi nhánh mặc định, MCP ghi thẳng `main`.
 - Phản biện đối kháng 3/3 bác bản đầu (nghiên cứu §8); bản này sửa đủ các lỗ đã nêu.
 - Mốc xét lại: 2027-01-21 (cùng LOOP-DESIGN-014) hoặc khi một bản agent ký bị revert vì lỗi người xem được.

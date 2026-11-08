@@ -3,6 +3,7 @@ có hiệu lực khi CẢ xt.yaml ở cây làm việc LẪN bản đã commit �
 `release-check` không FAIL, việc người còn lại chỉ là chữ ký, dòng `subject:` khớp, và ô tên luôn là `agent`."""
 
 import datetime as dt
+import json
 import os
 import subprocess
 import sys
@@ -16,6 +17,7 @@ sys.path.insert(0, str(ROOT / ".claude" / "hooks"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # test_xt_cli
 import guard
 import xt
+from test_xt import audit_status_text
 from test_xt_cli import TmpRepoCase, run_main
 
 HEX = "a" * 64
@@ -35,8 +37,22 @@ def git(cwd: Path, *args: str) -> None:
     subprocess.run(["git", "-C", str(cwd), *args], check=True, capture_output=True, env={**os.environ, **GIT_ENV})
 
 
-def rc(fails=(), human=("go_no_go",), subject=None):
-    return {"fails": list(fails), "human": list(human), "subject": subject or SUBJECT, "head": "c" * 40}
+def rc(fails=(), human=("go_no_go",), subject=None, promotion="pending_human"):
+    return {
+        "fails": list(fails),
+        "human": list(human),
+        "subject": subject or SUBJECT,
+        "head": "c" * 40,
+        "promotion": {"state": promotion, "reasons": []},
+    }
+
+
+def refusal_doc(version="1.2.0", decision="NO-GO"):
+    today = dt.datetime.now(dt.timezone.utc).date().isoformat()
+    return (
+        f"# GO/NO-GO — X · phát hành v{version}\n\n## 5. Ký\n\n"
+        f"| Vai trò | Tên | Quyết định | Ngày |\n|---|---|---|---|\n| Chủ repo | An | {decision} | {today} |\n"
+    )
 
 
 class SignoffRepo(TmpRepoCase):
@@ -132,6 +148,72 @@ class ReleaseSignTest(SignoffRepo):
         self.refused("chữ ký gắn ứng viên khác", result=rc(subject={**SUBJECT, "content": "d" * 64}))
         self.refused("cần đúng một GO-NO-GO của v1.2.0", file="docs/ops/khac.md")
 
+    def test_refuses_when_promotion_rejected(self):
+        """Review #480 🔴: một GO-NO-GO khác của VERSION có dòng NO-GO của người → agent không ký đè ở file còn trống."""
+        self.refused("người đã từ chối", result=rc(promotion="rejected"))
+
+    def push_main(self, files):
+        for rel, text in files.items():
+            (self.repo / rel).parent.mkdir(parents=True, exist_ok=True)
+            (self.repo / rel).write_text(text, encoding="utf-8")
+        self.git("add", "-A")
+        self.git("commit", "-q", "-m", "go-no-go")
+        self.git("push", "-q", "origin", "main")
+
+    def test_main_refusal_scan_scope(self):
+        """Quét nhánh chính đúng tập `_release_go_no_go`: GO-NO-GO*.md ở docs/ops, docs, gốc, nhắc v<VERSION>, có NO-GO."""
+        self.push_main(
+            {
+                "docs/ops/GO-NO-GO-A-v1.2.0.md": refusal_doc(),
+                "docs/GO-NO-GO-v1.2.0.md": refusal_doc(decision="Từ chối"),
+                "GO-NO-GO.md": refusal_doc(),  # gốc, tiêu đề nhắc v1.2.0
+                "docs/ops/GO-NO-GO-v1.1.0.md": refusal_doc("1.1.0"),  # bản khác
+                "docs/old/GO-NO-GO-v1.2.0.md": refusal_doc(),  # ngoài tập thư mục
+                "docs/ops/NOTE-v1.2.0.md": refusal_doc(),  # không phải GO-NO-GO
+                "docs/ops/GO-NO-GO-B-v1.2.0.md": refusal_doc(decision="GO"),  # GO không phải từ chối
+            }
+        )
+        self.assertEqual(
+            xt._main_go_no_go_refusals(self.repo, "1.2.0"),
+            [
+                "origin/main:GO-NO-GO.md",
+                "origin/main:docs/GO-NO-GO-v1.2.0.md",
+                "origin/main:docs/ops/GO-NO-GO-A-v1.2.0.md",
+            ],
+        )
+
+    def test_main_ref_unreadable_fails_closed(self):
+        self.push_main({"docs/ops/GO-NO-GO-A-v1.2.0.md": refusal_doc(decision="GO")})
+        real = xt._git
+
+        def show_fails(cwd, *args, **kw):
+            if args[0] == "show" and "GO-NO-GO-A" in args[1]:
+                return subprocess.CompletedProcess(args, 128, "", "hỏng")
+            return real(cwd, *args, **kw)
+
+        own = "docs/ops/GO-NO-GO-2026-11-08-v1.2.0.md"
+        with unittest.mock.patch.object(xt, "_git", side_effect=show_fails):
+            self.refused("không đọc được origin/main:docs/ops/GO-NO-GO-A-v1.2.0.md", file=own)
+        self.git("remote", "remove", "origin")
+        with unittest.mock.patch.object(xt, "release_agent_signoff", return_value=True):
+            self.refused("không đọc được nhánh chính", file=own)
+
+    def test_promotion_counts_agent_row_only_with_key(self):
+        """Review #480 🟠: dòng ký ô tên `agent` chỉ là duyệt khi khoá `release_signoff: agent` có hiệu lực."""
+        rel = self.sign()
+        text = self.doc.read_text(encoding="utf-8")
+        self.set_key("human")
+        for name in ("agent", "Agent"):
+            with unittest.mock.patch.object(
+                xt, "_signed_go_no_go", return_value=[(rel, text.replace("| agent |", f"| {name} |"))]
+            ):
+                promo = xt._release_promotion(self.repo, [], [], SUBJECT)
+            self.assertEqual(promo["state"], "pending_human", name)
+            self.assertIn("`release_signoff: agent` chưa có hiệu lực", promo["reasons"][0])
+        self.set_key("agent")
+        with unittest.mock.patch.object(xt, "_signed_go_no_go", return_value=[(rel, text)]):
+            self.assertEqual(xt._release_promotion(self.repo, [], [], SUBJECT)["state"], "approved")
+
     def test_scope_scale_s_and_no_deferred(self):
         self.blueprint("M")
         self.refused("agent chỉ ký quy mô S")
@@ -205,10 +287,12 @@ class ReleaseSignCliTest(SignoffRepo):
             code, _, err = run_main("release-sign", "--note", "x")
         self.assertEqual(code, 2)
         self.assertIn("NO-GO", err)
-        with unittest.mock.patch.object(xt, "release_check", return_value=rc()):
+        with unittest.mock.patch.object(xt, "release_check", return_value=rc()) as check:
             code, out, _ = run_main("release-sign", "--note", "máy đạt")
         self.assertEqual(code, 0)
         self.assertIn("agent ký §5 docs/ops/GO-NO-GO-2026-11-08-v1.2.0.md", out)
+        # review #480: MUST tick không lệnh kiểm là FAIL khi agent ký (không phải ⚠)
+        check.assert_called_once_with(self.repo, "BLUEPRINT.md", "docs/ops/AUDIT-STATUS.md", unchecked_must="fail")
 
     def test_release_check_hint_follows_key(self):
         full = {
@@ -224,6 +308,73 @@ class ReleaseSignCliTest(SignoffRepo):
             self.set_key("human")
             _, out, _ = run_main("release-check")
             self.assertIn("máy không thay được chữ ký", out)
+
+
+class ReleaseSignRealCheckTest(SignoffRepo):
+    """`release-sign` với `release-check` thật (repo đủ để máy GO): các ca review #480 tái hiện."""
+
+    BP = "---\ntitle: B\nkind: blueprint\nupdated: 2026-10-19\nscale: S\nprofile: cli-tool\n---\n\n## Checklist\n\n"
+    MUST_OK = "- [x] `BASE-X-001` **MUST** a — Kiểm: `true`\n"
+    REFUSED = "docs/ops/GO-NO-GO-A-v1.2.0.md"
+
+    def setUp(self):
+        super().setUp()
+        (self.repo / "docs/ops/AUDIT-STATUS.md").write_text(audit_status_text(), encoding="utf-8")
+        (self.repo / ".gitignore").write_text("out/\ndist/\n", encoding="utf-8")
+        self.prepare(self.MUST_OK)
+
+    def prepare(self, checklist):
+        """Blueprint `checklist` + GO-NO-GO B chưa ký có dòng `subject:` của cây đã commit."""
+        (self.repo / "BLUEPRINT.md").write_text(self.BP + checklist, encoding="utf-8")
+        self.doc.unlink()
+        self.commit()
+        self.unsigned = GO_DOC.replace(HEX, xt.subject_fingerprint(self.repo))
+        self.doc.write_text(self.unsigned, encoding="utf-8")
+        self.commit()
+
+    def commit(self, push=True):
+        self.git("add", "-A")
+        self.git("commit", "-q", "--allow-empty", "-m", "c")
+        if push:
+            self.git("push", "-q", "origin", "main")
+
+    def sign_cli(self, *extra):
+        return run_main("release-sign", *extra, "--note", "máy đạt")
+
+    def assert_refused(self, msg, *extra):
+        code, _, err = self.sign_cli(*extra)
+        self.assertEqual(code, 2, err)
+        self.assertIn(msg, err)
+        self.assertEqual(self.doc.read_text(encoding="utf-8"), self.unsigned)
+
+    def test_baseline_signs(self):
+        code, out, err = self.sign_cli()
+        self.assertEqual(code, 0, err)
+        self.assertIn("agent ký §5", out)
+
+    def test_rejected_in_tree_not_overridden(self):
+        """Review #480 🔴 (a): A có NO-GO của người, B chưa ký → promotion rejected; `release-sign --file B` từ chối."""
+        (self.repo / self.REFUSED).write_text(refusal_doc(), encoding="utf-8")
+        self.commit(push=False)
+        _, out, _ = run_main("release-check", "--json")
+        d = json.loads(out)
+        self.assertEqual((d["promotion"]["state"], d["fails"], d["human"]), ("rejected", [], []), d["promotion"])
+        self.assert_refused("người đã từ chối", "--file", self.doc.relative_to(self.repo).as_posix())
+
+    def test_refusal_kept_on_main_after_tree_delete(self):
+        """Review #480 🔴 (b): NO-GO đã lên nhánh chính, `git rm` ở nhánh làm việc → vẫn từ chối (đọc origin/main)."""
+        (self.repo / self.REFUSED).write_text(refusal_doc(), encoding="utf-8")
+        self.commit()
+        self.git("rm", "-q", self.REFUSED)
+        self.commit(push=False)
+        _, out, _ = run_main("release-check", "--json")
+        self.assertNotEqual(json.loads(out)["promotion"]["state"], "rejected")
+        self.assert_refused(f"ở nhánh chính: origin/main:{self.REFUSED}")
+
+    def test_unchecked_must_blocks_sign(self):
+        """Review #480 🟠: MUST tick không `— Kiểm:` → `release-sign` từ chối (release-check `--unchecked-must fail`)."""
+        self.prepare(self.MUST_OK + "- [x] `BASE-X-002` **MUST** b\n")
+        self.assert_refused("FAIL unchecked_must")
 
 
 class ReleaseSignGuardTest(TmpRepoCase):
