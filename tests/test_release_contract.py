@@ -621,7 +621,8 @@ class PromotionTest(ReleaseCase):
 
     def test_subject_excludes_only_signoff_files(self):
         """AUD-HAR-319 (D-393): `subject.content` chỉ loại GO-NO-GO*.md nằm trực tiếp ở `GO_NO_GO_DIRS`, sổ
-        `DECISIONS_LOG`, `PROGRESS.md` gốc và `.autopilot/` — file cùng TÊN ở chỗ khác là mã/tài liệu dự án: đổi sau khi
+        `DECISIONS_LOG` và bản tháng cạnh nó (AUD-HAR-329), `PROGRESS.md` gốc và `.autopilot/` — file cùng TÊN ở chỗ khác
+        là mã/tài liệu dự án: đổi sau khi
         ký → chờ người ký lại. Vân tay gói stage (`evidence_fingerprint`) giữ luật cũ."""
         self.setup_xt()
         for rel in (
@@ -630,7 +631,8 @@ class PromotionTest(ReleaseCase):
             "docs/PROGRESS.md",
             "docs/research/DECISIONS.md",
             "docs/ops/old/GO-NO-GO-a.md",
-            "docs/autopilot/DECISIONS-2026-11.md",  # bản tháng: ngoài tập loại trừ (chặt)
+            "src/DECISIONS-2026-11.md",  # bản tháng chỉ loại ở thư mục sổ chính (AUD-HAR-329)
+            "docs/autopilot/DECISIONS-2026-1.md",
         ):
             with self.subTest(rel=rel):
                 self.go_no_go()
@@ -651,6 +653,7 @@ class PromotionTest(ReleaseCase):
             "docs/GO-NO-GO-w.md",
             "GO-NO-GO-z.md",
             "docs/autopilot/DECISIONS.md",
+            "docs/autopilot/DECISIONS-2026-11.md",  # AUD-HAR-329: chủ dự án ghi quyết định G7 vào bản tháng
             "PROGRESS.md",
             ".autopilot/note.txt",
         ):
@@ -879,12 +882,23 @@ class SubjectExcludeWorkTreeTest(TmpDirCase):
     loại trừ sửa chưa commit hay chưa track → vân tay không đổi; file cùng tên ở chỗ khác → đổi. Dự án ở gốc repo và ở
     thư mục con (pathspec tính từ dự án). Mutant `SUBJECT_EXCLUDE = []` làm ca loại trừ đỏ."""
 
-    EXCLUDED = ("docs/ops/GO-NO-GO-v1.md", "docs/GO-NO-GO.md", "GO-NO-GO-x.md", xt.DECISIONS_LOG, "PROGRESS.md")
+    EXCLUDED = (
+        "docs/ops/GO-NO-GO-v1.md",
+        "docs/GO-NO-GO.md",
+        "GO-NO-GO-x.md",
+        xt.DECISIONS_LOG,
+        "docs/autopilot/DECISIONS-2026-11.md",  # AUD-HAR-329: bản tháng cạnh sổ chính (`decision_logs`)
+        "PROGRESS.md",
+    )
     COUNTED = (
         "src/DECISIONS.md",
+        "src/DECISIONS-2026-10.md",
+        "docs/autopilot/old/DECISIONS-2026-10.md",
+        "docs/autopilot/DECISIONS-2026-1.md",
+        "docs/autopilot/DECISIONS-2026-10.md.bak",
+        "docs/autopilot/XDECISIONS-2026-10.md",
         "docs/PROGRESS.md",
         "docs/ops/old/GO-NO-GO-a.md",
-        "docs/autopilot/DECISIONS-2026-11.md",
         "docs/ops/GO-NO-GO-x.txt",
         "src/a.py",
     )
@@ -919,6 +933,13 @@ class SubjectExcludeWorkTreeTest(TmpDirCase):
         else:
             f.unlink()
         self.assertEqual(xt.subject_fingerprint(base), before, rel)
+
+    def test_subject_excluded_same_set(self):
+        """Nửa `ls-tree` (`_subject_excluded`) cùng tập với nửa pathspec: bản tháng chỉ ở thư mục sổ chính (AUD-HAR-329)."""
+        for rel in self.EXCLUDED:
+            self.assertTrue(xt._subject_excluded(rel), rel)
+        for rel in self.COUNTED:
+            self.assertFalse(xt._subject_excluded(rel), rel)
 
     def test_uncommitted_and_untracked(self):
         for sub in ("", "apps/web"):

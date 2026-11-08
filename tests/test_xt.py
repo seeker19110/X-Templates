@@ -2352,6 +2352,59 @@ class DecisionLogsTest(unittest.TestCase):
         (self.dir / "DECISIONS.md").mkdir()  # không đọc được (thư mục): có thể giấu đề xuất → FAIL như trước
         self.assertEqual(xt._release_prod_switch(self.base)["result"], "FAIL")
 
+    def test_prod_switch_counts_undecided_by_id(self):
+        """AUD-HAR-327 (D-399): nhãn ghim nguyên văn; đề xuất CHƯA quyết = D-NNN có `PROD_SWITCH_LABEL` trừ D-NNN đã có
+        dòng `- Khi chạy thật đã quyết (D-NNN): …` ở sổ hoặc bản tháng bất kỳ; thông điệp nêu ID chờ và file thật."""
+        self.assertEqual(xt.PROD_SWITCH_LABEL, "Khi chạy thật (đề xuất, chủ dự án quyết ở G7):")
+        self.assertEqual(xt.PROD_DECIDED_LABEL, "Khi chạy thật đã quyết")
+        month = self.dir / "DECISIONS-2026-10.md"
+        month.write_text(f"### D-001 · t · q\n- {xt.PROD_SWITCH_LABEL} dịch vụ trả phí\n", encoding="utf-8")
+        main = self.dir / "DECISIONS.md"
+        head = main.read_text(encoding="utf-8")
+
+        def row() -> dict:
+            return xt._release_prod_switch(self.base)
+
+        r = row()
+        self.assertEqual((r["result"], r["level"]), ("N/A", "BLOCKER"))
+        self.assertIn("1 đề xuất", r["evidence"])
+        self.assertIn("D-001 (docs/autopilot/DECISIONS-2026-10.md)", r["evidence"])
+        self.assertIn("loop decide-prod --ref D-NNN", r["evidence"])
+        main.write_text(head + "### D-004 · t · q\n- Khi chạy thật đã quyết (D-003): giữ\n", encoding="utf-8")
+        self.assertEqual(row()["result"], "N/A")  # dòng quyết cho ID khác: vẫn chờ
+        for bad in (
+            "Khi chạy thật đã quyết (D-001): ",
+            "  - Khi chạy thật đã quyết (D-001): x",
+            "Khi chạy thật đã quyết (D-001): x",
+        ):
+            with self.subTest(bad=bad):
+                main.write_text(head + f"### D-004 · t · q\n{bad}\n", encoding="utf-8")
+                self.assertEqual(row()["result"], "N/A")  # không đúng dạng dòng máy đọc: vẫn chờ
+        main.write_text(head + "### D-004 · t · q\n- Khi chạy thật đã quyết (D-001): giữ tự host\n", encoding="utf-8")
+        r = row()
+        self.assertEqual(r["result"], "PASS", r)
+        self.assertIn("bản tháng", r["evidence"])
+        month.write_text(
+            f"- {xt.PROD_SWITCH_LABEL} ngoài mục\n### D-001 · t · q\n- {xt.PROD_SWITCH_LABEL} dịch vụ trả phí\n",
+            encoding="utf-8",
+        )
+        r = row()  # dòng đề xuất trước mọi tiêu đề `### D-NNN`: không quyết được theo ID → luôn chờ
+        self.assertEqual(r["result"], "N/A")
+        self.assertIn("1 đề xuất", r["evidence"])
+        self.assertIn("ngoài mục D-NNN (docs/autopilot/DECISIONS-2026-10.md)", r["evidence"])
+
+    def test_prod_proposals_and_pending(self):
+        text = (
+            f"x {xt.PROD_SWITCH_LABEL} a\n### D-007 · t · q {xt.PROD_SWITCH_LABEL} b\n"
+            f"- {xt.PROD_SWITCH_LABEL} c {xt.PROD_SWITCH_LABEL} d\n## D-009\n- {xt.PROD_SWITCH_LABEL} e\n"
+        )
+        got = xt.prod_proposals(text)
+        self.assertEqual(got, [(None, "a"), ("D-007", "b"), ("D-007", "c"), ("D-007", "d"), ("D-007", "e")])
+        texts = {"a.md": text, "b.md": "- Khi chạy thật đã quyết (D-007): giữ\n"}
+        self.assertEqual(xt.prod_pending(texts), [(None, "a.md", "a")])
+        self.assertEqual(xt.prod_pending({"a.md": text})[1:2], [("D-007", "a.md", "b")])
+        self.assertEqual(xt.prod_pending({}), [])
+
     def test_decision_at_reads_month_files(self):
         (self.dir / "DECISIONS-2026-10.md").write_text(
             "### D-002 · 2026-10-30T01:00:00+00:00 · PR #7: tách hay đóng?\n", encoding="utf-8"
