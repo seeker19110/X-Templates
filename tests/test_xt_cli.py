@@ -1976,6 +1976,106 @@ class LoopCommandsTest(TmpDirCase):
         self.assertEqual(rc, 2)
         self.assertIn("--choice phải là", err)
 
+    def test_decide_prod_appends_owner_decision(self):
+        """AUD-HAR-327 (D-399): `loop decide-prod` chỉ THÊM một mục D-NNN mới vào sổ hiện hành (mục cũ giữ nguyên byte),
+        đề xuất ở bản tháng quyết được; hàng `prod_switch` chuyển PASS."""
+        month = self.tmp / "docs" / "autopilot" / "DECISIONS-2026-10.md"
+        month.parent.mkdir(parents=True)
+        old = f"### D-126 · t · App?\n\n- Chọn: tự host\n- {xt.PROD_SWITCH_LABEL} web app lưu trữ\n"
+        month.write_text(old, encoding="utf-8")
+        self.decide("--revert", "r", "--prod", "SES")  # D-127 ở sổ chính, cũng chờ quyết
+        log = self.tmp / "docs" / "autopilot" / "DECISIONS.md"
+        before = log.read_text(encoding="utf-8")
+        self.assertEqual(xt._release_prod_switch(self.tmp)["result"], "N/A")
+        rc, out, err = run_main("loop", "decide-prod", "--ref", "D-126", "--choice", " giữ tự host\ncục bộ ")
+        self.assertEqual((rc, err), (0, ""))
+        self.assertEqual(
+            out, "✓ D-128 chủ dự án quyết đề xuất D-126: giữ tự host cục bộ → docs/autopilot/DECISIONS.md\n"
+        )
+        text = log.read_text(encoding="utf-8")
+        self.assertTrue(text.startswith(before.rstrip("\n") + "\n"))
+        self.assertRegex(
+            text[len(before) :],
+            r"^\n### D-128 · \S+ · Chủ dự án quyết đề xuất \"Khi chạy thật\" của D-126: web app lưu trữ\n\n"
+            r"- Phương án: \(1\) Chuyển theo đề xuất của D-126 · \(2\) Giữ tự host\n- Chọn: giữ tự host cục bộ\n"
+            r"- Lý do \(tiêu chí chất lượng cuối\): chủ dự án quyết ở G7 .+\n- Đường lùi: .+ mục này và D-126 .+\n"
+            r"- Khi chạy thật đã quyết \(D-126\): giữ tự host cục bộ\n$",
+        )
+        self.assertEqual(month.read_text(encoding="utf-8"), old)
+        r = xt._release_prod_switch(self.tmp)
+        self.assertEqual(r["result"], "N/A")
+        self.assertIn("1 đề xuất", r["evidence"])
+        self.assertIn("D-127 (docs/autopilot/DECISIONS.md)", r["evidence"])
+        rc, out, _ = run_main(
+            "loop", "decide-prod", "--ref", "D-127", "--choice", "giữ Mailpit", "--log", xt.DECISIONS_LOG
+        )
+        self.assertEqual((rc, out.split(":")[0]), (0, "✓ D-129 chủ dự án quyết đề xuất D-127"))
+        self.assertEqual(xt._release_prod_switch(self.tmp)["result"], "PASS")
+
+    def test_decide_prod_rejects_without_writing(self):
+        """Từ chối (exit 2, sổ không đổi): `--ref` sai dạng, không có đề xuất ở sổ + bản tháng, đã quyết (ở bất kỳ file
+        nào), `--choice` rỗng, `--log` ngoài dự án, sổ không đọc được."""
+        self.decide("--revert", "r", "--prod", "SES")  # D-001 có đề xuất
+        self.decide("--revert", "r")  # D-002 không có đề xuất
+        month = self.tmp / "docs" / "autopilot" / "DECISIONS-2026-10.md"
+        month.write_text("### D-005 · t · q\n- Khi chạy thật đã quyết (D-001): ghi tay cũ\n", encoding="utf-8")
+        log = self.tmp / "docs" / "autopilot" / "DECISIONS.md"
+        before = log.read_text(encoding="utf-8")
+        cases = {
+            "ref sai dạng": (["--ref", "126", "--choice", "x"], "--ref phải là D-NNN"),
+            "ref chữ số lạ": (["--ref", "D-١٢٣", "--choice", "x"], "--ref phải là D-NNN"),
+            "không có mục": (["--ref", "D-009", "--choice", "x"], "không có đề xuất"),
+            "mục không có đề xuất": (["--ref", "D-002", "--choice", "x"], "không có đề xuất"),
+            "đã quyết": (["--ref", "D-001", "--choice", "x"], "đã quyết"),
+            "choice rỗng": (["--ref", "D-001", "--choice", " \n"], "--choice không được rỗng"),
+            "log ngoài dự án": (["--ref", "D-001", "--choice", "x", "--log", "../thoat.md"], "--log phải là file"),
+        }
+        for name, (argv, msg) in cases.items():
+            with self.subTest(name):
+                rc, out, err = run_main("loop", "decide-prod", *argv)
+                self.assertEqual((rc, out), (2, ""))
+                self.assertIn(msg, err)
+        self.assertEqual(log.read_text(encoding="utf-8"), before)
+        month.write_bytes(b"\xff\xfe")
+        rc, out, err = run_main("loop", "decide-prod", "--ref", "D-001", "--choice", "x")
+        self.assertEqual((rc, out), (2, ""))
+        self.assertIn("không đọc được sổ quyết định", err)
+        self.assertEqual(log.read_text(encoding="utf-8"), before)
+
+    def test_decide_prod_ignores_invalid_decided_lines(self):
+        """AUD-HAR-331: dòng quyết không hợp lệ (trong khối code, mục trước đề xuất) không làm `decide-prod` từ chối
+        "đã quyết"; dòng hợp lệ do chính lệnh ghi thì có."""
+        log = self.tmp / "docs" / "autopilot" / "DECISIONS.md"
+        log.parent.mkdir(parents=True)
+        log.write_text("### D-001 · t · q\n- Khi chạy thật đã quyết (D-002): ghi trước\n", encoding="utf-8")
+        self.decide("--revert", "r", "--prod", "SES")  # D-002
+        log.write_text(
+            log.read_text(encoding="utf-8") + "\n### D-003 · t · q\n```\n- Khi chạy thật đã quyết (D-002): giả\n```\n",
+            encoding="utf-8",
+        )
+        self.assertEqual(xt._release_prod_switch(self.tmp)["result"], "N/A")
+        rc, out, err = run_main("loop", "decide-prod", "--ref", "D-002", "--choice", "giữ Mailpit")
+        self.assertEqual((rc, err), (0, ""))
+        self.assertTrue(out.startswith("✓ D-004 "), out)
+        self.assertEqual(xt._release_prod_switch(self.tmp)["result"], "PASS")
+        rc, _, err = run_main("loop", "decide-prod", "--ref", "D-002", "--choice", "chuyển")
+        self.assertEqual(rc, 2)
+        self.assertIn("D-002 đã quyết", err)
+
+    def test_decide_prod_twice_second_refused(self):
+        """Hai lần quyết cùng đề xuất (vd hai phiên lần lượt): lần sau thấy dòng quyết của lần trước → từ chối, không
+        ghi mục thứ hai; quyết đề xuất khác vẫn được."""
+        self.decide("--revert", "r", "--prod", "SES")
+        self.decide("--revert", "r", "--prod", "S3")
+        self.assertEqual(run_main("loop", "decide-prod", "--ref", "D-001", "--choice", "giữ")[0], 0)
+        rc, _, err = run_main("loop", "decide-prod", "--ref", "D-001", "--choice", "chuyển")
+        self.assertEqual(rc, 2)
+        self.assertIn("D-001 đã quyết", err)
+        self.assertEqual(run_main("loop", "decide-prod", "--ref", "D-002", "--choice", "giữ")[0], 0)
+        text = (self.tmp / "docs" / "autopilot" / "DECISIONS.md").read_text(encoding="utf-8")
+        self.assertEqual(xt.PROD_DECIDED_RE.findall(text), ["D-001", "D-002"])
+        self.assertEqual(xt.DECISION_ID_RE.findall(text), ["001", "002", "003", "004"])
+
     def test_decide_log_must_stay_inside_project(self):
         (self.tmp / "docs").mkdir()
         for log in ("../thoat.md", "/tmp/tuyet-doi.md", "docs"):

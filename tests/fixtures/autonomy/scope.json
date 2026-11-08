@@ -289,9 +289,13 @@
    ]
   },
   {
-   "reason": "Hàng `release-check` `prod_switch` đọc sổ quyết định và bản tháng trên đĩa (sổ chính vắng) — không thuộc nhóm ca PR/rollup/review/guard; đỡ bằng Gate unittest tests.test_xt -k prod_switch",
+   "reason": "Hàng `release-check` `prod_switch` đọc sổ quyết định và bản tháng trên đĩa (sổ chính vắng) — không thuộc nhóm ca PR/rollup/review/guard; đỡ bằng Gate unittest tests.test_xt -k prod_switch (AUD-HAR-327/328: `loop decide-prod`, tests.test_xt_cli -k decide_prod; AUD-HAR-329: tests.test_release_contract -k subject)",
    "ids": [
-    "AUD-HAR-214"
+    "AUD-HAR-214",
+    "AUD-HAR-327",
+    "AUD-HAR-328",
+    "AUD-HAR-329",
+    "AUD-HAR-331"
    ]
   },
   {
