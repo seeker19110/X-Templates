@@ -303,3 +303,10 @@
 - Chọn: Sửa một dòng GO-NO-GO trên nhánh theo đề xuất reviewer (ngoài vân tay subject)
 - Lý do (tiêu chí chất lượng cuối): (1) GO-NO-GO là tài liệu người ký — không ship lời khai sai; sửa không đổi subject.content (GO-NO-GO ngoài vân tay, đã kiểm)
 - Đường lùi: Revert commit sửa
+
+### D-397 · 2026-11-08T00:33:49+00:00 · AUD-HAR-325: install.py ghi git_hooks của manifest.json thế nào khi thư mục hook nằm ngoài cây dự án (git worktree, core.hooksPath ngoài)?
+
+- Phương án: (1) Trong cây dự án → tương đối dự án (như cũ); trong git common dir → '.git/' + đường tương đối common dir (vd .git/hooks/pre-commit, đúng với mọi bản sao); ngoài cả hai → 'core.hooksPath/<tên>' (không ghi đường máy) · (2) Chỉ ghi tên hook · (3) Giữ tuyệt đối, sửa tay mỗi lần
+- Chọn: Trong cây dự án → tương đối dự án (như cũ); trong git common dir → '.git/' + đường tương đối common dir (vd .git/hooks/pre-commit, đúng với mọi bản sao); ngoài cả hai → 'core.hooksPath/<tên>' (không ghi đường máy)
+- Lý do (tiêu chí chất lượng cuối): (1) đúng và an toàn: manifest.json được commit — không lộ đường máy, giống nhau giữa bản sao chính và worktree; (2) giữ dạng tương đối cũ cho ca thường; (3) git_hooks chỉ để ghi nhận (AUD-HAR-204), không nơi nào đọc lại nên đổi dạng không phá
+- Đường lùi: Revert PR; shown_path ghi tuyệt đối như cũ

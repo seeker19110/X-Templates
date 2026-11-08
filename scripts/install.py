@@ -1083,11 +1083,32 @@ def git_hook_action(dst: Path) -> str:
     )
 
 
-def shown_path(target: Path, path: Path) -> str:
-    """Đường dẫn để báo/ghi manifest: tương đối `target` khi nằm trong dự án, ngược lại tuyệt đối (worktree, hooksPath
-    ngoài dự án)."""
+def git_common_dir(target: Path) -> Path | None:
+    """Thư mục git chung (`git rev-parse --git-common-dir`, resolve): của bản sao chính kể cả khi `target` là worktree;
+    không chạy được git → None."""
+    try:
+        r = subprocess.run(
+            ["git", "-C", str(target), "rev-parse", "--git-common-dir"], capture_output=True, text=True, timeout=10
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    out = r.stdout.strip()
+    if r.returncode != 0 or not out:
+        return None
+    return (target / out).resolve()
+
+
+def shown_path(target: Path, path: Path, hooks: Path) -> str:
+    """Đường dẫn để ghi manifest (file được commit — không lộ đường máy, giống nhau giữa các bản sao): trong dự án →
+    tương đối `target`; trong git common dir (worktree) → `.git/` + đường tương đối common dir; ngoài cả hai →
+    `core.hooksPath` (+ `/<tên>` cho file trong `hooks`). D-397."""
     full = path.resolve()
-    return full.relative_to(target).as_posix() if full.is_relative_to(target) else full.as_posix()
+    if full.is_relative_to(target):
+        return full.relative_to(target).as_posix()
+    common = git_common_dir(target)
+    if common is not None and full.is_relative_to(common):
+        return (Path(".git") / full.relative_to(common)).as_posix()
+    return (Path("core.hooksPath") / path.relative_to(hooks)).as_posix()
 
 
 def git_hooks_plan(target: Path, no_harness: bool, no_git_hooks: bool) -> dict[str, Any]:
@@ -1097,9 +1118,13 @@ def git_hooks_plan(target: Path, no_harness: bool, no_git_hooks: bool) -> dict[s
     hooks = None if reason else git_hooks_dir(target)
     if hooks is None:
         return {"action": "skipped", "reason": reason or "không phải repo git"}
-    where = shown_path(target, hooks)
-    rows = [{"name": n, "path": shown_path(target, hooks / n), "action": git_hook_action(hooks / n)} for n in GIT_HOOKS]
-    in_tree = not Path(where).is_absolute() and ".git" not in Path(where).parts
+    where = shown_path(target, hooks, hooks)
+    rows = [
+        {"name": n, "path": shown_path(target, hooks / n, hooks), "action": git_hook_action(hooks / n)}
+        for n in GIT_HOOKS
+    ]
+    full = hooks.resolve()
+    in_tree = full.is_relative_to(target) and ".git" not in full.relative_to(target).parts
     return {"action": "install", "dir": where, "in_tree": in_tree, "hooks": rows}
 
 
@@ -1123,7 +1148,7 @@ def install_git_hooks(target: Path) -> None:
             continue
         shutil.copy2(SRC / "framework" / "templates" / "git-hooks" / name, dst)
         dst.chmod(0o755)
-        ours.append(shown_path(target, dst))
+        ours.append(shown_path(target, dst, hooks))
         log(f"  git hook {name}: cài ({dst})")
     record_manifest_paths(target, "git_hooks", ours)
 

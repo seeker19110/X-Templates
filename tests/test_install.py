@@ -2699,17 +2699,54 @@ class GitHooksTest(unittest.TestCase):
         self.run_install("--harness", "codex")
         self.assertEqual(json.loads(manifest.read_text(encoding="utf-8"))["adapters"], [".codex/hooks.json"])
 
-    def test_hooks_dir_outside_project_shown_absolute(self):
-        """AUD-HAR-204: `core.hooksPath` ngoài dự án (worktree, thư mục chung) → đường dẫn tuyệt đối trong kế hoạch."""
+    def test_hooks_dir_outside_project_not_machine_path(self):
+        """AUD-HAR-204/325: `core.hooksPath` tuyệt đối ngoài dự án và ngoài git common dir → `core.hooksPath/<tên>`
+        (không ghi đường máy vào kế hoạch/manifest); log vẫn in đường thật."""
         self.init_repo()
         outside = Path(self.enterContext(tempfile.TemporaryDirectory())).resolve()
         self.assertEqual(self.git("config", "core.hooksPath", str(outside)).returncode, 0)
         p = json.loads(self.run_install("--plan"))["git_hooks"]
-        self.assertEqual((p["dir"], p["in_tree"]), (outside.as_posix(), False))
-        self.assertEqual(p["hooks"][0]["path"], (outside / "pre-commit").as_posix())
+        self.assertEqual((p["dir"], p["in_tree"]), ("core.hooksPath", False))
+        self.assertEqual(p["hooks"][0]["path"], "core.hooksPath/pre-commit")
         (outside / "commit-msg").symlink_to(outside / "khác")  # symlink: không đi theo, giữ như hook của dự án
         p = json.loads(self.run_install("--plan"))["git_hooks"]
         self.assertEqual({h["name"]: h["action"] for h in p["hooks"]}["commit-msg"], "kept-own")
+        log = self.install()
+        self.assertIn(f"({outside / 'pre-commit'})", log)
+        doc = json.loads((self.target / install.MANIFEST_V2).read_text(encoding="utf-8"))
+        self.assertEqual(doc["git_hooks"], ["core.hooksPath/pre-commit", "core.hooksPath/pre-push"])
+
+    def test_hooks_path_relative_in_project(self):
+        """AUD-HAR-325: `core.hooksPath` tương đối trong dự án (`.husky/_`) → tương đối dự án, `in_tree`."""
+        self.init_repo()
+        self.assertEqual(self.git("config", "core.hooksPath", ".husky/_").returncode, 0)
+        self.install()
+        doc = json.loads((self.target / install.MANIFEST_V2).read_text(encoding="utf-8"))
+        self.assertEqual(doc["git_hooks"], [".husky/_/commit-msg", ".husky/_/pre-commit", ".husky/_/pre-push"])
+        p = json.loads(self.run_install("--plan"))["git_hooks"]
+        self.assertEqual((p["dir"], p["in_tree"]), (".husky/_", True))
+
+    def test_worktree_manifest_uses_common_dir_not_machine_path(self):
+        """AUD-HAR-325: cài trên `git worktree add` — hook nằm ở thư mục hook của bản sao chính (ngoài cây) → manifest
+        ghi `.git/hooks/*`, không ghi đường tuyệt đối."""
+        self.init_repo()
+        self.git("commit", "-q", "--allow-empty", "-m", "a")
+        wt = Path(self.enterContext(tempfile.TemporaryDirectory())).resolve() / "wt"
+        self.assertEqual(self.git("worktree", "add", "-q", str(wt), "-b", "wtb").returncode, 0)
+        main_target, self.target = self.target, wt
+        p = json.loads(self.run_install("--plan"))["git_hooks"]
+        self.assertEqual((p["dir"], p["in_tree"]), (".git/hooks", False))
+        self.assertEqual(p["hooks"][0]["path"], ".git/hooks/pre-commit")
+        self.install()
+        doc = json.loads((wt / install.MANIFEST_V2).read_text(encoding="utf-8"))
+        self.assertEqual(doc["git_hooks"], [".git/hooks/commit-msg", ".git/hooks/pre-commit", ".git/hooks/pre-push"])
+        self.assertTrue((main_target / ".git" / "hooks" / "pre-commit").exists())
+
+    def test_git_common_dir_unavailable(self):
+        """AUD-HAR-325: không phải repo git / git không chạy được → `git_common_dir` None."""
+        self.assertIsNone(install.git_common_dir(self.target))
+        with mock.patch.object(install.subprocess, "run", side_effect=OSError("không có git")):
+            self.assertIsNone(install.git_common_dir(self.target))
 
 
 if __name__ == "__main__":
