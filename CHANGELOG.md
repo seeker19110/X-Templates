@@ -28,6 +28,11 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
 - Nghiên cứu [nâng tự động hoá tới mức máy làm được](research/2026-11-08-full-automation.md): kiểm kê 247 điểm chờ
   người, định nghĩa "máy không thể", phân loại, lát triển khai.
 
+### Fixed
+
+- `release-check` chặn phát hành và để trống vân tay Git trong JSON khi lỗi đọc Git, HEAD đổi trong lúc kiểm, hoặc index
+  có `assume-unchanged`/`skip-worktree` che tệp tracked. Dùng checkout đầy đủ, sạch cho cổng phát hành.
+
 ## [3.33.0] - 2026-11-08
 
 **Dự án đích: chạy lại `install.py`.** Đề xuất "Khi chạy thật" nay đóng bằng `xt.py loop decide-prod --ref D-NNN

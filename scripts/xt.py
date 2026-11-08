@@ -12410,19 +12410,60 @@ def _release_verify(base: Path) -> Dict[str, str]:
     )
 
 
-def _release_tree(base: Path) -> Dict[str, str]:
-    head = _git_head(base)
-    if head is None:
-        return _release_row("tree", "FAIL", "không phải repo git có commit — bản phát hành phải gắn SHA bất biến")
-    dirty = _git(base, "-c", "core.quotePath=false", "status", "--porcelain", "--", ".", ":(exclude).autopilot").stdout
-    files = [ln[3:] for ln in dirty.splitlines() if ln.strip()]
-    if files:
-        return _release_row(
-            "tree",
-            "FAIL",
-            f"cây làm việc có {len(files)} file chưa commit ({', '.join(files[:5])}) — chứng nhận chỉ gắn với commit",
+class _ReleaseTreeError(RuntimeError):
+    """Git không chứng minh được cây của ứng viên."""
+
+
+def _release_git_stdout(base: Path, command: str, *args: str) -> str:
+    quote = ("-c", "core.quotePath=false") if command == "status" else ()
+    try:
+        result = _git(base, *quote, command, *args)
+    except OSError as exc:
+        raise _ReleaseTreeError(f"không chạy được `git {command}`") from exc
+    if result.returncode:
+        raise _ReleaseTreeError(f"không đọc được cây làm việc (`git {command}` exit {result.returncode})")
+    return result.stdout
+
+
+def _release_tree(base: Path) -> Tuple[Dict[str, str], Optional[str], bool]:
+    """Hàng cổng, HEAD và cây có đọc đủ để tính vân tay hay không."""
+    try:
+        head = _release_git_stdout(base, "rev-parse", "--verify", "HEAD").strip()
+    except _ReleaseTreeError as exc:
+        return (
+            _release_row("tree", "FAIL", f"không phải repo git có commit hoặc không đọc được HEAD — {exc}"),
+            None,
+            False,
         )
-    return _release_row("tree", "PASS", f"cây sạch, HEAD {head[:12]}")
+    spec = ("--", ".", ":(exclude).autopilot")
+    try:
+        status = _release_git_stdout(base, "status", "--porcelain", *spec)
+        index = _release_git_stdout(base, "ls-files", "-v", "-z", *spec)
+    except _ReleaseTreeError as exc:
+        return _release_row("tree", "FAIL", str(exc)), head, False
+    # git ls-files -v: chữ thường = assume-unchanged, S = skip-worktree (kể cả sparse checkout).
+    if re.search(r"(?:^|\x00)[Sa-z] ", index):
+        return (
+            _release_row(
+                "tree",
+                "FAIL",
+                "index có assume-unchanged hoặc skip-worktree — chạy release-check từ checkout đầy đủ, sạch",
+            ),
+            head,
+            False,
+        )
+    files = [ln[3:] for ln in status.splitlines() if ln.strip()]
+    if files:
+        return (
+            _release_row(
+                "tree",
+                "FAIL",
+                f"cây làm việc có {len(files)} file chưa commit ({', '.join(files[:5])}) — chứng nhận chỉ gắn với commit",
+            ),
+            head,
+            True,
+        )
+    return _release_row("tree", "PASS", f"cây sạch, HEAD {head[:12]}"), head, True
 
 
 def _release_prod_switch(base: Path, log: str = DECISIONS_LOG) -> Dict[str, str]:
@@ -13043,31 +13084,49 @@ SUBJECT_EXCLUDE = [  # pathspec cùng tập `_subject_excluded`; `glob`: `*` kh�
 ]
 
 
+def _subject_fingerprint(base: Path, git: Callable[..., str]) -> str:
+    tree = git("ls-tree", "-r", "-z", "HEAD", "--", ".")
+    paths = ((e, e.partition("\t")[2]) for e in tree.split("\0") if e)
+    kept = "\0".join(e for e, p in paths if not _subject_excluded(p))
+    return tree_hash(base, kept, git, SUBJECT_EXCLUDE)[0]
+
+
 def subject_fingerprint(base: Path) -> Optional[str]:
     """`subject.content` (D-389, D-393): sha256 nội dung cây — blob của HEAD (`ls-tree`, không SHA commit) + diff so HEAD
     + file chưa track — trừ đúng các file ký/sổ máy đọc (`_subject_excluded`): không đổi qua commit ký và squash, đổi
-    khi bất kỳ file khác đổi. Đường dẫn tính từ dự án (như `evidence_fingerprint`). Không phải repo git/chưa commit → None."""
-    tree = _git(base, "ls-tree", "-r", "-z", "HEAD", "--", ".")
-    if tree.returncode != 0:
+    khi bất kỳ file khác đổi. Đường dẫn tính từ dự án (như `evidence_fingerprint`). Không đọc được cây → None."""
+    try:
+        return _subject_fingerprint(base, lambda *a: _release_git_stdout(base, *a))
+    except (OSError, _ReleaseTreeError):
         return None
-    paths = ((e, e.partition("\t")[2]) for e in tree.stdout.split("\0") if e)
-    kept = "\0".join(e for e, p in paths if not _subject_excluded(p))
-    return tree_hash(base, kept, lambda *a: _git(base, *a).stdout, SUBJECT_EXCLUDE)[0]
 
 
-def _release_subject(base: Path, arts: List[Dict[str, Any]]) -> Dict[str, Any]:
+def _release_subject(
+    base: Path, arts: List[Dict[str, Any]], head: Optional[str], *, tree_readable: bool
+) -> Tuple[Dict[str, Any], str]:
     """Ứng viên được chứng nhận: HEAD, vân tay cây, digest gộp của artifact (None khi không khai hay có artifact lỗi) và
     `content` = `subject_fingerprint` — vân tay nội dung trừ file ký/sổ máy đọc: không đổi qua commit ký và squash,
     đổi khi mã đổi; chữ ký §5 gắn vào nó (D-389, AUD-HAR-219, D-393). Chỉ thêm khoá nên `RELEASE_SCHEMA` giữ 3."""
     ok = bool(arts) and not any(a["problem"] for a in arts)
     lines = "".join(f"{a['path']}\0{a['sha256']}\n" for a in sorted(arts, key=lambda a: str(a["path"])))
     digest = hashlib.sha256(lines.encode()).hexdigest() if ok else None
-    return {
-        "head": _git_head(base),
-        "tree": tree_fingerprint(base),
-        "digest": digest,
-        "content": subject_fingerprint(base),
-    }
+    subject = {"head": head, "tree": None, "digest": digest, "content": None}
+    if not tree_readable:
+        return subject, ""
+
+    def git(command: str, *args: str) -> str:
+        return _release_git_stdout(base, command, *args)
+
+    try:
+        raw_head = git("rev-parse", "--verify", "HEAD")
+        tree = tree_hash(base, raw_head, git, [f":(exclude){STAGE_LEDGER}"])[0]
+        content = _subject_fingerprint(base, git)
+        if raw_head.strip() != head or git("rev-parse", "--verify", "HEAD") != raw_head:
+            raise _ReleaseTreeError("HEAD đổi trong lúc kiểm — chạy lại release-check trên checkout ổn định")
+    except (OSError, _ReleaseTreeError) as exc:
+        return subject, str(exc)
+    subject.update(tree=tree, content=content)
+    return subject, ""
 
 
 SUBJECT_KINDS = ("content", "digest")  # ô của dòng `subject:` trong GO-NO-GO, theo thứ tự xét (D-389)
@@ -13378,7 +13437,13 @@ def release_check(base: Path, blueprint: str, status: str, unchecked_must: str =
         _release_blueprint(base, blueprint),
         _release_audit(base, status),
         _release_verify(base),
-        _release_tree(base),
+    ]
+    tree_row, head, tree_readable = _release_tree(base)
+    subject, subject_error = _release_subject(base, arts, head, tree_readable=tree_readable)
+    if subject_error:
+        tree_row = _release_row("tree", "FAIL", subject_error)
+    rows += [
+        tree_row,
         _release_prod_switch(base),
         _release_phase(base),
         _release_stage(base),
@@ -13390,10 +13455,9 @@ def release_check(base: Path, blueprint: str, status: str, unchecked_must: str =
     ]
     fails = [r["id"] for r in rows if r["result"] == "FAIL" and r["level"] == "BLOCKER"]
     human = [r["id"] for r in rows if r["result"] == "N/A" and r["level"] == "BLOCKER"]
-    subject = _release_subject(base, arts)
     return {
         "schema": RELEASE_SCHEMA,
-        "head": _git_head(base),
+        "head": head,
         "at": now_iso(),
         "rows": rows,
         "fails": fails,
