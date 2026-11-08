@@ -8514,10 +8514,26 @@ def prod_proposals(text: str) -> List[Tuple[Optional[str], str]]:
     return out
 
 
+def prod_decided(texts: Dict[str, str]) -> Set[str]:
+    """D-NNN đã có dòng quyết HỢP LỆ ở bất kỳ sổ nào (AUD-HAR-331): dòng `PROD_DECIDED_RE` người đọc thấy
+    (`_markdown_shown` — không trong khối code/chú thích HTML, như dòng ký GO AUD-HAR-323), nằm trong mục `### D-MMM`
+    (tiêu đề cũng phải hiện) có MMM > NNN — sổ chỉ thêm nên quyết luôn sau đề xuất; `loop decide-prod` tự thoả. Dòng
+    ngoài mục, ở mục trước/cùng đề xuất (kể cả ghi trước cho ID chưa có) → không tính."""
+    out: Set[str] = set()
+    for text in texts.values():
+        cur = -1
+        for line in _markdown_shown(text).split("\n"):
+            if m := DECISION_ID_RE.match(line):
+                cur = int(m[1])
+            elif (d := PROD_DECIDED_RE.match(line)) and cur > int(d[1][2:]):
+                out.add(d[1])
+    return out
+
+
 def prod_pending(texts: Dict[str, str]) -> List[Tuple[Optional[str], str, str]]:
     """Đề xuất CHƯA quyết qua mọi sổ `texts` (file → nội dung): (D-NNN hoặc None, file, nội dung) của các đề xuất trừ
-    D-NNN đã có dòng quyết `PROD_DECIDED_RE` ở BẤT KỲ sổ nào (quyết ở sổ hiện hành, đề xuất ở bản tháng — D-399)."""
-    decided = {ref for t in texts.values() for ref in PROD_DECIDED_RE.findall(t)}
+    D-NNN có dòng quyết hợp lệ (`prod_decided`) ở BẤT KỲ sổ nào (quyết ở sổ hiện hành, đề xuất ở bản tháng — D-399)."""
+    decided = prod_decided(texts)
     return [(i, f, p) for f, t in texts.items() for i, p in prod_proposals(t) if i is None or i not in decided]
 
 
@@ -8613,13 +8629,13 @@ def _append_decision(base: Path, log: Path, title: str, body: str) -> str:
 
 def _prod_ref_problem(texts: Dict[str, str], ref: str, where: str) -> Tuple[Optional[str], str]:
     """(lý do từ chối hoặc None, nội dung đề xuất) cho `loop decide-prod --ref`: `ref` đúng dạng D-NNN, có đề xuất
-    `PROD_SWITCH_LABEL` trong mục đó ở sổ/bản tháng, chưa có dòng quyết ở bất kỳ file nào."""
+    `PROD_SWITCH_LABEL` trong mục đó ở sổ/bản tháng, chưa có dòng quyết hợp lệ (`prod_decided`) ở bất kỳ file nào."""
     if not DECISION_REF_RE.fullmatch(ref):
         return f"--ref phải là D-NNN (vd D-126): {ref}", ""
     found = [p for t in texts.values() for i, p in prod_proposals(t) if i == ref]
     if not found:
         return f'không có đề xuất "Khi chạy thật" của {ref} trong {where} và bản tháng', ""
-    if any(ref in PROD_DECIDED_RE.findall(t) for t in texts.values()):
+    if ref in prod_decided(texts):
         return f"{ref} đã quyết (có dòng `- {PROD_DECIDED_LABEL} ({ref}): …`) — không ghi lần hai", ""
     return None, " · ".join(found)
 

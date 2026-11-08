@@ -2018,7 +2018,7 @@ class LoopCommandsTest(TmpDirCase):
         self.decide("--revert", "r", "--prod", "SES")  # D-001 có đề xuất
         self.decide("--revert", "r")  # D-002 không có đề xuất
         month = self.tmp / "docs" / "autopilot" / "DECISIONS-2026-10.md"
-        month.write_text("### D-000 · t · q\n- Khi chạy thật đã quyết (D-001): ghi tay cũ\n", encoding="utf-8")
+        month.write_text("### D-005 · t · q\n- Khi chạy thật đã quyết (D-001): ghi tay cũ\n", encoding="utf-8")
         log = self.tmp / "docs" / "autopilot" / "DECISIONS.md"
         before = log.read_text(encoding="utf-8")
         cases = {
@@ -2041,6 +2041,26 @@ class LoopCommandsTest(TmpDirCase):
         self.assertEqual((rc, out), (2, ""))
         self.assertIn("không đọc được sổ quyết định", err)
         self.assertEqual(log.read_text(encoding="utf-8"), before)
+
+    def test_decide_prod_ignores_invalid_decided_lines(self):
+        """AUD-HAR-331: dòng quyết không hợp lệ (trong khối code, mục trước đề xuất) không làm `decide-prod` từ chối
+        "đã quyết"; dòng hợp lệ do chính lệnh ghi thì có."""
+        log = self.tmp / "docs" / "autopilot" / "DECISIONS.md"
+        log.parent.mkdir(parents=True)
+        log.write_text("### D-001 · t · q\n- Khi chạy thật đã quyết (D-002): ghi trước\n", encoding="utf-8")
+        self.decide("--revert", "r", "--prod", "SES")  # D-002
+        log.write_text(
+            log.read_text(encoding="utf-8") + "\n### D-003 · t · q\n```\n- Khi chạy thật đã quyết (D-002): giả\n```\n",
+            encoding="utf-8",
+        )
+        self.assertEqual(xt._release_prod_switch(self.tmp)["result"], "N/A")
+        rc, out, err = run_main("loop", "decide-prod", "--ref", "D-002", "--choice", "giữ Mailpit")
+        self.assertEqual((rc, err), (0, ""))
+        self.assertTrue(out.startswith("✓ D-004 "), out)
+        self.assertEqual(xt._release_prod_switch(self.tmp)["result"], "PASS")
+        rc, _, err = run_main("loop", "decide-prod", "--ref", "D-002", "--choice", "chuyển")
+        self.assertEqual(rc, 2)
+        self.assertIn("D-002 đã quyết", err)
 
     def test_decide_prod_twice_second_refused(self):
         """Hai lần quyết cùng đề xuất (vd hai phiên lần lượt): lần sau thấy dòng quyết của lần trước → từ chối, không

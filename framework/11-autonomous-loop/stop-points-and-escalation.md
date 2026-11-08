@@ -70,7 +70,8 @@ dữ liệu vẫn là điểm dừng về hành động (tiền thật, dữ li�
 Quyết định của chủ dự án ghi bằng `xt.py loop decide-prod --ref D-NNN --choice "<chuyển gì / giữ tự host>"`: lệnh
 **thêm** mục D-NNN mới có dòng `- Khi chạy thật đã quyết (D-NNN): …`, không đổi nhãn hay sửa dòng đề xuất cũ (sổ chỉ
 thêm, `LOOP-STOP-019`; D-399); hàng `prod_switch` của `release-check` đếm đề xuất chưa có dòng quyết trên sổ và mọi bản
-tháng `DECISIONS-YYYY-MM.md`, N/A nêu D-NNN chờ và file.
+tháng `DECISIONS-YYYY-MM.md`, N/A nêu D-NNN chờ và file. Dòng quyết chỉ tính khi hiện (ngoài khối code, chú thích HTML)
+và nằm trong mục có số lớn hơn đề xuất (AUD-HAR-331).
 
 **Cách làm:** dữ kiện trước (đọc repo, `/research` khi cần nguồn sống) → ≥ 2 phương án → áp tiêu chí →
 `xt.py loop decide --question … --option … --option … --choice N --why "<tiêu chí quyết định>" --revert "<đường lùi>" [--prod "<đề xuất khi chạy thật>"]`
