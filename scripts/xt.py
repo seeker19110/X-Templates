@@ -79,6 +79,9 @@ Lệnh:
   registry [--file F] [--json] [--today D] [--strict]
                                 Registry sản phẩm đích (docs/ops/registry.json): lệch core/gói so với VERSION khung,
                                 ngoại lệ hết hạn; schema sai → exit 2; --strict: còn lệch/hết hạn → exit 1.
+  release-sign --note TEXT [--file F]
+                                Agent ký §5 GO-NO-GO khi xt.yaml (cây và nhánh chính) khai `release_signoff: agent`,
+                                release-check không FAIL và chỉ còn chữ ký (ADR-0074); ô tên ghi `agent`.
   merge-check [--pr PR] [--pr-json F] [--json]
                                 Máy quyết khi nào merge PR: merge · review · wait · update · fix · human · closed (exit 0 = merge).
   grant-check GROUP [KHOÁ=GIÁ_TRỊ ...] [--plan F] [--json]
@@ -5924,7 +5927,7 @@ HARD_RISK_LABELS = {"risk:auth", "risk:payment", "risk:pii", "risk:crypto", "ris
 # Harness agent: "session"/"permission" ở đây là phiên/quyền của agent (`.claude/hooks/session-start.sh`), không phải
 # xác thực của ứng dụng — miễn nhóm "auth"; vẫn vào làn chuẩn qua "cổng/CI" (D-020).
 HARD_KEY = "merge_hard_exceptions"
-HARD_KEY_REASON = f"đổi `{HARD_KEY}`/`stage_approval` trong xt.yaml hoặc hiệu lực ủy quyền production trong PLAN.md (ADR-0020, ADR-0022, ADR-0069) — luôn người merge"
+HARD_KEY_REASON = f"đổi `{HARD_KEY}`/`stage_approval`/`release_signoff` trong xt.yaml hoặc hiệu lực ủy quyền production trong PLAN.md (ADR-0020, ADR-0022, ADR-0069, ADR-0074) — luôn người merge"
 TRUNCATED_REASON = (
     "danh sách file của PR bị cắt (quá giới hạn REST) — không xác minh được ủy quyền/khoá, luôn người merge"
 )
@@ -6491,7 +6494,8 @@ def _plan_grants_changed(f: Dict[str, Any], repo: str, base_sha: str, head_sha: 
 HARD_GATED_KEYS = (
     HARD_KEY,
     "stage_approval",
-)  # khoá chỉ người đổi: ngoại lệ cứng (ADR-0020) và quyền tự duyệt giai đoạn
+    "release_signoff",
+)  # khoá chỉ người đổi: ngoại lệ cứng (ADR-0020), quyền tự duyệt giai đoạn (ADR-0069) và tự ký phát hành (ADR-0074)
 
 
 def _hard_key_lines(text: str) -> List[str]:
@@ -11797,15 +11801,21 @@ def stage_agent_approval(base: Path) -> bool:
     """`stage_approval: agent` có hiệu lực khi CẢ xt.yaml ở cây làm việc LẪN bản đã commit ở nhánh chính của remote
     (`STAGE_MAIN_REFS`, ref đầu tiên đọc được) đều khai — như `delivery_phase` của guard: phiên không tự cấp quyền duyệt
     cho mình (ADR-0069). Không đọc được xt.yaml hay không có remote → chỉ người (ADR-0058)."""
+    return _main_key_is(base, STAGE_APPROVAL_KEY, STAGE_AGENT_BY)
+
+
+def _main_key_is(base: Path, key: str, value: str) -> bool:
+    """Khoá `key` = `value` ở CẢ xt.yaml cây làm việc LẪN bản đã commit ở nhánh chính của remote (`STAGE_MAIN_REFS`, ref
+    đầu tiên đọc được); không đọc được → False (ADR-0069, ADR-0074)."""
     try:
-        if _xt_keys(base).get(STAGE_APPROVAL_KEY) != STAGE_AGENT_BY:
+        if _xt_keys(base).get(key) != value:
             return False
     except (OSError, ValueError):
         return False
     for ref in STAGE_MAIN_REFS:
         text = _committed_xt_text(base, ref)
         if text is not None:
-            return _yaml_keys(text).get(STAGE_APPROVAL_KEY) == STAGE_AGENT_BY
+            return _yaml_keys(text).get(key) == value
     return False
 
 
@@ -13320,7 +13330,8 @@ def _approval_problem(base: Path, rel: str, text: str, subject: Dict[str, Any]) 
 def _release_promotion(base: Path, fails: List[str], human: List[str], subject: Dict[str, Any]) -> Dict[str, Any]:
     """`blocked` (hàng BLOCKER FAIL) · `rejected` (một dòng ký từ chối ở bất kỳ GO-NO-GO nào của VERSION) ·
     `pending_human` (còn việc người, chữ ký thiếu/không phải GO/hết hạn/chưa gắn subject) · `approved`. Máy không nâng
-    `pending_human` (ADR-0068 câu 3): "đã duyệt" vẫn là chữ ký người."""
+    `pending_human` (ADR-0068 câu 3): "đã duyệt" là một dòng ký §5 — của người, hoặc của agent qua `release-sign` khi
+    dự án khai `release_signoff: agent` (ADR-0074); `by` của `approved` liệt kê ô tên đã ký (`agent` = agent ký)."""
     if fails:
         return {"state": "blocked", "reasons": fails}
     docs = _signed_go_no_go(base)
@@ -13335,7 +13346,15 @@ def _release_promotion(base: Path, fails: List[str], human: List[str], subject: 
     pending = [p for p in problems if p]
     if pending:
         return {"state": "pending_human", "reasons": pending}
-    return {"state": "approved", "reasons": [rel for rel, _ in docs]}
+    by = sorted({name for _, text in docs for name in _go_signers(text)})
+    return {"state": "approved", "reasons": [rel for rel, _ in docs], "by": by}
+
+
+def _go_signers(text: str) -> List[str]:
+    """Ô tên (cột 2) của các dòng ký §5 hiển thị — cùng phạm vi `_go_sign_rows`."""
+    part = re.split(r"^## 5\b.*$", _markdown_shown(text), maxsplit=1, flags=re.M)
+    section = re.split(r"^## ", part[-1], maxsplit=1, flags=re.M)[0] if len(part) == 2 else ""
+    return [m[0].strip().strip("|").split("|")[1].strip() for m in GO_SIGN_ROW_RE.finditer(section)]
 
 
 def release_check(base: Path, blueprint: str, status: str, unchecked_must: str = "warn") -> Dict[str, Any]:
@@ -13390,7 +13409,12 @@ def cmd_release_check(args: argparse.Namespace) -> int:
             mark = {"PASS": "✓", "FAIL": "✗", "N/A": "–", "WARN": "⚠"}[r["result"]]
             print(f"{mark} {r['level']:<7} {r['id']:<12} {r['result']:<4} {r['evidence']}")
         if out["human"]:
-            print("Chờ người: " + ", ".join(out["human"]) + " — máy không thay được chữ ký (GO-NO-GO.md §5)")
+            sign = (
+                "agent ký được bằng `xt.py release-sign --note …` khi chỉ còn chữ ký (ADR-0074)"
+                if release_agent_signoff(base)
+                else "máy không thay được chữ ký (GO-NO-GO.md §5)"
+            )
+            print("Chờ người: " + ", ".join(out["human"]) + " — " + sign)
         promo = out["promotion"]
         print(f"promotion: {promo['state']} — " + "; ".join(promo["reasons"]))
         _print_subject_lines(out)
@@ -13412,6 +13436,128 @@ def _print_subject_lines(out: Dict[str, Any]) -> None:
             "Dòng `subject:` chưa in: cây chưa sạch — commit rồi chạy lại để lấy dòng đúng (commit VERSION/CHANGELOG "
             "trước khi soạn GO-NO-GO)"
         )
+
+
+# ADR-0074 (chủ repo 2026-11-08 "cho agent ký GO-NO-GO", D-401): xt.yaml `release_signoff: agent` → agent ký §5 bằng
+# `release-sign` khi máy đã đạt. Khoá có hiệu lực như `stage_approval` (cây VÀ nhánh chính đã commit, HARD_GATED_KEYS);
+# dòng ký ghi ô tên `agent` — không bao giờ ghi tên người; guard `GO_SIGN` vẫn chặn mọi đường ghi dòng ký khác.
+RELEASE_SIGNOFF_KEY = "release_signoff"
+RELEASE_AGENT_NAME = "agent"
+RELEASE_AGENT_ROLE = "Agent (`release_signoff`, ADR-0074)"
+RELEASE_SIGN_HUMAN_OK = ("go_no_go",)  # việc người duy nhất còn được phép khi agent ký: chính chữ ký
+
+
+class ReleaseSignError(Exception):
+    """`release-sign` từ chối: một dòng cho người, exit 2, không ghi file."""
+
+
+def release_agent_signoff(base: Path) -> bool:
+    """`release_signoff: agent` có hiệu lực (ADR-0074) — cùng luật `stage_agent_approval`."""
+    return _main_key_is(base, RELEASE_SIGNOFF_KEY, RELEASE_AGENT_NAME)
+
+
+def _sign_doc(base: Path, file: str) -> Tuple[str, str]:
+    """(đường tương đối, nội dung) của GO-NO-GO `v<VERSION>` sẽ ký: `--file` phải là một trong các file đó; vắng → đúng một."""
+    try:
+        version = (base / "VERSION").read_text(encoding="utf-8").strip()
+        docs = list(_go_no_go_docs(base, version))
+    except (OSError, ValueError) as exc:
+        raise ReleaseSignError(f"không đọc được VERSION/GO-NO-GO: {exc}") from exc
+    if file:
+        want = (base / file).resolve()
+        docs = [(rel, text) for rel, text in docs if (base / rel).resolve() == want]
+    if len(docs) != 1:
+        names = ", ".join(rel for rel, _ in docs) or "không có"
+        raise ReleaseSignError(f"cần đúng một GO-NO-GO của v{version} (`--file`); thấy: {names}")
+    return docs[0]
+
+
+def _sign_scope_check(base: Path) -> None:
+    """Phạm vi agent được ký (phản biện ADR-0074): blueprint khai `scale: S` — M/L có GO-NO-GO dòng 20 BLOCKER (người
+    dùng thử thật, ADR-0048) mà máy không điền; và không còn việc `loop defer` chờ người trong vòng của dự án."""
+    try:
+        meta = parse_frontmatter((base / RELEASE_SIGN_BLUEPRINT).read_text(encoding="utf-8"))[0]
+    except (OSError, ValueError) as exc:
+        raise ReleaseSignError(f"không đọc được {RELEASE_SIGN_BLUEPRINT}: {exc}") from exc
+    if str(meta.get("scale", "")).strip() != "S":
+        raise ReleaseSignError(
+            f"{RELEASE_SIGN_BLUEPRINT} khai `scale: {meta.get('scale', '')}` — agent chỉ ký quy mô S (M/L: GO-NO-GO dòng 20"
+            " là BLOCKER người dùng thử, người ký)"
+        )
+    waiting = _deferred(read_state(base) or {})
+    if waiting:
+        raise ReleaseSignError(f"còn việc chờ người (`loop defer`): {', '.join(sorted(waiting))} — agent không ký")
+
+
+def _sign_insert(text: str, row: str, note: str) -> str:
+    """Chèn dòng ký sau dòng bảng cuối của §5 (văn bản thô), kèm một dòng trích dẫn giải trình ngay sau bảng."""
+    head = re.search(r"^## 5\b.*$", text, re.M)
+    if head is None:
+        raise ReleaseSignError("GO-NO-GO không có mục `## 5` (Ký)")
+    end = re.search(r"^## ", text[head.end() :], re.M)
+    stop = head.end() + end.start() if end else len(text)
+    rows = list(re.finditer(r"^\|.*$", text[head.end() : stop], re.M))
+    if not rows:
+        raise ReleaseSignError("§5 không có bảng ký")
+    at = head.end() + rows[-1].end()
+    return text[:at] + "\n" + row + "\n\n" + note + text[at:]
+
+
+def release_sign(base: Path, file: str, note: str, rc: Dict[str, Any]) -> str:
+    """Agent ký §5 (ADR-0074) khi: khoá `release_signoff: agent` có hiệu lực; `release-check` (`rc`) không FAIL BLOCKER
+    nào (cây sạch, sổ audit, nợ review…); việc người còn lại chỉ là chữ ký (`RELEASE_SIGN_HUMAN_OK`); file chưa có dòng
+    ký hay lời từ chối; dòng `subject:` gắn đúng ứng viên. Ghi rồi đọc lại: dòng ký phải hiện và đủ cho `promotion`, không
+    thì trả file về như cũ. Trả đường tương đối đã ký."""
+    if not release_agent_signoff(base):
+        raise ReleaseSignError(
+            f"chỉ người ký: `{RELEASE_SIGNOFF_KEY}: agent` chưa có ở cả xt.yaml cây làm việc lẫn nhánh chính (ADR-0074)"
+        )
+    if rc["fails"]:
+        raise ReleaseSignError(f"release-check NO-GO (FAIL {', '.join(rc['fails'])}) — agent không ký")
+    extra = [h for h in rc["human"] if h not in RELEASE_SIGN_HUMAN_OK]
+    if extra:
+        raise ReleaseSignError(f"còn việc người ngoài chữ ký: {', '.join(extra)} — agent không ký")
+    clean = " ".join(note.replace("|", " ").split())
+    if not clean:
+        raise ReleaseSignError("`--note` rỗng — ghi vì sao GO (bằng chứng máy đã xét)")
+    _sign_scope_check(base)
+    rel, text = _sign_doc(base, file)
+    if _go_no_go_signed(text) or _go_no_go_refusals(text):
+        raise ReleaseSignError(f"{rel}: §5 đã có dòng ký hoặc lời từ chối — không ký thêm")
+    problem = _subject_problem(rel, text, rc["subject"])
+    if problem:
+        raise ReleaseSignError(problem)
+    today = _dt.datetime.now(_dt.timezone.utc).date().isoformat()
+    row = f"| {RELEASE_AGENT_ROLE} | {RELEASE_AGENT_NAME} | GO | {today} |"
+    why = (
+        f"> Agent ký {today} (`release-sign`, ADR-0074): `release-check` @ `{(rc['head'] or '')[:12]}` không FAIL,"
+        f" việc người còn lại chỉ là chữ ký. {clean}"
+    )
+    new = _sign_insert(text, row, why)
+    path = base / rel
+    path.write_text(new, encoding="utf-8")
+    if not _go_no_go_signed(new) or _approval_problem(base, rel, new, rc["subject"]):
+        path.write_text(text, encoding="utf-8")
+        raise ReleaseSignError(
+            f"{rel}: dòng ký ghi vào không hiện ở §5 (bảng trong khối code/chú thích?) — đã hoàn tác"
+        )
+    return rel
+
+
+RELEASE_SIGN_BLUEPRINT = "BLUEPRINT.md"  # `release-sign` chỉ xét blueprint/sổ ở đường mặc định trong dự án — đường khác
+RELEASE_SIGN_STATUS = "docs/ops/AUDIT-STATUS.md"  # làm giả được `release-check` (phản biện ADR-0074, 2026-11-08)
+
+
+def cmd_release_sign(args: argparse.Namespace) -> int:
+    base = project_dir()
+    try:
+        rc = release_check(base, RELEASE_SIGN_BLUEPRINT, RELEASE_SIGN_STATUS)
+        rel = release_sign(base, args.file, args.note, rc)
+    except ReleaseSignError as exc:
+        print(f"✗ {exc}", file=sys.stderr)
+        return 2
+    print(f"✓ agent ký §5 {rel} — GO (ADR-0074); commit + PR: chữ ký có hiệu lực khi lên nhánh chính")
+    return 0
 
 
 WATCH_ERROR_LIMIT = 3  # lần lỗi đọc PR liên tiếp tối đa trước khi merge-watch bỏ cuộc (mạng chập chờn không đáng dừng)
@@ -19044,6 +19190,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     prc.add_argument("--json", action="store_true", help="in JSON {head, rows, fails, human, go, verdict}")
     prc.set_defaults(fn=cmd_release_check)
+    prs = sub.add_parser(
+        "release-sign",
+        help="agent ký §5 GO-NO-GO của v<VERSION> khi xt.yaml (cây và nhánh chính) khai `release_signoff: agent`,"
+        " release-check không FAIL và chỉ còn chữ ký (ADR-0074)",
+    )
+    prs.add_argument("--file", default="", help="GO-NO-GO sẽ ký (mặc định: GO-NO-GO duy nhất của v<VERSION>)")
+    prs.add_argument("--note", required=True, help="vì sao GO — bằng chứng máy đã xét (ghi dưới bảng ký)")
+    prs.set_defaults(fn=cmd_release_sign)
     prg = sub.add_parser(
         "registry",
         help="registry sản phẩm đích: lệch core/gói so với VERSION khung, ngoại lệ hết hạn (ADR-0068 lát E)",

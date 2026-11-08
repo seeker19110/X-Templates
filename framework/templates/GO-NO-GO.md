@@ -75,7 +75,7 @@ Bản phát hành **chỉ tối ưu**: chỉ task của `/optimize`, diff không
 **GO / NO-GO** — NO-GO nếu bất kỳ BLOCKER = FAIL. Điều kiện kèm theo (SHOULD FAIL có ticket): <...>
 Rủi ro còn lại được chấp nhận: <mục — người chấp nhận — ngày>
 
-## 5. Ký (con người, không phải agent)
+## 5. Ký (con người; agent chỉ khi xt.yaml khai `release_signoff: agent` và ký bằng `xt.py release-sign` — ADR-0074)
 | Vai trò | Tên | Quyết định | Ngày |
 |---|---|---|---|
 | Chủ sản phẩm | | GO / NO-GO | |

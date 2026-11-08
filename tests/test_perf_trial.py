@@ -852,6 +852,7 @@ class TrialReview442Test(TrialCase):
         with unittest.mock.patch("pwd.getpwuid", side_effect=KeyError(0)):
             self.assertIn("không có trong passwd", self.refused("status"))
 
+    @unittest.skipIf(os.geteuid() == 0, "root đọc được thư mục chmod 000 — CI chạy uid thường")
     def test_unreadable_dir_refused_and_trees_cleaned(self) -> None:
         """🟠 AUD-SEC-527: `setup` để thư mục `000` (lồng nhau) chứa symlink ra ngoài → exit 2 "không đọc được" thay vì bỏ
         qua; mọi thư mục tạm được dọn."""
@@ -950,7 +951,10 @@ class TrialFinishTest(TrialCase):
         self.assertEqual((len(held["seed"]), len(held["inputs"]), row["falsifier_hit"]), (16, 5, False))
         self.assertEqual([held["compare"][t]["verdict"] for t in ("base", "head")], ["improved"] * 2)
         self.assertEqual(set(held["per_input"].values()), {"improved"})  # EXTRA −500 ≥ 3,2 % ở mọi input (HELD_RANGE)
-        self.assertEqual(row["warnings"], [f"PATH có {wd} — uid này ghi được"])
+        # uid thường: chỉ `wd`; root ghi được cả /usr/bin, /bin — công cụ báo đúng thế (không nới: `wd` luôn có mặt)
+        writable = [p for p in ("/usr/bin", "/bin", str(wd)) if os.access(p, os.W_OK)]
+        self.assertEqual(writable[-1], str(wd))
+        self.assertEqual(row["warnings"], [f"PATH có {p} — uid này ghi được" for p in writable])
         st = self.tstate()
         self.assertEqual((st["phase"], st["kept_tree"]), ("closed", row["candidate_tree"]))
         self.assertIn("EXTRA = 0", (self.repo / "src" / "other.py").read_text(encoding="utf-8"))

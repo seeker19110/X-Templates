@@ -8,6 +8,23 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
 
 ### Added
 
+- **ADR-0074** (chủ repo 2026-11-08 "cho agent ký GO-NO-GO", D-401): khoá `xt.yaml` `release_signoff: agent` và lệnh
+  `xt.py release-sign --note … [--file …]` — agent ký §5 GO-NO-GO chỉ khi `release-check` (blueprint/sổ audit ở đường
+  mặc định) không FAIL BLOCKER, việc người còn lại chỉ là chữ ký, `BLUEPRINT.md` khai `scale: S`, không còn `loop
+  defer`, và dòng `subject:` khớp ứng viên; dòng ký ghi ô tên `agent` (không ghi tên người), ghi xong đọc lại, không đủ
+  cho `promotion` thì hoàn tác. `release-check --json` thêm `promotion.by` (ô tên đã ký). Khoá có hiệu lực khi cả cây
+  lẫn bản đã commit ở nhánh chính khai, nằm trong `HARD_GATED_KEYS` (PR đổi khoá luôn người merge). Guard chỉ cho một
+  lệnh đơn chữ rõ (`--file`/`--note`) khi khoá có hiệu lực; mọi dạng khác của `release-sign` và mọi đường ghi dòng ký
+  khác vẫn `GO_SIGN`. Repo khung: khoá dạng chú thích, bật ở PR riêng (D-402); mẫu dự án đích để trống. **Dự án đích:**
+  chạy lại `install.py`; muốn agent ký thì đặt `release_signoff: agent` qua PR người merge. Không đổi ID/mức mục
+  checklist.
+- Guard (lý do chạm hàng rào: phản biện ADR-0074 tìm ra đường tự bật khoá chỉ người đổi, D-402): đổi nhánh mặc định
+  (`gh repo edit --default-branch`, `gh api -X PATCH repos/o/r -f default_branch=…`) bị chặn như huỷ — nó dời ruleset
+  `~DEFAULT_BRANCH` khỏi `main`; tool MCP `create_or_update_file`/`push_files`/`delete_file` lên `main`/`master` hay không
+  nêu nhánh bị chặn như push thẳng nhánh chính (`PUSH_MAIN`); script Python nạp `xt` kèm tên chứa `sign`/`release` bị
+  chặn như AUD-SEC-498.
+- Nghiên cứu [nâng tự động hoá tới mức máy làm được](research/2026-11-08-full-automation.md): kiểm kê 247 điểm chờ
+  người, định nghĩa "máy không thể", phân loại, lát triển khai.
 - `xt.py loop decide-prod --ref D-NNN --choice …`: ghi quyết định của chủ dự án cho một đề xuất "Khi chạy thật" bằng
   mục THÊM mới (dòng `- Khi chạy thật đã quyết (D-NNN): …`) — sổ vẫn chỉ thêm (`LOOP-STOP-019`); hàng `prod_switch`
   của `release-check` đếm đề xuất chưa quyết theo ID trên sổ và mọi bản tháng (trước đây chưa có cách đóng —

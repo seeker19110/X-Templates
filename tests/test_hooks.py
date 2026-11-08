@@ -5690,7 +5690,8 @@ class GuardTitleRuleTest(unittest.TestCase):
         for tool, inp in (
             ("mcp__github__create_pull_request", {"title": "fix: a", "body": "x"}),
             ("mcp__github__update_pull_request", {"pullNumber": 7, "body": "chỉ sửa thân"}),
-            ("mcp__github__push_files", {"message": "fix: a\n\n" + "x" * 200}),
+            # nhánh làm việc: không nêu nhánh = nhánh mặc định → chặn như push `main` (ADR-0074, D-402)
+            ("mcp__github__push_files", {"message": "fix: a\n\n" + "x" * 200, "branch": "claude/x"}),
             ("mcp__github__add_issue_comment", {"title": self.LONG}),
         ):
             with self.subTest(ok=tool):

@@ -7003,17 +7003,28 @@ PLAIN_APPROVE_XT = ("scripts/xt.py", ".xtemplates/scripts/xt.py")  # xt.py của
 PLAIN_APPROVE_OPTS = ("--sha", "--note")
 
 
-def _approve_opts(rest: List[str]) -> bool:
-    """Sau `stage approve` chỉ có `--sha`/`--note` kèm giá trị (`--sha X` hay `--sha=X`)."""
+def _approve_opts(rest: List[str], opts: Tuple[str, ...] = PLAIN_APPROVE_OPTS) -> bool:
+    """Sau lệnh con chỉ có tuỳ chọn trong `opts` kèm giá trị (`--sha X` hay `--sha=X`)."""
     i = 0
     while i < len(rest):
-        if "=" in rest[i] and rest[i].split("=", 1)[0] in PLAIN_APPROVE_OPTS:
+        if "=" in rest[i] and rest[i].split("=", 1)[0] in opts:
             i += 1
-        elif rest[i] in PLAIN_APPROVE_OPTS and i + 1 < len(rest):
+        elif rest[i] in opts and i + 1 < len(rest):
             i += 2
         else:
             return False
     return True
+
+
+def _own_xt_rest(argv: List[str], root: str, cwd: Optional[str]) -> List[str]:
+    """`[python3|python] <xt.py của dự án> …` không token mờ → phần sau trình thông dịch (bắt đầu bằng đường xt.py); dạng
+    khác → []. Đường tương đối chỉ khi thư mục chạy là gốc dự án."""
+    if any(_vague(t) for t in argv):
+        return []
+    rest = argv[1:] if argv[:1] and argv[0] in PLAIN_APPROVE_PY else argv
+    here = cwd is not None and os.path.realpath(cwd) == os.path.realpath(root)
+    own = {os.path.join(root, p) for p in PLAIN_APPROVE_XT} | (set(PLAIN_APPROVE_XT) if here else set())
+    return rest if rest[:1] and rest[0] in own else []
 
 
 def _plain_approve(argv: List[str], root: str, cwd: Optional[str], single: bool) -> bool:
@@ -7021,18 +7032,63 @@ def _plain_approve(argv: List[str], root: str, cwd: Optional[str], single: bool)
     chỉ với `--sha`/`--note`, không token mờ. Review harden F1 (PLAN-harden-2026-11-05): `env -u CLAUDECODE …`, `unset …;`,
     gán biến (`CLAUDE_PROJECT_DIR=`, `PYTHONPATH=`), cờ trình thông dịch (`-c`, `-m pdb`, `-i`), xt.py ngoài dự án, nối
     lệnh hay lệnh lồng đều rơi về luật ADR-0058 (deny). Đường tương đối chỉ khi thư mục chạy là gốc dự án."""
-    if not single or any(_vague(t) for t in argv):
-        return False
-    rest = argv[1:] if argv[:1] and argv[0] in PLAIN_APPROVE_PY else argv
-    here = cwd is not None and os.path.realpath(cwd) == os.path.realpath(root)
-    own = {os.path.join(root, p) for p in PLAIN_APPROVE_XT} | (set(PLAIN_APPROVE_XT) if here else set())
-    return len(rest) >= 3 and rest[0] in own and rest[1:3] == ["stage", "approve"] and _approve_opts(rest[3:])
+    rest = _own_xt_rest(argv, root, cwd) if single else []
+    return len(rest) >= 3 and rest[1:3] == ["stage", "approve"] and _approve_opts(rest[3:])
 
 
 def _stage_approve_denied(argv: List[str], root: str, cwd: Optional[str] = None, single: bool = False) -> bool:
     """Lệnh duyệt giai đoạn bị chặn: mọi dạng (ADR-0058), trừ dạng chữ rõ của `_plain_approve` khi `agent_stage_approval`
     (ADR-0069)."""
     return _approves_stage(argv) and not (_plain_approve(argv, root, cwd, single) and agent_stage_approval(root))
+
+
+# ADR-0074 (chủ repo 2026-11-08 "cho agent ký GO-NO-GO", D-401): `xt.py release-sign` ghi dòng ký §5 ô tên `agent` khi
+# máy đã đạt. Như ADR-0069: chỉ dạng chữ rõ MỘT lệnh đơn, khi xt.yaml ở cây VÀ bản đã commit ở nhánh chính khai
+# `release_signoff: agent`; mọi dạng khác của lệnh này → GO_SIGN. Ghi dòng ký bằng Edit/Write/Bash/MCP vẫn chặn như cũ.
+RELEASE_SIGN_OPTS = ("--file", "--note")  # không nhận blueprint/sổ khác: đường ngoài cây làm giả `release-check`
+RELEASE_SIGN_WHY = (
+    "ký GO-NO-GO bằng `xt.py release-sign` ngoài dạng cho phép — "
+    + GO_SIGN_WHY
+    + "; agent ký được bằng một lệnh đơn chữ rõ khi xt.yaml ở cây VÀ bản đã commit ở nhánh chính khai"
+    " `release_signoff: agent` (ADR-0074)"
+)
+RELEASE_SIGNOFF_LINE_RE = re.compile(r"^release_signoff:[ \t]*([\"']?)([A-Za-z]*)\1[ \t]*(?:#.*)?$", re.M)
+_RELEASE_AGENT: Dict[str, bool] = {}
+
+
+def _release_signoff_value(text: str) -> str:
+    """Giá trị `release_signoff` (dòng trùng → dòng cuối); vắng → rỗng."""
+    found = RELEASE_SIGNOFF_LINE_RE.findall(text)
+    return str(found[-1][1]) if found else ""
+
+
+def agent_release_signoff(root: str) -> bool:
+    """Agent được ký §5 (ADR-0074); tính một lần mỗi tiến trình; `XT_GUARD_POLICY=strict` không nới."""
+    if root not in _RELEASE_AGENT:
+        xt = _xt_yaml_for(root)
+        _RELEASE_AGENT[root] = (
+            os.environ.get("XT_GUARD_POLICY") != "strict"
+            and bool(xt)
+            and _release_signoff_value(_read_all(xt)) == "agent"
+            and _committed_value(xt, _release_signoff_value, STAGE_REFS) == "agent"
+        )
+    return _RELEASE_AGENT[root]
+
+
+def _release_sign_form(argv: List[str], root: str, cwd: Optional[str]) -> bool:
+    """`[python3|python] <xt.py của dự án> release-sign` chỉ với `RELEASE_SIGN_OPTS`, không token mờ."""
+    rest = _own_xt_rest(argv, root, cwd)
+    return len(rest) >= 2 and rest[1] == "release-sign" and _approve_opts(rest[2:], RELEASE_SIGN_OPTS)
+
+
+def _release_sign_denied(argv: List[str], root: str, cwd: Optional[str] = None, single: bool = False) -> bool:
+    """`… xt.py … release-sign …` (luật chữ, mọi vị trí sau `xt.py` đầu tiên) bị chặn, trừ dạng chữ rõ một lệnh đơn khi
+    `agent_release_signoff`."""
+    n = normalize(argv)
+    at = next((k for k, t in enumerate(n) if posixpath.basename(t) == "xt.py"), len(n))
+    if "release-sign" not in n[at + 1 :]:
+        return False
+    return not (single and _release_sign_form(argv, root, cwd) and agent_release_signoff(root))
 
 
 def _approves_literal(n: List[str]) -> bool:
@@ -7065,7 +7121,7 @@ XT_INPROC_BUILTIN_MODS = frozenset({"builtins", "__builtins__"})  # `builtins.ex
 XT_INPROC_NAME_RE = re.compile(r"(?:.*[/\\.])?xt(?:\.pyc?)?", re.S)  # `xt`, `scripts.xt`, `scripts/xt.py`
 # Tên/chữ thư viện đọc của xt không cần — đi cùng `import xt` thì chặn (gọi CLI, sửa biến agent, truy cập động)
 XT_INPROC_RISKY_RE = re.compile(
-    r"main|stage|approv|adopt|environ|putenv|unsetenv|CLAUDE|AI_AGENT|[gsd]etattr|^vars$|^dir$|globals|locals"
+    r"main|stage|approv|adopt|sign|release|environ|putenv|unsetenv|CLAUDE|AI_AGENT|[gsd]etattr|^vars$|^dir$|globals|locals"
     r"|__dict__|__getattribute__|attrgetter|methodcaller|getmembers|^exec|^eval$|^compile$|__import__|import_module"
     r"|builtins|modules|__loader__|__spec__",
     re.I,
@@ -7753,7 +7809,7 @@ def mcp_decision(tool_name: str, tool_input: Dict[str, object], root: str) -> Tu
     if MCP_REVIEW_POST_RE.fullmatch(tool_name) and any(REVIEW_MARK_RE.search(s) for s in _strings(tool_input)):
         return "deny", f"Lệnh bị khung chặn ({REVIEW_FORGE_WHY}): {tool_name}"
     hit = mcp_attribution(tool_name, tool_input, root) or mcp_title(tool_name, tool_input, root)
-    hit = hit or _mcp_go_sign_why(tool_name, tool_input)
+    hit = hit or _mcp_go_sign_why(tool_name, tool_input) or _mcp_main_write_why(tool_name, tool_input)
     if hit:
         return "deny", hit
     if not MCP_MERGE_RE.fullmatch(tool_name):
@@ -7776,6 +7832,19 @@ def mcp_decision(tool_name: str, tool_input: Dict[str, object], root: str) -> Tu
     if not ok or tool_input.get("merge_method", "squash") not in MERGE_METHODS:
         return _mcp_merge_ask(ask, tool_input, root)
     return _merge_verdict([str(n)], str(sha), root, f"{owner}/{repo}")
+
+
+MCP_MAIN_BRANCHES = frozenset({"main", "master", "refs/heads/main", "refs/heads/master"})
+
+
+def _mcp_main_write_why(tool_name: str, tool_input: Dict[str, object]) -> str:
+    """Tool MCP ghi file thành commit (`create_or_update_file`, `push_files`, `delete_file`) lên nhánh chính hay không nêu
+    nhánh (= nhánh mặc định) → như `git push origin main` (ADR-0074, phản biện 2026-11-08: ruleset là lớp phía máy chủ,
+    guard là lớp chặn nhầm khi ruleset bị dời)."""
+    branch = tool_input.get("branch")
+    if MCP_COMMIT_RE.fullmatch(tool_name) and (not isinstance(branch, str) or branch.strip() in MCP_MAIN_BRANCHES):
+        return f"Lệnh bị khung chặn (push thẳng nhánh chính qua MCP — khung yêu cầu đi qua PR): {tool_name}"
+    return ""
 
 
 def _mcp_merge_ask(why: str, tool_input: Dict[str, object], root: str) -> Tuple[str, str]:
@@ -7994,7 +8063,9 @@ def _gh_api_destroy(args: List[str]) -> bool:
     fields = [v.replace(" ", "").lower() for v in _gh_api_field_values(args)]
     # Như `gh repo edit --visibility <bất kỳ>`: đổi `private`/`visibility` (kể cả sang private) là chặn; thân `--input`
     # không đọc được tại chỗ nên không xác minh được → chặn như `archived=true`.
-    exposes = any(v == "archived=true" or v.startswith(("private=", "visibility=")) for v in fields)
+    # ADR-0074 (phản biện 2026-11-08): `default_branch=` dời ruleset `~DEFAULT_BRANCH` khỏi nhánh chính → ghi thẳng `main`
+    # rồi tự bật khoá HARD_GATED (`release_signoff`, `stage_approval`) không qua PR người merge — chặn như huỷ.
+    exposes = any(v == "archived=true" or v.startswith(("private=", "visibility=", "default_branch=")) for v in fields)
     opaque = any(a.split("=", 1)[0] == "--input" for a in args)
     return method == "PATCH" and (exposes or opaque) and bool(GH_API_REPO_RE.fullmatch(path))
 
@@ -8030,7 +8101,9 @@ def _publish_rule(name: str, args: List[str]) -> Tuple[str, str]:
     if name == "gh":
         hit = tuple(args[:1]) in GH_ASK or tuple(args[:2]) in GH_ASK
         destroy = tuple(args[:1]) in GH_DESTROY or tuple(args[:2]) in GH_DESTROY
-        destroy = destroy or (args[:2] == ["repo", "edit"] and any(a.startswith("--visibility") for a in args))
+        destroy = destroy or (
+            args[:2] == ["repo", "edit"] and any(a.startswith(("--visibility", "--default-branch")) for a in args)
+        )
         return ("ask", DESTROY_ASK if destroy else EXTERNAL_ASK) if hit else ("", "")
     if name not in ASK_CMDS:
         return "", ""
@@ -9738,7 +9811,7 @@ def _go_reader(n: List[str], argv: List[str]) -> bool:
 def _go_argv_hits(n: List[str], argv: List[str], root: str, cwd: Optional[str]) -> List[str]:
     """Từ của lệnh ngoài `_go_reader` khớp `go-no-go*.md` (sau `=`/`:` cuối; glob nở ra file có sẵn); họ đổi tên/archive
     đổi tên thành viên: từ có chữ `go-no-go` (AUD-SEC-535)."""
-    if not n or _go_reader(n, argv):
+    if not n or _go_reader(n, argv) or _release_sign_form(argv, root, cwd):  # ADR-0074: luật RELEASE_SIGN xét riêng
         return []
     words = {posixpath.basename(a) for a in n}
     xform = words & GO_ARCHIVERS and any(a.startswith(GO_XFORM_OPTS) or a == "-s" for a in n)
@@ -14885,6 +14958,7 @@ def _bash_decision(
     simple = split_commands(tokens)
     single = whole and len(simple) == 1  # dạng chữ rõ của ADR-0069 chỉ khi cả lệnh là một lệnh đơn (review harden F1)
     asks += [STAGE_APPROVE_WHY] if any(_stage_approve_denied(c, root, cwd, single) for c in simple) else []
+    asks += [RELEASE_SIGN_WHY] if any(_release_sign_denied(c, root, cwd, single) for c in simple) else []
     asks += _go_patch_asks(cmd, placed, root, cwd, strict)  # AUD-SEC-534: diff từ tệp/stdin ở dự án có GO-NO-GO
     braces = brace_variants(cmd)
     nested_deny = (
