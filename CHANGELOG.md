@@ -6,6 +6,12 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
 
 ## [Unreleased]
 
+### Fixed
+
+- `install.py` chạy trên git worktree không còn ghi đường tuyệt đối của git hook (`/home/…/.git/hooks/*`) vào
+  `git_hooks` của `.xtemplates/manifest.json`: ghi `.git/hooks/*` (git common dir) hay `core.hooksPath/<tên>` khi
+  thư mục hook ở ngoài (AUD-HAR-325, D-397).
+
 ## [3.32.0] - 2026-11-07
 
 **Dự án đích: chạy lại `install.py`.** `promotion: approved` của `release-check` nay cần GO-NO-GO có dòng
