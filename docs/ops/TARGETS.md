@@ -8,10 +8,10 @@
 
 ## Danh sách
 
-- seeker19110/hotel-manager — có `.xtemplates/` (3.31.1), kiểm 2026-11-07; 2026-10-23: 188 FB-*.md
-- seeker19110/X-Company — có `.xtemplates/` (3.31.1), kiểm 2026-11-07; 2026-10-23: 91 FB-*.md
-- seeker19110/xboss — có `.xtemplates/` (3.31.1), kiểm 2026-11-07; 2026-10-23: 4 FB-*.md
-- seeker19110/dhcb — có `.xtemplates/` (3.31.1), kiểm 2026-11-07; 2026-10-23: chưa có phản hồi
+- seeker19110/hotel-manager — có `.xtemplates/` (3.32.0), kiểm 2026-11-08; 2026-10-23: 188 FB-*.md
+- seeker19110/X-Company — có `.xtemplates/` (3.32.0), kiểm 2026-11-08; 2026-10-23: 91 FB-*.md
+- seeker19110/xboss — có `.xtemplates/` (3.32.0), kiểm 2026-11-08; 2026-10-23: 4 FB-*.md
+- seeker19110/dhcb — có `.xtemplates/` (3.32.0), kiểm 2026-11-08; 2026-10-23: chưa có phản hồi
 
 Lần gộp 2026-10-23 (T-2410, `feedback aggregate --from` bản clone nông cả 4 repo public, exit 0): đủ ngưỡng 63 nhóm —
 `mien-tru` 47, `cong-cu` 10, `hook-chan-nham` 5, `hook-lot` 1; dưới ngưỡng 61. Nhóm `cong-cu` đủ ngưỡng cần phân loại
