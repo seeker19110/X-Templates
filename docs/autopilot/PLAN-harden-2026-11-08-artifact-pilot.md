@@ -47,4 +47,4 @@ Mốc dài hạn là ít nhất 18/20 loại bước có tự động hóa đư�
 
 T-3713 đạt với hai biên nhận staging. [Báo cáo pilot và diễn tập](../ops/ARTIFACT-PILOT-2026-11-08.md)
 
-Tách rollback ứng dụng và restore DB thành hai lát tự động hóa. Rollback cần digest bản tốt, tương thích schema và smoke đạt. Restore cần dữ liệu mốc, kiểm các role PostgreSQL mà policy RLS tham chiếu và đo thời gian phục hồi cùng mốc dữ liệu khôi phục.
+Rollback và restore đã chạy tự động trên hai run staging của #719. Rollback đối chiếu digest, Build ID và probe khi đổi tuyến về bản giữ sẵn cùng SHA nguồn. Restore xác minh dữ liệu mốc, role RLS, migration và app trên đích PostgreSQL riêng. Số đo và biên nhận nằm trong báo cáo. Phạm vi đo tiếp theo của kế hoạch gồm chuyển phiên bản có thay đổi schema và mục tiêu phục hồi của môi trường vận hành.

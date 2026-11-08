@@ -48,6 +48,19 @@ Lượt sau đạt trên hai container PostgreSQL 16 dùng một lần. SHA-256 
 
 `pg_restore` mất 9,145 giây, từ bắt đầu restore đến khi app sẵn sàng mất 11,165 giây. Mốc ghi được khôi phục cách thời điểm sự cố giả 0,480 giây, với một dòng giả nằm ngoài backup. Phép đo bắt đầu sau khi đã dựng đích và tạo role. Diễn tập gọi `pg_dump` và `pg_restore` trực tiếp. Luồng `restore-check.sh`, recovery set có uploads, PITR và RTO/RPO vận hành cần phép kiểm riêng. [Runbook backup và restore](https://github.com/seeker19110/xboss/blob/ab7389aa9901d329cd7f1081311e498c3c4ba5ed/docs/ops/backup.md)
 
+## Diễn tập tự động trong CI staging
+
+CI tổng hợp của #719 đạt trên `7e831ce1` trước khi thêm bước phục hồi. Bản tự động hóa `5b3fbd50bd303f0466782e43810ce3b563325591` đã chạy cả rollback và restore trên hai run độc lập. Job chỉ đạt khi hai biên nhận `verified` khớp repo, môi trường, SHA, run và attempt. Từng biên nhận được tải lại và đối chiếu độc lập với metadata artifact cùng các probe. [CI trước khi mở mốc](https://github.com/seeker19110/xboss/actions/runs/42438780309) · [CodeQL bản cuối](https://github.com/seeker19110/xboss/actions/runs/42441082183)
+
+| Run | Trigger | Rollback RTO | Restore RTO | RPO giả lập | Biên nhận CI |
+| --- | ------- | -----------: | ----------: | ----------: | ------------ |
+| [42441075174](https://github.com/seeker19110/xboss/actions/runs/42441075174) | `push` | 1,856 giây | 6,106 giây | 0,384 giây | [Artifact](https://github.com/seeker19110/xboss/actions/runs/42441075174/artifacts/13601718062) |
+| [42441082287](https://github.com/seeker19110/xboss/actions/runs/42441082287) | `pull_request` | 1,244 giây | 5,171 giây | 0,301 giây | [Artifact](https://github.com/seeker19110/xboss/actions/runs/42441082287/artifacts/13602135106) |
+
+Rollback chuyển tuyến về bản A đang chạy sẵn. A và B có Build ID và digest riêng từ cùng SHA nguồn. Restore tạo role tối thiểu trên dịch vụ đích riêng, kiểm 176 migration, mốc trước/sau backup, RLS hai tenant và bốn probe của artifact CI đang chạy trên đích. Giới hạn staging lần lượt là 60, 180 và 60 giây. Cửa sổ RPO dùng thời điểm quan sát commit ngay sau ghi dữ liệu giả. Artifact bằng chứng giữ 30 ngày.
+
+Quy trình người duyệt và merge production giữ nguyên. GitHub ruleset của `main` yêu cầu 0 approval, environment `Production` có 0 required reviewer và VPS tự deploy khi CI của `main` đạt. Diễn tập chạy trên nhánh pilot, với dịch vụ và dữ liệu dùng một lần. [Workflow VPS](https://github.com/seeker19110/xboss/blob/5b3fbd50bd303f0466782e43810ce3b563325591/.github/workflows/deploy.yml)
+
 ## Phạm vi phép đo
 
 Sáu lượt trên ba commit xác nhận bốn bước nhóm deploy trong PLAN trên staging cô lập. Mốc 90% của cả vòng đời cần đo qua các chu kỳ thật như đã định trong PLAN. Pilot dùng artifact cùng workflow run và SHA-256 metadata nối giữa hai job. Việc ký provenance và kiểm trên môi trường deploy bền là mốc riêng.
