@@ -6,6 +6,13 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
 
 ## [Unreleased]
 
+## [3.33.0] - 2026-11-08
+
+**Dự án đích: chạy lại `install.py`.** Đề xuất "Khi chạy thật" nay đóng bằng `xt.py loop decide-prod --ref D-NNN
+--choice …` (mục thêm mới, sổ chỉ thêm) — mẫu GO-NO-GO #18 và `LOOP-STOP-020` trỏ lệnh này; ghi quyết định vào bản tháng
+`DECISIONS-YYYY-MM.md` không còn làm GO-NO-GO đã ký về `pending_human`. Không đổi ID/mức mục checklist, không khoá
+`xt.yaml` mới.
+
 ### Added
 
 - `xt.py loop decide-prod --ref D-NNN --choice …`: ghi quyết định của chủ dự án cho một đề xuất "Khi chạy thật" bằng
