@@ -5271,6 +5271,9 @@ def _push_delete_rule(refs: List[str], deleting: bool, cwd: Optional[str]) -> Tu
 
 
 PUSH_VALUE_OPTS = ("-o", "--push-option", "--repo", "--receive-pack", "--exec")
+# AUD-SEC-573: token toàn chữ số trước chuyển hướng (`--delete 1234 >/dev/null`) có thể là tên nhánh — cách đọc thứ ba
+# giữ nó; một chữ số vẫn đọc là fd (`--delete <nhánh phiên> 2>&1` không thành xoá nhánh `2`).
+PUSH_FD_DIGITS = 1
 # Tuỳ chọn dài của push BẮT BUỘC giá trị (`git push --git-completion-helper-all` của git 2.43: tên kết thúc `=`).
 PUSH_HELP_VALUE_OPTS = ("--push-option", "--repo", "--receive-pack", "--exec", "--recurse-submodules")
 VERDICT_RANK = {"deny": 2, "ask": 1}
@@ -5644,17 +5647,21 @@ def _replace_names(args: List[str], _cwd: Optional[str]) -> RefNames:
     return _replace_reading(args) + _replace_reading(dropped, ambiguous)
 
 
-def _drop_redirect_ops(args: List[str]) -> List[str]:
-    """Bỏ toán tử chuyển hướng và đích của nó, GIỮ token đứng trước (`1234 >/dev/null`: chữ số có thể là đối số)."""
+def _drop_redirect_ops(args: List[str], fd_max: int = 0) -> List[str]:
+    """Bỏ toán tử chuyển hướng và đích của nó, GIỮ token đứng trước (`1234 >/dev/null`: chữ số có thể là đối số) — trừ
+    token chữ số dài ≤ `fd_max` (đọc là fd: `2>&1`)."""
     out: List[str] = []
-    skip = False
+    skip = adjacent = False  # `adjacent`: token cuối của `out` đứng ngay trước token đang xét
     for a in args:
         if skip:
-            skip = False
+            skip = adjacent = False
         elif _is_redirect(a):
-            skip = True
+            if adjacent and out[-1].isdigit() and len(out[-1]) <= fd_max:
+                out.pop()
+            skip, adjacent = True, False
         else:
             out.append(a)
+            adjacent = True
     return out
 
 
@@ -6135,7 +6142,8 @@ def git_rules(n: List[str], cwd: Optional[str] = None) -> Tuple[str, str]:
     if moved[0]:
         return moved
     if n[1] == "push":  # AUD-SEC-102: `git push origin 2>&1` trên nhánh chính — chuyển hướng không phải refspec
-        return _stricter(_git_push(args, cwd), _git_push(_drop_redirects(args), cwd))
+        verdict = _stricter(_git_push(args, cwd), _git_push(_drop_redirects(args), cwd))
+        return _stricter(verdict, _git_push(_drop_redirect_ops(args, PUSH_FD_DIGITS), cwd))
     rule = GIT_RULES.get(n[1])
     return rule(args) if rule else ("", "")
 
@@ -6923,7 +6931,14 @@ def _inside_root(target: str, root: str, cwd: Optional[str]) -> bool:
 
 
 def _delete_rule(name: str, args: List[str], root: str, cwd: Optional[str]) -> Tuple[str, str]:
-    args = _drop_redirects(args)
+    """Lệnh xoá/huỷ (rm/mv/shred/rsync/find) đọc bỏ chuyển hướng; token toàn chữ số trước chuyển hướng có thể là đối số
+    (`cd ~ && shred 2026 >/dev/null` — AUD-SEC-574) nên đọc thêm bản giữ nó, cách nào chặt hơn thắng."""
+    dropped, kept = _drop_redirects(args), _drop_redirect_ops(args)
+    verdict = _delete_reading(name, dropped, root, cwd)
+    return verdict if kept == dropped else _stricter(verdict, _delete_reading(name, kept, root, cwd))
+
+
+def _delete_reading(name: str, args: List[str], root: str, cwd: Optional[str]) -> Tuple[str, str]:
     if name == "rm":
         return _rm_rule(args, root, cwd)
     wiped = _wipe_outside(name, args, root, cwd) if root else []
@@ -8193,15 +8208,56 @@ def _external_rule(name: str, args: List[str], root: str, cwd: Optional[str] = N
     if name == "gh":
         args = _gh_lift_repo(args)
         verdict = _gh_rule(args, root, cwd or root)
-        if verdict[0]:
-            return verdict
-    verdict = _publish_rule(name, args)
+    else:
+        verdict = _publish_rule(name, args)
     return verdict if verdict[0] else egress_rule(name, args, root)
 
 
+# Bảng nhóm lệnh gh tối thiểu (AUD-SEC-571, D-408) — dựng từ các luật gh hiện có (`GH_ASK`, `GH_DESTROY`, merge/close,
+# `alias import`): nhóm có lệnh con thì dời hai tên lên đầu, lá (`api`) dời một tên (token sau là đối số của nó).
+# Lệnh không trong bảng giữ cách đọc cũ (không nới).
+GH_GROUPS = frozenset({"pr", "repo", "workflow", "variable", "release", "secret", "alias"})
+GH_LEAVES = frozenset({"api"})
+
+
+def _gh_canonical(args: List[str]) -> List[str]:
+    """Dạng cobra chạy (`args` sau `gh`): tên lệnh (`_gh_path`) lên đầu, mọi token khác giữ thứ tự gốc như cobra đưa
+    cho lệnh lá (`gh -X DELETE api r` → `api -X DELETE r`, `gh repo --visibility public edit` → `repo edit
+    --visibility public`). Tên đầu không trong bảng → `args` nguyên."""
+    path = _gh_path(args)
+    head = args[path[0]] if path else ""
+    if head not in GH_GROUPS | GH_LEAVES:
+        return args
+    path = path[:1] if head in GH_LEAVES else path
+    return [args[k] for k in path] + [a for k, a in enumerate(args) if k not in path]
+
+
+def _gh_rank(v: Tuple[str, str]) -> Tuple[int, bool]:
+    """Độ chặt của một quyết định: deny > ask > rỗng; cùng ask thì ask mà chính sách mặc định chặn (DESTROY…) hơn."""
+    return VERDICT_RANK.get(v[0], 0), policy_action(decide({"decision": v[0], "reason": v[1]})) == "deny"
+
+
 def _gh_rule(args: List[str], root: str, cwd: str) -> Tuple[str, str]:
-    """Luật riêng của `gh` (`args` sau `gh`, cờ repo đầu đã dời ra sau): xoá ref (D-407), `pr merge` — cả cờ đứng trước
-    `merge` (`gh pr -R o/r merge`, `gh pr -t x merge`, `gh -b x pr merge` — AUD-SEC-570), `alias import`, `api` ghi."""
+    """Mọi luật của `gh` (`args` sau `gh`, cờ repo đầu đã dời ra sau) đọc hai cách: nguyên văn và dạng cobra chạy khi cờ
+    ăn giá trị đứng trước lệnh con (`gh --method DELETE api repos/o/r`, `gh repo --visibility public edit` —
+    AUD-SEC-571, D-408); cách nào chặt hơn thắng (hoà → nguyên văn)."""
+    canon = _gh_canonical(args)
+    verdict = _gh_reading(args, root, cwd)
+    if canon == args:
+        return verdict
+    lifted = _gh_reading(canon, root, cwd)
+    return lifted if _gh_rank(lifted) > _gh_rank(verdict) else verdict
+
+
+def _gh_reading(args: List[str], root: str, cwd: str) -> Tuple[str, str]:
+    """Một cách đọc `args`: luật riêng của gh, rồi bảng đối ngoại/huỷ (`GH_ASK`, `GH_DESTROY`)."""
+    verdict = _gh_own_rule(args, root, cwd)
+    return verdict if verdict[0] else _publish_rule("gh", args)
+
+
+def _gh_own_rule(args: List[str], root: str, cwd: str) -> Tuple[str, str]:
+    """Luật riêng của `gh`: xoá ref (D-407), `pr merge` — cả cờ đứng trước `merge` (`gh pr -R o/r merge`, `gh pr -t x
+    merge`, `gh -b x pr merge` — AUD-SEC-570), `alias import`, `api` ghi."""
     gone = _gh_ref_delete_rule(args, cwd)
     if gone[0]:
         return gone
