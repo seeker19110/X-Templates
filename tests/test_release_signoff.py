@@ -993,7 +993,7 @@ class GoMirrorCredentialTest(TmpRepoCase):
         self.cfg.write_text("[user]\n\tname = x\n", encoding="utf-8")
         with unittest.mock.patch.dict(os.environ, {"GIT_ASKPASS": str(askpass), "GIT_SSL_CAINFO": "/ca.pem"}):
             env = xt._go_git_env()
-            self.assertFalse("GIT_ASKPASS" in env)  # không in cả môi trường khi đỏ
+            self.assertNotIn("GIT_ASKPASS", env.keys())  # khi đỏ chỉ in tên biến, không in giá trị môi trường
             self.assertEqual(env["GIT_SSL_CAINFO"], "/ca.pem")
             with self.assertRaises(ValueError):
                 self.clone()

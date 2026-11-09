@@ -4410,6 +4410,49 @@ class GuardEgressAuditTest(EgressCase):
             ),
         )
 
+    def test_guard_git_one_letter_abbrev(self):  # AUD-SEC-567
+        """git nhận viết tắt duy nhất của tuỳ chọn dài bất kể độ dài (`push --m` = `--mirror`, `clean --f` = `--force`,
+        đo trên git 2.43): viết tắt một chữ mở như viết tắt dài hơn. Viết tắt mơ hồ git tự báo lỗi nên mở rộng chỉ chặt
+        hơn; `--` trần giữ nguyên (hết tuỳ chọn)."""
+        self.assert_all(
+            "deny",
+            (
+                "git push --m origin",
+                "git push --f origin feat",
+                "git reset --h",
+                "git reset --h HEAD~3",
+                "git clean --f",
+                "git clean --f -d",
+                "git checkout --f",
+                "git checkout --f main",
+                "git branch --d -f main",
+            ),
+        )
+        self.assert_all("ask", ("git push --b origin", "git push --a origin", "git push --t origin"))
+        self.assert_all(
+            "",
+            (
+                "git reset --s HEAD~1",
+                "git reset --mi",
+                "git clean --d",  # git: `--dry-run` (duy nhất); guard mở thành `--delete` — luật clean không xét
+                "git clean --i",
+                "git checkout --d HEAD~1",
+                "git checkout --m main",
+                "git switch --t origin/x",
+                "git restore --t a.txt",
+                "git branch --t x origin/x",
+                "git branch --p HEAD",
+                "git config --t bool --get core.x",
+                "git config --p --get core.x",
+                "git tag --p HEAD",
+                "git fetch --m origin upstream",
+                "git log --a --oneline",
+                "git commit --a -m x",
+                "git reset -- a.txt",
+                "git clean -n --",
+            ),
+        )
+
     def test_review_84_gaps(self):  # review #84: `env -S` nháy lẻ, kubectl cờ toàn cục, `find -mindepth 1 -delete`
         self.assert_all(
             "deny",
@@ -7963,6 +8006,31 @@ class GuardRemoteDeleteTest(unittest.TestCase):
                 self.assert_allowed(cmd)
         with mock.patch.dict(os.environ, {"XT_GUARD_POLICY": "strict"}):
             self.assertEqual(self.g.bash_decision("gh pr close 12 -d", str(self.root))["decision"], "deny")
+
+    def test_gh_pr_close_attached_value_cluster(self):
+        """AUD-SEC-566 (review #486): cụm pflag mà giá trị dính liền chứa ký tự ngoài chữ/số (`-dRo/r`, `-dc.`) từng lọt
+        vì chỉ cụm `-[A-Za-z0-9]+` được đọc. Chữ cờ đọc lần lượt tới chữ ăn giá trị đầu tiên (`c`, `R`) hay `=`; `d`
+        trước điểm đó là xoá nhánh, phần sau là giá trị."""
+        for cmd in (
+            "gh pr close 12 -dRo/r",
+            "gh pr close 12 -dc.",
+            "gh pr close 12 -dc'x y'",
+            "gh pr close 12 -dc=x",
+            "gh pr close 12 -Ro/r -d",
+            "gh pr close 12 -4dRo/r",
+            "gh pr -R o/r close 12 -dc-",
+        ):
+            with self.subTest(cmd):
+                self.assert_deleted(cmd)
+        for cmd in (
+            "gh pr close 12 -Ro/r",
+            "gh pr close 12 -Ro/r-d",  # `-R` ăn phần sau: repo `o/r-d`
+            "gh pr close 12 -c.d",  # bình luận `.d`
+            "gh pr close 12 -c=-d",  # bình luận `-d`
+            "gh pr close 12 -c'x -d'",
+        ):
+            with self.subTest(cmd):
+                self.assert_allowed(cmd)
 
 
 class GuardAppendParallelTest(unittest.TestCase):

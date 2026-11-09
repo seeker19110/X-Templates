@@ -41,6 +41,11 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
   `-d`/`-f`); chữ số sau cờ ăn giá trị dính liền vẫn là giá trị (`checkout -bfix2`, `push -o4d`).
 - Guard (lý do chạm hàng rào: nợ review #485 AUD-SEC-558): `gh pr close … --delete-branch|-d` (mọi vị trí cờ, số hay URL
   PR) bị chặn `REMOTE_DELETE` — guard không biết nhánh head của PR; `gh pr close N` không cờ xoá như cũ.
+- Guard (lý do chạm hàng rào: nợ review #486 AUD-SEC-566): cụm cờ của `gh pr close` đọc tới chữ ăn giá trị đầu tiên
+  (`c`, `R`) bất kể ký tự sau — `-dRo/r`, `-dc.` bị chặn `REMOTE_DELETE`; `-Ro/r-d`, `-c.d` vẫn là giá trị.
+- Guard (lý do chạm hàng rào: nợ review #486 AUD-SEC-567): viết tắt MỘT chữ của tuỳ chọn git nguy hiểm được mở như
+  viết tắt dài hơn — `git push --m`/`--b`, `git reset --h`, `git clean --f`, `git checkout --f` bị chặn như dạng đầy
+  đủ; `--` trần giữ nguyên.
 
 ### Fixed
 
@@ -51,6 +56,7 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
 - Credential helper của clone mirror `release-sign` chỉ đọc từ cấu hình global thật của người dùng (bỏ `GIT_*`,
   `XDG_CONFIG_HOME` agent export được), không còn giữ `GIT_ASKPASS`, bỏ khoá `credential.<url>.helper` có `=` git không
   parse được (AUD-SEC-559, AUD-HAR-350).
+- Test `release-sign` dùng `assertNotIn` thay `assertFalse(a in b)` (CodeQL "Imprecise assert", AUD-TEST-094).
 
 - `release-check` chặn phát hành và để trống vân tay Git trong JSON khi lỗi đọc Git, HEAD đổi trong lúc kiểm, hoặc index
   có `assume-unchanged`/`skip-worktree` che tệp tracked. Dùng checkout đầy đủ, sạch cho cổng phát hành.

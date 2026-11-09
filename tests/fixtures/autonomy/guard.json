@@ -22708,6 +22708,22 @@
 {"id": "aud558-pr-close-repo-flag", "origin": "adversarial-author", "refs": ["AUD-SEC-558"], "input": {"command": "gh -R o/r pr close 12 --delete-branch=true"}, "expect": {"allowed": false, "code": "REMOTE_DELETE"}},
 {"id": "aud558-pr-close-nested", "origin": "adversarial-author", "refs": ["AUD-SEC-558"], "input": {"command": "bash -c 'gh pr -R o/r close 12 -d'"}, "expect": {"allowed": false, "code": "REMOTE_DELETE"}},
 {"id": "aud558-ctl-pr-close-plain", "origin": "control", "refs": ["AUD-SEC-558"], "input": {"command": "gh pr close 12", "files": {".git/HEAD": "ref: refs/heads/feat/me\n", ".git/objects/.keep": "", ".git/refs/heads/.keep": ""}}, "expect": {"allowed": true}, "note": "đóng PR không xoá nhánh: luật cũ"},
-{"id": "aud558-ctl-pr-close-comment-value", "origin": "control", "refs": ["AUD-SEC-558"], "input": {"command": "gh pr close 12 -c -d"}, "expect": {"allowed": true}, "note": "`-c` ăn token kế (pflag): bình luận `-d`"}
+{"id": "aud558-ctl-pr-close-comment-value", "origin": "control", "refs": ["AUD-SEC-558"], "input": {"command": "gh pr close 12 -c -d"}, "expect": {"allowed": true}, "note": "`-c` ăn token kế (pflag): bình luận `-d`"},
+{"id": "aud566-pr-close-d-repo-slash", "origin": "adversarial-reviewer", "refs": ["AUD-SEC-566"], "input": {"command": "gh pr close 12 -dRo/r"}, "expect": {"allowed": false, "code": "REMOTE_DELETE"}, "note": "review #486: pflag đọc `--delete-branch --repo o/r`; cụm có `/` từng lọt"},
+{"id": "aud566-pr-close-d-comment-dot", "origin": "adversarial-reviewer", "refs": ["AUD-SEC-566"], "input": {"command": "gh pr close 12 -dc."}, "expect": {"allowed": false, "code": "REMOTE_DELETE"}},
+{"id": "aud566-pr-close-d-comment-quoted", "origin": "adversarial-reviewer", "refs": ["AUD-SEC-566"], "input": {"command": "gh pr close 12 -dc'x y'"}, "expect": {"allowed": false, "code": "REMOTE_DELETE"}},
+{"id": "aud566-pr-close-digit-d-repo", "origin": "adversarial-author", "refs": ["AUD-SEC-566"], "input": {"command": "bash -c 'gh pr close 12 -4dRo/r'"}, "expect": {"allowed": false, "code": "REMOTE_DELETE"}},
+{"id": "aud566-ctl-pr-close-repo-value-d", "origin": "control", "refs": ["AUD-SEC-566"], "input": {"command": "gh pr close 12 -Ro/r-d"}, "expect": {"allowed": true}, "note": "`-R` ăn phần sau: repo `o/r-d`, không xoá"},
+{"id": "aud566-ctl-pr-close-comment-dot-d", "origin": "control", "refs": ["AUD-SEC-566"], "input": {"command": "gh pr close 12 -c.d"}, "expect": {"allowed": true}, "note": "bình luận `.d`"},
+{"id": "aud567-push-m-mirror", "origin": "adversarial-reviewer", "refs": ["AUD-SEC-567"], "input": {"command": "git push --m origin"}, "expect": {"allowed": false, "code": "RULE_DENY"}, "note": "review #486: git nhận viết tắt một chữ duy nhất — `--m` = `--mirror`"},
+{"id": "aud567-push-b-branches", "origin": "adversarial-reviewer", "refs": ["AUD-SEC-567"], "input": {"command": "git push --b origin"}, "expect": {"allowed": false, "code": "PUSH_ALL"}, "note": "`--b` = `--branches`"},
+{"id": "aud567-reset-h", "origin": "adversarial-reviewer", "refs": ["AUD-SEC-567"], "input": {"command": "git reset --h HEAD~3"}, "expect": {"allowed": false, "code": "RULE_DENY"}},
+{"id": "aud567-clean-f", "origin": "adversarial-reviewer", "refs": ["AUD-SEC-567"], "input": {"command": "git clean --f"}, "expect": {"allowed": false, "code": "RULE_DENY"}, "note": "git 2.43 `git clean --f` xoá tệp, exit 0"},
+{"id": "aud567-checkout-f", "origin": "adversarial-reviewer", "refs": ["AUD-SEC-567"], "input": {"command": "git checkout --f main"}, "expect": {"allowed": false, "code": "RULE_DENY"}},
+{"id": "aud567-branch-d-force-main", "origin": "adversarial-author", "refs": ["AUD-SEC-567"], "input": {"command": "git branch --d -f main"}, "expect": {"allowed": false, "code": "RULE_DENY"}},
+{"id": "aud567-ctl-clean-d-dry-run", "origin": "control", "refs": ["AUD-SEC-567"], "input": {"command": "git clean --d"}, "expect": {"allowed": true}, "note": "git: `--d` = `--dry-run` (duy nhất)"},
+{"id": "aud567-ctl-config-t-type", "origin": "control", "refs": ["AUD-SEC-567"], "input": {"command": "git config --t bool --get core.x"}, "expect": {"allowed": true}, "note": "git: `--t` = `--type`"},
+{"id": "aud567-ctl-checkout-d-detach", "origin": "control", "refs": ["AUD-SEC-567"], "input": {"command": "git checkout --d HEAD~1"}, "expect": {"allowed": true}, "note": "git: `--d` = `--detach`"},
+{"id": "aud567-ctl-reset-dashdash", "origin": "control", "refs": ["AUD-SEC-567"], "input": {"command": "git reset -- a.txt"}, "expect": {"allowed": true}, "note": "`--` trần giữ nguyên"}
  ]
 }
