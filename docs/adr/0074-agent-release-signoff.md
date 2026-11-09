@@ -71,9 +71,12 @@ Chọn **phương án 1** (D-401).
   (offline, xác thực), repo cục bộ hay mirror nông, `git log` lỗi → không ký; repo chưa có commit → không có lời từ
   chối. Giới hạn còn lại: guard `GO_SIGN` lọt tên tệp dựng lúc chạy (dòng GO giả tên người) — ranh giới thật là
   sandbox; dòng chỉ thêm khi giải xung đột merge không thấy (`git log -p` không in diff merge); remote mà agent viết lại
-  được lịch sử (force-push không bị chặn) thì neo không giữ; NO-GO của người chỉ nằm trên nhánh remote CHƯA có PR
-  (không `refs/pull/*`) thì `git push --delete` nhánh đó (guard cho qua) xoá nó khỏi cả mirror lẫn ref theo dõi cục bộ
-  — NO-GO bền khi đi qua PR (AUD-SEC-551).
+  được lịch sử (force-push không bị chặn) thì neo không giữ. Xoá nhánh/tag remote khác nhánh hiện tại của phiên và
+  viết lại mọi ref (`filter-branch --all`, `filter-repo`) guard chặn (`REMOTE_DELETE`, AUD-SEC-551, D-407) — còn lọt:
+  đổi sang nhánh của người khác rồi xoá nó (`harness-files.md`). **Khoá** đọc thêm ở xt.yaml của dự án tại nhánh mặc
+  định (HEAD) của CHÍNH bản mirror vừa clone (AUD-SEC-552) — `origin/main` cục bộ chưa fetch không giữ được khoá đã tắt
+  trên remote; clone mang riêng credential helper global của người dùng (`credential.helper`, `credential.<url>.helper`),
+  mọi cấu hình khác vẫn cô lập (AUD-SEC-553).
 - **`promotion.by`** liệt kê ô tên đã ký — người đọc phân biệt được bản do agent ký. Dòng ký ô tên `agent` chỉ là duyệt
   khi khoá có hiệu lực; khoá tắt → `pending_human` (tắt khoá thu hồi luôn chữ ký agent chưa phát hành).
 - **Guard** chỉ cho `[python3] <xt.py của dự án> release-sign` là **một lệnh đơn chữ rõ** chỉ với `--file`/`--note`,

@@ -3,7 +3,7 @@ title: File harness: PLAN · PROGRESS · BLUEPRINT · evidence · state
 kind: module
 prefix: LOOP-HARNESS
 applies_to: [all]
-updated: 2026-11-08
+updated: 2026-11-09
 ---
 
 # File harness: PLAN · PROGRESS · BLUEPRINT · evidence · state
@@ -170,6 +170,7 @@ OS/devcontainer có egress allowlist (`LOOP-HARNESS-022`) và việc phiên chí
   `--git-dir`, `--work-tree`, `--namespace`, `--config-env`, `--shallow-file`, `--attr-source`); tuỳ chọn `--…` guard
   không biết đứng trước lệnh con → `UNRESOLVED_TARGET` (D-216). Gate đọc
   `origin/main` chỉ chống nhầm lẫn — rào thật của vòng tối ưu là `perf trial` (ADR-0052 §7).
+- **Xoá ref remote / viết lại mọi ref** (AUD-SEC-551, D-407): `push --delete|-d`, `:<ref>`, `--prune`, `gh api -X DELETE …/git/refs/…`, graphql `deleteRef` với đích khác nhánh hiện tại (đọc như PUSH_MAIN; không biết → chặn) và `filter-branch --all|--branches|--tags|--remotes|--glob|--stdin`/nhiều ref, `filter-repo` → `REMOTE_DELETE`; `fetch --prune` qua. Còn lọt: `checkout`/`switch <nhánh người khác>` rồi xoá nó — nó thành nhánh hiện tại (cả trong cùng lệnh: `HEAD` đọc lúc guard xét, như PUSH_MAIN); `gh api -X PATCH …/git/refs/… force=true`.
 - **Gán `TÊN+=v` và `parallel :::`** (AUD-SEC-125/121): `X+=1 cmd` xét `cmd`; giá trị nối thêm là không biết (khoá cấu
   hình git nối thêm → `HOOK_BYPASS`). `parallel` không mẫu lệnh (hay có tuỳ chọn guard không biết): mỗi tổ hợp đối số
   sau `:::` quét như shell lồng, nhóm rỗng và nhóm đọc từ tệp (`::::`, `-a`) thành `""` — chỉ đọc tệp thì như chạy

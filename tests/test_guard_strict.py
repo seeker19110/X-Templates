@@ -1406,6 +1406,7 @@ class ReasonCodeLockTest(unittest.TestCase):
         "NEST_TOO_DEEP": 'bash -c \'bash -c "bash -c \\"bash -c \\\\\\"bash -c ls\\\\\\"\\""\'',
         "UNRESOLVED_TARGET": "git push origin $(cat b)",
         "REMOTE_REF_FORGE": "git update-ref refs/remotes/origin/main HEAD",
+        "REMOTE_DELETE": "git push origin --delete someone/else",  # AUD-SEC-551, D-407
         "BUDGET": "echo " + BT + "id" + BT,
         "BRACE_OVERFLOW": "echo {1..9}{1..9}{1..9}{1..9}{1..9}{1..9}",
     }
