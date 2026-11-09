@@ -521,6 +521,12 @@
     "AUD-SEC-553",
     "AUD-SEC-559"
    ]
+  },
+  {
+   "reason": "Lời khai phạm vi trong CHANGELOG/harness-files/sổ (\"mọi luật gh\" đọc dạng chuẩn hoá cobra) — tài liệu, không có hành vi để mô phỏng; hành vi tương ứng được ghim bằng tests.test_guard_gh_parity (đối chiếu 778 biến thể cờ-trước-lệnh-con với dạng gốc) và các ca corpus aud575/577/578/579-*.",
+   "ids": [
+    "AUD-DOC-281"
+   ]
   }
  ]
 }
