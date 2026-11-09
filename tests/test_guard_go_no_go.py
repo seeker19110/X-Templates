@@ -708,6 +708,9 @@ class GoNoGoMcpTest(GoNoGoGuardBase):
             ("mcp__github__delete_file", {"path": GO_REL, "content": SIGNED}),
             ("mcp__github__get_file_contents", {"path": GO_REL}),
         ):
+            # ADR-0074/D-402: tool ghi commit không nêu nhánh = nhánh mặc định → bị chặn như push `main`; ca này chỉ xét
+            # luật GO_SIGN nên ghi lên nhánh làm việc.
+            ti = {**ti, "branch": "claude/x"} if "get_file" not in name else ti
             self.assertEqual(self.mcp(name, ti)[0], "", (name, ti))
 
 

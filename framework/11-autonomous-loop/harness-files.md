@@ -3,7 +3,7 @@ title: File harness: PLAN · PROGRESS · BLUEPRINT · evidence · state
 kind: module
 prefix: LOOP-HARNESS
 applies_to: [all]
-updated: 2026-11-07
+updated: 2026-11-08
 ---
 
 # File harness: PLAN · PROGRESS · BLUEPRINT · evidence · state
@@ -268,6 +268,7 @@ YAML phẳng `khoá: lệnh`; `""` = không có, thiếu khoá = tự dò từ m
 | `preview` | `xt.py stage submit` (ghi, không chạy) | Cách chạy thử bản trình người duyệt giai đoạn (ADR-0058) — chỉ ghi vào sổ và in ở `stage status` |
 | `preview_smoke` | `xt.py stage submit` (chạy qua guard) | Gate bản trình (D-247): exit ≠ 0, để lại thay đổi trong cây hay HEAD đổi trong lúc chạy → không trình; trống → sổ ghi "không có smoke" |
 | `stage_approval` | `xt.py stage approve` · `loop next-step` · guard — đọc ở **cây và bản đã commit ở nhánh chính** | `agent` = agent tự nghiệm thu giai đoạn (ADR-0069): duyệt bản trình còn nguyên, `next-step` trả `stage-approve`; vắng/`human` = chỉ người, ngoài phiên agent (ADR-0058). `init --adopt` luôn chỉ người |
+| `release_signoff` | `xt.py release-sign` · `release-check` · guard — đọc ở **cây và bản đã commit ở nhánh chính** | `agent` = agent ký §5 GO-NO-GO (ADR-0074): chỉ khi `release-check` (blueprint/sổ ở đường mặc định) không FAIL BLOCKER, việc người còn lại chỉ là chữ ký, `BLUEPRINT.md` `scale: S`, không còn `loop defer`, dòng `subject:` khớp; ô tên ghi `agent`, `promotion.by` liệt kê người ký; guard chỉ cho một lệnh đơn chữ rõ, ghi dòng ký bằng tay vẫn chặn (`GO_SIGN`). Vắng/`human` = người ký |
 | `claude_min_version` · `ai_attribution` | `doctor` · guard | Cảnh báo Claude Code thấp hơn (`LOOP-HARNESS-026`) · `forbid` chặn commit/PR ghi tên model hay URL phiên AI (`LOOP-HARNESS-027`) |
 | `harness_permissions` | `install.py` | `own` = dự án giữ mô hình quyền riêng: không thêm `allow: Bash`/`deny` của khung, lệnh hook của khung theo dạng dự án đang dùng — có lệnh khung dạng `${CLAUDE_PROJECT_DIR}/.claude/hooks/…` thì giữ tuyệt đối, không có thì tương đối `bash .claude/hooks/x.sh` (giao ước dhcb — chủ repo 2026-10-22; ADR-0073, D-383); guard vẫn chạy trong hook. Vắng = gộp quyền theo ADR-0018 |
 

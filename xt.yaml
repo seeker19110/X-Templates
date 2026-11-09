@@ -54,6 +54,10 @@ merge_autonomy: L3
 # Ngoại lệ cứng (tiền/dữ liệu thật/auth/mật mã/bí mật): chủ repo chọn 2026-10-17 "bỏ toàn bộ ngoại lệ cứng" → auto =
 # agent merge như PR khác (ADR-0020); human = người merge (ADR-0016/0019).
 merge_hard_exceptions: auto
+# Ký §5 GO-NO-GO (ADR-0074): chủ repo 2026-11-08 "cho agent ký GO-NO-GO" (D-401) → agent ký bằng `xt.py release-sign`
+# khi release-check không FAIL và chỉ còn chữ ký; ô tên ghi `agent`. Bật ở PR RIÊNG sau khi mã ADR-0074 đã lên nhánh
+# chính (D-402): lúc đó `release_signoff` đã thuộc HARD_GATED_KEYS nên PR bật khoá luôn người merge.
+# release_signoff: agent
 # Pha giao hàng (ADR-0031): repo khung LUÔN là production — chủ repo 2026-10-22 (D-136, thay D-109) → `harden`: PR làn
 # chuẩn cần review sạch ở head bởi reviewer năng lực cao hơn người viết; guard không nới việc cục bộ (ADR-0040 chỉ áp pha build).
 delivery_phase: harden

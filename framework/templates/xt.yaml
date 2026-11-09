@@ -53,6 +53,7 @@ acceptance: ""        # cổng production: kiểm thử nghiệm thu theo tiêu 
 acceptance_report: "" # vd reports/junit.xml — trong dự án VÀ trong .gitignore (file chưa commit làm hàng `tree` FAIL)
 release_artifacts: "" # artifact ứng viên, cách nhau bởi khoảng trắng (sidecar <file>.sha256 nếu có) → `subject.digest`; GO-NO-GO ghi dòng `subject: digest` (mẫu GO-NO-GO.md §1)
 release_approval_days: "" # hạn chữ ký GO-NO-GO §5 để `promotion: approved` (mặc định 30 ngày)
+release_signoff: ""   # agent = agent ký §5 GO-NO-GO bằng `xt.py release-sign` khi release-check không FAIL và chỉ còn chữ ký (ADR-0074); trống/human = người ký. Có hiệu lực khi cả cây lẫn bản đã commit ở nhánh chính khai; PR đổi khoá luôn người merge
 preview: ""           # cách chạy thử bản trình người duyệt (`xt.py stage submit` ghi lại — ADR-0058); vd npm run preview
 preview_smoke: ""     # Gate bản trình: `stage submit` chạy (qua guard), exit ≠ 0 → không trình (D-247); vd npm run build && npx playwright test smoke
 stage_approval: agent # agent tự nghiệm thu giai đoạn (`stage approve` bản trình còn nguyên — ADR-0069, chủ dự án 2026-11-04); human = chỉ người ngoài phiên agent (ADR-0058). Có hiệu lực khi cả cây lẫn bản đã commit ở nhánh chính khai
