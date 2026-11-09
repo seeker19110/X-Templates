@@ -47,10 +47,21 @@ Chọn **phương án 1** (D-401).
   hàng BLOCKER nào FAIL (gồm cây sạch, sổ audit, nợ review); `promotion` không `rejected` (người đã NO-GO ở một GO-NO-GO
   khác của `VERSION` — agent không ký đè); việc người còn lại chỉ là `go_no_go`; `BLUEPRINT.md` khai `scale: S` (M/L có
   GO-NO-GO dòng 20 BLOCKER — người dùng thử thật); không còn việc `loop defer`; GO-NO-GO của `VERSION` chưa có dòng ký
-  hay lời từ chối; nhánh chính (mọi ref đọc được của `origin/main` → `origin/master`) không có GO-NO-GO của `VERSION`
-  (cùng tập thư mục hàng `go_no_go`) mang lời từ chối NO-GO — xoá/đổi file ở nhánh làm việc không gỡ được, không đọc
-  được nhánh chính thì không ký; dòng `subject:` khớp ứng viên. Dòng ghi: `| Agent (`release_signoff`, ADR-0074) | agent | GO | <ngày UTC> |` cùng một dòng
+  hay lời từ chối; **lịch sử git** không còn lời từ chối của người có hiệu lực (D-404); dòng `subject:` khớp ứng viên.
+  Dòng ghi: `| Agent (`release_signoff`, ADR-0074) | agent | GO | <ngày UTC> |` cùng một dòng
   giải trình dưới bảng. Ghi xong đọc lại; dòng không hiện hoặc chưa đủ cho `promotion` thì trả file như cũ.
+- **Lời từ chối trong lịch sử** (D-404, thay quét nhánh chính theo `VERSION` — vỡ khi NO-GO chỉ ở nhánh PR, dự án ở
+  thư mục con, đổi `VERSION`, dòng thiếu ngày): một lệnh `git log --all -p` đọc dòng **thêm** của mọi commit reachable
+  từ mọi ref cục bộ và remote, ở mọi tệp `GO-NO-GO*.md` (mọi thư mục, mọi độ sâu tính từ gốc repo, không phân biệt hoa
+  thường, mọi phiên bản). Lời từ chối = dòng bảng sau `## 5` đầu tiên tới hết tệp, hay ở bảng có cột `Quyết định`, có ô
+  quyết định không rỗng khác GO (`?`, `Hold`, `Không GO`, `NO-GO`… — ngày không xét) và ô tên của người (không rỗng/
+  placeholder, khác `agent`; tên trống chỉ tính khi ô ghi NO-GO rõ — dòng mẫu `| … | | GO / NO-GO | |` không tính).
+  Mỗi lời từ chối tính ở lần thêm **mới nhất** (chép/lưu trữ lại làm mới). Hết hiệu lực khi một commit có ngày commit
+  sau nó thêm **lần đầu** một dòng ký GO của người ở §5 (tên + `YYYY-MM-DD`, dạng guard `GO_SIGN` chặn agent ghi; chép
+  lại dòng GO cũ không tính), hoặc khi cũ hơn `release_approval_days`. Không đọc được lịch sử → không ký; repo chưa có
+  commit → không có lời từ chối. Giới hạn: ref theo dõi cũ (agent không `fetch`) thì không thấy lời từ chối mới ở
+  remote — neo tin cậy cùng lớp khoá `release_signoff` đọc `origin/main`; dòng chỉ thêm khi giải xung đột merge không
+  thấy (`git log -p` không in diff merge); clone nông chỉ thấy phần lịch sử đã tải.
 - **`promotion.by`** liệt kê ô tên đã ký — người đọc phân biệt được bản do agent ký. Dòng ký ô tên `agent` chỉ là duyệt
   khi khoá có hiệu lực; khoá tắt → `pending_human` (tắt khoá thu hồi luôn chữ ký agent chưa phát hành).
 - **Guard** chỉ cho `[python3] <xt.py của dự án> release-sign` là **một lệnh đơn chữ rõ** chỉ với `--file`/`--note`,
@@ -79,8 +90,10 @@ Chọn **phương án 1** (D-401).
 ### Xác nhận
 
 - `python3 -m unittest tests.test_release_signoff`: khoá cần cả cây lẫn nhánh chính; từ chối khi FAIL, còn việc người
-  khác, quy mô khác S, còn `loop defer`, ghi chú rỗng, subject lệch, đã ký, §5 sai dạng, `promotion` rejected, NO-GO chỉ
-  còn ở nhánh chính sau `git rm`, nhánh chính không đọc được, MUST không lệnh kiểm (với `release-check` thật); ký thành
+  khác, quy mô khác S, còn `loop defer`, ghi chú rỗng, subject lệch, đã ký, §5 sai dạng, `promotion` rejected, lời từ
+  chối trong lịch sử (D-404: xoá ở nhánh PR/đã lên `main`, thư mục con `apps/web`, ô `Không GO`, đổi `VERSION`, dòng
+  thiếu ngày/tên; GO người sau đó hay quá hạn thì ký được; mẫu khung không tạo lời từ chối), lịch sử không đọc được, MUST
+  không lệnh kiểm (với `release-check` thật); quét lịch sử repo khung (87 commit chạm GO-NO-GO, ~1800 commit) ~0,1 s; ký thành
   công ra `promotion.by = ["agent"]`, dòng `agent` khi khoá tắt → `pending_human`; guard cho dạng chữ rõ, chặn dạng nối lệnh, `env -u`, token mờ, `--status`/`--blueprint`,
   tuỳ chọn lạ, xt.py ngoài dự án, strict, gọi trong tiến trình, đổi nhánh mặc định, MCP ghi thẳng `main`.
 - Phản biện đối kháng 3/3 bác bản đầu (nghiên cứu §8); bản này sửa đủ các lỗ đã nêu.

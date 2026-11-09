@@ -13529,9 +13529,8 @@ def release_agent_signoff(base: Path) -> bool:
     return _main_key_is(base, RELEASE_SIGNOFF_KEY, RELEASE_AGENT_NAME)
 
 
-def _sign_doc(base: Path, file: str) -> Tuple[str, str, str]:
-    """(đường tương đối, nội dung, VERSION) của GO-NO-GO `v<VERSION>` sẽ ký: `--file` phải là một trong các file đó;
-    vắng → đúng một."""
+def _sign_doc(base: Path, file: str) -> Tuple[str, str]:
+    """(đường tương đối, nội dung) của GO-NO-GO `v<VERSION>` sẽ ký: `--file` phải là một trong các file đó; vắng → đúng một."""
     try:
         version = (base / "VERSION").read_text(encoding="utf-8").strip()
         docs = list(_go_no_go_docs(base, version))
@@ -13543,43 +13542,168 @@ def _sign_doc(base: Path, file: str) -> Tuple[str, str, str]:
     if len(docs) != 1:
         names = ", ".join(rel for rel, _ in docs) or "không có"
         raise ReleaseSignError(f"cần đúng một GO-NO-GO của v{version} (`--file`); thấy: {names}")
-    return docs[0][0], docs[0][1], version
+    return docs[0][0], docs[0][1]
 
 
-def _main_go_no_go_text(base: Path, ref: str, rel: str, version: str) -> str:
-    """Nội dung `ref:rel` khi `rel` là GO-NO-GO của `version` ở `GO_NO_GO_DIRS` (cùng tập `_go_no_go_docs`); khác → rỗng.
-    Có tên trong cây mà không đọc được → từ chối (có thể giấu lời từ chối)."""
-    path = posixpath.dirname(rel) or "."
-    name = posixpath.basename(rel)
-    if path not in GO_NO_GO_DIRS or not fnmatch.fnmatchcase(name, "GO-NO-GO*.md"):
+# D-404 (review #480 lần 2): lời từ chối của người đọc từ LỊCH SỬ git — dòng đã commit không gỡ được bằng commit mới
+# (xoá tệp ở nhánh PR hay đã lên nhánh chính, đổi tên/VERSION, dự án ở thư mục con). Một lệnh `git log --all -p`:
+# mọi ref cục bộ + remote, `GO-NO-GO*.md` ở mọi thư mục/độ sâu tính từ gốc repo (`top`), tên không phân biệt hoa
+# thường (guard cũng so chữ thường), ngữ cảnh cả tệp (`--unified` tối đa) để biết dòng thêm nằm ở mục/bảng nào.
+# Cấu hình git làm lệch output bị tắt bằng cờ: màu, diff ngoài/textconv, đổi tên, `diff.relative`, tiền tố, chữ ký.
+GO_HISTORY_MARK = "\x01"  # đầu dòng commit (`%x01`); dòng nội dung diff luôn có tiền tố ' ' '+' '-' '\'
+GO_HISTORY_LOG = (
+    *("-c", "core.quotePath=false", "-c", "log.showSignature=false", "-c", "diff.suppressBlankEmpty=false"),
+    *("log", "--all", "--no-color", "--no-ext-diff", "--no-textconv", "--no-renames", "--no-relative", "--text"),
+    *("--src-prefix=a/", "--dst-prefix=b/", f"--unified={2**31 - 1}", "-p", "--format=%x01%H %ct"),
+    *("--", ":(top,glob,icase)**/GO-NO-GO*.md"),
+)
+GO_HUNK_RE = re.compile(r"@@ -\d+(?:,(\d+))? \+\d+(?:,(\d+))? @@")
+GO_RULE_CELL_RE = re.compile(r":?-+:?")  # ô dòng kẻ bảng Markdown
+GO_DECISION_HEAD = "quyết định"  # tiêu đề cột quyết định (so sau NFC + casefold)
+GO_NAME_HEAD = "tên"
+
+
+class GoBlob(NamedTuple):
+    """Một tệp GO-NO-GO ở một commit của lịch sử: bản sau commit, từng dòng kèm cờ "dòng thêm ở commit này"."""
+
+    sha: str
+    ct: int  # ngày commit (committer date, epoch)
+    path: str  # từ gốc repo
+    lines: List[Tuple[str, bool]]
+
+
+def _go_hunk_step(line: str, post: List[Tuple[str, bool]], left: List[int]) -> None:
+    """Một dòng của hunk: `left` = [dòng cũ, dòng mới] còn lại; giữ dòng của bản sau (ngữ cảnh, `+`)."""
+    tag = line[:1]
+    if tag == "\\":  # "\ No newline at end of file"
+        return
+    if tag != "+":
+        left[0] -= 1
+    if tag != "-":
+        left[1] -= 1
+        post.append((line[1:], tag == "+"))
+
+
+def _go_history_blobs(out: str) -> List[GoBlob]:
+    """Tách output `GO_HISTORY_LOG` thành `GoBlob`. Dòng trong hunk đếm theo số dòng của tiêu đề `@@` — dòng nội dung
+    trông như tiêu đề diff (`--- a/x`, `diff --git`) không làm lệch. Output hỏng → ValueError/IndexError (bên gọi từ chối)."""
+    blobs: List[GoBlob] = []
+    sha, ct, left = "", 0, [0, 0]
+    for line in out.split("\n"):
+        if left[0] > 0 or left[1] > 0:
+            _go_hunk_step(line, blobs[-1].lines, left)
+        elif line.startswith(GO_HISTORY_MARK):
+            sha, stamp = line[1:].split(" ")
+            ct = int(stamp)
+        elif line.startswith("+++ "):
+            blobs.append(GoBlob(sha, ct, line[4:].removeprefix("b/"), []))
+        elif m := GO_HUNK_RE.match(line):
+            left = [int(m[1] or 1), int(m[2] or 1)]
+    return blobs
+
+
+def _go_cells(text: str) -> List[str]:
+    return [c.strip() for c in text.strip().strip("|").split("|")]
+
+
+def _go_tables(lines: Sequence[str]) -> Iterator[List[Tuple[int, str]]]:
+    """Các khối dòng liền nhau bắt đầu bằng `|` (bỏ thụt đầu dòng), kèm chỉ số dòng."""
+    run: List[Tuple[int, str]] = []
+    for i, text in enumerate([*lines, ""]):
+        if text.lstrip().startswith("|"):
+            run.append((i, text))
+        elif run:
+            yield run
+            run = []
+
+
+def _go_table_cols(rows: List[Tuple[int, str]], in_five: bool) -> Optional[Tuple[Optional[int], int, int]]:
+    """(cột tên, cột quyết định, dòng thân đầu) của bảng xét lời từ chối; None = không xét. Bảng có tiêu đề (dòng 2 là
+    dòng kẻ) chứa cột `Quyết định` → theo tiêu đề, ở mọi mục (thiếu cột `Tên` → tên rỗng); bảng nằm sau `## 5` đầu tiên
+    → vị trí dòng ký §5 (tên cột 2, quyết định cột 3). Không tiêu đề → mọi dòng là thân (dòng ký lẻ vẫn tính)."""
+    ruled = len(rows) > 1 and all(GO_RULE_CELL_RE.fullmatch(c) for c in _go_cells(rows[1][1]))
+    head = [unicodedata.normalize("NFC", c).casefold() for c in _go_cells(rows[0][1])] if ruled else []
+    body = 2 if ruled else 0
+    if GO_DECISION_HEAD in head:
+        name = head.index(GO_NAME_HEAD) if GO_NAME_HEAD in head else None
+        return name, head.index(GO_DECISION_HEAD), body
+    return (1, 2, body) if in_five else None
+
+
+def _go_human_name(name: str) -> bool:
+    """Ô tên là của người: có chữ/số, không phải placeholder `<…>`, không phải `RELEASE_AGENT_NAME`."""
+    placeholder = name.startswith("<") and name.endswith(">")
+    return any(ch.isalnum() for ch in name) and not placeholder and name.casefold() != RELEASE_AGENT_NAME
+
+
+def _go_signed_human_go(text: str) -> bool:
+    """Dòng ký GO của người đúng dạng guard `GO_SIGN` chặn agent ghi (`GO_SIGN_ROW_RE`: 4 ô, tên + YYYY-MM-DD)."""
+    cells = _go_cells(text)
+    return bool(GO_SIGN_ROW_RE.match(text)) and _decision(cells[2]) == "go" and _go_human_name(cells[1])
+
+
+def _go_row_kind(text: str, name_col: Optional[int], dec_col: int, in_sign: bool) -> str:
+    """`no` = lời từ chối: ô quyết định không rỗng, khác GO (`_decision`, kể cả `?`/`Hold`/`Không GO`), ô tên là của
+    người (`_go_human_name`) — hoặc tên rỗng/placeholder mà ô ghi NO-GO rõ (`_decision` = `no`); dòng mẫu (tên trống,
+    `GO / NO-GO`) không tính. `go` = dòng ký GO của người ở §5 guard bảo vệ (`in_sign`, `_go_signed_human_go`). Ngày
+    không xét: lời từ chối thiếu/sai ngày vẫn là lời từ chối."""
+    cells = _go_cells(text)
+    if dec_col >= len(cells) or (name_col or 0) >= len(cells) or not cells[dec_col]:
         return ""
-    r = _git(base, "show", f"{ref}:{rel}")
-    if r.returncode != 0:
-        raise ReleaseSignError(f"không đọc được {ref}:{rel} để kiểm lời từ chối NO-GO — agent không ký")
-    return r.stdout if _go_no_go_names_version(name, r.stdout, version) else ""
+    name = cells[name_col] if name_col is not None else ""
+    decision = _decision(cells[dec_col])
+    if decision == "go":
+        return "go" if in_sign and _go_signed_human_go(text) else ""
+    if name.casefold() == RELEASE_AGENT_NAME:
+        return ""
+    return "no" if decision == "no" or _go_human_name(name) else ""
 
 
-def _main_go_no_go_refusals(base: Path, version: str) -> List[str]:
-    """`ref:đường` của mọi GO-NO-GO `v<version>` có lời từ chối NO-GO (`_go_no_go_refusals`) ở MỌI nhánh chính đọc được
-    (`STAGE_MAIN_REFS`) — xoá/đổi file ở cây làm việc không gỡ được lời từ chối người đã đưa lên nhánh chính (review
-    #480). Không đọc được nhánh chính nào → từ chối (fail-closed)."""
-    found: List[str] = []
-    seen = False
-    for ref in STAGE_MAIN_REFS:
-        r = _git(base, "ls-tree", "-r", "-z", "--full-tree", "--name-only", ref)
-        if r.returncode != 0:
+def _go_decision_rows(lines: Sequence[str]) -> Iterator[Tuple[int, str, str]]:
+    """(chỉ số dòng, dòng, `no`/`go`) của các dòng quyết định của người trong bản tệp `lines`. Chặt hơn §5 hiển thị:
+    bảng sau `## 5` đầu tiên tới HẾT tệp (như `_go_no_go_refusals`) hoặc bảng có cột `Quyết định` ở bất kỳ mục nào —
+    lời từ chối người đặt lệch mục vẫn là lời từ chối. Dòng GO gỡ lời từ chối thì chỉ ở §5 guard bảo vệ (`## 5` đầu
+    tiên tới `## ` kế, cùng phạm vi guard `GO_SIGN`) — agent ghi được dòng GO ở chỗ khác."""
+    head = next((i for i, t in enumerate(lines) if re.match(r"## 5\b", t)), len(lines))
+    end = next((i for i in range(head + 1, len(lines)) if lines[i].startswith("## ")), len(lines))
+    for rows in _go_tables(lines):
+        cols = _go_table_cols(rows, rows[0][0] > head)
+        if cols is None:
             continue
-        seen = True
-        found += [
-            f"{ref}:{rel}"
-            for rel in r.stdout.split("\0")
-            if _go_no_go_refusals(_main_go_no_go_text(base, ref, rel, version))
-        ]
-    if not seen:
+        for i, text in rows[cols[2] :]:
+            kind = _go_row_kind(text, cols[0], cols[1], head < i < end)
+            if kind:
+                yield i, text, kind
+
+
+def _history_go_refusals(base: Path) -> List[str]:
+    """`<sha ngắn> <tệp>:<dòng> \\`<dòng>\\`` của mọi lời từ chối của người (`_go_decision_rows`) còn hiệu lực trong lịch sử
+    git (D-404): mỗi dòng (theo nội dung các ô) tính ở lần THÊM MỚI NHẤT (chép/lưu trữ lại làm mới — chiều chặt); hết
+    hiệu lực khi một commit có ngày commit SAU nó thêm một dòng ký GO của người lần ĐẦU (chép lại dòng GO cũ không tính),
+    hoặc khi cũ hơn `release_approval_days`. Không đọc được lịch sử → ReleaseSignError; repo chưa có commit → rỗng."""
+    r = _git(base, *GO_HISTORY_LOG)
+    try:
+        if r.returncode != 0:
+            raise ValueError(f"git log exit {r.returncode}: {(r.stderr.strip().splitlines() or [''])[0]}")
+        blobs = _go_history_blobs(r.stdout)
+    except (ValueError, IndexError) as exc:
         raise ReleaseSignError(
-            f"không đọc được nhánh chính ({', '.join(STAGE_MAIN_REFS)}) để kiểm lời từ chối NO-GO — agent không ký"
-        )
-    return found
+            f"không đọc được lịch sử git để kiểm lời từ chối NO-GO ({exc}) — agent không ký"
+        ) from exc
+    refused: Dict[str, Tuple[int, str]] = {}
+    first_go: Dict[str, int] = {}
+    for b in blobs:
+        for i, text, kind in _go_decision_rows([t for t, _ in b.lines]):
+            if not b.lines[i][1]:
+                continue
+            key = " | ".join(_go_cells(text))
+            if kind == "go":
+                first_go[key] = min(b.ct, first_go.get(key, b.ct))
+            elif b.ct >= refused.get(key, (-1, ""))[0]:
+                refused[key] = (b.ct, f"{b.sha[:12]} {b.path}:{i + 1} `{text.strip()}`")
+    last_go = max(first_go.values(), default=-1)
+    oldest = _dt.datetime.now(_dt.timezone.utc).timestamp() - _approval_days(base) * 86400
+    return sorted(where for ct, where in refused.values() if ct >= oldest and ct >= last_go)
 
 
 def _sign_scope_check(base: Path) -> None:
@@ -13616,9 +13740,9 @@ def _sign_insert(text: str, row: str, note: str) -> str:
 def release_sign(base: Path, file: str, note: str, rc: Dict[str, Any]) -> str:
     """Agent ký §5 (ADR-0074) khi: khoá `release_signoff: agent` có hiệu lực; `release-check` (`rc`) không FAIL BLOCKER
     nào (cây sạch, sổ audit, nợ review…); `promotion` không `rejected`; việc người còn lại chỉ là chữ ký
-    (`RELEASE_SIGN_HUMAN_OK`); file chưa có dòng ký hay lời từ chối; nhánh chính không có lời từ chối NO-GO cho VERSION
-    (`_main_go_no_go_refusals`); dòng `subject:` gắn đúng ứng viên. Ghi rồi đọc lại: dòng ký phải hiện và đủ cho `promotion`, không
-    thì trả file về như cũ. Trả đường tương đối đã ký."""
+    (`RELEASE_SIGN_HUMAN_OK`); file chưa có dòng ký hay lời từ chối; lịch sử git không còn lời từ chối của người có
+    hiệu lực (`_history_go_refusals`, D-404); dòng `subject:` gắn đúng ứng viên. Ghi rồi đọc lại: dòng ký phải hiện và đủ
+    cho `promotion`, không thì trả file về như cũ. Trả đường tương đối đã ký."""
     if not release_agent_signoff(base):
         raise ReleaseSignError(
             f"chỉ người ký: `{RELEASE_SIGNOFF_KEY}: agent` chưa có ở cả xt.yaml cây làm việc lẫn nhánh chính (ADR-0074)"
@@ -13636,14 +13760,14 @@ def release_sign(base: Path, file: str, note: str, rc: Dict[str, Any]) -> str:
     if not clean:
         raise ReleaseSignError("`--note` rỗng — ghi vì sao GO (bằng chứng máy đã xét)")
     _sign_scope_check(base)
-    rel, text, version = _sign_doc(base, file)
+    rel, text = _sign_doc(base, file)
     if _go_no_go_signed(text) or _go_no_go_refusals(text):
         raise ReleaseSignError(f"{rel}: §5 đã có dòng ký hoặc lời từ chối — không ký thêm")
-    refused = _main_go_no_go_refusals(base, version)
+    refused = _history_go_refusals(base)
     if refused:
         raise ReleaseSignError(
-            f"người đã từ chối ở nhánh chính: {', '.join(refused)} ghi NO-GO cho v{version} — agent không ký đè (xoá/đổi"
-            " file ở cây làm việc không gỡ được lời từ chối)"
+            f"người đã từ chối (lịch sử git): {'; '.join(refused)} — agent không ký đè (xoá/đổi tên/đổi VERSION không gỡ"
+            f" được; gỡ: người ký GO mới ở §5, hoặc lời từ chối cũ hơn `{APPROVAL_DAYS_KEY}`)"
         )
     problem = _subject_problem(rel, text, rc["subject"])
     if problem:
