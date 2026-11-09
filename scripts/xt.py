@@ -13560,7 +13560,9 @@ GO_HISTORY_LOG = (
     *("--no-renames", "--no-relative", "--text", "--src-prefix=a/", "--dst-prefix=b/", f"--unified={2**31 - 1}"),
     *("-p", "--format=%x01%H %ct", "--", ":(top,glob,icase)**/GO-NO-GO*.md"),
 )
-GO_GIT_KEEP_ENV = ("GIT_SSL_CAINFO", "GIT_SSL_CAPATH", "GIT_ASKPASS")  # chỉ truyền tải: CA tin cậy, xác thực
+# Chỉ truyền tải: CA tin cậy. `GIT_ASKPASS` KHÔNG giữ (AUD-SEC-559): agent export được, và nó là chương trình chạy bên
+# trong clone tin cậy (thấy thư mục mirror) — cùng lớp helper lạ; xác thực đi qua credential helper global thật.
+GO_GIT_KEEP_ENV = ("GIT_SSL_CAINFO", "GIT_SSL_CAPATH")
 GO_HUNK_RE = re.compile(r"@@ -\d+(?:,(\d+))? \+\d+(?:,(\d+))? @@")
 GO_RULE_CELL_RE = re.compile(r":?-+:?")  # ô dòng kẻ bảng Markdown
 GO_DECISION_HEADS = ("quyet dinh", "decision")  # tiêu đề cột quyết định (so không dấu + casefold — `_go_head_key`)
@@ -13770,18 +13772,31 @@ def _go_full_history(cwd: Path, what: str) -> None:
         raise ValueError(f"{what} là clone nông (shallow) — lịch sử thiếu")
 
 
-GO_CREDENTIAL_KEY_RE = re.compile(r"credential\.(?:.+\.)?helper", re.S)  # helper chung hay theo URL (`credential.<u>.`)
+# helper chung hay theo URL (`credential.<u>.`); khoá có `=` (URL `?a=b`) git không parse được qua `-c` (AUD-HAR-350)
+GO_CREDENTIAL_KEY_RE = re.compile(r"credential\.(?:[^=]+\.)?helper", re.S)
+
+
+def _go_user_global_env() -> Dict[str, str]:
+    """Môi trường đọc cấu hình global THẬT của người dùng (AUD-SEC-559): bỏ mọi `GIT_*` (`GIT_CONFIG_GLOBAL` trỏ tệp lạ,
+    `GIT_CONFIG_*` tiêm) và `XDG_CONFIG_HOME` — agent export được, guard không nhận tệp cấu hình lạ — nên git chỉ đọc
+    `$HOME/.gitconfig` (không có thì `$HOME/.config/git/config`). Giữ `HOME`: guard chặn ghi `~/.gitconfig` theo tên."""
+    return {k: v for k, v in os.environ.items() if not k.startswith("GIT_") and k != "XDG_CONFIG_HOME"}
 
 
 def _go_credential_args(base: Path) -> List[str]:
     """`-c` mang RIÊNG credential helper global của người dùng vào lệnh clone mirror (AUD-SEC-553): `_go_git_env` cô
-    lập cấu hình global/system nên clone HTTPS repo riêng tư mất xác thực (fail-closed, chặn oan). Đọc bằng môi trường
-    GỐC (`git config --global -z --get-regexp`) mọi `credential.helper` và `credential.<url>.helper` theo thứ tự cấu
-    hình (giá trị rỗng = xoá danh sách, như git); git tự khớp `<url>` với URL clone. Mở đầu `credential.helper=` (xoá
-    danh sách). An toàn vì helper chỉ cấp thông tin đăng nhập cho URL clone — URL cố định đọc thô ở `.git/config`
-    (guard khoá `remote.origin.url`/`insteadOf`), mọi cấu hình khác vẫn cô lập; helper chạy cùng uid với phiên, không
-    thêm quyền gì (lớp chặn nhầm, D-015). Không đọc được → chỉ phần xoá danh sách."""
-    r = _git(base, "config", "--global", "-z", "--get-regexp", r"^credential\.(.*\.)?helper$")
+    lập cấu hình global/system nên clone HTTPS repo riêng tư mất xác thực (fail-closed, chặn oan). Đọc từ cấu hình
+    global THẬT (`git config --global -z --get-regexp` trong `_go_user_global_env`, AUD-SEC-559 — không theo
+    `GIT_CONFIG_GLOBAL`/`XDG_CONFIG_HOME` agent đặt) mọi `credential.helper` và `credential.<url>.helper` theo thứ tự
+    cấu hình (giá trị rỗng = xoá danh sách, như git); git tự khớp `<url>` với URL clone; khoá có `=` bỏ qua (AUD-HAR-350).
+    Mở đầu `credential.helper=` (xoá danh sách). Helper chỉ cấp thông tin đăng nhập cho URL clone — URL cố định đọc thô
+    ở `.git/config` (guard khoá `remote.origin.url`/`insteadOf`), mọi cấu hình khác vẫn cô lập. Helper chạy cùng uid với
+    phiên nhưng ở VỊ TRÍ khác: trong thư mục tạm của clone, thấy mirror đang đọc — vì vậy chỉ nhận helper của người
+    dùng; agent sửa được tệp thật bằng tên dựng lúc chạy hay đặt `HOME` thì ranh giới còn lại là sandbox (lớp chặn nhầm,
+    D-015). Không đọc được → chỉ phần xoá danh sách."""
+    r = _git(
+        base, "config", "--global", "-z", "--get-regexp", r"^credential\.(.*\.)?helper$", env=_go_user_global_env()
+    )
     out = ["-c", "credential.helper="]
     for item in r.stdout.split("\0") if r.returncode == 0 else []:
         key, _, value = item.partition("\n")

@@ -5059,8 +5059,23 @@ def normalize(argv: List[str]) -> List[str]:
     return _strip_git_global_opts(a) if a[0] == "git" else a
 
 
-def _short_flags(args: List[str]) -> str:
-    return "".join(x[1:] for x in args if re.fullmatch(r"-[A-Za-z]+", x))
+SHORT_CLUSTER_RE = re.compile(r"-[A-Za-z0-9]+")  # cụm cờ ngắn: chữ số là cờ (`-4`/`-6` của push, `-2`/`-3` checkout)
+
+
+def _short_flags(args: List[str], valued: str = "") -> str:
+    """Chữ cờ của mọi cụm cờ ngắn trong `args`, bỏ chữ số: `-4d` = `-4 -d` → `d` (AUD-SEC-556/557 — cụm có chữ số từng
+    bị bỏ qua nên `git push -4d|-4f` lọt). Cụm chỉ chữ giữ cách đọc cũ: mọi chữ là cờ (chặt hơn git, `-bfeat` có `f`).
+    Cụm có chữ số dừng sau chữ thuộc `valued` (cờ ăn giá trị dính liền: `-bfix2` = nhánh `fix2`, `-o4d` = push-option
+    `4d`) — cụm đó trước đây không được đọc, nên luật chỉ chặt hơn, không chặn oan giá trị có chữ số."""
+    out: List[str] = []
+    for x in args:
+        if not SHORT_CLUSTER_RE.fullmatch(x):
+            continue
+        body = x[1:]
+        if not body.isalpha():
+            body = body[: next((i + 1 for i, c in enumerate(body) if c in valued), len(body))]
+        out.append("".join(c for c in body if not c.isdigit()))
+    return "".join(out)
 
 
 def _positionals(args: List[str], with_value: Tuple[str, ...] = ()) -> List[str]:
@@ -5276,7 +5291,7 @@ def _stricter(a: Tuple[str, str], b: Tuple[str, str]) -> Tuple[str, str]:
 def _git_push(args: List[str], cwd: Optional[str] = None) -> Tuple[str, str]:
     """push: deny --force/--mirror/+refspec và xoá nhánh chính; ask khi đẩy thẳng nhánh chính — kể cả khi không có
     refspec hoặc đích là `HEAD` mà nhánh hiện tại (ở `cwd`) là nhánh chính — và khi `--all`/`--tags` (mọi nhánh/tag)."""
-    flags = _short_flags(args)
+    flags = _short_flags(args, "o")  # `-o<push-option>` ăn giá trị dính liền
     force = any(x.startswith("--force") and x != "--force-if-includes" or x == "--mirror" for x in args) or "f" in flags
     refs = _push_refs(args)
     if force or any(r.startswith("+") for r in refs):
@@ -5305,7 +5320,7 @@ def _git_reset(args: List[str]) -> Tuple[str, str]:
 
 def _git_clean(args: List[str]) -> Tuple[str, str]:
     """clean: deny -f/--force."""
-    if "f" in _short_flags(args) or "--force" in args:
+    if "f" in _short_flags(args, "e") or "--force" in args:
         return "deny", "clean -f xoá file chưa track"
     return "", ""
 
@@ -5321,7 +5336,7 @@ def _discards_whole_tree(args: List[str]) -> bool:
 
 def _git_checkout(args: List[str]) -> Tuple[str, str]:
     """checkout: deny -f/--force và checkout cả cây."""
-    if "f" in _short_flags(args) or "--force" in args:
+    if "f" in _short_flags(args, "bB") or "--force" in args:
         return "deny", "checkout -f vứt thay đổi"
     if _discards_whole_tree(args):
         return "deny", DISCARD_WHOLE_TREE_WHY.format("checkout")
@@ -5330,14 +5345,14 @@ def _git_checkout(args: List[str]) -> Tuple[str, str]:
 
 def _git_switch(args: List[str]) -> Tuple[str, str]:
     """switch: deny -f/--force/--discard-changes (vứt thay đổi như `checkout -f`); `-C` là force-create, không tính."""
-    if "f" in _short_flags(args) or "--force" in args or "--discard-changes" in args:
+    if "f" in _short_flags(args, "cC") or "--force" in args or "--discard-changes" in args:
         return "deny", "switch -f/--discard-changes vứt thay đổi"
     return "", ""
 
 
 def _git_restore(args: List[str]) -> Tuple[str, str]:
     """restore: deny restore cả cây, trừ khi chỉ bỏ khỏi index (`--staged` không kèm worktree)."""
-    index_only = "--staged" in args and "--worktree" not in args and "W" not in _short_flags(args)
+    index_only = "--staged" in args and "--worktree" not in args and "W" not in _short_flags(args, "s")
     if _discards_whole_tree(args) and not index_only:
         return "deny", DISCARD_WHOLE_TREE_WHY.format("restore")
     return "", ""
@@ -5352,7 +5367,7 @@ def _git_stash(args: List[str]) -> Tuple[str, str]:
 
 def _git_branch(args: List[str]) -> Tuple[str, str]:
     """branch: deny xoá cưỡng bức nhánh chính."""
-    flags = _short_flags(args)
+    flags = _short_flags(args, "u")
     deleting_force = "D" in flags or (("d" in flags or "--delete" in args) and ("f" in flags or "--force" in args))
     if deleting_force and any(x in MAIN_BRANCHES for x in _positionals(args)):
         return "deny", "xoá nhánh chính"
@@ -6521,7 +6536,7 @@ def _build_local_git(n: List[str], argv: List[str], root: str, cwd: Optional[str
     """git vứt thay đổi cục bộ trong repo ở dự án/tmp (trừ `clean -x/-X` — xoá cả `.autopilot/`); git dời cây/repo/index/hook
     (`GIT_TREE_MOVER_RE`) hay `-C` chưa giải → không nới."""
     sub = n[1] if len(n) > 1 else ""
-    if sub not in LOCAL_GIT or (sub == "clean" and set("xX") & set(_short_flags(n[2:]))):
+    if sub not in LOCAL_GIT or (sub == "clean" and set("xX") & set(_short_flags(n[2:], "e"))):
         return False
     if any(GIT_TREE_MOVER_RE.search(a) for a in argv) or not all(_local(d, root, cwd) for d in _git_C_dirs(argv)):
         return False
@@ -8163,9 +8178,35 @@ def _gh_api_ref_delete(args: List[str]) -> Optional[str]:
     return m.group(1) if m else None
 
 
+GH_PR_CLOSE_VALUE_FLAGS = ("-c", "--comment", *GH_REPO_FLAGS)  # cờ ăn token kế của `gh pr close`
+GH_PR_CLOSE_DELETE_WHY = (
+    REF_DESTROY_MARK + ": `gh pr close --delete-branch|-d` xoá nhánh head của PR trên remote — guard không biết head là"
+    " nhánh nào (như graphql `deleteRef`; AUD-SEC-558, D-407, ADR-0018); đóng PR không cờ xoá rồi xoá nhánh hiện tại"
+    " của phiên bằng `git push origin --delete <nhánh>`"
+)
+
+
+def _gh_pr_close_deletes(args: List[str]) -> bool:
+    """`gh pr close … --delete-branch|-d` (AUD-SEC-558; `args` sau `gh`, cờ repo đã dời ra sau): pflag nhận cờ ở mọi
+    vị trí, cụm `-dc x`, `-d=…`/`--delete-branch=…` (mọi giá trị tính — chặt); token kế của `-c`/`--comment`/`-R`/
+    `--repo` là giá trị, không phải cờ. Lệnh con đọc sau `-R <repo>` (`gh pr -R o/r close`)."""
+    if args[:1] != ["pr"] or _positionals(args[1:], GH_REPO_FLAGS)[:1] != ["close"]:
+        return False
+    skip = False
+    for a in args[1:]:
+        name = a.split("=", 1)[0]
+        if skip or a in GH_PR_CLOSE_VALUE_FLAGS:
+            skip = not skip
+        elif name == "--delete-branch" or "d" in _short_flags([name], "cR"):
+            return True
+    return False
+
+
 def _gh_ref_delete_rule(args: List[str], cwd: str) -> Tuple[str, str]:
     """D-407: `gh api` xoá ref không phải nhánh hiện tại của phiên (ở `cwd`) → deny REMOTE_DELETE; nhánh chính giữ luật
-    huỷ (DESTROY) như cũ."""
+    huỷ (DESTROY) như cũ. `gh pr close --delete-branch` → deny REMOTE_DELETE (head của PR không biết)."""
+    if _gh_pr_close_deletes(args):
+        return "deny", GH_PR_CLOSE_DELETE_WHY
     gone = _gh_api_ref_delete(args[1:]) if args[:1] == ["api"] else None
     if gone is None or _gh_api_destroy(args[1:]):
         return "", ""

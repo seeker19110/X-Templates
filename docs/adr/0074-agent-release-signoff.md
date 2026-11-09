@@ -57,7 +57,7 @@ Chọn **phương án 1** (D-401).
   ngoài, `log.showRoot false`): mỗi lần ký, `release-sign` clone `--mirror` mới của `origin` (URL thô ở `.git/config`;
   mọi ref, kể cả `refs/pull/*/head` GitHub giữ) vào thư mục tạm, rồi một lệnh `git log --all --full-history -p` ở
   mirror và ở repo cục bộ đọc dòng **thêm** của mọi tệp `GO-NO-GO*.md` (mọi thư mục/độ sâu từ gốc repo, không phân biệt
-  hoa thường, mọi phiên bản). Môi trường git cô lập: bỏ `GIT_*` (trừ CA/xác thực truyền tải), không cấu hình
+  hoa thường, mọi phiên bản). Môi trường git cô lập: bỏ `GIT_*` (trừ CA truyền tải; `GIT_ASKPASS` không giữ), không cấu hình
   global/system, `-c` ghim `log.showRoot`/`log.follow`/`core.commitGraph`…, không grafts/replace.
   Lời từ chối = HỢP hai nguồn (cục bộ bắt NO-GO chưa đẩy): dòng thân bảng có cột tiêu đề `Quyết định`/`Decision` (so
   không dấu; bảng không có cột đó không đọc theo vị trí, kể cả sau `## 5`), ô quyết định không rỗng không phải GO và ô
@@ -72,11 +72,15 @@ Chọn **phương án 1** (D-401).
   chối. Giới hạn còn lại: guard `GO_SIGN` lọt tên tệp dựng lúc chạy (dòng GO giả tên người) — ranh giới thật là
   sandbox; dòng chỉ thêm khi giải xung đột merge không thấy (`git log -p` không in diff merge); remote mà agent viết lại
   được lịch sử (force-push không bị chặn) thì neo không giữ. Xoá nhánh/tag remote khác nhánh hiện tại của phiên và
-  viết lại mọi ref (`filter-branch --all`, `filter-repo`) guard chặn (`REMOTE_DELETE`, AUD-SEC-551, D-407) — còn lọt:
-  đổi sang nhánh của người khác rồi xoá nó (`harness-files.md`). **Khoá** đọc thêm ở xt.yaml của dự án tại nhánh mặc
+  viết lại mọi ref (`filter-branch --all`, `filter-repo`) guard chặn (`REMOTE_DELETE`, AUD-SEC-551, D-407; cả cờ gộp
+  chữ số `push -4d|-4f` và `gh pr close --delete-branch`, AUD-SEC-556…558) — còn lọt: đổi sang nhánh của người khác
+  rồi xoá nó (`harness-files.md`). **Khoá** đọc thêm ở xt.yaml của dự án tại nhánh mặc
   định (HEAD) của CHÍNH bản mirror vừa clone (AUD-SEC-552) — `origin/main` cục bộ chưa fetch không giữ được khoá đã tắt
   trên remote; clone mang riêng credential helper global của người dùng (`credential.helper`, `credential.<url>.helper`),
-  mọi cấu hình khác vẫn cô lập (AUD-SEC-553).
+  mọi cấu hình khác vẫn cô lập (AUD-SEC-553). Helper đọc từ cấu hình global THẬT (`$HOME/.gitconfig`, không có thì
+  `$HOME/.config/git/config`; bỏ `GIT_*`/`XDG_CONFIG_HOME` agent export được — AUD-SEC-559) và chạy trong thư mục tạm
+  của clone (thấy mirror): helper agent ghi vào tệp thật bằng tên dựng lúc chạy hay `HOME` agent đặt — ranh giới còn
+  lại là sandbox.
 - **`promotion.by`** liệt kê ô tên đã ký — người đọc phân biệt được bản do agent ký. Dòng ký ô tên `agent` chỉ là duyệt
   khi khoá có hiệu lực; khoá tắt → `pending_human` (tắt khoá thu hồi luôn chữ ký agent chưa phát hành).
 - **Guard** chỉ cho `[python3] <xt.py của dự án> release-sign` là **một lệnh đơn chữ rõ** chỉ với `--file`/`--note`,
