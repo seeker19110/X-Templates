@@ -12,9 +12,10 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
   `xt.py release-sign --note … [--file …]` — agent ký §5 GO-NO-GO chỉ khi `release-check` (blueprint/sổ audit ở đường
   mặc định) không FAIL BLOCKER, việc người còn lại chỉ là chữ ký, `BLUEPRINT.md` khai `scale: S`, không còn `loop
   defer`, và dòng `subject:` khớp ứng viên; dòng ký ghi ô tên `agent` (không ghi tên người), ghi xong đọc lại, không đủ
-  cho `promotion` thì hoàn tác; không ký khi `promotion` rejected, khi lịch sử git (mọi ref, mọi `GO-NO-GO*.md`) còn
-  lời từ chối của người chưa bị dòng ký GO người sau đó thay — không hết hạn theo tuổi (D-404, D-405; không đọc được →
-  không ký) hay MUST không lệnh kiểm, và dòng `agent` khi khoá tắt là
+  cho `promotion` thì hoàn tác; không ký khi `promotion` rejected, khi lịch sử git (bản clone `--mirror` mới của
+  `origin` hợp lịch sử cục bộ, mọi `GO-NO-GO*.md`) còn lời từ chối của người chưa bị dòng ký GO người trên origin, cùng
+  phiên bản hay cao hơn, thay — không hết hạn theo tuổi (D-404…D-406; offline/không đọc được/repo nông → không ký) hay
+  MUST không lệnh kiểm, và dòng `agent` khi khoá tắt là
   `pending_human`. `release-check --json` thêm `promotion.by` (ô tên đã ký). Khoá có hiệu lực khi cả cây
   lẫn bản đã commit ở nhánh chính khai, nằm trong `HARD_GATED_KEYS` (PR đổi khoá luôn người merge). Guard chỉ cho một
   lệnh đơn chữ rõ (`--file`/`--note`) khi khoá có hiệu lực; mọi dạng khác của `release-sign` và mọi đường ghi dòng ký

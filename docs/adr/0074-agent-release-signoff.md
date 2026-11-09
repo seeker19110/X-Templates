@@ -47,23 +47,31 @@ Chọn **phương án 1** (D-401).
   hàng BLOCKER nào FAIL (gồm cây sạch, sổ audit, nợ review); `promotion` không `rejected` (người đã NO-GO ở một GO-NO-GO
   khác của `VERSION` — agent không ký đè); việc người còn lại chỉ là `go_no_go`; `BLUEPRINT.md` khai `scale: S` (M/L có
   GO-NO-GO dòng 20 BLOCKER — người dùng thử thật); không còn việc `loop defer`; GO-NO-GO của `VERSION` chưa có dòng ký
-  hay lời từ chối; **lịch sử git** không còn lời từ chối của người có hiệu lực (D-404); dòng `subject:` khớp ứng viên.
+  hay lời từ chối; **lịch sử git** (bản mirror mới của `origin` và repo cục bộ) không còn lời từ chối của người có
+  hiệu lực (D-404, D-406); dòng `subject:` khớp ứng viên.
   Dòng ghi: `| Agent (`release_signoff`, ADR-0074) | agent | GO | <ngày UTC> |` cùng một dòng
   giải trình dưới bảng. Ghi xong đọc lại; dòng không hiện hoặc chưa đủ cho `promotion` thì trả file như cũ.
 - **Lời từ chối trong lịch sử** (D-404, thay quét nhánh chính theo `VERSION` — vỡ khi NO-GO chỉ ở nhánh PR, dự án ở
-  thư mục con, đổi `VERSION`, dòng thiếu ngày): một lệnh `git log --all -p` đọc dòng **thêm** của mọi commit reachable
-  từ mọi ref cục bộ và remote, ở mọi tệp `GO-NO-GO*.md` (mọi thư mục, mọi độ sâu tính từ gốc repo, không phân biệt hoa
-  thường, mọi phiên bản). Lời từ chối = dòng bảng sau `## 5` đầu tiên tới hết tệp, hay ở bảng có cột `Quyết định`, có ô
-  quyết định không rỗng khác GO (`?`, `Hold`, `Không GO`, `NO-GO`… — ngày không xét) và ô tên của người (không rỗng/
-  placeholder, khác `agent`; tên trống chỉ tính khi ô ghi NO-GO rõ — dòng mẫu `| … | | GO / NO-GO | |` không tính).
-  Mỗi lời từ chối tính ở lần thêm **mới nhất** (chép/lưu trữ lại làm mới). Hết hiệu lực **chỉ** khi một commit có ngày
-  commit sau nó thêm **lần đầu** một dòng ký GO của người ở §5 (tên + `YYYY-MM-DD`, dạng guard `GO_SIGN` chặn agent ghi;
-  chép lại dòng GO cũ không tính). Không hết hạn theo tuổi (D-405): hạn theo `release_approval_days` đọc xt.yaml cây
-  làm việc — agent đặt `1` là mọi NO-GO cũ hết hiệu lực; người đã từ chối thì người gỡ, ký GO một lần là đủ. Không đọc
-  được lịch sử → không ký; repo chưa có
-  commit → không có lời từ chối. Giới hạn: ref theo dõi cũ (agent không `fetch`) thì không thấy lời từ chối mới ở
-  remote — neo tin cậy cùng lớp khoá `release_signoff` đọc `origin/main`; dòng chỉ thêm khi giải xung đột merge không
-  thấy (`git log -p` không in diff merge); clone nông chỉ thấy phần lịch sử đã tải.
+  thư mục con, đổi `VERSION`, dòng thiếu ngày). **Neo tin cậy ở remote** (D-406 — quét lịch sử cục bộ lách được bằng
+  lệnh guard cho qua: `merge -s ours`, `fetch --depth=1`, `branch -rd`/`push --delete`/`filter-branch`, fetch repo
+  ngoài, `log.showRoot false`): mỗi lần ký, `release-sign` clone `--mirror` mới của `origin` (URL thô ở `.git/config`;
+  mọi ref, kể cả `refs/pull/*/head` GitHub giữ) vào thư mục tạm, rồi một lệnh `git log --all --full-history -p` ở
+  mirror và ở repo cục bộ đọc dòng **thêm** của mọi tệp `GO-NO-GO*.md` (mọi thư mục/độ sâu từ gốc repo, không phân biệt
+  hoa thường, mọi phiên bản). Môi trường git cô lập: bỏ `GIT_*` (trừ CA/xác thực truyền tải), không cấu hình
+  global/system, `-c` ghim `log.showRoot`/`log.follow`/`core.commitGraph`…, không grafts/replace.
+  Lời từ chối = HỢP hai nguồn (cục bộ bắt NO-GO chưa đẩy): dòng thân bảng có cột tiêu đề `Quyết định`/`Decision` (so
+  không dấu; bảng không có cột đó không đọc theo vị trí, kể cả sau `## 5`), ô quyết định không rỗng không phải GO và ô
+  tên của người (không rỗng/placeholder, khác `agent`; tên trống chỉ tính khi ô ghi NO-GO rõ — dòng mẫu không tính);
+  ngày không xét. GO = ô bắt đầu bằng `GO` rồi hết chuỗi hay ký tự không phải chữ/số sau khi bỏ `*`/`_`/`` ` ``
+  (`**GO**; D-126…`, `GO — ok`), không chứa NO-GO/`Không GO`. Mỗi lời từ chối tính ở lần thêm **mới nhất**. Hết hiệu
+  lực **chỉ** khi một commit có ngày commit sau nó, **trên mirror**, thêm **lần đầu** một dòng ký GO của người ở §5 (tên
+  + `YYYY-MM-DD`, dạng guard `GO_SIGN` chặn agent ghi) ở tệp cùng phiên bản `vX.Y.Z` hay cao hơn (tên tệp, không có thì
+  tiêu đề `# `); lời từ chối không xác định phiên bản chỉ gỡ bằng GO cùng tệp. Không hết hạn theo tuổi (D-405): hạn
+  `release_approval_days` đọc xt.yaml cây — agent đặt `1` là mọi NO-GO cũ hết hiệu lực. Không có `origin`, clone lỗi
+  (offline, xác thực), repo cục bộ hay mirror nông, `git log` lỗi → không ký; repo chưa có commit → không có lời từ
+  chối. Giới hạn còn lại: guard `GO_SIGN` lọt tên tệp dựng lúc chạy (dòng GO giả tên người) — ranh giới thật là
+  sandbox; dòng chỉ thêm khi giải xung đột merge không thấy (`git log -p` không in diff merge); remote mà agent viết lại
+  được lịch sử (force-push không bị chặn) thì neo không giữ.
 - **`promotion.by`** liệt kê ô tên đã ký — người đọc phân biệt được bản do agent ký. Dòng ký ô tên `agent` chỉ là duyệt
   khi khoá có hiệu lực; khoá tắt → `pending_human` (tắt khoá thu hồi luôn chữ ký agent chưa phát hành).
 - **Guard** chỉ cho `[python3] <xt.py của dự án> release-sign` là **một lệnh đơn chữ rõ** chỉ với `--file`/`--note`,
@@ -94,9 +102,11 @@ Chọn **phương án 1** (D-401).
 - `python3 -m unittest tests.test_release_signoff`: khoá cần cả cây lẫn nhánh chính; từ chối khi FAIL, còn việc người
   khác, quy mô khác S, còn `loop defer`, ghi chú rỗng, subject lệch, đã ký, §5 sai dạng, `promotion` rejected, lời từ
   chối trong lịch sử (D-404: xoá ở nhánh PR/đã lên `main`, thư mục con `apps/web`, ô `Không GO`, đổi `VERSION`, dòng
-  thiếu ngày/tên; GO người sau đó thì ký được; cũ 400 ngày hay `release_approval_days: 1` vẫn chặn — D-405; mẫu khung
-  không tạo lời từ chối), lịch sử không đọc được, MUST
-  không lệnh kiểm (với `release-check` thật); quét lịch sử repo khung (87 commit chạm GO-NO-GO, ~1800 commit) ~0,1 s; ký thành
+  thiếu ngày/tên; GO người sau đó thì ký được; cũ 400 ngày hay `release_approval_days: 1` vẫn chặn — D-405; D-406:
+  `merge -s ours`, `fetch --depth=1`, `branch -rd`, `push --delete` còn `refs/pull/*`, GO của repo ngoài, GO phiên bản
+  thấp hơn, `log.showRoot false`, `insteadOf` tiêm qua env đều vẫn chặn; GO viết tự do và bảng §6 không chặn oan; không
+  `origin`/clone lỗi → không ký; mẫu khung không tạo lời từ chối), lịch sử không đọc được, MUST
+  không lệnh kiểm (với `release-check` thật); repo khung qua GitHub thật: clone mirror ~2,4 s, quét hai repo ~0,3 s; ký thành
   công ra `promotion.by = ["agent"]`, dòng `agent` khi khoá tắt → `pending_human`; guard cho dạng chữ rõ, chặn dạng nối lệnh, `env -u`, token mờ, `--status`/`--blueprint`,
   tuỳ chọn lạ, xt.py ngoài dự án, strict, gọi trong tiến trình, đổi nhánh mặc định, MCP ghi thẳng `main`.
 - Phản biện đối kháng 3/3 bác bản đầu (nghiên cứu §8); bản này sửa đủ các lỗ đã nêu.

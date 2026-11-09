@@ -13545,22 +13545,29 @@ def _sign_doc(base: Path, file: str) -> Tuple[str, str]:
     return docs[0][0], docs[0][1]
 
 
-# D-404 (review #480 lần 2): lời từ chối của người đọc từ LỊCH SỬ git — dòng đã commit không gỡ được bằng commit mới
-# (xoá tệp ở nhánh PR hay đã lên nhánh chính, đổi tên/VERSION, dự án ở thư mục con). Một lệnh `git log --all -p`:
-# mọi ref cục bộ + remote, `GO-NO-GO*.md` ở mọi thư mục/độ sâu tính từ gốc repo (`top`), tên không phân biệt hoa
-# thường (guard cũng so chữ thường), ngữ cảnh cả tệp (`--unified` tối đa) để biết dòng thêm nằm ở mục/bảng nào.
-# Cấu hình git làm lệch output bị tắt bằng cờ: màu, diff ngoài/textconv, đổi tên, `diff.relative`, tiền tố, chữ ký.
+# D-404/D-406 (review #480 lần 2–3): lời từ chối của người đọc từ LỊCH SỬ git — dòng đã commit không gỡ được bằng commit
+# mới (xoá tệp ở nhánh PR/đã lên nhánh chính, đổi tên/VERSION, dự án ở thư mục con). Neo tin cậy ở REMOTE (D-406): mỗi
+# lần ký clone `--mirror` mới của `origin` (mọi ref, kể cả `refs/pull/*/head` GitHub giữ) — xoá ref, `fetch --depth`,
+# `merge -s ours`, viết lại lịch sử cục bộ hay fetch repo ngoài không đổi được bản đó. Một lệnh `git log --all
+# --full-history -p` mỗi repo: `GO-NO-GO*.md` mọi thư mục/độ sâu tính từ gốc repo (`top`), tên không phân biệt hoa
+# thường (guard cũng so chữ thường), ngữ cảnh cả tệp (`--unified` tối đa) để biết dòng thêm nằm ở bảng nào. Môi trường
+# git cô lập (`_go_git_env`) + cờ/`-c` ghim mọi cấu hình làm lệch output (repo cục bộ vẫn đọc `.git/config` của nó).
 GO_HISTORY_MARK = "\x01"  # đầu dòng commit (`%x01`); dòng nội dung diff luôn có tiền tố ' ' '+' '-' '\'
 GO_HISTORY_LOG = (
     *("-c", "core.quotePath=false", "-c", "log.showSignature=false", "-c", "diff.suppressBlankEmpty=false"),
-    *("log", "--all", "--no-color", "--no-ext-diff", "--no-textconv", "--no-renames", "--no-relative", "--text"),
-    *("--src-prefix=a/", "--dst-prefix=b/", f"--unified={2**31 - 1}", "-p", "--format=%x01%H %ct"),
-    *("--", ":(top,glob,icase)**/GO-NO-GO*.md"),
+    *("-c", "log.showRoot=true", "-c", "log.follow=false", "-c", "core.commitGraph=false"),
+    *("log", "--all", "--full-history", "--diff-merges=off", "--no-color", "--no-ext-diff", "--no-textconv"),
+    *("--no-renames", "--no-relative", "--text", "--src-prefix=a/", "--dst-prefix=b/", f"--unified={2**31 - 1}"),
+    *("-p", "--format=%x01%H %ct", "--", ":(top,glob,icase)**/GO-NO-GO*.md"),
 )
+GO_GIT_KEEP_ENV = ("GIT_SSL_CAINFO", "GIT_SSL_CAPATH", "GIT_ASKPASS")  # chỉ truyền tải: CA tin cậy, xác thực
 GO_HUNK_RE = re.compile(r"@@ -\d+(?:,(\d+))? \+\d+(?:,(\d+))? @@")
 GO_RULE_CELL_RE = re.compile(r":?-+:?")  # ô dòng kẻ bảng Markdown
-GO_DECISION_HEAD = "quyết định"  # tiêu đề cột quyết định (so sau NFC + casefold)
-GO_NAME_HEAD = "tên"
+GO_DECISION_HEADS = ("quyet dinh", "decision")  # tiêu đề cột quyết định (so không dấu + casefold — `_go_head_key`)
+GO_NAME_HEADS = ("ten", "name")
+GO_FREE_RE = re.compile(r"GO(?!\w)", re.I)  # ô GO viết tự do: `GO`, `**GO**; D-126…`, `GO — ok` (D-406)
+GO_NOT_RE = re.compile(r"kh[oô]ng\s*go\b", re.I)  # `Không GO` không bao giờ là GO (cùng `NO_GO_RE`)
+GO_VERSION_RE = re.compile(r"(?<![\w.])v(\d+)\.(\d+)\.(\d+)(?![\w.-])")  # `v1.2.0`; `-rc1`/`.1` → không xác định
 
 
 class GoBlob(NamedTuple):
@@ -13617,17 +13624,30 @@ def _go_tables(lines: Sequence[str]) -> Iterator[List[Tuple[int, str]]]:
             run = []
 
 
-def _go_table_cols(rows: List[Tuple[int, str]], in_five: bool) -> Optional[Tuple[Optional[int], int, int]]:
-    """(cột tên, cột quyết định, dòng thân đầu) của bảng xét lời từ chối; None = không xét. Bảng có tiêu đề (dòng 2 là
-    dòng kẻ) chứa cột `Quyết định` → theo tiêu đề, ở mọi mục (thiếu cột `Tên` → tên rỗng); bảng nằm sau `## 5` đầu tiên
-    → vị trí dòng ký §5 (tên cột 2, quyết định cột 3). Không tiêu đề → mọi dòng là thân (dòng ký lẻ vẫn tính)."""
-    ruled = len(rows) > 1 and all(GO_RULE_CELL_RE.fullmatch(c) for c in _go_cells(rows[1][1]))
-    head = [unicodedata.normalize("NFC", c).casefold() for c in _go_cells(rows[0][1])] if ruled else []
-    body = 2 if ruled else 0
-    if GO_DECISION_HEAD in head:
-        name = head.index(GO_NAME_HEAD) if GO_NAME_HEAD in head else None
-        return name, head.index(GO_DECISION_HEAD), body
-    return (1, 2, body) if in_five else None
+def _go_head_key(cell: str) -> str:
+    """Tiêu đề cột so không dấu + casefold: `Quyết định` → `quyet dinh` (`đ` không tách dấu khi NFD — thay tay)."""
+    plain = "".join(ch for ch in unicodedata.normalize("NFD", cell) if not unicodedata.combining(ch))
+    return plain.replace("đ", "d").replace("Đ", "D").casefold()
+
+
+def _go_table_cols(rows: List[Tuple[int, str]]) -> Optional[Tuple[Optional[int], int]]:
+    """(cột tên, cột quyết định) của bảng có tiêu đề (dòng 2 là dòng kẻ) chứa cột `Quyết định`/`Decision`; khác → None.
+    Không đọc theo vị trí cột, kể cả sau `## 5` (D-406: bảng §6 đọc theo vị trí từng thành lời từ chối giả). Thiếu cột
+    `Tên`/`Name` → tên rỗng (chỉ ô NO-GO rõ tính)."""
+    if len(rows) < 2 or not all(GO_RULE_CELL_RE.fullmatch(c) for c in _go_cells(rows[1][1])):
+        return None
+    head = [_go_head_key(c) for c in _go_cells(rows[0][1])]
+    dec = next((i for i, h in enumerate(head) if h in GO_DECISION_HEADS), None)
+    name = next((i for i, h in enumerate(head) if h in GO_NAME_HEADS), None)
+    return None if dec is None else (name, dec)
+
+
+def _go_cell_go(cell: str) -> bool:
+    """Ô quyết định là GO (D-406): bỏ `*`/`_`/`` ` `` và khoảng trắng hai đầu, rồi bắt đầu bằng `GO` theo sau là hết chuỗi
+    hay ký tự không phải chữ/số — `GO`, `**GO**; D-126…`, `GO — ok`, `GO v1.2.0`. Có NO-GO/từ chối (`NO_GO_RE`) hay
+    `Không GO` → không bao giờ là GO. Chỉ dùng cho quét lịch sử; `promotion` giữ `_decision` (danh sách cho phép hẹp)."""
+    text = re.sub(r"[*_`]", "", cell).strip()
+    return bool(GO_FREE_RE.match(text)) and not NO_GO_RE.search(text) and not GO_NOT_RE.search(text)
 
 
 def _go_human_name(name: str) -> bool:
@@ -13639,71 +13659,143 @@ def _go_human_name(name: str) -> bool:
 def _go_signed_human_go(text: str) -> bool:
     """Dòng ký GO của người đúng dạng guard `GO_SIGN` chặn agent ghi (`GO_SIGN_ROW_RE`: 4 ô, tên + YYYY-MM-DD)."""
     cells = _go_cells(text)
-    return bool(GO_SIGN_ROW_RE.match(text)) and _decision(cells[2]) == "go" and _go_human_name(cells[1])
+    return bool(GO_SIGN_ROW_RE.match(text)) and _go_cell_go(cells[2]) and _go_human_name(cells[1])
 
 
 def _go_row_kind(text: str, name_col: Optional[int], dec_col: int, in_sign: bool) -> str:
-    """`no` = lời từ chối: ô quyết định không rỗng, khác GO (`_decision`, kể cả `?`/`Hold`/`Không GO`), ô tên là của
-    người (`_go_human_name`) — hoặc tên rỗng/placeholder mà ô ghi NO-GO rõ (`_decision` = `no`); dòng mẫu (tên trống,
-    `GO / NO-GO`) không tính. `go` = dòng ký GO của người ở §5 guard bảo vệ (`in_sign`, `_go_signed_human_go`). Ngày
-    không xét: lời từ chối thiếu/sai ngày vẫn là lời từ chối."""
+    """`no` = lời từ chối: ô quyết định không rỗng, không phải GO (`_go_cell_go` — kể cả `?`/`Hold`/`Không GO`), ô tên
+    là của người (`_go_human_name`) — hoặc tên rỗng/placeholder mà ô ghi NO-GO rõ (`_decision` = `no`); dòng mẫu (tên
+    trống, `GO / NO-GO`) không tính. `go` = dòng ký GO của người ở §5 guard bảo vệ (`in_sign`, `_go_signed_human_go`).
+    Ngày không xét: lời từ chối thiếu/sai ngày vẫn là lời từ chối."""
     cells = _go_cells(text)
     if dec_col >= len(cells) or (name_col or 0) >= len(cells) or not cells[dec_col]:
         return ""
     name = cells[name_col] if name_col is not None else ""
-    decision = _decision(cells[dec_col])
-    if decision == "go":
+    if _go_cell_go(cells[dec_col]):
         return "go" if in_sign and _go_signed_human_go(text) else ""
     if name.casefold() == RELEASE_AGENT_NAME:
         return ""
-    return "no" if decision == "no" or _go_human_name(name) else ""
+    return "no" if _decision(cells[dec_col]) == "no" or _go_human_name(name) else ""
 
 
 def _go_decision_rows(lines: Sequence[str]) -> Iterator[Tuple[int, str, str]]:
-    """(chỉ số dòng, dòng, `no`/`go`) của các dòng quyết định của người trong bản tệp `lines`. Chặt hơn §5 hiển thị:
-    bảng sau `## 5` đầu tiên tới HẾT tệp (như `_go_no_go_refusals`) hoặc bảng có cột `Quyết định` ở bất kỳ mục nào —
-    lời từ chối người đặt lệch mục vẫn là lời từ chối. Dòng GO gỡ lời từ chối thì chỉ ở §5 guard bảo vệ (`## 5` đầu
-    tiên tới `## ` kế, cùng phạm vi guard `GO_SIGN`) — agent ghi được dòng GO ở chỗ khác."""
+    """(chỉ số dòng, dòng, `no`/`go`) của các dòng quyết định của người trong bản tệp `lines`: thân mọi bảng có cột
+    `Quyết định` (`_go_table_cols`) ở bất kỳ mục nào — lời từ chối đặt lệch mục vẫn là lời từ chối. Dòng GO gỡ lời từ
+    chối thì chỉ ở §5 guard bảo vệ (`## 5` đầu tiên tới `## ` kế, cùng phạm vi guard `GO_SIGN`) — agent ghi được dòng
+    GO ở chỗ khác."""
     head = next((i for i, t in enumerate(lines) if re.match(r"## 5\b", t)), len(lines))
     end = next((i for i in range(head + 1, len(lines)) if lines[i].startswith("## ")), len(lines))
     for rows in _go_tables(lines):
-        cols = _go_table_cols(rows, rows[0][0] > head)
+        cols = _go_table_cols(rows)
         if cols is None:
             continue
-        for i, text in rows[cols[2] :]:
+        for i, text in rows[2:]:
             kind = _go_row_kind(text, cols[0], cols[1], head < i < end)
             if kind:
                 yield i, text, kind
 
 
+def _go_blob_version(b: GoBlob) -> Optional[Tuple[int, int, int]]:
+    """Phiên bản `vX.Y.Z` của tệp: ở tên tệp, không có thì ở tiêu đề `# ` đầu tiên ngoài frontmatter; không xác định
+    (không có, `-rc1`…) → None."""
+    m = GO_VERSION_RE.search(posixpath.splitext(posixpath.basename(b.path))[0])
+    if m is None:
+        title = re.search(r"^# .*$", GO_FRONT_RE.sub("", "\n".join(t for t, _ in b.lines), count=1), re.M)
+        m = GO_VERSION_RE.search(title[0]) if title else None
+    return (int(m[1]), int(m[2]), int(m[3])) if m else None
+
+
+class GoMark(NamedTuple):
+    """Một dòng quyết định ở lịch sử: ngày commit, phiên bản + đường của tệp chứa nó, chỗ in cho người đọc."""
+
+    ct: int
+    version: Optional[Tuple[int, int, int]]
+    path: str
+    where: str
+
+
+def _go_added_rows(blobs: Sequence[GoBlob], kind: str) -> Iterator[Tuple[str, GoMark]]:
+    """(nội dung các ô, `GoMark`) của mọi dòng loại `kind` THÊM ở commit của blob đó."""
+    for b in blobs:
+        for i, text, k in _go_decision_rows([t for t, _ in b.lines]):
+            if k == kind and b.lines[i][1]:
+                where = f"{b.sha[:12]} {b.path}:{i + 1} `{text.strip()}`"
+                yield " | ".join(_go_cells(text)), GoMark(b.ct, _go_blob_version(b), b.path, where)
+
+
+def _go_lifts(go: GoMark, no: GoMark) -> bool:
+    """Dòng GO người gỡ lời từ chối khi commit SAU nó và cùng phiên bản hay lớn hơn; lời từ chối không xác định phiên
+    bản chỉ gỡ bằng GO cùng tệp (đường) — chiều chặt (D-406)."""
+    if go.ct <= no.ct:
+        return False
+    if no.version is None:
+        return go.path == no.path
+    return go.version is not None and go.version >= no.version
+
+
+def _go_live_refusals(remote: Sequence[GoBlob], local: Sequence[GoBlob]) -> List[str]:
+    """Lời từ chối = HỢP của mirror `origin` và lịch sử cục bộ (bắt NO-GO chưa đẩy), mỗi dòng (theo ô + phiên bản, hay
+    đường khi không có phiên bản) tính ở lần THÊM MỚI NHẤT (chép/lưu trữ lại làm mới — chiều chặt). Dòng GO gỡ lời từ
+    chối CHỈ lấy từ mirror (repo ngoài fetch vào cục bộ không gỡ được), tính ở lần thêm ĐẦU TIÊN (chép lại dòng GO cũ
+    không tính). Không hết hạn theo tuổi, không đọc `release_approval_days` (D-405)."""
+    refused: Dict[Tuple[str, str], GoMark] = {}
+    for key, mark in _go_added_rows([*remote, *local], "no"):
+        slot = (key, str(mark.version) if mark.version else mark.path)
+        if slot not in refused or mark.ct >= refused[slot].ct:
+            refused[slot] = mark
+    gos: Dict[str, GoMark] = {}
+    for key, mark in _go_added_rows(remote, "go"):
+        if key not in gos or mark.ct < gos[key].ct:
+            gos[key] = mark
+    return sorted(no.where for no in refused.values() if not any(_go_lifts(go, no) for go in gos.values()))
+
+
+def _go_git_env() -> Dict[str, str]:
+    """Môi trường git cô lập (D-406): bỏ mọi `GIT_*` của tiến trình (cấu hình tiêm `GIT_CONFIG_*`, `GIT_DIR`…) trừ biến
+    truyền tải `GO_GIT_KEEP_ENV`; không đọc cấu hình global/system (`url.*.insteadOf` đổi đích clone, `log.*`)."""
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_") or k in GO_GIT_KEEP_ENV}
+    return {**env, "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1", "GIT_TERMINAL_PROMPT": "0"}
+
+
+def _go_git(cwd: Path, what: str, *args: str) -> str:
+    """stdout của git trong `_go_git_env`; exit khác 0 → ValueError `what` + dòng lỗi đầu (đã che bí mật)."""
+    r = _git(cwd, *args, env=_go_git_env())
+    if r.returncode != 0:
+        raise ValueError(f"{what}: exit {r.returncode} {redact((r.stderr.strip().splitlines() or [''])[0])}")
+    return r.stdout
+
+
+def _go_full_history(cwd: Path, what: str) -> None:
+    if _go_git(cwd, what, "rev-parse", "--is-shallow-repository").strip() == "true":
+        raise ValueError(f"{what} là clone nông (shallow) — lịch sử thiếu")
+
+
+def _go_origin_mirror(base: Path, tmp: Path) -> Path:
+    """Clone `--mirror` mới của `origin` vào `tmp`: URL đọc thô ở `.git/config` (không include, không `insteadOf`; guard
+    chặn đổi `remote.origin.url`), không mẫu; mirror nông → lỗi."""
+    url = _go_git(base, "không có remote `origin`", "config", "--local", "--no-includes", "--get", "remote.origin.url")
+    dest = tmp / "origin.git"
+    _go_git(tmp, "clone --mirror origin lỗi", "clone", "-q", "--mirror", "--template=", "--", url.strip(), str(dest))
+    _go_full_history(dest, "bản mirror của origin")
+    return dest
+
+
 def _history_go_refusals(base: Path) -> List[str]:
-    """`<sha ngắn> <tệp>:<dòng> \\`<dòng>\\`` của mọi lời từ chối của người (`_go_decision_rows`) còn hiệu lực trong lịch sử
-    git (D-404): mỗi dòng (theo nội dung các ô) tính ở lần THÊM MỚI NHẤT (chép/lưu trữ lại làm mới — chiều chặt); hết
-    hiệu lực CHỈ khi một commit có ngày commit SAU nó thêm một dòng ký GO của người lần ĐẦU (chép lại dòng GO cũ không
-    tính) — không hết hạn theo tuổi, không đọc `release_approval_days` (D-405: tham số agent sửa được trong cây). Không
-    đọc được lịch sử → ReleaseSignError; repo chưa có commit → rỗng."""
-    r = _git(base, *GO_HISTORY_LOG)
+    """`<sha ngắn> <tệp>:<dòng> \\`<dòng>\\`` của mọi lời từ chối của người còn hiệu lực (`_go_live_refusals`), đọc từ
+    bản mirror mới của `origin` và lịch sử cục bộ (D-404, D-406). Repo cục bộ nông, không có `origin`, clone lỗi (mạng,
+    xác thực), mirror nông, `git log` lỗi → ReleaseSignError (fail-closed); thư mục tạm luôn dọn. Repo chưa có commit →
+    rỗng."""
     try:
-        if r.returncode != 0:
-            raise ValueError(f"git log exit {r.returncode}: {(r.stderr.strip().splitlines() or [''])[0]}")
-        blobs = _go_history_blobs(r.stdout)
+        _go_full_history(base, "repo cục bộ")
+        with tempfile.TemporaryDirectory(prefix="xt-release-sign-") as tmp:
+            mirror = _go_origin_mirror(base, Path(tmp))
+            remote = _go_history_blobs(_go_git(mirror, "git log (mirror)", *GO_HISTORY_LOG))
+        local = _go_history_blobs(_go_git(base, "git log", *GO_HISTORY_LOG))
     except (ValueError, IndexError) as exc:
         raise ReleaseSignError(
             f"không đọc được lịch sử git để kiểm lời từ chối NO-GO ({exc}) — agent không ký"
         ) from exc
-    refused: Dict[str, Tuple[int, str]] = {}
-    first_go: Dict[str, int] = {}
-    for b in blobs:
-        for i, text, kind in _go_decision_rows([t for t, _ in b.lines]):
-            if not b.lines[i][1]:
-                continue
-            key = " | ".join(_go_cells(text))
-            if kind == "go":
-                first_go[key] = min(b.ct, first_go.get(key, b.ct))
-            elif b.ct >= refused.get(key, (-1, ""))[0]:
-                refused[key] = (b.ct, f"{b.sha[:12]} {b.path}:{i + 1} `{text.strip()}`")
-    last_go = max(first_go.values(), default=-1)
-    return sorted(where for ct, where in refused.values() if ct >= last_go)
+    return _go_live_refusals(remote, local)
 
 
 def _sign_scope_check(base: Path) -> None:

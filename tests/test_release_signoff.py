@@ -408,15 +408,91 @@ class ReleaseSignRealCheckTest(RealCheckRepo):
         self.assert_history_refused(self.REFUSED)
 
     def test_refusal_superseded_by_later_human_go(self):
-        """D-404: lời từ chối hết hiệu lực khi commit SAU nó thêm dòng ký GO của người (§5, tên + ngày) → ký được."""
-        now = int(dt.datetime.now(dt.timezone.utc).timestamp())
+        """D-404/D-406: lời từ chối hết hiệu lực khi commit SAU nó (trên origin) thêm dòng ký GO của người (§5, tên +
+        ngày) ở tệp cùng phiên bản hay cao hơn → ký được."""
         self.write(self.REFUSED, refusal_doc())
-        self.commit(at=now - 200)
-        self.write("docs/ops/GO-NO-GO-v1.1.0.md", refusal_doc("1.1.0", decision="GO"))
-        self.commit(at=now - 100)
+        self.commit(at=ago(seconds=200))
+        self.write("docs/ops/GO-NO-GO-v1.3.0.md", refusal_doc("1.3.0", decision="GO"))
+        self.commit(at=ago(seconds=100))
         self.rm(self.REFUSED)
         self.commit(push=False)
         self.assert_signs()
+
+    def test_lower_version_go_does_not_lift(self):
+        """D-406 🟠: dòng GO người ở GO-NO-GO phiên bản thấp hơn không gỡ NO-GO của v1.2.0 (trước: gỡ toàn cục)."""
+        self.write(self.REFUSED, refusal_doc())
+        self.commit(at=ago(seconds=200))
+        self.write("docs/ops/GO-NO-GO-v1.1.0.md", refusal_doc("1.1.0", decision="GO"))
+        self.commit(at=ago(seconds=100))
+        self.rm(self.REFUSED)
+        self.commit(push=False)
+        self.assert_history_refused(self.REFUSED)
+
+    def test_free_form_go_and_appendix_table_not_refusal(self):
+        """D-406 🟠 chặn oan: ô GO viết tự do (`**GO**; D-126…`) là GO; bảng §6 không cột `Quyết định` không đọc."""
+        go = refusal_doc("1.1.0", decision="**GO**; D-126: giữ tự host")
+        go += "\n## 6. Phụ lục\n\n| Rủi ro | Người | Trạng thái |\n|---|---|---|\n| Mạng | An | Hold |\n"
+        self.write("docs/ops/GO-NO-GO-v1.1.0.md", go)
+        self.commit()
+        self.assert_signs()
+
+    def test_merge_ours_does_not_hide_refusal(self):
+        """D-406 🔴: `git merge -s ours` nhánh có NO-GO rồi xoá nhánh — giản lược lịch sử của `git log -- <pathspec>`
+        giấu commit đó; `--full-history` thấy (cả mirror lẫn cục bộ)."""
+        self.git("checkout", "-q", "-b", self.BRANCH)
+        self.write(self.REFUSED, refusal_doc())
+        self.commit(push=False)
+        self.git("checkout", "-q", "main")
+        self.git("merge", "-q", "-s", "ours", "-m", "m", self.BRANCH)
+        self.git("branch", "-q", "-D", self.BRANCH)
+        self.git("push", "-q", "origin", "main")
+        self.assert_history_refused(self.REFUSED)
+
+    def test_remote_ref_deleted_locally_still_seen(self):
+        """D-406 🔴: NO-GO đã đẩy lên nhánh PR của origin, agent `branch -D` + `branch -rd origin/<nhánh>` → mirror thấy."""
+        self.git("checkout", "-q", "-b", self.BRANCH)
+        self.write(self.REFUSED, refusal_doc())
+        self.commit(push=self.BRANCH)
+        self.git("checkout", "-q", "main")
+        self.git("branch", "-q", "-D", self.BRANCH)
+        self.git("branch", "-q", "-rd", f"origin/{self.BRANCH}")
+        self.assert_history_refused(self.REFUSED)
+
+    def test_pull_ref_survives_branch_delete(self):
+        """D-406 🔴: `push --delete` nhánh NO-GO + `fetch --prune` — origin còn `refs/pull/1/head` (GitHub giữ) → thấy."""
+        self.git("checkout", "-q", "-b", self.BRANCH)
+        self.write(self.REFUSED, refusal_doc())
+        self.commit(push=self.BRANCH)
+        self.git("push", "-q", "origin", "HEAD:refs/pull/1/head")
+        self.git("checkout", "-q", "main")
+        self.git("branch", "-q", "-D", self.BRANCH)
+        self.git("push", "-q", "origin", "--delete", self.BRANCH)
+        self.git("fetch", "-q", "--prune", "origin")
+        self.assert_history_refused(self.REFUSED)
+
+    def test_shallow_fetch_refused(self):
+        """D-406 🔴: `git fetch --depth=1 origin main` làm repo nông → không ký (lịch sử trước tip biến mất)."""
+        self.write(self.REFUSED, refusal_doc())
+        self.commit()
+        self.rm(self.REFUSED)
+        self.commit()
+        self.git("fetch", "-q", "--depth=1", "origin", "main")
+        self.assert_refused("clone nông (shallow)")
+
+    def test_external_repo_go_does_not_lift(self):
+        """D-406 🔴: GO người của repo ngoài `fetch` vào cục bộ (`refs/heads/x`) không gỡ NO-GO đã lên origin."""
+        self.write(self.REFUSED, refusal_doc())
+        self.commit(at=ago(seconds=200))
+        self.rm(self.REFUSED)
+        self.commit()
+        ext = self.tmp / "ext"
+        ext.mkdir()
+        git(ext, "init", "-q", "-b", "main")
+        (ext / "GO-NO-GO-v9.0.0.md").write_text(refusal_doc("9.0.0", decision="GO"), encoding="utf-8")
+        git(ext, "add", "-A")
+        git(ext, "commit", "-q", "-m", "go")
+        self.git("fetch", "-q", str(ext), "main:refs/heads/x")
+        self.assert_history_refused(self.REFUSED)
 
     def test_refusal_does_not_expire_by_age(self):
         """D-405: lời từ chối cũ hơn mọi hạn (400 ngày) vẫn chặn ký khi chưa có dòng GO người sau nó."""
@@ -466,25 +542,124 @@ def table(*rows, head="| Vai trò | Tên | Quyết định | Ngày |\n|---|---|-
     return head + "".join(r + "\n" for r in rows)
 
 
-def sign_doc(*rows, before=""):
-    return f"# GO/NO-GO — X\n\n{before}## 5. Ký\n\n" + table(*rows) + "\n## 6. Phụ lục\n\nx\n"
+def sign_doc(*rows, before="", title="# GO/NO-GO — X", after="x\n"):
+    return f"{title}\n\n{before}## 5. Ký\n\n" + table(*rows) + "\n## 6. Phụ lục\n\n" + after
+
+
+def bare(path):
+    subprocess.run(["git", "init", "-q", "--bare", "-b", "main", str(path)], check=True)
+    return path
 
 
 class GoHistoryTest(TmpRepoCase):
-    """`_history_go_refusals` (D-404): quét dòng thêm của mọi `GO-NO-GO*.md` trong `git log --all`."""
+    """`_history_go_refusals` (D-404, D-406): dòng thêm của mọi `GO-NO-GO*.md` trong `git log --all --full-history` của
+    bản mirror mới của `origin` và của repo cục bộ."""
 
     def setUp(self):
         super().setUp()
         self.init_repo()
+        self.origin = bare(self.tmp / "origin.git")
+        self.git("remote", "add", "origin", str(self.origin))
 
-    def refusals(self, base=None):
+    def refusals(self, base=None, publish=True):
+        if publish:
+            self.git("push", "-q", "--mirror", "origin")
         return xt._history_go_refusals(base or self.repo)
 
-    def test_empty_repo_and_not_a_repo(self):
-        self.assertEqual(self.refusals(), [])
+    def refused(self, msg, base=None):
         with self.assertRaises(xt.ReleaseSignError) as ctx:
-            self.refusals(self.tmp)
+            xt._history_go_refusals(base or self.repo)
         self.assertIn("không đọc được lịch sử git", str(ctx.exception))
+        self.assertIn(msg, str(ctx.exception))
+
+    def other_clone(self, name="other"):
+        """Bản clone khác của origin (người khác đẩy lên) — repo cục bộ không fetch."""
+        path = self.tmp / name
+        subprocess.run(["git", "clone", "-q", str(self.origin), str(path)], check=True, capture_output=True)
+        return path
+
+    def test_empty_repo_and_not_a_repo(self):
+        self.assertEqual(self.refusals(publish=False), [])
+        self.refused("repo cục bộ: exit", self.tmp)
+
+    def test_no_origin_or_clone_error_fails_closed(self):
+        """D-406: không có `origin`, clone lỗi (đường/mạng/xác thực) → từ chối."""
+        self.commit_files({"x.md": "x"}, ago(seconds=10))
+        self.git("remote", "set-url", "origin", str(self.tmp / "khong-co.git"))
+        self.refused("clone --mirror origin lỗi")
+        self.git("remote", "remove", "origin")
+        self.refused("không có remote `origin`")
+
+    def test_shallow_local_fails_closed(self):
+        """D-406 🔴: `git fetch --depth=1` làm repo cục bộ nông — lịch sử trước tip biến mất → từ chối."""
+        for at in (30, 20, 10):
+            self.commit_files({"x.md": str(at)}, ago(seconds=at))
+        self.git("push", "-q", "origin", "main")
+        self.git("fetch", "-q", "--depth=1", "origin", "main")
+        self.refused("repo cục bộ là clone nông", self.repo)
+
+    def test_isolated_git_env_and_unfetched_remote(self):
+        """D-406: lời từ chối người khác đẩy lên origin mà repo cục bộ chưa fetch (ref theo dõi cũ, AUD-SEC-548) vẫn thấy;
+        `url.*.insteadOf` tiêm qua `GIT_CONFIG_*`/`GIT_CONFIG_GLOBAL` không đổi được đích clone."""
+        self.commit_files({"x.md": "x"}, ago(seconds=30))
+        self.git("push", "-q", "origin", "main")
+        other = self.other_clone()
+        (other / "GO-NO-GO-v1.0.0.md").write_text(sign_doc("| Chủ repo | An | NO-GO | 2026-11-09 |"), "utf-8")
+        for args in (("add", "-A"), ("commit", "-q", "-m", "no"), ("push", "-q", "origin", "main")):
+            git(other, *args)
+        fake = bare(self.tmp / "fake.git")
+        subprocess.run(["git", "-C", str(self.repo), "push", "-q", str(fake), "main"], check=True)
+        glob_cfg = self.tmp / "gitconfig"
+        glob_cfg.write_text(f'[url "{fake}"]\n\tinsteadOf = {self.origin}\n', encoding="utf-8")
+        envs = (
+            {},
+            {
+                "GIT_CONFIG_COUNT": "1",
+                "GIT_CONFIG_KEY_0": f"url.{fake}.insteadOf",
+                "GIT_CONFIG_VALUE_0": str(self.origin),
+            },
+            {"GIT_CONFIG_GLOBAL": str(glob_cfg)},
+        )
+        for env in envs:
+            with self.subTest(env=sorted(env)), unittest.mock.patch.dict(os.environ, env):
+                self.assertIn("GO-NO-GO-v1.0.0.md:7", "\n".join(xt._history_go_refusals(self.repo)))
+
+    def test_go_from_external_repo_does_not_lift(self):
+        """D-406 🔴: dòng GO người của repo ngoài fetch vào cục bộ không gỡ lời từ chối — GO chỉ tính từ mirror origin."""
+        self.commit_files({"GO-NO-GO-v1.0.0.md": sign_doc("| Chủ repo | An | NO-GO | 2026-11-01 |")}, ago(days=2))
+        ext = self.tmp / "ext"
+        ext.mkdir()
+        git(ext, "init", "-q", "-b", "main")
+        (ext / "GO-NO-GO-v9.0.0.md").write_text(sign_doc("| Chủ repo | Lạ | GO | 2026-11-08 |"), encoding="utf-8")
+        git(ext, "add", "-A")
+        git(ext, "commit", "-q", "-m", "go")
+        self.git("push", "-q", "origin", "main")
+        self.git("fetch", "-q", str(ext), "main:refs/heads/x")
+        self.assertEqual(len(self.refusals(publish=False)), 1)
+        self.git("push", "-q", "origin", "x")  # cùng dòng GO lên origin → gỡ (đối chứng)
+        self.assertEqual(self.refusals(publish=False), [])
+
+    def test_show_root_pinned(self):
+        """D-406 🟠: `git config log.showRoot false` ở repo cục bộ không ẩn lời từ chối ở commit gốc chưa đẩy."""
+        seed = self.tmp / "seed"
+        seed.mkdir()
+        git(seed, "init", "-q", "-b", "main")
+        git(seed, "commit", "-q", "--allow-empty", "-m", "seed")
+        git(seed, "push", "-q", str(self.origin), "main")
+        self.commit_files({"GO-NO-GO-v1.0.0.md": sign_doc("| Chủ repo | An | Hold | |")}, ago(seconds=10))
+        self.git("config", "log.showRoot", "false")
+        self.assertEqual(len(self.refusals(publish=False)), 1)
+
+    def test_pins_all_refs_and_full_context(self):
+        """Ghim cờ: lời từ chối chỉ reachable từ ref khác HEAD (`--all`); dòng NO-GO thêm cách xa tiêu đề bảng (cần
+        `--unified` tối đa để biết dòng nằm trong bảng có cột `Quyết định`)."""
+        filler = [f"| Mục {i} | | | |" for i in range(40)]
+        self.commit_files({"GO-NO-GO-v1.0.0.md": sign_doc(*filler)}, ago(seconds=40))
+        self.git("checkout", "-q", "-b", "side")
+        far = "| Chủ repo | An | NO-GO | 2026-11-09 |"
+        self.commit_files({"GO-NO-GO-v1.0.0.md": sign_doc(*filler, far, after="\n" * 30 + "y\n")}, ago(seconds=30))
+        self.git("checkout", "-q", "main")
+        self.assertIn(f"GO-NO-GO-v1.0.0.md:47 `{far}`", "\n".join(self.refusals()))
 
     def test_scope_any_dir_case_version(self):
         """Mọi thư mục, mọi độ sâu, tên không phân biệt hoa thường, mọi phiên bản; tệp tên khác không tính."""
@@ -503,7 +678,8 @@ class GoHistoryTest(TmpRepoCase):
         )
 
     def test_row_rules(self):
-        """Dòng quyết định của người: tên không rỗng/placeholder/agent (trừ ô NO-GO rõ), ô quyết định khác GO."""
+        """Dòng quyết định của người: tên không rỗng/placeholder/agent (trừ ô NO-GO rõ), ô quyết định không phải GO.
+        GO viết tự do (D-406) là GO; `GO / NO-GO`, `Không GO` không bao giờ là GO."""
         rows = (
             "| Chủ sản phẩm | | GO / NO-GO | |",  # dòng mẫu
             "| Kỹ thuật | | | |",
@@ -519,22 +695,46 @@ class GoHistoryTest(TmpRepoCase):
             "| A | | Từ chối | |",
             "  | A | Én | **GO** | |",
             "| A | Phú |",
+            "| A | Hà | GO / NO-GO | 2026-11-09 |",
+            "| A | Khánh | GO, không GO | |",
+            "| A | Lan | **GO**; D-126: giữ tự host | 2026-10-26 |",
+            "| A | Minh | `GO` — ok | |",
+            "| A | Ngọc | Gold | |",
         )
         before = (
             "## 1. Đếm\n\n| Mức | PASS | FAIL | N/A |\n|---|---|---|---|\n| BLOCKER | 12 | 0 | 3 |\n\n"
             "## 2. Khác\n\n| Quyết định | Tên |\n|---|---|\n| Hoãn | Giang |\n\n"
+            "| Decision | Name |\n|---|---|\n| Hold | Oanh |\n\n"
+            "| Mục | QUYET DINH |\n|:--|--:|\n| x | NO-GO |\n| y | Hold |\n\n"
         )
         self.commit_files({"GO-NO-GO.md": sign_doc(*rows, before=before)}, ago(seconds=10))
         text = "\n".join(self.refusals())
-        for who in ("Bình", "Chi", "Dũng", "| A | | Từ chối |", "Én", "Giang"):
+        for who in (
+            "Bình",
+            "Chi",
+            "Dũng",
+            "| A | | Từ chối |",
+            "Giang",
+            "Hà",
+            "Khánh",
+            "Ngọc",
+            "Oanh",
+            "| x | NO-GO |",
+        ):
             self.assertIn(who, text)
         for who in ("Chủ sản phẩm", "Kỹ thuật", "<tên>", "—", "agent", "AGENT", "| An |", "Phú", "BLOCKER", "Mức"):
             self.assertNotIn(who, text)
+        for who in ("Én", "Lan", "Minh", "| y |"):
+            self.assertNotIn(who, text)
 
-    def test_lone_row_without_header_counts(self):
-        """Dòng bảng không có tiêu đề + kẻ (không thành bảng khi hiển thị) vẫn là lời từ chối."""
-        self.commit_files({"GO-NO-GO.md": "## 5. Ký\n\n| Chủ repo | An | NO-GO |\n"}, ago(seconds=10))
-        self.assertIn("| Chủ repo | An | NO-GO |", "\n".join(self.refusals()))
+    def test_tables_without_decision_column_not_read(self):
+        """D-406 🟠: chỉ bảng có cột `Quyết định` — bảng §6 (sau `## 5`) không cột đó, hay dòng lẻ không tiêu đề, không
+        đọc theo vị trí cột."""
+        appendix = "| Rủi ro | Người | Trạng thái |\n|---|---|---|\n| Mạng | An | Hold |\n"
+        lone = "| Chủ repo | Bình | NO-GO |\n"
+        doc = sign_doc("| Chủ repo | | GO / NO-GO | |", after=appendix + "\n## 7. X\n\n" + lone)
+        self.commit_files({"GO-NO-GO-v1.0.0.md": doc}, ago(seconds=10))
+        self.assertEqual(self.refusals(), [])
 
     def test_template_has_no_refusal(self):
         """Mẫu GO-NO-GO của khung (dòng tiêu đề/kẻ/dòng trống) không tự tạo lời từ chối, ở gốc lẫn thư mục con."""
@@ -545,33 +745,49 @@ class GoHistoryTest(TmpRepoCase):
     def test_supersede_needs_new_signed_human_go_in_section_five(self):
         """Chỉ dòng ký GO của người ở §5 (tên + ngày, khớp `GO_SIGN_ROW_RE` — guard chặn agent ghi), XUẤT HIỆN LẦN ĐẦU
         sau lời từ chối, mới gỡ nó. GO thiếu ngày, ngoài §5, của agent, hay chép lại dòng GO cũ thì không."""
+        title = "# GO/NO-GO — X · phát hành v1.0.0"
         old_go = "| Chủ repo | An | GO | 2026-10-01 |"
-        self.commit_files({"GO-NO-GO-old.md": sign_doc(old_go)}, ago(days=5))
-        self.commit_files({"GO-NO-GO-a.md": sign_doc("| Chủ repo | An | NO-GO | 2026-11-01 |")}, ago(days=4))
+        self.commit_files({"GO-NO-GO-old.md": sign_doc(old_go, title=title)}, ago(days=5))
+        no = "| Chủ repo | An | NO-GO | 2026-11-01 |"
+        self.commit_files({"GO-NO-GO-a.md": sign_doc(no, title=title)}, ago(days=4))
         not_enough = (
-            sign_doc("| Chủ repo | An | GO | |"),
-            sign_doc("| Agent | agent | GO | 2026-11-08 |"),
-            "# x\n\n## 4. Kết luận\n\n" + table("| Chủ repo | Bình | GO | 2026-11-08 |") + "\n## 5. Ký\n\nx\n",
-            sign_doc(old_go),
+            sign_doc("| Chủ repo | An | GO | |", title=title),
+            sign_doc("| Agent | agent | GO | 2026-11-08 |", title=title),
+            f"{title}\n\n## 4. Kết luận\n\n" + table("| Chủ repo | Bình | GO | 2026-11-08 |") + "\n## 5. Ký\n\nx\n",
+            sign_doc(old_go, title=title),
+            sign_doc("| Chủ repo | An | GO | 2026-11-08 |", title="# GO/NO-GO — X · phát hành v0.9.9"),  # bản thấp hơn
+            sign_doc("| Chủ repo | Chi | GO | 2026-11-08 |"),  # tệp không có phiên bản
         )
         for i, text in enumerate(not_enough):
             self.commit_files({f"GO-NO-GO-{i}.md": text}, ago(days=3, seconds=-i))
             self.assertIn("NO-GO | 2026-11-01", "\n".join(self.refusals()), i)
-        self.commit_files({"GO-NO-GO-new.md": sign_doc("| Chủ repo | An | GO | 2026-11-08 |")}, ago(days=2))
+        new = sign_doc("| Chủ repo | An | GO | 2026-11-09 |", title="---\nx: 1\n---\n# GO/NO-GO — X · v1.0.1")
+        self.commit_files({"GO-NO-GO-new.md": new}, ago(days=2))
+        self.assertEqual(self.refusals(), [])
+
+    def test_unversioned_refusal_lifted_only_in_same_file(self):
+        """D-406: lời từ chối ở tệp không xác định phiên bản chỉ gỡ bằng dòng GO người cùng tệp (đường), commit sau."""
+        self.commit_files({"GO-NO-GO.md": sign_doc("| Chủ repo | An | Hold | |")}, ago(days=4))
+        v9 = sign_doc("| Chủ repo | An | GO | 2026-11-08 |")  # cùng dòng GO ở hai tệp một commit: lần đầu = cùng ngày
+        self.commit_files({"GO-NO-GO-v9.0.0.md": v9, "GO-NO-GO-v9.0.1.md": v9}, ago(days=3))
+        self.assertEqual(len(self.refusals()), 1)
+        go = sign_doc("| Chủ repo | An | Hold | |", "| Chủ repo | An | GO | 2026-11-09 |")
+        self.commit_files({"GO-NO-GO.md": go}, ago(days=2))
         self.assertEqual(self.refusals(), [])
 
     def test_refusal_no_expiry_latest_occurrence(self):
         """D-405: không hết hạn theo tuổi, `release_approval_days` không xét; GO người sau gỡ; chép lại lời từ chối
         (đổi tên/lưu trữ) SAU dòng GO đó làm nó có hiệu lực lại — tính ở lần thêm mới nhất (chiều chặt)."""
         no = "| Chủ repo | An | NO-GO | 2025-01-01 |"
-        self.commit_files({"GO-NO-GO-a.md": sign_doc(no)}, ago(days=400))
+        self.commit_files({"GO-NO-GO-a-v1.0.0.md": sign_doc(no)}, ago(days=400))
         (self.repo / "xt.yaml").write_text("release_approval_days: 1\n", encoding="utf-8")
         self.assertEqual(len(self.refusals()), 1)
-        self.commit_files({"GO-NO-GO-b.md": sign_doc("| Chủ repo | An | GO | 2025-02-01 |")}, ago(days=300))
+        go = sign_doc("| Chủ repo | An | GO | 2025-02-01 |")
+        self.commit_files({"GO-NO-GO-b-v1.0.0.md": go}, ago(days=300))
         self.assertEqual(self.refusals(), [])
-        self.git("mv", "GO-NO-GO-a.md", "GO-NO-GO-archived.md")
+        self.git("mv", "GO-NO-GO-a-v1.0.0.md", "GO-NO-GO-archived-v1.0.0.md")
         sha = self.commit_files({}, ago(days=1))
-        self.assertIn(f"{sha[:12]} GO-NO-GO-archived.md", "\n".join(self.refusals()))
+        self.assertIn(f"{sha[:12]} GO-NO-GO-archived-v1.0.0.md", "\n".join(self.refusals()))
 
     def test_diff_parsing_edges(self):
         """Sửa (dòng `-`), xoá tệp, tệp không có xuống dòng cuối, dòng nội dung trông như tiêu đề diff."""
