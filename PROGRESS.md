@@ -1,18 +1,17 @@
 # PROGRESS.md — Khung X-Templates
 
-> Giai đoạn hiện tại: G8 Vận hành & tiến hoá (khung 3.33.0, pha `harden` — D-136) · Cập nhật: 2026-11-08 · Nhánh: claude/festive-gauss-i861qa
+> Giai đoạn hiện tại: G8 Vận hành & tiến hoá (khung 3.33.0, pha `harden` — D-136) · Cập nhật: 2026-11-09 · Nhánh: claude/intelligent-cori-vuunal
 
 ## Đang làm
-- 2026-11-08 nghiên cứu [tự động hoá tới mức máy làm được](research/2026-11-08-full-automation.md) (247 điểm chờ → 41 nhóm, lộ trình S1–S11) + **ADR-0074** agent ký §5 GO-NO-GO (chủ repo quyết, D-401; `xt.py release-sign`; phản biện 3/3 bác bản đầu → siết, D-402). Kế tiếp: PR riêng bật `release_signoff: agent` ở `xt.yaml` (HARD_GATED → **chủ repo merge**), rồi S1–S3 của nghiên cứu.
-- Chờ người: §5 ký GO-NO-GO [3.30.0](docs/ops/GO-NO-GO-2026-11-05-v3.30.0.md)/3.30.1/3.31.0/3.31.1 (3.32.0 đã ký #476; D-126 đã quyết giữ tự host #477) và GO-NO-GO 3.33.0 (tag `v3.33.0`, #481). T-3557 (`PLAN-harden-2026-10-27-loops.md`) còn `[ ]` — tick qua `loop record` khi chạy lại Gate của nó.
-- Dự án đích (`main` 2026-11-08, [registry](docs/ops/registry.json)): cả 4 (hotel-manager, X-Company, xboss, dhcb) ở 3.32.0 (#154, #102, #717, #1489). GO-NO-GO của dự án cần dòng `subject:` khi người ký lại (D-389).
-- 2026-11-08 **cắt 3.33.0** từ `main` `a09f7a7` (D-403): #472 (AUD-HAR-325), #478 `loop decide-prod` (AUD-HAR-327…329), #479 (AUD-HAR-331). `release-check` GO trên `main` (sau `git fetch --unshallow` — clone nông làm hàng blueprint/audit FAIL giả). #474/#475 (pilot artifact xboss) vào bản kế; #437 đóng (đã thay bởi #451). Còn mở: AUD-TEST-061 (CodeQL); fixture host Codex/Gemini.
+- 2026-11-09 đã merge sau 3.33.0: #474 (release-check chặn khi Git không kiểm được cây), #475 (PLAN pilot artifact xboss), #480 (**ADR-0074** `xt.py release-sign` — agent ký §5 khi khoá `release_signoff: agent`; 4 vòng kiểm Fable → D-404…D-406: lời từ chối NO-GO đọc từ lịch sử git của bản `clone --mirror` mới của `origin`, chỉ GO người gỡ, không hết hạn). #437 đóng (thay bởi #451). Nợ review mở 27 dòng (`audit check --strict` đỏ tới khi trả): AUD-HAR-334…338 (#474), AUD-DOC-273…277 (#475), AUD-SEC-544/545/551…553, AUD-HAR-340…348, AUD-DOC-278/279, AUD-TEST-093 (#480).
+- Chờ người: §5 ký GO-NO-GO 3.30.0…3.31.1 và [3.33.0](docs/ops/GO-NO-GO-2026-11-08-v3.33.0.md) (3.32.0 đã ký #476); bật `release_signoff: agent` ở `xt.yaml` là PR chủ repo merge (HARD_GATED, D-402). T-3557 còn `[ ]`.
+- Dự án đích (`main` 2026-11-08, [registry](docs/ops/registry.json)): cả 4 ở 3.32.0; PR nâng 3.33.0 chưa mở. Còn mở: AUD-TEST-061 (CodeQL); fixture host Codex/Gemini.
 - Phép đo `LOOP-ORCH-020` tích luỹ; tăng số agent chỉ khi có số (ADR-0061). Phản hồi dự án đích: 10 nhóm `cong-cu` chờ phân loại ([TARGETS](docs/ops/TARGETS.md)).
 - Hoãn tới harden: T-1690/T-1691 (quét lại SEC-091…099). Rà `seeker19110/stored`: chờ chủ repo (HAR-036/041, SEC-026, CI-006/7/9, SEC-043; hạn xét: 2026-12-31).
 
 ## Tiếp theo
 1. Phản hồi dự án đích qua `xt.py feedback`; PR nâng do `pr-steward` của từng dự án merge.
-2. **Kế tiếp:** merge PR cắt 3.33.0 → tag (`release-tag.yml`) → PR nâng 3.33.0 ở 4 dự án (pr-steward/người merge) → `registry.json`/`TARGETS.md`. Mục 3–5 bên dưới.
+2. **Kế tiếp:** trả nợ review #474/#475/#480 (pha harden, ưu tiên 🟠: AUD-SEC-551/552/553, AUD-HAR-334/340, AUD-DOC-273/274) → cắt 3.34.0 (#480 đổi việc dự án đích) → PR nâng ở 4 dự án → `registry.json`/`TARGETS.md`.
 3. PLAN-harden-2026-10-27-loops còn T-3554 (pilot `next-step`) và T-3555 (lát 5: field trigger, bot nâng bản, worker ngoài phiên). 🟢 mở của `perf trial`/`dev-task.sh` rà ở audit kế (sổ: AUD-HAR-294…297, AUD-TEST-082/083, AUD-PERF-020…025).
 4. Còn: máy hoá `LOOP-HARNESS-031` (dấu hook theo phiên), `LOOP-STOP-030` (ConfigChange); task `[perf]` trong `loop` (D-041); URL phiên do máy chủ MCP gắn vào thân PR; ép báo "đã đo/chưa đo" cho task UI (`LOOP-DESIGN-021`); sàn quyền token; `xt.pyz` (ADR-0010); ca đối kháng cho `autonomy-bench`; `project-commands.sh` được `source` hai lần mỗi task.
 5. Giới hạn guard đã biết: ở sổ audit và `harness-files.md`; tên dựng lúc chạy chấp nhận tới 2027-01-21 (AUD-SEC-406, ADR-0067). Đánh giá sandbox Bash opt-in cho khung trước 2027-01-21 (D-331/D-332); cùng đợt T-3709 đo chi phí compile `guard.py` mỗi lệnh Bash (ADR-0072, hạn 2027-01-21). **Xét lại hàng rào 2027-01-21** hoặc khi đổi model (LOOP-DESIGN-014; Claude Code ≥ `claude_min_version`).
