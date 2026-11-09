@@ -22750,6 +22750,12 @@
 {"id": "har353-ctl-replace-quoted-gt", "origin": "control", "refs": ["AUD-HAR-353"], "input": {"command": "git replace -f '>' HEAD"}, "expect": {"allowed": false, "code": "REMOTE_REF_FORGE"}, "note": "`>` trong nháy là tên ref hợp lệ, không phải chuyển hướng"},
 {"id": "har353-ctl-push-o-h-main", "origin": "control", "refs": ["AUD-HAR-353"], "input": {"command": "git push -o -h origin main"}, "expect": {"allowed": false, "code": "PUSH_MAIN"}, "note": "`-h` là push-option: git vẫn đẩy (đo)"},
 {"id": "har353-ctl-push-dashdash-h-main", "origin": "control", "refs": ["AUD-HAR-353"], "input": {"command": "git push origin -- main -h", "files": {".git/HEAD": "ref: refs/heads/main\n", ".git/objects/.keep": "", ".git/refs/heads/.keep": ""}}, "expect": {"allowed": false, "code": "PUSH_MAIN"}},
-{"id": "har353-ctl-merge-help-subject", "origin": "control", "refs": ["AUD-HAR-353"], "input": {"command": "gh pr merge 12 -t --help"}, "expect": {"allowed": false, "code": "RULE_DENY"}, "note": "`--help` là subject: gh chạy merge"}
+{"id": "har353-ctl-merge-help-subject", "origin": "control", "refs": ["AUD-HAR-353"], "input": {"command": "gh pr merge 12 -t --help"}, "expect": {"allowed": false, "code": "RULE_DENY"}, "note": "`--help` là subject: gh chạy merge"},
+{"id": "aud572-replace-digit-sha-devnull", "origin": "adversarial-reviewer", "refs": ["AUD-SEC-572"], "input": {"command": "git replace -f origin/main 1234 >/dev/null"}, "expect": {"allowed": false, "code": "REMOTE_REF_FORGE"}, "note": "review #488: SHA tiền tố toàn chữ số trước `>` là đối số, không phải fd (git 2.43 ghi refs/replace)"},
+{"id": "aud572-replace-digit-devnull-2to1", "origin": "adversarial-reviewer", "refs": ["AUD-SEC-572"], "input": {"command": "git replace -f origin/main 1234 >/dev/null 2>&1"}, "expect": {"allowed": false, "code": "REMOTE_REF_FORGE"}},
+{"id": "aud572-replace-digit-stdin", "origin": "adversarial-reviewer", "refs": ["AUD-SEC-572"], "input": {"command": "git replace -f origin/main 1234 </dev/null"}, "expect": {"allowed": false, "code": "REMOTE_REF_FORGE"}},
+{"id": "aud572-replace-branch-2-dup", "origin": "adversarial-reviewer", "refs": ["AUD-SEC-572"], "input": {"command": "git replace origin/main 2 >&1"}, "expect": {"allowed": false, "code": "REMOTE_REF_FORGE"}, "note": "nhánh tên `2`: `git branch 2 HEAD~1; git replace HEAD 2 >&1` exit 0"},
+{"id": "aud572-ctl-replace-help-redirect", "origin": "control", "refs": ["AUD-SEC-572", "AUD-HAR-353"], "input": {"command": "git replace -h 2>&1"}, "expect": {"allowed": true}, "note": "một đối số tối đa: git in usage, exit 129"},
+{"id": "aud572-ctl-replace-list-redirect", "origin": "control", "refs": ["AUD-SEC-572"], "input": {"command": "git replace 2>&1"}, "expect": {"allowed": true}}
  ]
 }

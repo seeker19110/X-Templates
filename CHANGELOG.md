@@ -58,7 +58,8 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
 
 - Guard (nợ review #487 AUD-HAR-353): dạng trợ giúp thật không còn bị chặn oan — `gh pr close 12 -d --help`/`-dh`,
   `git replace -h 2>&1` (`2` của chuyển hướng không còn đọc là đối tượng), `git push -h` ở `main`; `-h`/`--help` là giá
-  trị của cờ khác (`gh pr merge 12 -b --help --auto`, `git push -o -h`) hay sau `--` vẫn bị xét như lệnh thật.
+  trị của cờ khác (`gh pr merge 12 -b --help --auto`, `git push -o -h`) hay sau `--` vẫn bị xét như lệnh thật; chữ số
+  đứng trước chuyển hướng vẫn có thể là đối số (`git replace -f origin/main 1234 >/dev/null` vẫn bị chặn).
 - `release-sign` đọc khoá `release_signoff` ở nhánh mặc định của bản mirror `origin` vừa clone (cùng lần quét lời từ
   chối) — khoá đã tắt trên remote mà `origin/main` cục bộ chưa fetch không còn cho agent ký (AUD-SEC-552, D-407).
 - Clone mirror của `release-sign` giữ riêng credential helper global của người dùng (`credential.helper`,

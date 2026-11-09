@@ -5636,19 +5636,39 @@ def _replace_names(args: List[str], _cwd: Optional[str]) -> RefNames:
     `--convert-graft-file`); liệt kê (không đối số, `-l`/`--list`, `--format`) và xoá (`-d`) thì không (AUD-SEC-158).
     Chuyển hướng (`2>&1`) đến đây như token, không phân biệt được với chữ trong nháy (`'>'` là tên ref hợp lệ) → xét cả
     hai cách đọc như push (AUD-SEC-102); dạng thường ghi chỉ khi đúng hai đối số — git 2.43 báo "bad number of
-    arguments" với số khác, nên `git replace -h 2>&1` không còn bị đọc thành `refs/replace/2` (AUD-HAR-353)."""
-    return _replace_reading(args) + _replace_reading(_drop_redirects(args))
+    arguments" với số khác, nên `git replace -h 2>&1` không còn bị đọc thành `refs/replace/2` (AUD-HAR-353). Token chữ
+    số trước chuyển hướng có thể là fd (`2>&1`) hay đối số (`1234 >/dev/null`, nhánh tên `2`) — shlex không phân biệt
+    → cách đọc bỏ chuyển hướng tính thêm tới `ambiguous` đối số như thế (AUD-SEC-572); cách nào có thể ghi thì tính."""
+    dropped = _drop_redirects(args)
+    ambiguous = len(_drop_redirect_ops(args)) - len(dropped)
+    return _replace_reading(args) + _replace_reading(dropped, ambiguous)
 
 
-def _replace_reading(args: List[str]) -> List[str]:
+def _drop_redirect_ops(args: List[str]) -> List[str]:
+    """Bỏ toán tử chuyển hướng và đích của nó, GIỮ token đứng trước (`1234 >/dev/null`: chữ số có thể là đối số)."""
+    out: List[str] = []
+    skip = False
+    for a in args:
+        if skip:
+            skip = False
+        elif _is_redirect(a):
+            skip = True
+        else:
+            out.append(a)
+    return out
+
+
+def _replace_reading(args: List[str], ambiguous: int = 0) -> List[str]:
+    """Tên ghi theo một cách đọc; `ambiguous` = số token chữ số đã bỏ như fd mà có thể là đối số: dạng thường ghi khi
+    số đối số có thể là 2 (`len(pos) <= 2 <= len(pos) + ambiguous`)."""
     flags, pos, _ = _parse_opts(args, "", ())
     convert = _has_opt(flags, {"--convert-graft-file"})
     mode = convert or _has_opt(flags, {"-e", "--edit", "-g", "--graft"})
     sized = not any(REPLACE_SPLIT_RE.search(p) for p in pos)  # `$(…)`/`$v`/glob tách thành bao nhiêu từ: không biết
     if (
         _has_opt(flags, {"-d", "--delete", "-l", "--list"})
-        or not (pos or convert)
-        or (not mode and sized and len(pos) != 2)
+        or not (pos or convert or ambiguous)
+        or (not mode and sized and not len(pos) <= 2 <= len(pos) + ambiguous)
     ):
         return []
     return [REPLACE_REF_PREFIX + (pos[0] if pos else "*")]

@@ -8186,6 +8186,28 @@ class GuardReview487DebtTest(unittest.TestCase):
             "REMOTE_REF_FORGE",
         )
 
+    def test_replace_numeric_arg_before_redirect(self):  # AUD-SEC-572
+        """Token chữ số đứng trước chuyển hướng có thể là ĐỐI SỐ (`1234 >/dev/null` — SHA tiền tố toàn chữ số, nhánh
+        tên `2`), không chỉ fd (`2>&1`): shlex không phân biệt có dấu cách hay không. Cách đọc bỏ toán tử + đích nhưng
+        giữ chữ số được hợp với hai cách cũ — bất kỳ cách nào ghi thì chặn (git 2.43: `git replace -f HEAD~1 8714
+        >/dev/null` exit 0, ghi refs/replace)."""
+        self.assert_code(
+            (
+                "git replace -f origin/main 1234 >/dev/null",
+                "git replace -f origin/main 1234 >/dev/null 2>&1",
+                "git replace -f origin/main 1234 </dev/null",
+                "git replace -f origin/main 2026 >&2",
+                "git replace origin/main 2 >&1",
+                "git replace origin/main HEAD 2>&1",
+                "git replace 1234 5678 >/dev/null 2>&1",
+                "git replace 2>/dev/null 3>/dev/null",  # có thể là `git replace 2 3` (nhánh tên số)
+                "git replace --edit 2>&1",
+            ),
+            "REMOTE_REF_FORGE",
+        )
+        self.assert_allowed(("git replace -h 2>&1", "git replace 2>&1", "git replace -l 2>/dev/null"))
+        self.assertEqual(self.g._drop_redirect_ops(["a", "1", ">", "f", "2", ">&", "1"]), ["a", "1", "2"])
+
     def test_close_short_eq_strict(self):  # AUD-HAR-354
         """`=` không còn tách cụm không chỉ chữ: token gh từ chối/bỏ qua (`-4=d`, `-test.=d`) tính là có `-d` — chặt hơn."""
         for a in ("-4=d", "-test.=d", "-d=false", "-dRo/r"):
