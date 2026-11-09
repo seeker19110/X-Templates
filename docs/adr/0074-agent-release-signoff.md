@@ -53,7 +53,7 @@ Chọn **phương án 1** (D-401).
   giải trình dưới bảng. Ghi xong đọc lại; dòng không hiện hoặc chưa đủ cho `promotion` thì trả file như cũ.
 - **Lời từ chối trong lịch sử** (D-404, thay quét nhánh chính theo `VERSION` — vỡ khi NO-GO chỉ ở nhánh PR, dự án ở
   thư mục con, đổi `VERSION`, dòng thiếu ngày). **Neo tin cậy ở remote** (D-406 — quét lịch sử cục bộ lách được bằng
-  lệnh guard cho qua: `merge -s ours`, `fetch --depth=1`, `branch -rd`/`push --delete`/`filter-branch`, fetch repo
+  lệnh guard cho qua: `merge -s ours`, `fetch --depth=1`, `branch -rd`/`filter-branch`, `push --delete` nhánh đã có PR, fetch repo
   ngoài, `log.showRoot false`): mỗi lần ký, `release-sign` clone `--mirror` mới của `origin` (URL thô ở `.git/config`;
   mọi ref, kể cả `refs/pull/*/head` GitHub giữ) vào thư mục tạm, rồi một lệnh `git log --all --full-history -p` ở
   mirror và ở repo cục bộ đọc dòng **thêm** của mọi tệp `GO-NO-GO*.md` (mọi thư mục/độ sâu từ gốc repo, không phân biệt
@@ -71,7 +71,9 @@ Chọn **phương án 1** (D-401).
   (offline, xác thực), repo cục bộ hay mirror nông, `git log` lỗi → không ký; repo chưa có commit → không có lời từ
   chối. Giới hạn còn lại: guard `GO_SIGN` lọt tên tệp dựng lúc chạy (dòng GO giả tên người) — ranh giới thật là
   sandbox; dòng chỉ thêm khi giải xung đột merge không thấy (`git log -p` không in diff merge); remote mà agent viết lại
-  được lịch sử (force-push không bị chặn) thì neo không giữ.
+  được lịch sử (force-push không bị chặn) thì neo không giữ; NO-GO của người chỉ nằm trên nhánh remote CHƯA có PR
+  (không `refs/pull/*`) thì `git push --delete` nhánh đó (guard cho qua) xoá nó khỏi cả mirror lẫn ref theo dõi cục bộ
+  — NO-GO bền khi đi qua PR (AUD-SEC-551).
 - **`promotion.by`** liệt kê ô tên đã ký — người đọc phân biệt được bản do agent ký. Dòng ký ô tên `agent` chỉ là duyệt
   khi khoá có hiệu lực; khoá tắt → `pending_human` (tắt khoá thu hồi luôn chữ ký agent chưa phát hành).
 - **Guard** chỉ cho `[python3] <xt.py của dự án> release-sign` là **một lệnh đơn chữ rõ** chỉ với `--file`/`--note`,
