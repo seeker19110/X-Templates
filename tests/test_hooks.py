@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import concurrent.futures
 import contextlib
 import fnmatch
 import importlib.util
@@ -8034,10 +8035,9 @@ class GuardRemoteDeleteTest(unittest.TestCase):
                 self.assert_allowed(cmd)
 
 
-class GuardReview487DebtTest(unittest.TestCase):
-    """Nợ review #487 (đo trên git 2.43, gh 2.89): viết tắt tuỳ chọn dài MỘT chữ ở `_long_match` (AUD-SEC-569); cờ đứng
-    TRƯỚC lệnh con gh mà cobra coi là ăn token kế lúc tìm lệnh (`gh pr -c x close`, `gh -t x pr merge` — AUD-SEC-570);
-    dạng trợ giúp (in usage rồi thoát) không bị chặn oan, còn giá trị trông như trợ giúp vẫn bị xét (AUD-HAR-353)."""
+class _GuardDebtCase(unittest.TestCase):
+    """Khung chung của các lớp trả nợ review guard: repo tạm nhánh `feat/me`/`main`, merge-check giả, chính sách mặc
+    định; không có ca test riêng."""
 
     @classmethod
     def setUpClass(cls):
@@ -8071,6 +8071,12 @@ class GuardReview487DebtTest(unittest.TestCase):
             with self.subTest(cmd):
                 res = self.out(cmd, d)
                 self.assertEqual((res["raw"], res["decision"]), ("", ""), (cmd, res))
+
+
+class GuardReview487DebtTest(_GuardDebtCase):
+    """Nợ review #487 (đo trên git 2.43, gh 2.89): viết tắt tuỳ chọn dài MỘT chữ ở `_long_match` (AUD-SEC-569); cờ đứng
+    TRƯỚC lệnh con gh mà cobra coi là ăn token kế lúc tìm lệnh (`gh pr -c x close`, `gh -t x pr merge` — AUD-SEC-570);
+    dạng trợ giúp (in usage rồi thoát) không bị chặn oan, còn giá trị trông như trợ giúp vẫn bị xét (AUD-HAR-353)."""
 
     def test_long_match_one_letter(self):  # AUD-SEC-569
         """git nhận viết tắt duy nhất kể cả một chữ: `update-ref --s` = `--stdin` (ref từ stdin, guard không thấy)."""
@@ -8216,6 +8222,121 @@ class GuardReview487DebtTest(unittest.TestCase):
         for a in ("-c=-d", "-Ro/r-d", "-c.d", "-4c=d"):
             with self.subTest(a):
                 self.assertFalse(self.g._gh_close_short_deletes(a))
+
+
+class GuardReview488DebtTest(_GuardDebtCase):
+    """Nợ review #488 (đo trên gh 2.89, git 2.43): cờ ăn giá trị đứng TRƯỚC lệnh con gh (cobra `stripFlags` nhấc lên) ở
+    MỌI luật gh — `gh` chuẩn hoá đường lệnh một lần, đọc cả hai cách (AUD-SEC-571, D-408); tên nhánh/đích toàn chữ số
+    đứng trước chuyển hướng ở `push --delete` (AUD-SEC-573) và lệnh xoá (AUD-SEC-574)."""
+
+    LIFTED = (  # (dạng cờ trước lệnh con, dạng chuẩn) — gh 2.89 `<dạng> --help` in trợ giúp của đúng lệnh con
+        ("gh --method DELETE api repos/o/r", "gh api --method DELETE repos/o/r"),
+        ("gh -X DELETE api repos/o/r/git/refs/heads/x", "gh api -X DELETE repos/o/r/git/refs/heads/x"),
+        ("gh -X PUT api repos/o/r/pulls/7/merge", "gh api -X PUT repos/o/r/pulls/7/merge"),
+        ("gh repo --visibility public edit", "gh repo edit --visibility public"),
+        ("gh workflow --ref main run x.yml", "gh workflow run --ref main x.yml"),
+        ("gh release --repo o/r delete v1", "gh release delete --repo o/r v1"),
+        ("gh -X PATCH api repos/o/r -f private=false", "gh api -X PATCH repos/o/r -f private=false"),
+        ("gh -X DELETE api --paginate repos/o/r", "gh api -X DELETE --paginate repos/o/r"),
+    )
+
+    def test_gh_lifted_flags_every_rule(self):  # AUD-SEC-571
+        """Mọi luật gh (huỷ repo, xoá ref, merge REST, `repo edit --visibility`, `release delete`) đọc dạng cobra chạy."""
+        self.assert_code(
+            (
+                "gh --method DELETE api repos/o/r",
+                "gh -X DELETE api repos/o/r",
+                "gh --method=DELETE api repos/o/r",
+                "gh -X DELETE api repos/o/r/git/refs/heads/main",
+                "gh -H x:y -X DELETE api repos/o/r",
+                "gh -X DELETE api 'repos/{owner}/{repo}'",
+                "gh -X PATCH api repos/o/r -f private=false",
+                "gh repo --visibility public edit",
+                "gh repo --visibility=public edit",
+                "gh release --repo o/r delete v1",
+                "bash -c 'gh -X DELETE api repos/o/r'",
+            ),
+            "DESTROY",
+        )
+        self.assert_code(
+            ("gh -X DELETE api repos/o/r/git/refs/heads/x", "gh --method DELETE api repos/o/r/git/refs/tags/v1"),
+            "REMOTE_DELETE",
+        )
+        self.assert_code(("gh -X PUT api repos/o/r/pulls/7/merge",), "UNVERIFIED")
+        self.assert_code(("gh -f commit_title=x -X PUT api repos/o/r/pulls/7/merge",), "RULE_DENY")
+        self.assertEqual(self.out("gh workflow --ref main run x.yml")["raw"], "ask")  # như `gh workflow run x.yml`
+        self.assert_allowed(
+            (
+                "gh api repos/o/r",
+                "gh -X GET api repos/o/r",
+                "gh -X GET api repos/o/r/git/refs/heads/x",
+                "gh pr --help",
+                "gh repo -h edit --visibility public",  # cobra: `-h` ăn `edit` lúc tìm — gh in trợ giúp của `repo`
+                "gh -- api -X DELETE repos/o/r",  # `--` hết cờ: cobra không tìm lệnh con (gh báo lỗi)
+                "gh -X DELETE foo repos/o/r",  # lệnh không trong bảng: giữ cách đọc cũ
+                "gh pr list",
+            )
+        )
+
+    def test_gh_lifted_parity(self):  # AUD-SEC-571
+        """Dạng cờ trước lệnh con cho cùng quyết định (thô và mã) với dạng chuẩn — kể cả khi chạy đồng thời."""
+
+        def verdict(cmd: str) -> tuple:
+            res = self.out(cmd)
+            return res["raw"], res.get("code")
+
+        for lifted, canon in self.LIFTED:
+            with self.subTest(lifted):
+                self.assertEqual(verdict(lifted), verdict(canon))
+        cmds = [c for pair in self.LIFTED for c in pair] * 3
+        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
+            together = list(pool.map(verdict, cmds))
+        self.assertEqual(together, [verdict(c) for c in cmds])
+
+    def test_gh_canonical(self):  # AUD-SEC-571
+        """Bảng nhóm lệnh tối thiểu: nhóm dời hai tên lên đầu, lá (`api`) một tên; còn lại giữ thứ tự gốc như cobra."""
+        canon = self.g._gh_canonical
+        self.assertEqual(canon(["-X", "DELETE", "api", "repos/o/r"]), ["api", "-X", "DELETE", "repos/o/r"])
+        self.assertEqual(canon(["--method=DELETE", "api", "x"]), ["api", "--method=DELETE", "x"])
+        self.assertEqual(canon(["repo", "--visibility", "public", "edit"]), ["repo", "edit", "--visibility", "public"])
+        self.assertEqual(canon(["workflow", "--ref", "m", "run", "x"]), ["workflow", "run", "--ref", "m", "x"])
+        self.assertEqual(canon(["-c", "x", "pr", "close", "1"]), ["pr", "close", "-c", "x", "1"])
+        for args in (["api", "-X", "DELETE", "x"], ["foo", "-x", "y", "bar"], ["--", "api"], [], ["-X", "DELETE"]):
+            with self.subTest(args):
+                self.assertEqual(canon(args), args)
+
+    def test_push_numeric_branch_before_redirect(self):  # AUD-SEC-573
+        """`--delete 1234 >/dev/null`: tên nhánh nhiều chữ số trước chuyển hướng là đối số (fd quen dùng là một chữ số)."""
+        self.assert_code(
+            (
+                "git push origin --delete 1234 >/dev/null",
+                "git push origin --delete 1234 >/dev/null 2>&1",
+                "git push origin -d 2026 </dev/null",
+                "git push origin --delete feat/me 1234 >/dev/null",
+            ),
+            "REMOTE_DELETE",
+        )
+        self.assert_allowed(
+            (
+                "git push origin feat >/dev/null",
+                "git push origin feat 2>&1",
+                "git push origin --delete feat/me 2>&1",
+                "git push origin --delete feat/me >/dev/null 2>&1",
+            )
+        )
+        self.assertEqual(self.g._drop_redirect_ops(["a", "12", ">", "f", "2", ">&", "1"], 1), ["a", "12"])
+
+    def test_delete_numeric_operand_before_redirect(self):  # AUD-SEC-574
+        """`cd ~ && shred 2026 >/dev/null`: đối số toàn chữ số trước chuyển hướng có thể là tệp ngoài dự án."""
+        self.assert_code(
+            (
+                "cd ~ && shred 2026 >/dev/null",
+                "cd ~ && shred -u 1234 >/dev/null 2>&1",
+                f"cd ~ && rsync -a --delete {self.feat}/src/ 2026 >/dev/null",  # bỏ `2026`: đích là nguồn trong dự án
+            ),
+            "WIPE_OUTSIDE",
+        )
+        self.assert_allowed(("shred 2026 >/dev/null", "shred -u tmp.bin 2>/dev/null", "rm -rf build 2>/dev/null"))
 
 
 class GuardAppendParallelTest(unittest.TestCase):

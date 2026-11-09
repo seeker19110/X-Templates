@@ -51,6 +51,13 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
 - Guard (lý do chạm hàng rào: nợ review #487 AUD-SEC-570): lệnh con `gh pr close`/`gh pr merge` tìm như cobra — cờ đứng
   trước lệnh con ăn token kế (`gh pr -c x close 12 -d`, `gh -c x pr close 12 -d`, `gh pr -t x merge 12`, `gh -b x pr
   merge 12 --auto`) nên bị xét như cờ đứng sau (`REMOTE_DELETE`, subject, `--auto`, `--admin`).
+- Guard (lý do chạm hàng rào: nợ review #488 AUD-SEC-571, D-408): mọi luật `gh` đọc thêm dạng cobra chạy khi cờ ăn
+  giá trị đứng trước lệnh con (`gh --method DELETE api repos/o/r`, `gh -X DELETE api …/git/refs/heads/x`, `gh -X PUT api
+  …/pulls/7/merge`, `gh repo --visibility public edit`, `gh release --repo o/r delete v1`), cách đọc nào chặt hơn thắng.
+- Guard (lý do chạm hàng rào: nợ review #488 AUD-SEC-573): tên nhánh nhiều chữ số đứng trước chuyển hướng ở `git push
+  --delete` (`--delete 1234 >/dev/null`) bị chặn `REMOTE_DELETE`; một chữ số vẫn đọc là fd (`--delete <nhánh> 2>&1`).
+- Guard (lý do chạm hàng rào: nợ review #488 AUD-SEC-574): đối số toàn chữ số trước chuyển hướng của lệnh xoá
+  (`cd ~ && shred 2026 >/dev/null`, `rsync --delete … 2026 >/dev/null`) bị xét như đích (`WIPE_OUTSIDE`).
 - Guard (nợ review #487 AUD-HAR-354): `=` không còn tách cụm cờ không chỉ chữ của `gh pr close` — token gh từ chối hay
   bỏ qua (`-4=d`, `-test.=d`) tính là có `-d` (chặt hơn).
 
