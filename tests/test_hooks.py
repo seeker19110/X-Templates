@@ -4753,6 +4753,7 @@ class GuardWave1017Test(unittest.TestCase):
                 "gh api --method DELETE /repos/o/r/",
                 "gh api -X DELETE repos/{owner}/{repo}",
                 "gh api -X DELETE repos/o/r/git/refs/heads/main",
+                "gh api -X DELETE repos/o/r/git/refs/heads/someone/else",  # D-407: nhánh không phải của phiên
                 "gh api -X PATCH repos/o/r -F archived=true",
                 "gh api -X PATCH repos/o/r -F private=false",
                 "gh api -X PATCH repos/o/r -f visibility=public",
@@ -4770,7 +4771,6 @@ class GuardWave1017Test(unittest.TestCase):
             "",
             (
                 "gh api -X DELETE repos/o/r/issues/comments/1",
-                "gh api -X DELETE repos/o/r/git/refs/heads/feat",
                 "gh api -X PATCH repos/o/r -f description=x",
                 "gh api -X PATCH repos/o/r/issues/1 -f private=false",
                 "gh api repos/o/r",
@@ -7664,6 +7664,203 @@ class GuardRemoteRefTest(unittest.TestCase):
             {"XT_GUARD_POLICY": ""},
         )
         self.assertEqual((code, decision(out)), (0, None))
+
+
+class GuardRemoteDeleteTest(unittest.TestCase):
+    """AUD-SEC-551 (D-407): xoá nhánh/tag remote KHÁC nhánh hiện tại của phiên và viết lại mọi ref (`filter-branch
+    --all`, `filter-repo`) thuộc nhóm máy chặn (không đảo ngược, ADR-0018) — xoá được nhánh người khác và lời từ chối
+    NO-GO chỉ nằm trên nhánh chưa có PR khỏi neo `release-sign` (D-406). Xoá đúng nhánh hiện tại (`symbolic-ref` ở thư
+    mục lệnh, như luật push nhánh chính) vẫn cho; `fetch --prune` chỉ xoá ref theo dõi cục bộ."""
+
+    BRANCH = "feat/me"
+
+    @classmethod
+    def setUpClass(cls):
+        cls.g = _guard()
+
+    def setUp(self):
+        clean = {k: v for k, v in os.environ.items() if not re.fullmatch(r"GIT_CONFIG(_\w+)?", k)}
+        self.enterContext(mock.patch.dict(os.environ, {**clean, "XT_GUARD_POLICY": ""}, clear=True))
+        self.root = self.repo(self.BRANCH)
+
+    def repo(self, branch: str) -> Path:
+        path = Path(self.enterContext(tempfile.TemporaryDirectory())).resolve()
+        for args in (("init", "-q", "-b", branch), ("remote", "add", "origin", "https://example.invalid/o.git")):
+            subprocess.run(["git", "-C", str(path), *args], check=True, capture_output=True)
+        return path
+
+    def out(self, cmd: str, cwd: Path | None = None) -> dict:
+        return self.g.apply_policy(self.g.bash_decision(cmd, str(self.root), str(cwd or self.root)))
+
+    def assert_deleted(self, cmd: str, cwd: Path | None = None) -> None:
+        res = self.out(cmd, cwd)
+        self.assertEqual((res["decision"], res.get("code")), ("deny", "REMOTE_DELETE"), (cmd, res))
+        self.assertIn("không phải của phiên", str(res["reason"]), cmd)
+        self.assertIn("D-407", str(res["reason"]), cmd)
+
+    def assert_allowed(self, cmd: str, cwd: Path | None = None) -> None:
+        res = self.out(cmd, cwd)
+        self.assertEqual(res["decision"], "", (cmd, res))
+
+    def test_push_delete_other_ref_denied(self):
+        for cmd in (
+            "git push origin --delete other",
+            "git push origin -d other",
+            "git push -d origin other",
+            "git push origin --del other",  # viết tắt tuỳ chọn dài (git nhận)
+            "git push origin -ud other",
+            "git push origin --delete refs/heads/other",
+            "git push origin --delete refs/tags/v1.0.0",
+            "git push origin --delete v1.0.0",
+            "git push origin --delete feat/me other",  # một trong các đích không phải của phiên
+            "git push origin :other",
+            "git push origin :refs/heads/other",
+            "git push origin :refs/tags/v1.0.0",
+            "git push origin feat/me :other",
+            "git push origin -- :other",
+            "git push origin --delete other 2>&1",
+            "git push origin --delete '>' other",  # `>` trong nháy là tên ref hợp lệ — hai cách đọc, lấy chặt
+            "git push origin --delete other >log.txt",  # đích chuyển hướng là tên ref được: chặt
+            "git push --prune origin",
+            "git push origin --prune refs/heads/feat/me",
+            "git push --pru origin",
+            "git push --prune origin 'refs/heads/*:refs/heads/*'",
+            "bash -c 'git push origin --delete other'",
+            "env X=1 git push origin --delete other",
+            "git -c alias.x=push x origin --delete other",
+            "git -c 'alias.x=push origin --delete' x other",
+            "B=other; git push origin --delete $B",
+            "git push origin --delete $(echo other)",
+            "git push origin --delete 'other$'",  # `$` chữ trong tên ref: không phải biến
+            'git push origin --delete "$(echo other)"',
+            "gh api -X DELETE repos/o/r/git/refs/heads/other",
+            "gh api --method DELETE repos/o/r/git/refs/tags/v1.0.0",
+            "gh api --method=DELETE /repos/o/r/git/refs/heads/other",
+            "gh api -XDELETE https://api.github.com/repos/o/r/git/refs/heads/other",
+            "gh api -X DELETE repos/o/r/git/refs/heads%2Fother",
+            "gh api -X DELETE repos/{owner}/{repo}/git/refs/heads/other",
+            "bash -c 'gh api -X DELETE repos/o/r/git/refs/heads/other'",
+            "gh api graphql -f query='mutation { deleteRef(input: {refId: \"x\"}) { clientMutationId } }'",
+        ):
+            with self.subTest(cmd):
+                self.assert_deleted(cmd)
+
+    def test_filter_rewrite_all_refs_denied(self):
+        for cmd in (
+            "git filter-branch -- --all",
+            "git filter-branch --msg-filter cat -- --all",
+            "git filter-branch --tag-name-filter cat -- --branches --tags",
+            "git filter-branch --msg-filter cat -- --remotes=origin",
+            "git filter-branch --msg-filter cat -- --glob=refs/heads/*",
+            "git filter-branch --msg-filter cat main feat/me",
+            "git filter-branch -f --msg-filter cat HEAD --all",
+            "git filter-branch --msg-filter cat -- main...feat/me",
+            "git filter-branch --msg-filter cat -- --stdin",
+            "git -C . filter-branch -- --all",
+            "bash -c 'git filter-branch -- --all'",
+            "git -c alias.fb=filter-branch fb -- --all",
+            "git filter-repo --path x",
+            "git filter-repo --invert-paths --path secrets.txt",
+            "git filter-repo --analyze",
+            "git-filter-repo --path x",
+            "/usr/local/bin/git-filter-repo --path x",
+            "git -c alias.filter-repo=status filter-repo --path x",  # git chạy `git-filter-repo` trước alias
+        ):
+            with self.subTest(cmd):
+                self.assert_deleted(cmd)
+        for cmd in ("echo --all | xargs git filter-branch --msg-filter cat --", "echo x | xargs git push origin -d"):
+            res = self.out(cmd)  # đối số từ stdin thêm được `--all`/đích: không biết → chặn
+            self.assertEqual((res["decision"], res.get("code")), ("deny", "UNRESOLVED_TARGET"), (cmd, res))
+
+    def test_own_branch_and_local_prune_allowed(self):
+        for cmd in (
+            "git push origin --delete feat/me",
+            "git push origin -d feat/me",
+            "git push origin --delete refs/heads/feat/me",
+            "git push origin :feat/me",
+            "git push origin :refs/heads/feat/me",
+            "git push origin --delete HEAD",
+            "git push origin --delete @",
+            "git push origin --delete $(git branch --show-current)",
+            'git push origin --delete "$(git branch --show-current)"',
+            "git push origin --delete feat/me 2>&1",
+            "git push origin --delete feat/me >/dev/null 2>&1",
+            "git push origin --delete feat/me 2>/dev/null | tail -3",
+            "git push origin HEAD",
+            "git push -u origin feat/me",
+            "git push origin other",  # đẩy (không xoá) nhánh khác: như cũ
+            "git push origin --no-prune",
+            "git fetch --prune",
+            "git fetch origin --prune",
+            "git fetch --all --prune",
+            "git fetch -p",
+            "git pull --prune",
+            "git remote prune origin",
+            "git branch -d other",
+            "git tag -d v1.0.0",
+            "gh api -X DELETE repos/o/r/git/refs/heads/feat/me",
+            "gh api repos/o/r/git/refs/heads/other",
+            "gh api -X DELETE repos/o/r/issues/comments/1",
+            "gh api graphql -f query='query { viewer { login } }'",
+            "git filter-branch --msg-filter cat HEAD",
+            "git filter-branch --msg-filter cat -- HEAD~3..HEAD",
+            "git filter-branch --msg-filter cat -- ^main feat/me",
+            "git filter-branch --prune-empty --subdirectory-filter sub HEAD",
+            "git filter-branch -f --msg-filter cat",  # không ref: git báo lỗi, không viết lại gì
+            "git log --all --branches --tags",
+            "git rev-list --all",
+        ):
+            with self.subTest(cmd):
+                self.assert_allowed(cmd)
+
+    def test_current_branch_read_at_command_dir(self):
+        """Nhánh hiện tại đọc ở thư mục của lệnh (`cd`, `git -C`) như PUSH_MAIN; không biết (không phải repo, detached)
+        → mọi đích xoá là không phải của phiên (chặt)."""
+        other = self.repo("other")
+        plain = Path(self.enterContext(tempfile.TemporaryDirectory())).resolve()
+        self.assert_allowed("git push origin --delete other", other)
+        self.assert_allowed(f"cd {other} && git push origin --delete other")
+        self.assert_allowed(f"git -C {other} push origin --delete other")
+        self.assert_deleted(f"git -C {other} push origin --delete feat/me")
+        self.assert_deleted(f"cd {plain} && git push origin --delete feat/me")
+        self.assert_deleted("git push origin --delete feat/me", plain)
+        self.assert_deleted("git push origin :HEAD", plain)
+        main = self.repo("main")
+        res = self.out("git push origin --delete main", main)  # nhánh chính: luật cũ (lý do riêng) vẫn chặn
+        self.assertEqual(res["decision"], "deny", res)
+        self.assertIn("xoá nhánh chính trên remote", str(res["reason"]))
+        self.assertEqual(self.out("git push --mirror origin")["decision"], "deny")
+        self.assertEqual(self.out("git push origin +:other")["decision"], "deny")
+
+    def test_strict_build_phase_and_concurrency(self):
+        """Không nới ở strict hay pha build; quyết định song song (luồng) bằng quyết định tuần tự."""
+        with mock.patch.dict(os.environ, {"XT_GUARD_POLICY": "strict"}):
+            self.assertEqual(self.g.bash_decision("git push origin --delete other", str(self.root))["decision"], "deny")
+        with mock.patch.object(self.g, "build_phase", return_value=True):
+            self.assert_deleted("git push origin --delete other")
+            self.assert_deleted("git filter-branch -- --all")
+        import concurrent.futures
+
+        other = self.repo("other")
+        cases = [
+            ("git push origin --delete other", self.root),
+            ("git push origin --delete other", other),
+            ("git push origin :feat/me", self.root),
+            ("git push origin :feat/me", other),
+        ] * 6
+        want = [self.out(c, d)["decision"] for c, d in cases]
+        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
+            got = list(pool.map(lambda cd: self.out(*cd)["decision"], cases))
+        self.assertEqual(got, want)
+        self.assertEqual(want[:4], ["deny", "", "", "deny"])
+
+    def test_reason_code_marker(self):
+        self.assertEqual(self.g.reason_code("deny", f"x {self.g.REF_DESTROY_MARK} y"), "REMOTE_DELETE")
+        self.assertEqual(self.g._session_ref("refs/heads/feat/me", "feat/me"), True)
+        self.assertEqual(self.g._session_ref("heads/feat/me", "feat/me"), True)
+        self.assertEqual(self.g._session_ref("refs/tags/feat/me", "feat/me"), False)
+        self.assertEqual(self.g._session_ref("HEAD", ""), False)
+        self.assertEqual(self.g._session_ref("feat/me", ""), False)
 
 
 class GuardAppendParallelTest(unittest.TestCase):

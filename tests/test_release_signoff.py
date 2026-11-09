@@ -2,11 +2,16 @@
 có hiệu lực khi CẢ xt.yaml ở cây làm việc LẪN bản đã commit ở nhánh chính khai; `release-sign` chỉ ký khi
 `release-check` không FAIL, việc người còn lại chỉ là chữ ký, dòng `subject:` khớp, và ô tên luôn là `agent`."""
 
+import base64
 import datetime as dt
+import functools
+import http.server
 import json
 import os
 import subprocess
 import sys
+import tempfile
+import threading
 import unittest
 import unittest.mock
 from pathlib import Path
@@ -339,6 +344,20 @@ class RealCheckRepo(SignoffRepo):
         self.assert_refused("người đã từ chối (lịch sử git)", *extra)
         self.assert_refused(where, *extra)
 
+    def push_key_from_other_clone(self, text):
+        """Chủ repo đổi xt.yaml của dự án trên remote từ bản clone khác (`None` = xoá); repo cục bộ KHÔNG fetch
+        (`origin/main` cục bộ cũ — AUD-SEC-552)."""
+        other = self.tmp / "owner"
+        subprocess.run(["git", "clone", "-q", str(self.origin), str(other)], check=True, capture_output=True)
+        target = other / self.SUB / "xt.yaml"
+        if text is None:
+            git(other, "rm", "-q", str(target))
+        else:
+            target.write_text(text, encoding="utf-8")
+            git(other, "add", "-A")
+        git(other, "commit", "-q", "-m", "owner: release_signoff")
+        git(other, "push", "-q", "origin", "main")
+
 
 class ReleaseSignRealCheckTest(RealCheckRepo):
     """`release-sign` với `release-check` thật: các ca review #480 tái hiện (lần 1 và D-404)."""
@@ -517,6 +536,19 @@ class ReleaseSignRealCheckTest(RealCheckRepo):
         self.prepare(self.MUST_OK + "- [x] `BASE-X-002` **MUST** b\n")
         self.assert_refused("FAIL unchecked_must")
 
+    def test_remote_key_off_refused_with_stale_tracking_ref(self):
+        """AUD-SEC-552 (D-407): chủ repo tắt khoá trên remote; `origin/main` cục bộ chưa fetch còn `agent` → khoá cục bộ
+        vẫn coi là bật nhưng `release-sign` đọc khoá ở HEAD của bản mirror vừa clone → từ chối."""
+        self.push_key_from_other_clone("lint: ''\nrelease_signoff: human\n")
+        self.assertTrue(xt.release_agent_signoff(self.proj))  # góc nhìn cục bộ cũ: bật
+        self.assert_refused("chưa bật trên remote")
+        self.assert_refused("`human`")
+
+    def test_remote_key_missing_refused(self):
+        """Mirror không có xt.yaml của dự án ở nhánh mặc định → từ chối (fail-closed)."""
+        self.push_key_from_other_clone(None)
+        self.assert_refused("chưa bật trên remote")
+
 
 class ReleaseSignSubdirTest(RealCheckRepo):
     """D-404 🔴: dự án ở thư mục con của repo (monorepo `apps/web`) — quét không phụ thuộc thư mục dự án."""
@@ -532,6 +564,14 @@ class ReleaseSignSubdirTest(RealCheckRepo):
         self.rm(self.REFUSED)
         self.commit(push=False)
         self.assert_history_refused(f"apps/web/{self.REFUSED}")
+
+    def test_remote_key_read_at_project_path(self):
+        """AUD-SEC-552: khoá trên mirror đọc ở `apps/web/xt.yaml` (đường tương đối gốc repo) — xt.yaml gốc repo khai
+        `agent` không thay được khoá của dự án."""
+        self.write("../../xt.yaml", "release_signoff: agent\n")
+        self.commit()
+        self.push_key_from_other_clone("lint: ''\nrelease_signoff: human\n")
+        self.assert_refused("chưa bật trên remote")
 
 
 def ago(days=0, seconds=0):
@@ -552,8 +592,8 @@ def bare(path):
 
 
 class GoHistoryTest(TmpRepoCase):
-    """`_history_go_refusals` (D-404, D-406): dòng thêm của mọi `GO-NO-GO*.md` trong `git log --all --full-history` của
-    bản mirror mới của `origin` và của repo cục bộ."""
+    """`_go_remote_scan(...).refusals` (D-404, D-406): dòng thêm của mọi `GO-NO-GO*.md` trong `git log --all
+    --full-history` của bản mirror mới của `origin` và của repo cục bộ."""
 
     def setUp(self):
         super().setUp()
@@ -564,11 +604,11 @@ class GoHistoryTest(TmpRepoCase):
     def refusals(self, base=None, publish=True):
         if publish:
             self.git("push", "-q", "--mirror", "origin")
-        return xt._history_go_refusals(base or self.repo)
+        return xt._go_remote_scan(base or self.repo).refusals
 
     def refused(self, msg, base=None):
         with self.assertRaises(xt.ReleaseSignError) as ctx:
-            xt._history_go_refusals(base or self.repo)
+            xt._go_remote_scan(base or self.repo)
         self.assertIn("không đọc được lịch sử git", str(ctx.exception))
         self.assertIn(msg, str(ctx.exception))
 
@@ -622,7 +662,7 @@ class GoHistoryTest(TmpRepoCase):
         )
         for env in envs:
             with self.subTest(env=sorted(env)), unittest.mock.patch.dict(os.environ, env):
-                self.assertIn("GO-NO-GO-v1.0.0.md:7", "\n".join(xt._history_go_refusals(self.repo)))
+                self.assertIn("GO-NO-GO-v1.0.0.md:7", "\n".join(xt._go_remote_scan(self.repo).refusals))
 
     def test_go_from_external_repo_does_not_lift(self):
         """D-406 🔴: dòng GO người của repo ngoài fetch vào cục bộ không gỡ lời từ chối — GO chỉ tính từ mirror origin."""
@@ -800,6 +840,125 @@ class GoHistoryTest(TmpRepoCase):
         found = self.refusals()
         self.assertEqual(len(found), 1)
         self.assertIn("GO-NO-GO.md:11 `" + no + "`", found[0])
+
+
+class _BasicAuthHandler(http.server.SimpleHTTPRequestHandler):
+    """Máy chủ git HTTP "dumb" (tệp tĩnh của repo trần sau `update-server-info`) đòi Basic auth `u:p` — như remote
+    HTTPS riêng tư: không có credential helper thì git (`GIT_TERMINAL_PROMPT=0`) không clone được."""
+
+    TOKEN = "Basic " + base64.b64encode(b"u:p").decode()
+
+    def do_GET(self):
+        if self.headers.get("Authorization") != self.TOKEN:
+            self.send_response(401)
+            self.send_header("WWW-Authenticate", 'Basic realm="x"')
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
+        super().do_GET()
+
+    def log_message(self, *args):
+        pass
+
+
+class GoMirrorCredentialTest(TmpRepoCase):
+    """AUD-SEC-553 (D-407): clone mirror của `release-sign` giữ RIÊNG `credential.helper` global của người dùng (chung và
+    `credential.<url>.helper`) — remote HTTP cần xác thực clone được; cấu hình global khác (`url.*.insteadOf`) vẫn cô lập.
+    Chạy thật: máy chủ HTTP cục bộ + helper giả là script ghi lại lệnh được gọi."""
+
+    def setUp(self):
+        super().setUp()
+        self.init_repo()
+        self.commit_files({"x.md": "x"}, ago(seconds=10))
+        srv = self.tmp / "srv"
+        srv.mkdir()
+        bare(srv / "origin.git")
+        self.git("push", "-q", str(srv / "origin.git"), "main")
+        subprocess.run(["git", "-C", str(srv / "origin.git"), "update-server-info"], check=True)
+        server = http.server.ThreadingHTTPServer(
+            ("127.0.0.1", 0), functools.partial(_BasicAuthHandler, directory=str(srv))
+        )
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        self.base_url = f"http://127.0.0.1:{server.server_address[1]}"
+        self.url = f"{self.base_url}/origin.git"
+        self.git("remote", "add", "origin", self.url)
+        self.log = self.tmp / "helper.log"
+        self.helper = self.tmp / "helper.sh"
+        self.helper.write_text(
+            f'#!/bin/sh\necho "$1" >> "{self.log}"\n[ "$1" = get ] && printf "username=u\\npassword=p\\n"\nexit 0\n',
+            encoding="utf-8",
+        )
+        self.helper.chmod(0o755)
+        self.cfg = self.tmp / "gitconfig"
+        no_proxy = {"NO_PROXY": "127.0.0.1,localhost", "no_proxy": "127.0.0.1,localhost"}
+        self.enterContext(unittest.mock.patch.dict(os.environ, {**no_proxy, "GIT_CONFIG_GLOBAL": str(self.cfg)}))
+
+    def clone(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            mirror = xt._go_origin_mirror(self.repo, Path(tmp))
+            return subprocess.run(
+                ["git", "-C", str(mirror), "rev-parse", "HEAD"], capture_output=True, text=True, check=True
+            ).stdout.strip()
+
+    def test_global_helper_used_by_clone(self):
+        """Đỏ trước sửa: `GIT_CONFIG_GLOBAL=/dev/null` làm mất helper → `could not read Username` → clone lỗi."""
+        fake = self.tmp / "khong-co.git"
+        self.cfg.write_text(
+            f'[credential]\n\thelper = {self.helper}\n[url "{fake}"]\n\tinsteadOf = {self.url}\n', encoding="utf-8"
+        )
+        self.assertEqual(self.clone(), self.git("rev-parse", "HEAD").strip())
+        self.assertIn("get", self.log.read_text(encoding="utf-8").split())
+
+    def test_url_scoped_helper_used_by_clone(self):
+        self.cfg.write_text(f'[credential "{self.base_url}"]\n\thelper = {self.helper}\n', encoding="utf-8")
+        self.assertEqual(self.clone(), self.git("rev-parse", "HEAD").strip())
+        self.assertIn("get", self.log.read_text(encoding="utf-8").split())
+
+    def test_no_helper_still_fails_closed(self):
+        self.cfg.write_text("[user]\n\tname = x\n", encoding="utf-8")
+        with self.assertRaises(ValueError) as ctx:
+            self.clone()
+        self.assertIn("clone --mirror origin lỗi", str(ctx.exception))
+        self.assertFalse(self.log.exists())
+
+    def test_credential_args_order_and_isolation(self):
+        """Thứ tự giữ như cấu hình (giá trị rỗng = xoá danh sách); khoá khác `credential.*helper` không truyền."""
+        self.cfg.write_text(
+            "[credential]\n\thelper = a\n\thelper =\n\tusername = x\n\thelper = b c\n"
+            f'[credential "{self.base_url}"]\n\thelper = d\n[credential]\n\thelperx = y\n[log]\n\tshowRoot = false\n',
+            encoding="utf-8",
+        )
+        self.assertEqual(
+            xt._go_credential_args(self.repo),
+            [
+                *("-c", "credential.helper="),
+                *("-c", "credential.helper=a", "-c", "credential.helper=", "-c", "credential.helper=b c"),
+                *("-c", f"credential.{self.base_url}.helper=d"),
+            ],
+        )
+        self.cfg.write_text("", encoding="utf-8")
+        self.assertEqual(xt._go_credential_args(self.repo), ["-c", "credential.helper="])
+        with unittest.mock.patch.dict(os.environ, {"GIT_CONFIG_GLOBAL": str(self.tmp / "khong-co")}):
+            self.assertEqual(xt._go_credential_args(self.repo), ["-c", "credential.helper="])
+
+    def test_helper_not_passed_to_log(self):
+        """Helper chỉ đi vào lệnh clone: `git log` ở mirror/cục bộ chạy với môi trường cô lập, không `-c` helper."""
+        self.cfg.write_text(f"[credential]\n\thelper = {self.helper}\n", encoding="utf-8")
+        calls = []
+        real = xt._git
+
+        def spy(cwd, *args, **kw):
+            calls.append(args)
+            return real(cwd, *args, **kw)
+
+        with unittest.mock.patch.object(xt, "_git", side_effect=spy):
+            self.assertEqual(xt._go_remote_scan(self.repo).refusals, [])
+        with_helper = [a for a in calls if f"credential.helper={self.helper}" in a]
+        self.assertEqual(len(with_helper), 1, with_helper)
+        self.assertIn("clone", with_helper[0])
+        self.assertTrue(any("log" in a for a in calls))
 
 
 class ReleaseSignGuardTest(TmpRepoCase):

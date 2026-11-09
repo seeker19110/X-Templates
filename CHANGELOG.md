@@ -30,7 +30,19 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
 - Nghiên cứu [nâng tự động hoá tới mức máy làm được](research/2026-11-08-full-automation.md): kiểm kê 247 điểm chờ
   người, định nghĩa "máy không thể", phân loại, lát triển khai.
 
+### Changed
+
+- Guard (lý do chạm hàng rào: nợ review #480 AUD-SEC-551, D-407): mã mới `REMOTE_DELETE` (máy chặn) cho xoá nhánh/tag
+  remote khác nhánh hiện tại của phiên (`git push --delete|-d`, `:<ref>`, `--prune`, `gh api -X DELETE …/git/refs/…`,
+  graphql `deleteRef`) và `git filter-branch --all`/nhiều ref, `git filter-repo`; xoá nhánh của chính phiên và `git
+  fetch --prune` vẫn chạy.
+
 ### Fixed
+
+- `release-sign` đọc khoá `release_signoff` ở nhánh mặc định của bản mirror `origin` vừa clone (cùng lần quét lời từ
+  chối) — khoá đã tắt trên remote mà `origin/main` cục bộ chưa fetch không còn cho agent ký (AUD-SEC-552, D-407).
+- Clone mirror của `release-sign` giữ riêng credential helper global của người dùng (`credential.helper`,
+  `credential.<url>.helper`) — remote HTTPS riêng tư không còn luôn bị từ chối; cấu hình khác vẫn cô lập (AUD-SEC-553).
 
 - `release-check` chặn phát hành và để trống vân tay Git trong JSON khi lỗi đọc Git, HEAD đổi trong lúc kiểm, hoặc index
   có `assume-unchanged`/`skip-worktree` che tệp tracked. Dùng checkout đầy đủ, sạch cho cổng phát hành.

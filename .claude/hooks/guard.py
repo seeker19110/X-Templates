@@ -5201,6 +5201,60 @@ def _push_ref_rule(ref: str, deleting: bool, cwd: Optional[str] = None) -> Tuple
     return "ask", "push thẳng nhánh chính — khung yêu cầu đi qua PR"
 
 
+# AUD-SEC-551 (D-407): xoá nhánh/tag remote KHÁC nhánh hiện tại của phiên (`push --delete|-d`, refspec `:<ref>`,
+# `push --prune`, `gh api -X DELETE …/git/refs/…`, graphql `deleteRef`) và viết lại mọi ref (`filter-branch --all`/nhiều
+# ref, `filter-repo`) là hành động khó đảo ngược (nhóm máy chặn, ADR-0018): xoá nhánh của người khác, và xoá được lời từ
+# chối NO-GO chỉ nằm trên nhánh chưa có PR khỏi neo `release-sign` (D-406). Nhánh hiện tại = `_current_branch` ở thư
+# mục của lệnh (như PUSH_MAIN); không biết (không phải repo, detached) → mọi đích là không phải của phiên.
+REF_DESTROY_MARK = "xoá/viết lại ref không phải của phiên"  # dấu của mã REMOTE_DELETE (REASON_CODES)
+REMOTE_DELETE_WHY = (
+    REF_DESTROY_MARK + ": xoá `{}` trên remote (nhánh hiện tại: `{}`) — nhánh/tag của người khác, xoá được lời từ chối"
+    " NO-GO khỏi neo `release-sign` (D-406); chỉ xoá được nhánh hiện tại của phiên (D-407, ADR-0018)"
+)
+REF_REWRITE_WHY = (
+    REF_DESTROY_MARK + ": `{}` viết lại mọi ref/nhiều ref — khó đảo ngược, xoá được lời từ chối NO-GO khỏi lịch sử"
+    " (D-407, ADR-0018); viết lại một nhánh thì nêu đúng một ref (`git filter-branch … HEAD`)"
+)
+REDIRECT_TARGET_SAFE = ("/",)  # đích chuyển hướng là đường tuyệt đối (`>/dev/null`): không phải tên ref git nhận
+
+
+def _session_ref(dst: str, cur: str) -> bool:
+    """Đích `dst` (refspec đã bỏ `:`) là nhánh hiện tại `cur` của phiên: `HEAD`/`@`, `<cur>`, `heads/<cur>`,
+    `refs/heads/<cur>`; tag và nhánh không biết (`cur` rỗng) → không."""
+    name = dst.removeprefix("refs/").removeprefix("heads/")
+    return bool(cur) and (name in ("HEAD", "@") or name == cur)
+
+
+def _push_expands(r: str) -> bool:
+    """Token là biến/thay lệnh mà luật biến/thay lệnh của push xét lại sau khi thay giá trị: `$B`, `${B}`, `$(…)` (cả
+    token `$` shlex tách khỏi `(`), backtick. `$` chữ (`feat$`) là tên ref thường."""
+    return bool(VAR_USE_RE.search(r)) or "$(" in r or "`" in r or r == "$"
+
+
+def _push_deleted(refs: List[str], deleting: bool) -> List[str]:
+    """Đích bị xoá của các refspec `refs` (đã bỏ remote): mọi đích khi `--delete`/`-d`, còn lại refspec `:<ref>`. Token
+    chuyển hướng của cách đọc giữ nguyên (`2 >& 1`, `> /dev/null`) không tính: toán tử, số fd trước nó, đích `&`-dup hay
+    đường tuyệt đối (git không nhận làm ref); đích tên thường (`>log`) vẫn tính — chặt (AUD-SEC-102)."""
+    out: List[str] = []
+    for i, r in enumerate(refs):
+        prev, nxt = refs[i - 1] if i else "", refs[i + 1] if i + 1 < len(refs) else ""
+        if _is_redirect(r) or r.isdigit() and _is_redirect(nxt) or ">&" in prev and (r.isdigit() or r == "-"):
+            continue
+        if _is_redirect(prev) and r.startswith(REDIRECT_TARGET_SAFE) or _push_expands(r):
+            continue  # biến/thay lệnh: `_push_var_rule`/`_push_subst_rule` xét bản đã thay giá trị (không giải → hỏi)
+        if deleting or r.startswith(":") and r != ":":
+            out.append(r.split(":", 1)[-1])
+    return out
+
+
+def _push_delete_rule(refs: List[str], deleting: bool, cwd: Optional[str]) -> Tuple[str, str]:
+    """D-407: push xoá đích không phải nhánh hiện tại của phiên (ở `cwd`) → deny REMOTE_DELETE."""
+    gone = _push_deleted(refs, deleting)
+    cur = _current_branch(cwd) if gone else ""
+    other = next((d for d in gone if not _session_ref(d, cur)), None)
+    return ("deny", REMOTE_DELETE_WHY.format(other, cur or "không rõ")) if other is not None else ("", "")
+
+
 PUSH_VALUE_OPTS = ("-o", "--push-option", "--repo", "--receive-pack", "--exec")
 VERDICT_RANK = {"deny": 2, "ask": 1}
 
@@ -5227,6 +5281,9 @@ def _git_push(args: List[str], cwd: Optional[str] = None) -> Tuple[str, str]:
     refs = _push_refs(args)
     if force or any(r.startswith("+") for r in refs):
         return "deny", "push --force/--mirror/+refspec ghi đè lịch sử"
+    if "--prune" in args:  # xoá mọi ref remote không có bản cục bộ (D-407)
+        gone = "--prune: mọi ref remote không có bản cục bộ"
+        return "deny", REMOTE_DELETE_WHY.format(gone, _current_branch(cwd) or "không rõ")
     spread = any("*" in r or r == ":" for r in refs[1:])  # refspec glob, `:` = matching (AUD-SEC-047)
     spread = spread or (PUSH_CONFIG_FLAG in args and not refs[1:])  # cấu hình push chỉ có hiệu lực khi không có refspec
     if spread or {"--all", "--branches", "--tags"} & set(args):
@@ -5236,7 +5293,7 @@ def _git_push(args: List[str], cwd: Optional[str] = None) -> Tuple[str, str]:
         verdict = _push_ref_rule(r, deleting, cwd)
         if verdict[0]:
             return verdict
-    return "", ""
+    return _push_delete_rule(refs[1:], deleting, cwd)
 
 
 def _git_reset(args: List[str]) -> Tuple[str, str]:
@@ -5300,6 +5357,55 @@ def _git_branch(args: List[str]) -> Tuple[str, str]:
     if deleting_force and any(x in MAIN_BRANCHES for x in _positionals(args)):
         return "deny", "xoá nhánh chính"
     return "", ""
+
+
+GIT_DASHED_REWRITERS = frozenset({"git-filter-repo", "git-filter-branch"})  # lệnh git chạy thẳng dạng `git-<tên>`
+FILTER_BRANCH_FLAGS = {
+    "-f",
+    "--force",
+    "--remap-to-ancestor",
+    "--prune-empty",
+}  # cờ không ăn giá trị (git-filter-branch.sh)
+REV_ALL_REFS = (
+    "--all",
+    "--branches",
+    "--tags",
+    "--remotes",
+    "--glob",
+    "--stdin",
+)  # rev-list chọn nhiều ref/ref không thấy
+
+
+def _filter_branch_revs(args: List[str]) -> List[str]:
+    """Đối số rev-list của `git filter-branch` như script của git đọc: sau `--`, hay từ đối số vị trí đầu; mọi tuỳ chọn
+    `-…` khác FILTER_BRANCH_FLAGS ăn token kế."""
+    i = 0
+    while i < len(args):
+        a = args[i]
+        if a == "--":
+            return args[i + 1 :]
+        if not a.startswith("-"):
+            return args[i:]
+        i += 1 if a in FILTER_BRANCH_FLAGS else 2
+    return []
+
+
+def _rewritten_refs(revs: List[str]) -> int:
+    """Số ref dương `filter-branch` viết lại: `a..b` = một (`a` bị loại), `a...b` = hai, `^x` và tuỳ chọn không tính."""
+    return sum(2 if "..." in r else 1 for r in revs if not r.startswith(("-", "^")))
+
+
+def _git_filter_branch(args: List[str]) -> Tuple[str, str]:
+    """filter-branch: deny khi viết lại mọi ref (`--all`/`--branches`/`--tags`/`--remotes`/`--glob`, `--stdin`) hay
+    nhiều ref (D-407) — token đó ở BẤT KỲ đâu (chặt: script của git dừng đọc tuỳ chọn ở đối số vị trí đầu)."""
+    if any(a.split("=", 1)[0] in REV_ALL_REFS for a in args) or _rewritten_refs(_filter_branch_revs(args)) > 1:
+        return "deny", REF_REWRITE_WHY.format("git filter-branch " + " ".join(args)[:120])
+    return "", ""
+
+
+def _git_filter_repo(args: List[str]) -> Tuple[str, str]:
+    """filter-repo: mặc định viết lại MỌI ref (và xoá remote `origin`) — deny mọi dạng (D-407)."""
+    return "deny", REF_REWRITE_WHY.format("git filter-repo " + " ".join(args)[:120])
 
 
 # AUD-SEC-119 (T-3563): Gate mẫu tối ưu đọc script/baseline từ `origin/main` (optimization-loop.md), nhưng ref remote là
@@ -5930,12 +6036,16 @@ GIT_RULES: Dict[str, GitRule] = {
     "branch": _git_branch,
     "config": _git_config,
     "remote": _git_remote,
+    "filter-branch": _git_filter_branch,
+    "filter-repo": _git_filter_repo,
 }
 
 
 # git nhận tuỳ chọn dài viết tắt (`reset --ha`, `push --mirr`, `clean --fo`): viết tắt của tuỳ chọn nguy hiểm → coi là
 # tuỳ chọn đó (AUD-SEC-023). Thứ tự: ngắn trước, để `--forc` thành `--force`.
-GIT_DANGER_LONG = ("--all", "--hard", "--tags", "--force", "--delete", "--mirror", "--branches", "--discard-changes")
+GIT_DANGER_LONG = (
+    *("--all", "--hard", "--tags", "--force", "--prune", "--delete", "--mirror", "--branches", "--discard-changes"),
+)
 
 
 def _git_long(a: str) -> str:
@@ -6795,7 +6905,9 @@ def command_rules(n: List[str], root: str, cwd: Optional[str] = None) -> Tuple[s
         return "deny", "chmod 777"
     if name == "git":
         return git_rules(n, cwd)
-    return _external_rule(name, args, root)
+    if posixpath.basename(name) in GIT_DASHED_REWRITERS:  # `git-filter-repo` chạy thẳng (pip cài vào PATH)
+        return git_rules(["git", posixpath.basename(name)[4:], *args], cwd)
+    return _external_rule(name, args, root, cwd)
 
 
 def _gh_api_methods(args: List[str]) -> List[str]:
@@ -8011,10 +8123,14 @@ def _gh_lift_repo(args: List[str]) -> List[str]:
     return [*args, *moved]
 
 
-def _external_rule(name: str, args: List[str], root: str) -> Tuple[str, str]:
-    """Hành động đối ngoại/triển khai thật → ask; `gh pr merge` qua `xt.py merge-check` (ADR-0013)."""
+def _external_rule(name: str, args: List[str], root: str, cwd: Optional[str] = None) -> Tuple[str, str]:
+    """Hành động đối ngoại/triển khai thật → ask; `gh pr merge` qua `xt.py merge-check` (ADR-0013); `gh api` xoá ref
+    không phải nhánh hiện tại (ở `cwd`) → deny (D-407)."""
     if name == "gh":
         args = _gh_lift_repo(args)
+        gone = _gh_ref_delete_rule(args, cwd or root)
+        if gone[0]:
+            return gone
     if name == "gh" and args[:2] == ["pr", "merge"] and not set(args[2:]) & HELP_FLAGS:
         return gh_pr_merge_rule(args[2:], root)
     if name == "gh" and args[:1] == ["pr"] and "merge" in args[2:4]:  # `gh pr -R o/r merge`: cờ repo của `pr`
@@ -8031,6 +8147,32 @@ def _external_rule(name: str, args: List[str], root: str) -> Tuple[str, str]:
 # delete|archive`; PATCH `private=`/`visibility=` hoặc thân `--input` — như `gh repo edit --visibility`.
 GH_API_REPO_RE = re.compile(r"/?repos/[^/\s]+/[^/\s]+/?")
 GH_API_MAIN_REF_RE = re.compile(r"/?repos/[^/\s]+/[^/\s]+/git/refs/heads/(main|master)/?")
+GH_API_REF_RE = re.compile(r"/?repos/[^/\s]+/[^/\s]+/git/refs/(\S+?)/?")  # ref REST: `heads/<nhánh>`, `tags/<tag>`
+GRAPHQL_REF_DELETE_RE = re.compile(r"\bdeleteRef\b")  # mutation xoá ref theo id mờ — không biết nhánh nào
+
+
+def _gh_api_ref_delete(args: List[str]) -> Optional[str]:
+    """Ref mà `gh api …` (đối số sau `api`) xoá: `-X DELETE …/git/refs/<ref>` → `<ref>`; graphql `deleteRef` → "" (id
+    mờ); không xoá ref → None. Phương thức: cờ cuối thắng như gh."""
+    pos = _positionals(args, GH_API_VALUE_FLAGS)
+    path = _api_path(pos[0]) if len(pos) == 1 else ""
+    if path.rstrip("/").rsplit("/", 1)[-1] == "graphql":
+        return "" if GRAPHQL_REF_DELETE_RE.search(" ".join(args)) else None
+    methods = _gh_api_methods(args)
+    m = GH_API_REF_RE.fullmatch(path) if methods[-1:] == ["DELETE"] else None
+    return m.group(1) if m else None
+
+
+def _gh_ref_delete_rule(args: List[str], cwd: str) -> Tuple[str, str]:
+    """D-407: `gh api` xoá ref không phải nhánh hiện tại của phiên (ở `cwd`) → deny REMOTE_DELETE; nhánh chính giữ luật
+    huỷ (DESTROY) như cũ."""
+    gone = _gh_api_ref_delete(args[1:]) if args[:1] == ["api"] else None
+    if gone is None or _gh_api_destroy(args[1:]):
+        return "", ""
+    cur = _current_branch(cwd) if gone else ""
+    if _session_ref(gone, cur):
+        return "", ""
+    return "deny", REMOTE_DELETE_WHY.format(gone or "ref của `deleteRef`", cur or "không rõ")
 
 
 # Ghi lên bí mật, quyền, bảo vệ nhánh, ruleset, webhook, chuyển chủ repo (review #97) — như `gh secret`/đổi ruleset.
@@ -13227,6 +13369,8 @@ def _fed_ref_why(n: List[str], fed: Fed, shell: bool = False) -> str:
     if len(n) < 2 or (fed is not None and fed(n[1])):
         return UNRESOLVED_ARGS_WHY.format("<lệnh con>", "lệnh con đến từ stdin")
     sub, args = n[1], n[2:]
+    if sub == "filter-branch":  # stdin thêm được `--all` (D-407)
+        return UNRESOLVED_ARGS_WHY.format(sub, "đối số từ xargs/parallel")
     if sub not in REMOTE_REF_NAMES:
         return ""
     k = len(args) if fed is None else next((i for i, a in enumerate(args) if fed(a)), -1)
@@ -15072,6 +15216,7 @@ REASON_CODES: Tuple[Tuple[str, str], ...] = (
     (UNKNOWN_GIT_OPT_MARK, UNRESOLVED_TARGET),  # `git --<lạ> v push …`: không biết lệnh con (D-216)
     (PARALLEL_UNSEEN_MARK, UNRESOLVED_TARGET),  # `parallel --arg-s ,, ,, x`: không biết dấu tách (AUD-SEC-121)
     (REMOTE_REF_MARK, "REMOTE_REF_FORGE"),  # giả `origin/main` mà Gate đọc (AUD-SEC-119, T-3563)
+    (REF_DESTROY_MARK, "REMOTE_DELETE"),  # xoá ref remote/viết lại mọi ref không phải của phiên (AUD-SEC-551, D-407)
     (PERM_NO_TARGET_WHY, UNRESOLVED_TARGET),  # `… | xargs chmod 000` (T-3532)
     ("vượt ngân sách quét", BUDGET),
     ("brace expansion quá nhiều", BRACE_OVERFLOW),

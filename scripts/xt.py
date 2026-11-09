@@ -13770,32 +13770,70 @@ def _go_full_history(cwd: Path, what: str) -> None:
         raise ValueError(f"{what} là clone nông (shallow) — lịch sử thiếu")
 
 
+GO_CREDENTIAL_KEY_RE = re.compile(r"credential\.(?:.+\.)?helper", re.S)  # helper chung hay theo URL (`credential.<u>.`)
+
+
+def _go_credential_args(base: Path) -> List[str]:
+    """`-c` mang RIÊNG credential helper global của người dùng vào lệnh clone mirror (AUD-SEC-553): `_go_git_env` cô
+    lập cấu hình global/system nên clone HTTPS repo riêng tư mất xác thực (fail-closed, chặn oan). Đọc bằng môi trường
+    GỐC (`git config --global -z --get-regexp`) mọi `credential.helper` và `credential.<url>.helper` theo thứ tự cấu
+    hình (giá trị rỗng = xoá danh sách, như git); git tự khớp `<url>` với URL clone. Mở đầu `credential.helper=` (xoá
+    danh sách). An toàn vì helper chỉ cấp thông tin đăng nhập cho URL clone — URL cố định đọc thô ở `.git/config`
+    (guard khoá `remote.origin.url`/`insteadOf`), mọi cấu hình khác vẫn cô lập; helper chạy cùng uid với phiên, không
+    thêm quyền gì (lớp chặn nhầm, D-015). Không đọc được → chỉ phần xoá danh sách."""
+    r = _git(base, "config", "--global", "-z", "--get-regexp", r"^credential\.(.*\.)?helper$")
+    out = ["-c", "credential.helper="]
+    for item in r.stdout.split("\0") if r.returncode == 0 else []:
+        key, _, value = item.partition("\n")
+        out += ["-c", f"{key}={value}"] if GO_CREDENTIAL_KEY_RE.fullmatch(key) else []
+    return out
+
+
 def _go_origin_mirror(base: Path, tmp: Path) -> Path:
     """Clone `--mirror` mới của `origin` vào `tmp`: URL đọc thô ở `.git/config` (không include, không `insteadOf`; guard
-    chặn đổi `remote.origin.url`), không mẫu; mirror nông → lỗi."""
+    chặn đổi `remote.origin.url`), không mẫu, credential helper của người dùng (`_go_credential_args`); mirror nông →
+    lỗi."""
     url = _go_git(base, "không có remote `origin`", "config", "--local", "--no-includes", "--get", "remote.origin.url")
     dest = tmp / "origin.git"
-    _go_git(tmp, "clone --mirror origin lỗi", "clone", "-q", "--mirror", "--template=", "--", url.strip(), str(dest))
+    clone = ("clone", "-q", "--mirror", "--template=", "--", url.strip(), str(dest))
+    _go_git(tmp, "clone --mirror origin lỗi", *_go_credential_args(base), *clone)
     _go_full_history(dest, "bản mirror của origin")
     return dest
 
 
-def _history_go_refusals(base: Path) -> List[str]:
-    """`<sha ngắn> <tệp>:<dòng> \\`<dòng>\\`` của mọi lời từ chối của người còn hiệu lực (`_go_live_refusals`), đọc từ
-    bản mirror mới của `origin` và lịch sử cục bộ (D-404, D-406). Repo cục bộ nông, không có `origin`, clone lỗi (mạng,
-    xác thực), mirror nông, `git log` lỗi → ReleaseSignError (fail-closed); thư mục tạm luôn dọn. Repo chưa có commit →
-    rỗng."""
+class GoRemote(NamedTuple):
+    """Kết quả đọc remote của một lần ký: lời từ chối còn hiệu lực và khoá `release_signoff` ở bản mirror."""
+
+    refusals: List[str]
+    signoff: str  # giá trị ở xt.yaml của dự án tại HEAD (nhánh mặc định) của mirror; "" = vắng/không đọc được
+
+
+def _go_mirror_key(base: Path, mirror: Path) -> str:
+    """`release_signoff` ở xt.yaml của dự án tại HEAD của `mirror` (AUD-SEC-552): dự án ở thư mục con đọc theo đường
+    tương đối gốc repo (`rev-parse --show-prefix`, như `_committed_xt_text` đọc `./xt.yaml`); không có → ""."""
+    prefix = _go_git(base, "git rev-parse --show-prefix", "rev-parse", "--show-prefix").strip()
+    r = _git(mirror, "show", f"HEAD:{prefix}xt.yaml", env=_go_git_env())
+    return _yaml_keys(r.stdout).get(RELEASE_SIGNOFF_KEY, "") if r.returncode == 0 else ""
+
+
+def _go_remote_scan(base: Path) -> GoRemote:
+    """Một clone mirror mới của `origin` cho cả hai việc: lời từ chối của người còn hiệu lực (`_go_live_refusals`,
+    `<sha ngắn> <tệp>:<dòng> \\`<dòng>\\``, đọc từ mirror và lịch sử cục bộ — D-404, D-406) và khoá `release_signoff`
+    ở nhánh mặc định của remote (`_go_mirror_key`, D-407). Repo cục bộ nông, không có `origin`, clone lỗi (mạng, xác
+    thực), mirror nông, `git log` lỗi → ReleaseSignError (fail-closed); thư mục tạm luôn dọn. Repo chưa có commit →
+    không lời từ chối."""
     try:
         _go_full_history(base, "repo cục bộ")
         with tempfile.TemporaryDirectory(prefix="xt-release-sign-") as tmp:
             mirror = _go_origin_mirror(base, Path(tmp))
             remote = _go_history_blobs(_go_git(mirror, "git log (mirror)", *GO_HISTORY_LOG))
+            signoff = _go_mirror_key(base, mirror)
         local = _go_history_blobs(_go_git(base, "git log", *GO_HISTORY_LOG))
     except (ValueError, IndexError) as exc:
         raise ReleaseSignError(
             f"không đọc được lịch sử git để kiểm lời từ chối NO-GO ({exc}) — agent không ký"
         ) from exc
-    return _go_live_refusals(remote, local)
+    return GoRemote(_go_live_refusals(remote, local), signoff)
 
 
 def _sign_scope_check(base: Path) -> None:
@@ -13815,6 +13853,23 @@ def _sign_scope_check(base: Path) -> None:
         raise ReleaseSignError(f"còn việc chờ người (`loop defer`): {', '.join(sorted(waiting))} — agent không ký")
 
 
+def _sign_remote_check(base: Path) -> None:
+    """Một lần clone mirror `origin` (`_go_remote_scan`): khoá `release_signoff: agent` phải có ở nhánh mặc định của
+    remote (AUD-SEC-552 — `origin/main` cục bộ chưa fetch có thể cũ) và không còn lời từ chối của người (D-404…D-406)."""
+    remote = _go_remote_scan(base)
+    if remote.signoff != RELEASE_AGENT_NAME:
+        raise ReleaseSignError(
+            f"chỉ người ký: `{RELEASE_SIGNOFF_KEY}: agent` chưa bật trên remote — xt.yaml của dự án ở nhánh mặc định của"
+            f" bản mirror `origin` vừa clone khai `{remote.signoff or '(vắng/không đọc được)'}` (`origin/main` cục bộ"
+            " có thể cũ — AUD-SEC-552, ADR-0074)"
+        )
+    if remote.refusals:
+        raise ReleaseSignError(
+            f"người đã từ chối (lịch sử git): {'; '.join(remote.refusals)} — agent không ký đè (xoá/đổi tên/đổi VERSION"
+            " không gỡ được, không hết hạn theo tuổi; chỉ người gỡ: ký GO mới ở §5)"
+        )
+
+
 def _sign_insert(text: str, row: str, note: str) -> str:
     """Chèn dòng ký sau dòng bảng cuối của §5 (văn bản thô), kèm một dòng trích dẫn giải trình ngay sau bảng."""
     head = re.search(r"^## 5\b.*$", text, re.M)
@@ -13832,8 +13887,9 @@ def _sign_insert(text: str, row: str, note: str) -> str:
 def release_sign(base: Path, file: str, note: str, rc: Dict[str, Any]) -> str:
     """Agent ký §5 (ADR-0074) khi: khoá `release_signoff: agent` có hiệu lực; `release-check` (`rc`) không FAIL BLOCKER
     nào (cây sạch, sổ audit, nợ review…); `promotion` không `rejected`; việc người còn lại chỉ là chữ ký
-    (`RELEASE_SIGN_HUMAN_OK`); file chưa có dòng ký hay lời từ chối; lịch sử git không còn lời từ chối của người có
-    hiệu lực (`_history_go_refusals`, D-404); dòng `subject:` gắn đúng ứng viên. Ghi rồi đọc lại: dòng ký phải hiện và đủ
+    (`RELEASE_SIGN_HUMAN_OK`); file chưa có dòng ký hay lời từ chối; bản mirror `origin` vừa clone khai khoá ở nhánh
+    mặc định và lịch sử git không còn lời từ chối của người có hiệu lực (`_go_remote_scan`, D-404, D-407); dòng
+    `subject:` gắn đúng ứng viên. Ghi rồi đọc lại: dòng ký phải hiện và đủ
     cho `promotion`, không thì trả file về như cũ. Trả đường tương đối đã ký."""
     if not release_agent_signoff(base):
         raise ReleaseSignError(
@@ -13855,12 +13911,7 @@ def release_sign(base: Path, file: str, note: str, rc: Dict[str, Any]) -> str:
     rel, text = _sign_doc(base, file)
     if _go_no_go_signed(text) or _go_no_go_refusals(text):
         raise ReleaseSignError(f"{rel}: §5 đã có dòng ký hoặc lời từ chối — không ký thêm")
-    refused = _history_go_refusals(base)
-    if refused:
-        raise ReleaseSignError(
-            f"người đã từ chối (lịch sử git): {'; '.join(refused)} — agent không ký đè (xoá/đổi tên/đổi VERSION không gỡ"
-            " được, không hết hạn theo tuổi; chỉ người gỡ: ký GO mới ở §5)"
-        )
+    _sign_remote_check(base)
     problem = _subject_problem(rel, text, rc["subject"])
     if problem:
         raise ReleaseSignError(problem)
