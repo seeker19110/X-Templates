@@ -891,9 +891,14 @@ class GoMirrorCredentialTest(TmpRepoCase):
             encoding="utf-8",
         )
         self.helper.chmod(0o755)
-        self.cfg = self.tmp / "gitconfig"
+        self.home = self.tmp / "home"
+        self.home.mkdir()
+        self.cfg = self.home / ".gitconfig"  # tệp global thật của người dùng: `$HOME/.gitconfig` (AUD-SEC-559)
         no_proxy = {"NO_PROXY": "127.0.0.1,localhost", "no_proxy": "127.0.0.1,localhost"}
-        self.enterContext(unittest.mock.patch.dict(os.environ, {**no_proxy, "GIT_CONFIG_GLOBAL": str(self.cfg)}))
+        clean = {k: v for k, v in os.environ.items() if not k.startswith("GIT_") and k != "XDG_CONFIG_HOME"}
+        self.enterContext(
+            unittest.mock.patch.dict(os.environ, {**clean, **no_proxy, "HOME": str(self.home)}, clear=True)
+        )
 
     def clone(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -940,8 +945,71 @@ class GoMirrorCredentialTest(TmpRepoCase):
         )
         self.cfg.write_text("", encoding="utf-8")
         self.assertEqual(xt._go_credential_args(self.repo), ["-c", "credential.helper="])
-        with unittest.mock.patch.dict(os.environ, {"GIT_CONFIG_GLOBAL": str(self.tmp / "khong-co")}):
+        self.cfg.unlink()
+        self.assertEqual(xt._go_credential_args(self.repo), ["-c", "credential.helper="])
+
+    def foreign(self, name: str) -> Path:
+        """Tệp cấu hình lạ (agent tạo được) khai helper ghi lại lệnh."""
+        path = self.tmp / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(f"[credential]\n\thelper = {self.helper}\n", encoding="utf-8")
+        return path
+
+    def test_foreign_global_config_not_trusted(self):
+        """AUD-SEC-559 (review #485): `GIT_CONFIG_GLOBAL`/`XDG_CONFIG_HOME` do agent export trỏ tệp lạ → helper trong đó
+        KHÔNG vào clone (từng chạy `op=get/store` trong thư mục tạm của clone); helper ở tệp global thật (`$HOME/.gitconfig`,
+        `$HOME/.config/git/config`) vẫn vào. Đỏ trước sửa: đọc `git config --global` với môi trường gốc."""
+        foreign = self.foreign("lạ/gc")
+        self.foreign("xdg/git/config")
+        env = {"GIT_CONFIG_GLOBAL": str(foreign), "XDG_CONFIG_HOME": str(self.tmp / "xdg"), "GIT_CONFIG_NOSYSTEM": "1"}
+        with unittest.mock.patch.dict(os.environ, env):
             self.assertEqual(xt._go_credential_args(self.repo), ["-c", "credential.helper="])
+            with self.assertRaises(ValueError) as ctx:  # không helper thật: clone fail-closed, helper lạ không chạy
+                self.clone()
+            self.assertIn("clone --mirror origin lỗi", str(ctx.exception))
+            self.assertFalse(self.log.exists())
+            xdg_real = self.home / ".config/git/config"  # `--global` đọc tệp này khi không có `~/.gitconfig`
+            xdg_real.parent.mkdir(parents=True)
+            xdg_real.write_text("[credential]\n\thelper = real-xdg\n", encoding="utf-8")
+            reset = ["-c", "credential.helper="]
+            self.assertEqual(xt._go_credential_args(self.repo), [*reset, "-c", "credential.helper=real-xdg"])
+            self.cfg.write_text("[credential]\n\thelper = real\n", encoding="utf-8")
+            want = [*reset, "-c", "credential.helper=real"]
+            self.assertEqual(xt._go_credential_args(self.repo), want)
+            import concurrent.futures
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
+                got = list(pool.map(lambda _: xt._go_credential_args(self.repo), range(8)))
+            self.assertEqual(got, [want] * 8)
+
+    def test_askpass_not_kept_for_clone(self):
+        """AUD-SEC-559: `GIT_ASKPASS` do agent export là chương trình chạy trong clone như helper lạ — không giữ;
+        CA tin cậy (`GIT_SSL_CAINFO`) vẫn giữ. Đỏ trước sửa: askpass trả `u`/`p` → clone thành công."""
+        askpass = self.tmp / "askpass.sh"
+        askpass.write_text(
+            f'#!/bin/sh\necho "$1" >> "{self.log}"\ncase "$1" in U*) echo u;; *) echo p;; esac\n', encoding="utf-8"
+        )
+        askpass.chmod(0o755)
+        self.cfg.write_text("[user]\n\tname = x\n", encoding="utf-8")
+        with unittest.mock.patch.dict(os.environ, {"GIT_ASKPASS": str(askpass), "GIT_SSL_CAINFO": "/ca.pem"}):
+            env = xt._go_git_env()
+            self.assertFalse("GIT_ASKPASS" in env)  # không in cả môi trường khi đỏ
+            self.assertEqual(env["GIT_SSL_CAINFO"], "/ca.pem")
+            with self.assertRaises(ValueError):
+                self.clone()
+        self.assertFalse(self.log.exists())
+
+    def test_helper_key_with_equals_skipped(self):
+        """AUD-HAR-350: khoá `credential.<url>.helper` có `=` (URL `?a=b`) git không parse được qua `-c` (exit 128 → clone
+        lỗi) — bỏ qua; helper khác vẫn vào và clone được."""
+        self.cfg.write_text(
+            f'[credential "{self.base_url}/?a=b"]\n\thelper = x\n[credential]\n\thelper = {self.helper}\n',
+            encoding="utf-8",
+        )
+        self.assertEqual(
+            xt._go_credential_args(self.repo), ["-c", "credential.helper=", "-c", f"credential.helper={self.helper}"]
+        )
+        self.assertEqual(self.clone(), self.git("rev-parse", "HEAD").strip())
 
     def test_helper_not_passed_to_log(self):
         """Helper chỉ đi vào lệnh clone: `git log` ở mirror/cục bộ chạy với môi trường cô lập, không `-c` helper."""

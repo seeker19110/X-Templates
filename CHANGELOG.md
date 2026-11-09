@@ -36,6 +36,11 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
   remote khác nhánh hiện tại của phiên (`git push --delete|-d`, `:<ref>`, `--prune`, `gh api -X DELETE …/git/refs/…`,
   graphql `deleteRef`) và `git filter-branch --all`/nhiều ref, `git filter-repo`; xoá nhánh của chính phiên và `git
   fetch --prune` vẫn chạy.
+- Guard (lý do chạm hàng rào: nợ review #485 AUD-SEC-556/557): cụm cờ ngắn có chữ số đọc ra cờ chữ — `git push -4d`,
+  `-q4d`, `-d4` là xoá (`REMOTE_DELETE`), `git push -4f`/`-6f` và `git checkout -2f` là ghi đè/vứt thay đổi (chặn như
+  `-d`/`-f`); chữ số sau cờ ăn giá trị dính liền vẫn là giá trị (`checkout -bfix2`, `push -o4d`).
+- Guard (lý do chạm hàng rào: nợ review #485 AUD-SEC-558): `gh pr close … --delete-branch|-d` (mọi vị trí cờ, số hay URL
+  PR) bị chặn `REMOTE_DELETE` — guard không biết nhánh head của PR; `gh pr close N` không cờ xoá như cũ.
 
 ### Fixed
 
@@ -43,6 +48,9 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
   chối) — khoá đã tắt trên remote mà `origin/main` cục bộ chưa fetch không còn cho agent ký (AUD-SEC-552, D-407).
 - Clone mirror của `release-sign` giữ riêng credential helper global của người dùng (`credential.helper`,
   `credential.<url>.helper`) — remote HTTPS riêng tư không còn luôn bị từ chối; cấu hình khác vẫn cô lập (AUD-SEC-553).
+- Credential helper của clone mirror `release-sign` chỉ đọc từ cấu hình global thật của người dùng (bỏ `GIT_*`,
+  `XDG_CONFIG_HOME` agent export được), không còn giữ `GIT_ASKPASS`, bỏ khoá `credential.<url>.helper` có `=` git không
+  parse được (AUD-SEC-559, AUD-HAR-350).
 
 - `release-check` chặn phát hành và để trống vân tay Git trong JSON khi lỗi đọc Git, HEAD đổi trong lúc kiểm, hoặc index
   có `assume-unchanged`/`skip-worktree` che tệp tracked. Dùng checkout đầy đủ, sạch cho cổng phát hành.

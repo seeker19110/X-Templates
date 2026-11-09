@@ -7862,6 +7862,108 @@ class GuardRemoteDeleteTest(unittest.TestCase):
         self.assertEqual(self.g._session_ref("HEAD", ""), False)
         self.assertEqual(self.g._session_ref("feat/me", ""), False)
 
+    def test_digit_short_flag_cluster(self):
+        """AUD-SEC-556/557 (review #485): cụm cờ ngắn có chữ số (`-4`/`-6` của push là IPv4/IPv6, `-2`/`-3` của
+        checkout là `--ours`/`--theirs`) vẫn mang cờ chữ: `-4d` = `-4 -d`, `-4f` = `-4 -f` — git thật xoá/ghi đè nhánh.
+        Chữ số sau cờ ăn giá trị dính liền là giá trị (`-bfix2`, `-o4d`), không phải cờ."""
+        for cmd in (
+            "git push -4d origin other",
+            "git push -6d origin other",
+            "git push origin -q4d other",
+            "git push origin -d4 other",
+            "git push origin -dq4 other",
+            "git push -46d origin refs/tags/v1.0.0",
+            "bash -c 'git push -4d origin other'",
+        ):
+            with self.subTest(cmd):
+                self.assert_deleted(cmd)
+        for cmd in (
+            "git push -4f origin other",
+            "git push -6f origin other",
+            "git push origin -f4 HEAD",
+            "git push -q6f origin feat/me",
+            "git checkout -2f -- x",
+            "git checkout -3f",
+            "git switch -1f other",
+            "git clean -1f",
+            "git branch -1D main",
+        ):
+            with self.subTest(cmd):
+                self.assertEqual(self.out(cmd)["decision"], "deny", cmd)
+        for cmd in (
+            "git push -4d origin feat/me",  # nhánh của chính phiên: như `-d`
+            "git push -4 origin HEAD",
+            "git push -6 -u origin feat/me",
+            "git push -o4d origin other",  # `-o` ăn giá trị dính liền: push-option `4d`, không xoá
+            "git log -n5",
+            "git log -5",
+            "git diff -U3",
+            "git checkout -bfix2",  # `-b` ăn giá trị: nhánh mới `fix2`, không `-f`
+            "git checkout -Bfeat2 origin/x",
+            "git switch -cfix2",
+            "git switch -Cfeat2",
+            "git clean -e1f -n",  # mẫu loại trừ `1f`, chạy thử
+            "git restore --staged -s1W .",  # nguồn `1W`, chỉ bỏ khỏi index
+            "git branch -ufd2 main",  # upstream `fd2`, không xoá
+        ):
+            with self.subTest(cmd):
+                self.assert_allowed(cmd)
+        import concurrent.futures
+
+        cases = ["git push -4d origin other", "git push -4d origin feat/me", "git push -6f origin x"] * 6
+        want = [self.out(c)["decision"] for c in cases]
+        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
+            self.assertEqual(list(pool.map(lambda c: self.out(c)["decision"], cases)), want)
+        self.assertEqual(want[:3], ["deny", "", "deny"])
+
+    def test_short_flags_parse(self):
+        """`_short_flags`: chữ cờ của mọi cụm `-[A-Za-z0-9]+`; cụm chỉ chữ giữ cách đọc cũ (mọi chữ là cờ); cụm có chữ
+        số dừng sau chữ thuộc `valued` (cờ ăn giá trị dính liền)."""
+        sf = self.g._short_flags
+        self.assertEqual(sf(["-4d", "-q6", "-d4", "-46", "--delete", "-", "-x.y", "x"]), "dqd")
+        self.assertEqual(sf(["-bfix2", "-bfeat"], "bB"), "bbfeat")
+        self.assertEqual(sf(["-q4ob5d", "-4"], "o"), "qo")
+        self.assertEqual(sf([]), "")
+
+    def test_gh_pr_close_delete_branch_denied(self):
+        """AUD-SEC-558 (review #485): `gh pr close … --delete-branch|-d` xoá nhánh head của PR trên remote — guard không
+        biết head của PR (như graphql `deleteRef`) → REMOTE_DELETE ở mọi vị trí cờ, số hay URL PR; đóng PR không xoá
+        nhánh theo luật cũ."""
+        for cmd in (
+            "gh pr close 12 --delete-branch",
+            "gh pr close 12 -d",
+            "gh pr close -d 12",
+            "gh pr close --delete-branch https://github.com/o/r/pull/12",
+            "gh pr close feat/other -d",
+            "gh pr close -d",  # PR của nhánh hiện tại: head do gh giải, không phải guard
+            "gh pr close 12 -dc xong",
+            "gh pr close 12 --comment xong --delete-branch",
+            "gh pr close 12 --delete-branch=true",
+            "gh pr close 12 -d=1",
+            "gh pr close 12 -cd",  # cụm chỉ chữ: mọi chữ là cờ (chặt — pflag đọc là bình luận `d`)
+            "gh -R o/r pr close 12 -d",
+            "gh --repo=o/r pr close 12 --delete-branch",
+            "gh pr -R o/r close 12 -d",
+            "bash -c 'gh pr close 12 -d'",
+            "env X=1 gh pr close 12 -d",
+        ):
+            with self.subTest(cmd):
+                self.assert_deleted(cmd)
+        for cmd in (
+            "gh pr close 12",
+            "gh pr close 12 --comment xong",
+            "gh pr close 12 -c -d",  # `-c` ăn token kế (pflag): bình luận `-d`, không xoá
+            "gh pr close 12 --comment --delete-branch",
+            "gh pr close 12 -c5d",  # cụm có chữ số dừng sau `-c`: bình luận `5d`
+            "gh pr close 12 --comment=-d",
+            "gh pr view 12 -c",
+            "gh pr list --state closed",
+        ):
+            with self.subTest(cmd):
+                self.assert_allowed(cmd)
+        with mock.patch.dict(os.environ, {"XT_GUARD_POLICY": "strict"}):
+            self.assertEqual(self.g.bash_decision("gh pr close 12 -d", str(self.root))["decision"], "deny")
+
 
 class GuardAppendParallelTest(unittest.TestCase):
     """T-3564 (D-217): AUD-SEC-125 — gán `TÊN+=v` là phép gán của bash (`X+=1 rm -rf /` chạy rm), không phải tên lệnh;
