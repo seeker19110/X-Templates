@@ -6064,8 +6064,10 @@ GIT_DANGER_LONG = (
 
 
 def _git_long(a: str) -> str:
+    """Viết tắt (kể cả MỘT chữ: `push --m`, `clean --f` — AUD-SEC-567) của tuỳ chọn nguy hiểm → tuỳ chọn đó; `--` trần
+    giữ nguyên. Viết tắt mơ hồ (`push --f` khớp `--force`/`--follow-tags`) git tự báo lỗi, nên mở rộng chỉ chặt hơn."""
     key, eq, val = a.partition("=")
-    if not key.startswith("--") or len(key) < 4 or key in GIT_DANGER_LONG:
+    if not key.startswith("--") or len(key) < 3 or key in GIT_DANGER_LONG:
         return a
     full = next((d for d in GIT_DANGER_LONG if d.startswith(key)), "")
     return full + eq + val if full else a
@@ -8194,12 +8196,21 @@ def _gh_pr_close_deletes(args: List[str]) -> bool:
         return False
     skip = False
     for a in args[1:]:
-        name = a.split("=", 1)[0]
         if skip or a in GH_PR_CLOSE_VALUE_FLAGS:
             skip = not skip
-        elif name == "--delete-branch" or "d" in _short_flags([name], "cR"):
+        elif a.split("=", 1)[0] == "--delete-branch" or _gh_close_short_deletes(a):
             return True
     return False
+
+
+def _gh_close_short_deletes(a: str) -> bool:
+    """Cụm cờ ngắn của `gh pr close` mang `-d`. Cụm chỉ chữ (trước `=`): mọi chữ là cờ (chặt, như `_short_flags`). Cụm
+    khác: pflag đọc chữ cờ lần lượt tới chữ ăn giá trị đầu tiên (`c`, `R`) hay `=` — phần sau là giá trị dính liền, bất
+    kể ký tự gì (`-dRo/r`, `-dc.` — AUD-SEC-566)."""
+    if not a.startswith("-") or a.startswith("--"):
+        return False
+    head = a[1:].split("=", 1)[0]
+    return "d" in (head if head.isalpha() else re.split(r"[cR=]", a[1:], maxsplit=1)[0])
 
 
 def _gh_ref_delete_rule(args: List[str], cwd: str) -> Tuple[str, str]:
