@@ -311,6 +311,13 @@
 - Lý do (tiêu chí chất lượng cuối): (1) đúng và an toàn: manifest.json được commit — không lộ đường máy, giống nhau giữa bản sao chính và worktree; (2) giữ dạng tương đối cũ cho ca thường; (3) git_hooks chỉ để ghi nhận (AUD-HAR-204), không nơi nào đọc lại nên đổi dạng không phá
 - Đường lùi: Revert PR; shown_path ghi tuyệt đối như cũ
 
+### D-398 · 2026-11-08T01:54:45+00:00 · Dùng nguồn nào để xác minh artifact sau deploy trong pilot xboss?
+
+- Phương án: (1) Dùng SHA và health do workflow deploy báo. · (2) Staging cô lập tải archive đúng run, kiểm hash và đối chiếu HTTP với bản cài.
+- Chọn: Staging cô lập tải archive đúng run, kiểm hash và đối chiếu HTTP với bản cài.
+- Lý do (tiêu chí chất lượng cuối): Chủ dự án chọn staging cô lập ngày 2026-11-08. Hash archive và probe HTTP độc lập kiểm được lỗi tráo artifact hoặc route cũ trong khi dùng dữ liệu giả.
+- Đường lùi: Gỡ workflow pilot và bỏ biên nhận staging. Luồng production giữ quyền duyệt hiện hành.
+
 ### D-399 · 2026-11-08T02:27:59+00:00 · AUD-HAR-327: đóng đề xuất 'Khi chạy thật' thế nào mà không sửa mục cũ của sổ (LOOP-STOP-019)?
 
 - Phương án: (1) Dòng THÊM mới máy đọc: lệnh 'xt.py loop decide-prod --ref D-NNN --choice …' ghi vào sổ hiện hành một mục có dòng 'Khi chạy thật đã quyết (D-NNN): …'; release-check trừ đề xuất có D-NNN đã có dòng quyết; nhãn cũ giữ nguyên · (2) Đổi nhãn dòng cũ (#477) · (3) Ghi quyết định ở GO-NO-GO §5, máy đọc từ đó
