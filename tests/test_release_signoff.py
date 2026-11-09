@@ -418,14 +418,23 @@ class ReleaseSignRealCheckTest(RealCheckRepo):
         self.commit(push=False)
         self.assert_signs()
 
-    def test_refusal_expired_after_approval_days(self):
-        """D-404: lời từ chối cũ hơn `release_approval_days` (theo ngày commit) hết hiệu lực → ký được."""
-        old = int((dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=31)).timestamp())
+    def test_refusal_does_not_expire_by_age(self):
+        """D-405: lời từ chối cũ hơn mọi hạn (400 ngày) vẫn chặn ký khi chưa có dòng GO người sau nó."""
         self.write(self.REFUSED, refusal_doc())
-        self.commit(at=old)
+        self.commit(at=ago(days=400))
         self.rm(self.REFUSED)
         self.commit(push=False)
-        self.assert_signs()
+        self.assert_history_refused(self.REFUSED)
+
+    def test_short_approval_days_does_not_lift_refusal(self):
+        """D-405: agent đặt `release_approval_days: 1` ở xt.yaml cây (đã commit) → lời từ chối 2 ngày tuổi vẫn chặn."""
+        self.write(self.REFUSED, refusal_doc())
+        self.commit(at=ago(days=2))
+        self.rm(self.REFUSED)
+        self.write("xt.yaml", "lint: ''\nrelease_signoff: agent\nrelease_approval_days: 1\n")
+        self.prepare(self.MUST_OK)  # dòng `subject:` của B theo cây mới
+        self.assertEqual(xt._approval_days(self.proj), 1)
+        self.assert_history_refused(self.REFUSED)
 
     def test_unchecked_must_blocks_sign(self):
         """Review #480 🟠: MUST tick không `— Kiểm:` → `release-sign` từ chối (release-check `--unchecked-must fail`)."""
@@ -551,14 +560,15 @@ class GoHistoryTest(TmpRepoCase):
         self.commit_files({"GO-NO-GO-new.md": sign_doc("| Chủ repo | An | GO | 2026-11-08 |")}, ago(days=2))
         self.assertEqual(self.refusals(), [])
 
-    def test_refusal_lifetime_uses_latest_occurrence(self):
-        """Lời từ chối hết hạn theo `release_approval_days`; chép lại nó (đổi tên/lưu trữ) làm mới hạn — chiều chặt."""
-        no = "| Chủ repo | An | NO-GO | 2026-09-01 |"
-        self.commit_files({"GO-NO-GO-a.md": sign_doc(no)}, ago(days=31))
-        self.assertEqual(self.refusals(), [])
-        (self.repo / "xt.yaml").write_text("release_approval_days: 60\n", encoding="utf-8")
+    def test_refusal_no_expiry_latest_occurrence(self):
+        """D-405: không hết hạn theo tuổi, `release_approval_days` không xét; GO người sau gỡ; chép lại lời từ chối
+        (đổi tên/lưu trữ) SAU dòng GO đó làm nó có hiệu lực lại — tính ở lần thêm mới nhất (chiều chặt)."""
+        no = "| Chủ repo | An | NO-GO | 2025-01-01 |"
+        self.commit_files({"GO-NO-GO-a.md": sign_doc(no)}, ago(days=400))
+        (self.repo / "xt.yaml").write_text("release_approval_days: 1\n", encoding="utf-8")
         self.assertEqual(len(self.refusals()), 1)
-        (self.repo / "xt.yaml").unlink()
+        self.commit_files({"GO-NO-GO-b.md": sign_doc("| Chủ repo | An | GO | 2025-02-01 |")}, ago(days=300))
+        self.assertEqual(self.refusals(), [])
         self.git("mv", "GO-NO-GO-a.md", "GO-NO-GO-archived.md")
         sha = self.commit_files({}, ago(days=1))
         self.assertIn(f"{sha[:12]} GO-NO-GO-archived.md", "\n".join(self.refusals()))

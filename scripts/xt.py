@@ -13679,8 +13679,9 @@ def _go_decision_rows(lines: Sequence[str]) -> Iterator[Tuple[int, str, str]]:
 def _history_go_refusals(base: Path) -> List[str]:
     """`<sha ngắn> <tệp>:<dòng> \\`<dòng>\\`` của mọi lời từ chối của người (`_go_decision_rows`) còn hiệu lực trong lịch sử
     git (D-404): mỗi dòng (theo nội dung các ô) tính ở lần THÊM MỚI NHẤT (chép/lưu trữ lại làm mới — chiều chặt); hết
-    hiệu lực khi một commit có ngày commit SAU nó thêm một dòng ký GO của người lần ĐẦU (chép lại dòng GO cũ không tính),
-    hoặc khi cũ hơn `release_approval_days`. Không đọc được lịch sử → ReleaseSignError; repo chưa có commit → rỗng."""
+    hiệu lực CHỈ khi một commit có ngày commit SAU nó thêm một dòng ký GO của người lần ĐẦU (chép lại dòng GO cũ không
+    tính) — không hết hạn theo tuổi, không đọc `release_approval_days` (D-405: tham số agent sửa được trong cây). Không
+    đọc được lịch sử → ReleaseSignError; repo chưa có commit → rỗng."""
     r = _git(base, *GO_HISTORY_LOG)
     try:
         if r.returncode != 0:
@@ -13702,8 +13703,7 @@ def _history_go_refusals(base: Path) -> List[str]:
             elif b.ct >= refused.get(key, (-1, ""))[0]:
                 refused[key] = (b.ct, f"{b.sha[:12]} {b.path}:{i + 1} `{text.strip()}`")
     last_go = max(first_go.values(), default=-1)
-    oldest = _dt.datetime.now(_dt.timezone.utc).timestamp() - _approval_days(base) * 86400
-    return sorted(where for ct, where in refused.values() if ct >= oldest and ct >= last_go)
+    return sorted(where for ct, where in refused.values() if ct >= last_go)
 
 
 def _sign_scope_check(base: Path) -> None:
@@ -13767,7 +13767,7 @@ def release_sign(base: Path, file: str, note: str, rc: Dict[str, Any]) -> str:
     if refused:
         raise ReleaseSignError(
             f"người đã từ chối (lịch sử git): {'; '.join(refused)} — agent không ký đè (xoá/đổi tên/đổi VERSION không gỡ"
-            f" được; gỡ: người ký GO mới ở §5, hoặc lời từ chối cũ hơn `{APPROVAL_DAYS_KEY}`)"
+            " được, không hết hạn theo tuổi; chỉ người gỡ: ký GO mới ở §5)"
         )
     problem = _subject_problem(rel, text, rc["subject"])
     if problem:

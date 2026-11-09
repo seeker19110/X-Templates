@@ -56,9 +56,11 @@ Chọn **phương án 1** (D-401).
   thường, mọi phiên bản). Lời từ chối = dòng bảng sau `## 5` đầu tiên tới hết tệp, hay ở bảng có cột `Quyết định`, có ô
   quyết định không rỗng khác GO (`?`, `Hold`, `Không GO`, `NO-GO`… — ngày không xét) và ô tên của người (không rỗng/
   placeholder, khác `agent`; tên trống chỉ tính khi ô ghi NO-GO rõ — dòng mẫu `| … | | GO / NO-GO | |` không tính).
-  Mỗi lời từ chối tính ở lần thêm **mới nhất** (chép/lưu trữ lại làm mới). Hết hiệu lực khi một commit có ngày commit
-  sau nó thêm **lần đầu** một dòng ký GO của người ở §5 (tên + `YYYY-MM-DD`, dạng guard `GO_SIGN` chặn agent ghi; chép
-  lại dòng GO cũ không tính), hoặc khi cũ hơn `release_approval_days`. Không đọc được lịch sử → không ký; repo chưa có
+  Mỗi lời từ chối tính ở lần thêm **mới nhất** (chép/lưu trữ lại làm mới). Hết hiệu lực **chỉ** khi một commit có ngày
+  commit sau nó thêm **lần đầu** một dòng ký GO của người ở §5 (tên + `YYYY-MM-DD`, dạng guard `GO_SIGN` chặn agent ghi;
+  chép lại dòng GO cũ không tính). Không hết hạn theo tuổi (D-405): hạn theo `release_approval_days` đọc xt.yaml cây
+  làm việc — agent đặt `1` là mọi NO-GO cũ hết hiệu lực; người đã từ chối thì người gỡ, ký GO một lần là đủ. Không đọc
+  được lịch sử → không ký; repo chưa có
   commit → không có lời từ chối. Giới hạn: ref theo dõi cũ (agent không `fetch`) thì không thấy lời từ chối mới ở
   remote — neo tin cậy cùng lớp khoá `release_signoff` đọc `origin/main`; dòng chỉ thêm khi giải xung đột merge không
   thấy (`git log -p` không in diff merge); clone nông chỉ thấy phần lịch sử đã tải.
@@ -92,7 +94,8 @@ Chọn **phương án 1** (D-401).
 - `python3 -m unittest tests.test_release_signoff`: khoá cần cả cây lẫn nhánh chính; từ chối khi FAIL, còn việc người
   khác, quy mô khác S, còn `loop defer`, ghi chú rỗng, subject lệch, đã ký, §5 sai dạng, `promotion` rejected, lời từ
   chối trong lịch sử (D-404: xoá ở nhánh PR/đã lên `main`, thư mục con `apps/web`, ô `Không GO`, đổi `VERSION`, dòng
-  thiếu ngày/tên; GO người sau đó hay quá hạn thì ký được; mẫu khung không tạo lời từ chối), lịch sử không đọc được, MUST
+  thiếu ngày/tên; GO người sau đó thì ký được; cũ 400 ngày hay `release_approval_days: 1` vẫn chặn — D-405; mẫu khung
+  không tạo lời từ chối), lịch sử không đọc được, MUST
   không lệnh kiểm (với `release-check` thật); quét lịch sử repo khung (87 commit chạm GO-NO-GO, ~1800 commit) ~0,1 s; ký thành
   công ra `promotion.by = ["agent"]`, dòng `agent` khi khoá tắt → `pending_human`; guard cho dạng chữ rõ, chặn dạng nối lệnh, `env -u`, token mờ, `--status`/`--blueprint`,
   tuỳ chọn lạ, xt.py ngoài dự án, strict, gọi trong tiến trình, đổi nhánh mặc định, MCP ghi thẳng `main`.
