@@ -5271,7 +5271,16 @@ def _push_delete_rule(refs: List[str], deleting: bool, cwd: Optional[str]) -> Tu
 
 
 PUSH_VALUE_OPTS = ("-o", "--push-option", "--repo", "--receive-pack", "--exec")
+# Tuỳ chọn dài của push BẮT BUỘC giá trị (`git push --git-completion-helper-all` của git 2.43: tên kết thúc `=`).
+PUSH_HELP_VALUE_OPTS = ("--push-option", "--repo", "--receive-pack", "--exec", "--recurse-submodules")
 VERDICT_RANK = {"deny": 2, "ask": 1}
+
+
+def _git_help(args: List[str], short_val: str, long_val: Tuple[str, ...]) -> bool:
+    """`-h`/`--help` là tuỳ chọn thật của lệnh git (parse-options đọc mọi vị trí trước `--`, cả trong cụm `-qh`): git in
+    usage rồi thoát 129 trước khi làm gì (AUD-HAR-353). Giá trị của tuỳ chọn ăn giá trị (`-o -h`, `--repo -h`, viết tắt
+    `--recu -h`) và token sau `--` không tính — đo trên git 2.43: `push -o -h` vẫn đẩy, `push main -h` thoát 129."""
+    return _has_opt(_parse_opts(args, short_val, long_val)[0], {"-h", "--help"})
 
 
 def _push_refs(args: List[str]) -> List[str]:
@@ -5291,6 +5300,8 @@ def _stricter(a: Tuple[str, str], b: Tuple[str, str]) -> Tuple[str, str]:
 def _git_push(args: List[str], cwd: Optional[str] = None) -> Tuple[str, str]:
     """push: deny --force/--mirror/+refspec và xoá nhánh chính; ask khi đẩy thẳng nhánh chính — kể cả khi không có
     refspec hoặc đích là `HEAD` mà nhánh hiện tại (ở `cwd`) là nhánh chính — và khi `--all`/`--tags` (mọi nhánh/tag)."""
+    if _git_help(args, "o", PUSH_HELP_VALUE_OPTS):
+        return "", ""
     flags = _short_flags(args, "o")  # `-o<push-option>` ăn giá trị dính liền
     force = any(x.startswith("--force") and x != "--force-if-includes" or x == "--mirror" for x in args) or "f" in flags
     refs = _push_refs(args)
@@ -5469,8 +5480,10 @@ ParsedOpts = Tuple[Set[str], List[str], List[Tuple[str, str]]]
 
 
 def _long_match(key: str, opts: Tuple[str, ...]) -> bool:
-    """`key` (tuỳ chọn dài) là một trong `opts` hoặc viết tắt của nó — git nhận viết tắt không mơ hồ (`--force-c`)."""
-    return key in opts or (key.startswith("--") and len(key) > 3 and any(o.startswith(key) for o in opts))
+    """`key` (tuỳ chọn dài) là một trong `opts` hoặc viết tắt của nó — git nhận viết tắt không mơ hồ kể cả MỘT chữ
+    (`--force-c`, `update-ref --s` = `--stdin` — AUD-SEC-569); `--` trần (hết tuỳ chọn) không phải viết tắt. Viết tắt
+    mơ hồ git tự báo lỗi, nên khớp thêm chỉ đọc đúng điều git làm."""
+    return key in opts or (key.startswith("--") and len(key) > 2 and any(o.startswith(key) for o in opts))
 
 
 def _short_cluster(a: str, nxt: List[str], short_val: str) -> Tuple[List[str], List[Tuple[str, str]], int]:
@@ -5609,6 +5622,7 @@ def _has_opt(flags: Set[str], opts: Set[str]) -> bool:
 
 RefNames = Optional[List[str]]  # tên ref lệnh sẽ ghi/tạo; None = không thấy được (đọc từ stdin)
 REPLACE_REF_PREFIX = "refs/replace/"  # `git replace` đổi nội dung mọi lệnh git đọc (AUD-SEC-158)
+REPLACE_SPLIT_RE = re.compile(r"[$`*?\[{]")  # đối số shell có thể tách/mở rộng thành số từ khác
 
 
 def _update_ref_names(args: List[str], _cwd: Optional[str]) -> RefNames:
@@ -5619,9 +5633,23 @@ def _update_ref_names(args: List[str], _cwd: Optional[str]) -> RefNames:
 
 def _replace_names(args: List[str], _cwd: Optional[str]) -> RefNames:
     """replace: mọi dạng ghi `refs/replace/<đối tượng>` (`<obj> <thay>`, `-f`, `--graft`, `--edit`,
-    `--convert-graft-file`); liệt kê (không đối số, `-l`/`--list`, `--format`) và xoá (`-d`) thì không (AUD-SEC-158)."""
+    `--convert-graft-file`); liệt kê (không đối số, `-l`/`--list`, `--format`) và xoá (`-d`) thì không (AUD-SEC-158).
+    Chuyển hướng (`2>&1`) đến đây như token, không phân biệt được với chữ trong nháy (`'>'` là tên ref hợp lệ) → xét cả
+    hai cách đọc như push (AUD-SEC-102); dạng thường ghi chỉ khi đúng hai đối số — git 2.43 báo "bad number of
+    arguments" với số khác, nên `git replace -h 2>&1` không còn bị đọc thành `refs/replace/2` (AUD-HAR-353)."""
+    return _replace_reading(args) + _replace_reading(_drop_redirects(args))
+
+
+def _replace_reading(args: List[str]) -> List[str]:
     flags, pos, _ = _parse_opts(args, "", ())
-    if _has_opt(flags, {"-d", "--delete", "-l", "--list"}) or not (pos or _has_opt(flags, {"--convert-graft-file"})):
+    convert = _has_opt(flags, {"--convert-graft-file"})
+    mode = convert or _has_opt(flags, {"-e", "--edit", "-g", "--graft"})
+    sized = not any(REPLACE_SPLIT_RE.search(p) for p in pos)  # `$(…)`/`$v`/glob tách thành bao nhiêu từ: không biết
+    if (
+        _has_opt(flags, {"-d", "--delete", "-l", "--list"})
+        or not (pos or convert)
+        or (not mode and sized and len(pos) != 2)
+    ):
         return []
     return [REPLACE_REF_PREFIX + (pos[0] if pos else "*")]
 
@@ -6194,7 +6222,6 @@ GH_API_VALUE_FLAGS: Tuple[str, ...] = (
     *GH_API_FIELD_FLAGS,
     *("-X", "--method", "-H", "--header", "-q", "--jq", "-t", "--template", "-p", "--preview", "--cache", "--hostname"),
 )
-HELP_FLAGS = {"--help", "-h"}
 
 
 def _flag_value(args: List[str], flag: str) -> Optional[str]:
@@ -8145,19 +8172,30 @@ def _external_rule(name: str, args: List[str], root: str, cwd: Optional[str] = N
     không phải nhánh hiện tại (ở `cwd`) → deny (D-407)."""
     if name == "gh":
         args = _gh_lift_repo(args)
-        gone = _gh_ref_delete_rule(args, cwd or root)
-        if gone[0]:
-            return gone
-    if name == "gh" and args[:2] == ["pr", "merge"] and not set(args[2:]) & HELP_FLAGS:
-        return gh_pr_merge_rule(args[2:], root)
-    if name == "gh" and args[:1] == ["pr"] and "merge" in args[2:4]:  # `gh pr -R o/r merge`: cờ repo của `pr`
-        return _pr_flag_merge_rule(args, root)
-    if name == "gh" and args[:2] == ["alias", "import"]:  # `alias set`: ADR-0063 lát C chặn trước
-        return "ask", "gh alias đặt lệnh tắt — guard không thấy lệnh thật khi alias chạy"
-    if name == "gh" and args[:1] == ["api"] and _gh_api_writes(args[1:]):
-        return ("ask", DESTROY_ASK) if _gh_api_destroy(args[1:]) else _gh_api_merge_rule(args[1:], root)
+        verdict = _gh_rule(args, root, cwd or root)
+        if verdict[0]:
+            return verdict
     verdict = _publish_rule(name, args)
     return verdict if verdict[0] else egress_rule(name, args, root)
+
+
+def _gh_rule(args: List[str], root: str, cwd: str) -> Tuple[str, str]:
+    """Luật riêng của `gh` (`args` sau `gh`, cờ repo đầu đã dời ra sau): xoá ref (D-407), `pr merge` — cả cờ đứng trước
+    `merge` (`gh pr -R o/r merge`, `gh pr -t x merge`, `gh -b x pr merge` — AUD-SEC-570), `alias import`, `api` ghi."""
+    gone = _gh_ref_delete_rule(args, cwd)
+    if gone[0]:
+        return gone
+    if args[:2] == ["pr", "merge"]:
+        helped = _gh_help_asked(args[2:], GH_MERGE_VALUE_FLAGS, "dmrs")
+        return ("", "") if helped else gh_pr_merge_rule(args[2:], root)
+    rest = _gh_pr_sub(args, "merge", args[:1] == ["pr"] and "merge" in args[2:4])
+    if rest is not None:
+        return _pr_flag_merge_rule(args, rest, root)
+    if args[:2] == ["alias", "import"]:  # `alias set`: ADR-0063 lát C chặn trước
+        return "ask", "gh alias đặt lệnh tắt — guard không thấy lệnh thật khi alias chạy"
+    if args[:1] == ["api"] and _gh_api_writes(args[1:]):
+        return ("ask", DESTROY_ASK) if _gh_api_destroy(args[1:]) else _gh_api_merge_rule(args[1:], root)
+    return "", ""
 
 
 # `gh api` huỷ repo/nhánh chính (AUD-SEC-048): DELETE repo hay ref nhánh chính, PATCH `archived=true` — như `gh repo
@@ -8189,13 +8227,17 @@ GH_PR_CLOSE_DELETE_WHY = (
 
 
 def _gh_pr_close_deletes(args: List[str]) -> bool:
-    """`gh pr close … --delete-branch|-d` (AUD-SEC-558; `args` sau `gh`, cờ repo đã dời ra sau): pflag nhận cờ ở mọi
-    vị trí, cụm `-dc x`, `-d=…`/`--delete-branch=…` (mọi giá trị tính — chặt); token kế của `-c`/`--comment`/`-R`/
-    `--repo` là giá trị, không phải cờ. Lệnh con đọc sau `-R <repo>` (`gh pr -R o/r close`)."""
-    if args[:1] != ["pr"] or _positionals(args[1:], GH_REPO_FLAGS)[:1] != ["close"]:
+    """`gh pr close … --delete-branch|-d` (AUD-SEC-558; `args` sau `gh`, cờ repo đầu đã dời ra sau): pflag nhận cờ ở
+    mọi vị trí, cụm `-dc x`, `-d=…`/`--delete-branch=…` (mọi giá trị tính — chặt); token kế của `-c`/`--comment`/`-R`/
+    `--repo` là giá trị, không phải cờ. Lệnh con tìm như cobra (`_gh_pr_sub`: `gh pr -R o/r close`, `gh pr -c x close`,
+    `gh -c x pr close` — AUD-SEC-570) hay cách đọc cũ (giữ chặt). Cờ trợ giúp thật → gh in trợ giúp, không đóng PR
+    (AUD-HAR-353)."""
+    legacy = args[:1] == ["pr"] and _positionals(args[1:], GH_REPO_FLAGS)[:1] == ["close"]
+    rest = _gh_pr_sub(args, "close", legacy)
+    if rest is None or _gh_help_asked(rest, GH_PR_CLOSE_VALUE_FLAGS, "d"):
         return False
     skip = False
-    for a in args[1:]:
+    for a in rest:
         if skip or a in GH_PR_CLOSE_VALUE_FLAGS:
             skip = not skip
         elif a.split("=", 1)[0] == "--delete-branch" or _gh_close_short_deletes(a):
@@ -8205,12 +8247,81 @@ def _gh_pr_close_deletes(args: List[str]) -> bool:
 
 def _gh_close_short_deletes(a: str) -> bool:
     """Cụm cờ ngắn của `gh pr close` mang `-d`. Cụm chỉ chữ (trước `=`): mọi chữ là cờ (chặt, như `_short_flags`). Cụm
-    khác: pflag đọc chữ cờ lần lượt tới chữ ăn giá trị đầu tiên (`c`, `R`) hay `=` — phần sau là giá trị dính liền, bất
-    kể ký tự gì (`-dRo/r`, `-dc.` — AUD-SEC-566)."""
+    khác: pflag đọc chữ cờ lần lượt tới chữ ăn giá trị đầu tiên (`c`, `R`) — phần sau là giá trị dính liền, bất kể ký
+    tự gì (`-dRo/r`, `-dc.` — AUD-SEC-566). `=` không tách (AUD-HAR-354): chỉ khác trên token gh từ chối hay bỏ qua
+    (`-4=d`, `-test.=d`), tính là có `-d` — chặt hơn, gọn hơn."""
     if not a.startswith("-") or a.startswith("--"):
         return False
     head = a[1:].split("=", 1)[0]
-    return "d" in (head if head.isalpha() else re.split(r"[cR=]", a[1:], maxsplit=1)[0])
+    return "d" in (head if head.isalpha() else re.split(r"[cR]", a[1:], maxsplit=1)[0])
+
+
+# cobra (gh 2.89) tìm lệnh con TRƯỚC khi biết cờ của nó (`stripFlags`/`argsMinusFirstX`): `-x`/`--tên` không `=` ăn token
+# kế, trừ cờ bool đã đăng ký — chỉ `--help` (persistent của gốc gh); `-h` chưa đăng ký lúc tìm nên cũng ăn token kế
+# (đo: `gh pr -c x close --help` và `gh -c x pr close --help` in trợ giúp của close, `gh pr -h close` in của `pr`).
+GH_FIND_BOOL_FLAGS = ("--help",)
+
+
+def _gh_path(args: List[str]) -> List[int]:
+    """Chỉ số (tối đa hai) token là tên lệnh khi cobra tìm lệnh con trong `args` (sau `gh`); dừng ở `--`."""
+    out: List[int] = []
+    i = 0
+    while i < len(args) and len(out) < 2:
+        a = args[i]
+        i += 1
+        if a == "--":
+            break
+        if a.startswith("-"):
+            i += "=" not in a and a not in GH_FIND_BOOL_FLAGS and (a.startswith("--") or len(a) == 2)
+        elif a:
+            out.append(i - 1)
+    return out
+
+
+def _gh_pr_sub(args: List[str], sub: str, legacy: bool) -> Optional[List[str]]:
+    """Token tới tay lệnh `gh pr <sub>` (cờ trước lẫn sau tên lệnh, thứ tự gốc — như cobra đưa cho lệnh con) khi `args`
+    gọi lệnh đó; `legacy` = cách đọc cũ đã nhận ra lệnh (giữ chặt: `<sub>` đầu tiên sau `pr`); không thì None."""
+    path = _gh_path(args)
+    if [args[k] for k in path] != ["pr", sub]:
+        if not legacy:
+            return None
+        path = [0, args.index(sub, 1)]
+    return [a for k, a in enumerate(args) if k not in path]
+
+
+def _gh_help_asked(rest: List[str], value_flags: Tuple[str, ...], bools: str) -> bool:
+    """Lệnh con gh gặp cờ trợ giúp thật thì cobra in trợ giúp, không chạy (AUD-HAR-353): `--help`, `-h`, cụm cờ bool
+    ngắn có `h` (`-dh`). Không tính: giá trị của cờ ăn token kế (`-b --help`, `-dc -h` — gh chạy lệnh), `-h=…`,
+    `-test.…` (pflag bỏ qua), sau `--`. `bools` = chữ cờ bool ngắn của lệnh con."""
+    vals = "".join(f[1] for f in value_flags if len(f) == 2)
+    skip = False
+    for a in rest:
+        if skip:
+            skip = False
+        elif a == "--":
+            return False
+        elif a == "--help":
+            return True
+        elif a.startswith("-") and not a.startswith("--"):
+            helped, skip = _gh_short_help(a, bools, vals)
+            if helped:
+                return True
+        else:
+            skip = a in value_flags
+    return False
+
+
+def _gh_short_help(a: str, bools: str, vals: str) -> Tuple[bool, bool]:
+    """(cụm cờ ngắn `a` gọi trợ giúp, ăn token kế) theo pflag: chữ bool đọc lần lượt; `h` (không có `=` liền sau) là trợ
+    giúp; chữ ăn giá trị lấy phần còn lại của cụm, hết cụm thì token kế; ký tự khác dừng (pflag báo lỗi/bỏ qua)."""
+    for k, ch in enumerate(a[1:], 1):
+        if ch == "h" and a[k + 1 : k + 2] != "=":
+            return True, False
+        if ch in vals:
+            return False, k == len(a) - 1
+        if ch not in bools:
+            break
+    return False, False
 
 
 def _gh_ref_delete_rule(args: List[str], cwd: str) -> Tuple[str, str]:
@@ -8264,23 +8375,19 @@ def _gh_api_destroy(args: List[str]) -> bool:
     return method == "PATCH" and (exposes or opaque) and bool(GH_API_REPO_RE.fullmatch(path))
 
 
-def _pr_flag_merge_rule(args: List[str], root: str) -> Tuple[str, str]:
-    """`gh pr <cờ…> merge …` (`gh pr -R o/r merge 7`): bật auto-merge → deny phẳng (ADR-0036 §3); còn lại không tự
-    merge — vẫn kiểm `hard`/review như merge thiếu ghim."""
-    if _gh_auto_flag(args[1:]):
+def _pr_flag_merge_rule(args: List[str], rest: List[str], root: str) -> Tuple[str, str]:
+    """`gh pr <cờ…> merge …` (`gh pr -R o/r merge 7`, `gh -t x pr merge 7`; `rest` = mọi token tới tay `merge`, cả cờ
+    đứng trước nó — AUD-SEC-570): bật auto-merge → deny phẳng (ADR-0036 §3), `--admin`, subject tường minh → deny; còn
+    lại không tự merge — vẫn kiểm `hard`/review như merge thiếu ghim. Repo từ `-R`/`--repo` trước hoặc sau `merge`."""
+    if _gh_auto_flag(args):
         return "deny", AUTO_MERGE_WHY
-    if _gh_admin_flag(args[1:]):
+    if _gh_admin_flag(args):
         return "deny", ADMIN_MERGE_WHY
-    if _merge_subject_flag(args[args.index("merge", 2) + 1 :]):
+    if _merge_subject_flag(rest):
         return "deny", SQUASH_SUBJECT_WHY
-    selector, repo = _pr_flag_merge(args, args.index("merge", 2))
-    return _merge_ask(f"{EXTERNAL_ASK} — `gh pr <cờ> merge` không tự merge", selector, root, repo)
-
-
-def _pr_flag_merge(args: List[str], i: int) -> Tuple[List[str], str]:
-    """(selector, repo) của `gh pr <cờ…> merge <selector> …`: repo từ `-R`/`--repo` trước hoặc sau `merge`."""
     repo = _flag_value(args, "-R") or _flag_value(args, "--repo") or next((a[2:] for a in args if a[:2] == "-R"), "")
-    return _positionals(args[i + 1 :], GH_MERGE_VALUE_FLAGS), repo
+    selector = _positionals(rest, GH_MERGE_VALUE_FLAGS)
+    return _merge_ask(f"{EXTERNAL_ASK} — `gh pr <cờ> merge` không tự merge", selector, root, repo)
 
 
 def _publish_rule(name: str, args: List[str]) -> Tuple[str, str]:

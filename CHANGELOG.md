@@ -46,9 +46,19 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
 - Guard (lý do chạm hàng rào: nợ review #486 AUD-SEC-567): viết tắt MỘT chữ của tuỳ chọn git nguy hiểm được mở như
   viết tắt dài hơn — `git push --m`/`--b`, `git reset --h`, `git clean --f`, `git checkout --f` bị chặn như dạng đầy
   đủ; `--` trần giữ nguyên.
+- Guard (lý do chạm hàng rào: nợ review #487 AUD-SEC-569): bộ đọc tuỳ chọn ghi ref nhận viết tắt MỘT chữ như git —
+  `git update-ref --s` (= `--stdin`) bị chặn `UNRESOLVED_TARGET`, `git replace --c` (= `--convert-graft-file`) bị chặn.
+- Guard (lý do chạm hàng rào: nợ review #487 AUD-SEC-570): lệnh con `gh pr close`/`gh pr merge` tìm như cobra — cờ đứng
+  trước lệnh con ăn token kế (`gh pr -c x close 12 -d`, `gh -c x pr close 12 -d`, `gh pr -t x merge 12`, `gh -b x pr
+  merge 12 --auto`) nên bị xét như cờ đứng sau (`REMOTE_DELETE`, subject, `--auto`, `--admin`).
+- Guard (nợ review #487 AUD-HAR-354): `=` không còn tách cụm cờ không chỉ chữ của `gh pr close` — token gh từ chối hay
+  bỏ qua (`-4=d`, `-test.=d`) tính là có `-d` (chặt hơn).
 
 ### Fixed
 
+- Guard (nợ review #487 AUD-HAR-353): dạng trợ giúp thật không còn bị chặn oan — `gh pr close 12 -d --help`/`-dh`,
+  `git replace -h 2>&1` (`2` của chuyển hướng không còn đọc là đối tượng), `git push -h` ở `main`; `-h`/`--help` là giá
+  trị của cờ khác (`gh pr merge 12 -b --help --auto`, `git push -o -h`) hay sau `--` vẫn bị xét như lệnh thật.
 - `release-sign` đọc khoá `release_signoff` ở nhánh mặc định của bản mirror `origin` vừa clone (cùng lần quét lời từ
   chối) — khoá đã tắt trên remote mà `origin/main` cục bộ chưa fetch không còn cho agent ký (AUD-SEC-552, D-407).
 - Clone mirror của `release-sign` giữ riêng credential helper global của người dùng (`credential.helper`,
