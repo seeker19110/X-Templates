@@ -7064,7 +7064,8 @@ class GuardRemoteRefTest(unittest.TestCase):
         self.assertEqual(parse(["-b"], "b", ()), ({"-b"}, [], []))
         self.assertEqual(parse(["-", "a"], "", ()), (set(), ["-", "a"], []))
         self.assertTrue(self.g._long_match("--force-c", ("--force-create",)))
-        self.assertFalse(self.g._long_match("--f", ("--force-create",)))
+        self.assertTrue(self.g._long_match("--f", ("--force-create",)))  # git nhận viết tắt một chữ (AUD-SEC-569)
+        self.assertFalse(self.g._long_match("--", ("--force-create",)))
         self.assertFalse(self.g._long_match("-f", ("--force-create",)))
 
     def test_guard_remote_ref_build_phase_not_relaxed(self):
@@ -8031,6 +8032,190 @@ class GuardRemoteDeleteTest(unittest.TestCase):
         ):
             with self.subTest(cmd):
                 self.assert_allowed(cmd)
+
+
+class GuardReview487DebtTest(unittest.TestCase):
+    """Nợ review #487 (đo trên git 2.43, gh 2.89): viết tắt tuỳ chọn dài MỘT chữ ở `_long_match` (AUD-SEC-569); cờ đứng
+    TRƯỚC lệnh con gh mà cobra coi là ăn token kế lúc tìm lệnh (`gh pr -c x close`, `gh -t x pr merge` — AUD-SEC-570);
+    dạng trợ giúp (in usage rồi thoát) không bị chặn oan, còn giá trị trông như trợ giúp vẫn bị xét (AUD-HAR-353)."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.g = _guard()
+
+    def setUp(self):
+        clean = {k: v for k, v in os.environ.items() if not re.fullmatch(r"GIT_CONFIG(_\w+)?", k)}
+        self.enterContext(mock.patch.dict(os.environ, {**clean, "XT_GUARD_POLICY": ""}, clear=True))
+        verdict = {"hard": False, "verdict": "wait", "reasons": []}
+        self.enterContext(mock.patch.object(self.g, "merge_check", return_value=verdict))
+        self.feat, self.main = self.repo("feat/me"), self.repo("main")
+
+    def repo(self, branch: str) -> str:
+        path = Path(self.enterContext(tempfile.TemporaryDirectory())).resolve()
+        for args in (("init", "-q", "-b", branch), ("remote", "add", "origin", "https://example.invalid/o.git")):
+            subprocess.run(["git", "-C", str(path), *args], check=True, capture_output=True)
+        return str(path)
+
+    def out(self, cmd: str, d: str = "") -> dict:
+        raw = self.g.bash_decision(cmd, d or self.feat, d or self.feat)
+        return {**self.g.apply_policy(raw), "raw": raw["decision"]}
+
+    def assert_code(self, cmds: tuple[str, ...], code: str, d: str = "") -> None:
+        for cmd in cmds:
+            with self.subTest(cmd):
+                res = self.out(cmd, d)
+                self.assertEqual((res["decision"], res.get("code")), ("deny", code), (cmd, res))
+
+    def assert_allowed(self, cmds: tuple[str, ...], d: str = "") -> None:
+        for cmd in cmds:
+            with self.subTest(cmd):
+                res = self.out(cmd, d)
+                self.assertEqual((res["raw"], res["decision"]), ("", ""), (cmd, res))
+
+    def test_long_match_one_letter(self):  # AUD-SEC-569
+        """git nhận viết tắt duy nhất kể cả một chữ: `update-ref --s` = `--stdin` (ref từ stdin, guard không thấy)."""
+        self.assertTrue(self.g._long_match("--s", ("--stdin",)))
+        self.assertFalse(self.g._long_match("--", ("--stdin",)))  # `--` trần: hết tuỳ chọn, không phải viết tắt
+        self.assertFalse(self.g._long_match("--x", ("--stdin",)))
+        for cmd in ("git update-ref --s < refs.txt", "git update-ref -z --s < refs.txt"):
+            with self.subTest(cmd):
+                res = self.out(cmd)
+                self.assertEqual((res["raw"], res["decision"], res["code"]), ("ask", "deny", "UNRESOLVED_TARGET"))
+        self.assert_code(("git switch --c origin/x",), "REMOTE_REF_FORGE")  # `--c` = `--create` (duy nhất)
+        self.assert_allowed(("git update-ref refs/heads/x HEAD", "git update-ref -- refs/heads/x HEAD"))
+
+    def test_gh_pr_close_lifted_value_flags(self):  # AUD-SEC-570
+        """cobra tìm lệnh con trước khi biết cờ của nó: `-x`/`--tên` không `=` (trừ `--help`) ăn token kế ở MỌI mức
+        (`gh pr -c x close`, `gh -c x pr close`); mọi token còn lại tới tay `close`."""
+        self.assert_code(
+            (
+                "gh pr -c x close 12 -d",
+                "gh pr --comment x close 12 --delete-branch",
+                "gh pr -c x -R o/r close 12 -d",
+                "gh pr -d x close -d",  # `-d` trước `close` ăn `x` lúc tìm; `close` đọc `-d` là xoá, `x` là nhánh
+                "gh -c x pr close 12 -d",
+                "gh --comment x pr close 12 -d",
+                "gh -R o/r -c x pr close 12 -dc y",
+                "bash -c 'gh pr --comment x close 12 -d'",
+                "gh pr -c close 12 -d",  # cobra: `-c` ăn `close` (gh báo lỗi) — cách đọc cũ vẫn chặn, giữ chặt
+            ),
+            "REMOTE_DELETE",
+        )
+        self.assert_allowed(
+            (
+                "gh pr -c x close 12",
+                "gh pr -c x close 12 -c -d",  # `-c` của close ăn `-d`: bình luận
+                "gh pr -dc x close 12 -d",  # `-dc` (3 ký tự) không ăn token kế: `x` không phải lệnh con — gh báo lỗi
+                "gh -- pr close 12 -d",  # `--` hết cờ: cobra không tìm lệnh con
+            )
+        )
+        path = self.g._gh_path
+        self.assertEqual(path(["pr", "-c", "x", "close", "12"]), [0, 3])
+        self.assertEqual(path(["--help", "pr", "--comment=x", "close"]), [1, 3])  # `--help` bool, `=` không ăn
+        self.assertEqual(path(["", "pr", "-", "close"]), [1, 3])  # token rỗng, `-` trần bỏ qua như cobra
+        self.assertEqual(path(["pr", "--", "close"]), [0])
+
+    def test_gh_pr_merge_lifted_value_flags(self):  # AUD-SEC-570 — cùng cơ chế ở `gh pr merge`
+        """Cờ trước `merge` (`--subject`, `-t`, `--auto`, `--admin`) tới tay `merge` như cờ sau nó."""
+        self.assert_code(
+            (
+                "gh pr -b x -t y merge 12 --auto",
+                "gh -b x pr merge 12 --auto",
+                "gh pr merge 12 -b --help --auto",  # `--help` là thân của `-b`: gh chạy merge (đo: lỗi git, không help)
+            ),
+            "AUTO_MERGE_ENABLE",
+        )
+        self.assert_code(("gh pr -b x -t y merge 12 --admin",), "MERGE_ADMIN")
+        for cmd in (
+            "gh pr --subject x merge 12",
+            "gh pr -t x merge 12",
+            "gh pr -b x -t y merge 12",
+            "gh -t x pr merge 12",
+            "gh pr merge 12 -t --help",
+        ):
+            with self.subTest(cmd):
+                res = self.out(cmd)
+                self.assertEqual(res["raw"], "deny", (cmd, res))
+                self.assertIn("squash_merge_commit_title: PR_TITLE", str(res["reason"]), cmd)
+        for cmd in ("gh pr -b x -F f merge 12", "gh pr -R o/r -b x merge 12", "gh --body x pr merge 12"):
+            with self.subTest(cmd):
+                self.assertEqual(self.out(cmd)["raw"], "ask", cmd)  # qua merge-check như merge thiếu ghim
+
+    def test_help_forms_allowed(self):  # AUD-HAR-353
+        """Cờ trợ giúp thật: gh/git in usage rồi thoát, không chạy hành động. Giá trị của cờ khác, sau `--`, `-h=…`,
+        `-test.…` (pflag bỏ qua) không phải trợ giúp — vẫn bị xét."""
+        self.assert_allowed(
+            (
+                "gh pr close 12 -d --help",
+                "gh pr close 12 -dh",
+                "gh pr close 12 -d -h",
+                "gh pr --help close 12 -d",
+                "gh pr -c x close 12 -dhc y",
+                "git replace -h 2>&1",
+                "git replace 2>&1",
+                "git replace -l 2>/dev/null",
+                "gh pr merge 12 --auto --help",
+            )
+        )
+        self.assert_allowed(("git push -h", "git push --help", "git push origin main -h", "git push -qh"), self.main)
+        self.assert_code(
+            (
+                "gh pr close 12 -c --help -d",
+                "gh pr close 12 -c -h -d",
+                "gh pr close 12 -dc -h",  # cụm kết thúc ở chữ ăn giá trị: `-h` là bình luận
+                "gh pr close 12 -dR -h",
+                "gh pr close 12 -d --comment --help",
+                "gh pr close -d -- --help",
+                "gh pr close 12 -d -h=false",
+                "gh pr close 12 -d -test.h",
+            ),
+            "REMOTE_DELETE",
+        )
+        self.assert_code(("git push --repo -h", "git push -o -h", "git push origin -- main -h"), "PUSH_MAIN", self.main)
+        self.assert_code(("git push --recu -h origin main",), "PUSH_MAIN", self.main)  # viết tắt ăn giá trị
+        self.assert_code(
+            (
+                "git replace -f origin/main HEAD 2>&1",
+                "git replace origin/main HEAD 2>/dev/null",
+                "git replace --graft origin/main 2>&1",
+                "git replace -f '>' HEAD",  # `>` là tên ref hợp lệ: chữ trong nháy không phải chuyển hướng
+                "git replace -h -f origin/main HEAD 2>&1",
+                "git replace $(cat pair.txt) 2>&1",  # `$(…)` tách thành bao nhiêu từ: không biết — xét như có ghi
+                "git replace $PAIR",
+            ),
+            "REMOTE_REF_FORGE",
+        )
+
+    def test_replace_numeric_arg_before_redirect(self):  # AUD-SEC-572
+        """Token chữ số đứng trước chuyển hướng có thể là ĐỐI SỐ (`1234 >/dev/null` — SHA tiền tố toàn chữ số, nhánh
+        tên `2`), không chỉ fd (`2>&1`): shlex không phân biệt có dấu cách hay không. Cách đọc bỏ toán tử + đích nhưng
+        giữ chữ số được hợp với hai cách cũ — bất kỳ cách nào ghi thì chặn (git 2.43: `git replace -f HEAD~1 8714
+        >/dev/null` exit 0, ghi refs/replace)."""
+        self.assert_code(
+            (
+                "git replace -f origin/main 1234 >/dev/null",
+                "git replace -f origin/main 1234 >/dev/null 2>&1",
+                "git replace -f origin/main 1234 </dev/null",
+                "git replace -f origin/main 2026 >&2",
+                "git replace origin/main 2 >&1",
+                "git replace origin/main HEAD 2>&1",
+                "git replace 1234 5678 >/dev/null 2>&1",
+                "git replace 2>/dev/null 3>/dev/null",  # có thể là `git replace 2 3` (nhánh tên số)
+                "git replace --edit 2>&1",
+            ),
+            "REMOTE_REF_FORGE",
+        )
+        self.assert_allowed(("git replace -h 2>&1", "git replace 2>&1", "git replace -l 2>/dev/null"))
+        self.assertEqual(self.g._drop_redirect_ops(["a", "1", ">", "f", "2", ">&", "1"]), ["a", "1", "2"])
+
+    def test_close_short_eq_strict(self):  # AUD-HAR-354
+        """`=` không còn tách cụm không chỉ chữ: token gh từ chối/bỏ qua (`-4=d`, `-test.=d`) tính là có `-d` — chặt hơn."""
+        for a in ("-4=d", "-test.=d", "-d=false", "-dRo/r"):
+            with self.subTest(a):
+                self.assertTrue(self.g._gh_close_short_deletes(a))
+        for a in ("-c=-d", "-Ro/r-d", "-c.d", "-4c=d"):
+            with self.subTest(a):
+                self.assertFalse(self.g._gh_close_short_deletes(a))
 
 
 class GuardAppendParallelTest(unittest.TestCase):
