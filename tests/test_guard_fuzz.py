@@ -229,6 +229,10 @@ CWD_RELATIVE: Dict[str, str] = {
     },
     "guard-sec188-pr-create-combined-title": "`ai_attribution: forbid` ở xt.yaml của repo ca; /tmp không khai",
     "guard-sec188-pr-create-combined-body": "`ai_attribution: forbid` ở xt.yaml của repo ca; /tmp không khai",
+    **{
+        f"aud578-{k}": "`ai_attribution: forbid` ở xt.yaml của repo ca; /tmp không khai (AUD-SEC-578)"
+        for k in ("body-before-create-attribution", "repo-before-pr-attribution", "heredoc-title-before-create")
+    },
     # T-3673 (AUD-SEC-468…477): đích tương đối của ca (thư mục canh, Git dir `gd`) → dưới /tmp sau `cd /tmp`
     **{
         f"t3673-{k}": f"{v} tương đối → /tmp/{v} sau cd /tmp ({ref})"

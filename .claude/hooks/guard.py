@@ -3991,8 +3991,15 @@ def _gh_cmd_why(raw: List[str], moved: bool, line: _GhLine, up: List[List[str]])
         n, wrapped = n[n.index("gh") :], True
     if len(n) < 2:
         return ""
+    readings = [[n[0], *r] for r in _gh_readings(n[1:])]  # D-409: mọi cách đọc, cách nào có lý do thì chặn
     if n[0] != "gh":
-        return "tên `gh` dựng lúc chạy (AUD-SEC-192)" if GH_DYN_RE.search(n[0]) and n[1] in GH_TOPICS else ""
+        dyn = GH_DYN_RE.search(n[0]) and any(r[1] in GH_TOPICS for r in readings)
+        return "tên `gh` dựng lúc chạy (AUD-SEC-192)" if dyn else ""
+    return next((why for r in readings for why in [_gh_reading_why(r, moved, line, up, wrapped)] if why), "")
+
+
+def _gh_reading_why(n: List[str], moved: bool, line: _GhLine, up: List[List[str]], wrapped: bool) -> str:
+    """Lý do chặn của một cách đọc `n` (`gh …`, ≥ 2 token) ở lớp đăng review (ADR-0063)."""
     kind = _gh_kind(n, line)
     if kind == "deny":
         return "`gh alias`/`extension`/lệnh con lạ — có thể đăng thân guard không thấy (AUD-SEC-193)"
@@ -6246,9 +6253,12 @@ REST_MERGE_PATH_RE = re.compile(r"repos/\{owner\}/\{repo\}/pulls/(\d+)/merge")
 MERGE_METHODS = {"squash", "merge", "rebase"}
 # `gh api` ghi (khác GET; `-f`/`-F`/`--input` ngầm là POST) = hành động đối ngoại, kể cả merge qua REST (AUD-SEC-020).
 GH_API_FIELD_FLAGS = ("-f", "-F", "--field", "--raw-field", "--input")
+# `-R/--repo`: gh 2.89 `api` không nhận (báo lỗi, không gửi), nhưng `gh -R o/r api …` (cobra nhấc `api`) bị `_gh_lift_repo`
+# dời ra sau — đọc như cờ ăn giá trị để endpoint không lẫn với repo (đường chặt, D-409).
 GH_API_VALUE_FLAGS: Tuple[str, ...] = (
     *GH_API_FIELD_FLAGS,
     *("-X", "--method", "-H", "--header", "-q", "--jq", "-t", "--template", "-p", "--preview", "--cache", "--hostname"),
+    *("-R", "--repo"),
 )
 
 
@@ -7044,11 +7054,15 @@ REVIEW_MARK_RE = re.compile(
     r"<!--\s*xt-review\s+v1\s+head=(?:[0-9a-f]{40}|[$`%][^>]{0,200}?)\s+verdict=(?:clean|blocking|inconclusive|debt|[$`%])"
 )
 # `gh api` chỉ khi GHI (cờ trường/`--input`/phương thức ghi) — `gh api … --jq` đọc comment không bị chặn (review #159).
+GH_API_WRITE_TEXT = r"(?:\s-[fF]|\s--(?:field|raw-field|input)\b|\s(?:-X\s*|--method[=\s]+)(?:POST|PATCH|PUT)\b)"
 GH_POST_RE = re.compile(
-    # cờ toàn cục giữa nhóm và lệnh con (`gh pr -R o/r comment`), cờ trường dính (`-fbody=…`), `close/reopen -c` —
-    # AUD-SEC-193; tên cờ `-{1,2}\w[\w-]*` khớp một cách duy nhất (`[\w-]+` sau `-{1,2}` là ReDoS 2^n — review lát C)
-    r"\bgh\b.*?\b(?:(?:pr|issue)(?:\s+-{1,2}\w[\w-]*(?:[=\s]+[^\s-]\S*)?)*\s+(?:comment|review|create|edit|close|reopen)\b"
-    r"|api\b.*?(?:\s-[fF]|\s--(?:field|raw-field|input)\b|\s(?:-X\s*|--method[=\s]+)(?:POST|PATCH|PUT)\b))",
+    # Chữ thô (lọc nhanh; argv đọc qua `_gh_readings`): cờ ở BẤT KỲ đâu giữa `gh`, nhóm và lệnh con — kể cả giá trị nhiều
+    # từ (`gh pr --body 'a b' comment`) và cờ ghi đứng trước `api` (`gh -F k=@f api …`, cobra nhấc lệnh con — AUD-SEC-575,
+    # D-409); cờ trường dính (`-fbody=…`), `close/reopen -c` — AUD-SEC-193. Tuyến tính (review lát C: ReDoS): chỉ thử từ
+    # đầu chữ (`\A`), nhóm nguyên tử `(?>…)` chốt lần gặp ĐẦU của `gh` rồi của nhóm/`api`/cờ ghi — có bộ ba theo thứ tự
+    # ở đâu đó thì bộ ba bắt đầu từ các lần gặp đầu cũng khớp (không giới hạn đoạn, `re.S`), nên không mất ca nào.
+    rf"\A(?>.*?\bgh\b)(?:(?>.*?\b(?:pr|issue)\b).*?\s(?:comment|review|create|edit|close|reopen)\b"
+    rf"|(?>.*?\bapi\b).*?{GH_API_WRITE_TEXT}|(?>.*?{GH_API_WRITE_TEXT}).*?\bapi\b)",
     re.S,
 )
 GH_TEXT_NOISE_RE = re.compile(r"['\"\\]")
@@ -7417,10 +7431,7 @@ def xt_inproc_asks(cmd: str, tokens: List[str], cwd: Optional[str]) -> List[str]
 def _forges_review(argv: List[str]) -> bool:
     """Lệnh `gh` đăng/sửa comment, review, thân PR/issue (hoặc `gh api`) mang dấu review — chỉ argv của lệnh thật,
     không phải chữ trong heredoc/chuỗi của lệnh khác (script sửa tài liệu nhắc tới dấu)."""
-    n = normalize(argv)
-    return (
-        bool(n) and n[0] == "gh" and bool(GH_POST_RE.search(" ".join(n))) and bool(REVIEW_MARK_RE.search(" ".join(n)))
-    )
+    return _gh_posts(argv) and bool(REVIEW_MARK_RE.search(" ".join(normalize(argv))))
 
 
 REVIEW_BODY_FILES_MAX = 8  # số nguồn thân tối đa mỗi lệnh `gh` đăng chữ — vượt thì coi như không đọc được
@@ -7832,8 +7843,9 @@ def _gh_files(argv: List[str]) -> List[str]:
     """File cờ của `gh` đăng chữ trong argv — cả khi bị bọc (`xargs -I{} gh …`, `find … -exec gh … {} ;`, `parallel gh
     …`); giá trị là chuỗi thay chỗ lệnh bọc điền lúc chạy (`{}`, `-I R`) → nguồn mờ (AUD-SEC-179)."""
     k = next((i for i, t in enumerate(argv) if posixpath.basename(t) == "gh"), len(argv))
-    args = normalize(argv[k:])[1:]
-    files = _gh_api_files(args) if args[:1] == ["api"] else _gh_flag_files(args, split_at=False)
+    readings = _gh_readings(normalize(argv[k:])[1:])  # mọi cách đọc (D-409): `gh -F k=@f api …` đọc `f`
+    found = [f for r in readings for f in (_gh_api_files(r) if r[:1] == ["api"] else _gh_flag_files(r, split_at=False))]
+    files = list(dict.fromkeys(found))
     ph = _placeholders(argv, any(posixpath.basename(t) in STDIN_FEEDERS for t in argv))
     return ["$" if PARALLEL_REPLACE_RE.search(f) or any(p in f for p in ph) else f for f in files]
 
@@ -7977,9 +7989,9 @@ def _review_forge_hit(cmd: str, tokens: List[str], cwd: Optional[str], budget: O
 
 
 def _gh_posts(argv: List[str]) -> bool:
-    """`gh` đăng/sửa comment, review, thân PR/issue, hay `gh api` ghi."""
+    """`gh` đăng/sửa comment, review, thân PR/issue, hay `gh api` ghi — ở một cách đọc bất kỳ (`_gh_readings`, D-409)."""
     n = normalize(argv)
-    return bool(n) and n[0] == "gh" and bool(GH_POST_RE.search(" ".join(n)))
+    return n[:1] == ["gh"] and any(GH_POST_RE.search(" ".join(["gh", *r])) for r in _gh_readings(n[1:]))
 
 
 def _strings(value: object) -> Iterator[str]:
@@ -8213,23 +8225,35 @@ def _external_rule(name: str, args: List[str], root: str, cwd: Optional[str] = N
     return verdict if verdict[0] else egress_rule(name, args, root)
 
 
-# Bảng nhóm lệnh gh tối thiểu (AUD-SEC-571, D-408) — dựng từ các luật gh hiện có (`GH_ASK`, `GH_DESTROY`, merge/close,
-# `alias import`): nhóm có lệnh con thì dời hai tên lên đầu, lá (`api`) dời một tên (token sau là đối số của nó).
-# Lệnh không trong bảng giữ cách đọc cũ (không nới).
-GH_GROUPS = frozenset({"pr", "repo", "workflow", "variable", "release", "secret", "alias"})
-GH_LEAVES = frozenset({"api"})
+# Nhóm lệnh gh có lệnh con (gh 2.89 `gh --help`, cả tên gọi khác `ext`/`cs`/`at`/`rs`/`agent…`) — CHỈ để biết có dời
+# tên thứ hai không (D-409). Tên đầu không cần bảng: cobra tìm nó như nhau cho lệnh dựng sẵn, alias, extension, lệnh lạ.
+GH_GROUPS = frozenset(
+    {
+        *("agent-task", "agent-tasks", "agent", "agents", "alias", "attestation", "at", "auth", "cache", "codespace"),
+        *("cs", "config", "extension", "extensions", "ext", "gist", "gpg-key", "issue", "label", "org", "pr"),
+        *("preview", "project", "release", "repo", "ruleset", "rs", "run", "search", "secret", "ssh-key", "variable"),
+        "workflow",
+    }
+)
 
 
 def _gh_canonical(args: List[str]) -> List[str]:
     """Dạng cobra chạy (`args` sau `gh`): tên lệnh (`_gh_path`) lên đầu, mọi token khác giữ thứ tự gốc như cobra đưa
     cho lệnh lá (`gh -X DELETE api r` → `api -X DELETE r`, `gh repo --visibility public edit` → `repo edit
-    --visibility public`). Tên đầu không trong bảng → `args` nguyên."""
+    --visibility public`, `gh --help=false x` → `x --help=false`). Tên đầu là nhóm (`GH_GROUPS`) thì dời cả tên thứ
+    hai; tên khác (lá `api`, alias, extension, lệnh lạ) dời một tên — token sau là đối số của nó."""
     path = _gh_path(args)
-    head = args[path[0]] if path else ""
-    if head not in GH_GROUPS | GH_LEAVES:
+    if not path:
         return args
-    path = path[:1] if head in GH_LEAVES else path
+    path = path if args[path[0]] in GH_GROUPS else path[:1]
     return [args[k] for k in path] + [a for k, a in enumerate(args) if k not in path]
+
+
+def _gh_readings(args: List[str]) -> List[List[str]]:
+    """ĐIỂM VÀO DUY NHẤT của mọi luật đọc lệnh gh (`args` sau `gh`; D-409): nguyên văn, rồi dạng cobra chạy khi khác
+    (cờ đứng trước lệnh con — AUD-SEC-571/575/577/578/579). Luật xét MỌI cách đọc, cách chặt hơn thắng."""
+    canon = _gh_canonical(args)
+    return [args] if canon == args else [args, canon]
 
 
 def _gh_rank(v: Tuple[str, str]) -> Tuple[int, bool]:
@@ -8238,15 +8262,10 @@ def _gh_rank(v: Tuple[str, str]) -> Tuple[int, bool]:
 
 
 def _gh_rule(args: List[str], root: str, cwd: str) -> Tuple[str, str]:
-    """Mọi luật của `gh` (`args` sau `gh`, cờ repo đầu đã dời ra sau) đọc hai cách: nguyên văn và dạng cobra chạy khi cờ
-    ăn giá trị đứng trước lệnh con (`gh --method DELETE api repos/o/r`, `gh repo --visibility public edit` —
-    AUD-SEC-571, D-408); cách nào chặt hơn thắng (hoà → nguyên văn)."""
-    canon = _gh_canonical(args)
-    verdict = _gh_reading(args, root, cwd)
-    if canon == args:
-        return verdict
-    lifted = _gh_reading(canon, root, cwd)
-    return lifted if _gh_rank(lifted) > _gh_rank(verdict) else verdict
+    """Mọi luật của `gh` (`args` sau `gh`, cờ repo đầu đã dời ra sau) đọc mọi cách của `_gh_readings` (`gh --method
+    DELETE api repos/o/r`, `gh repo --visibility public edit` — AUD-SEC-571, D-408/D-409); cách nào chặt hơn thắng
+    (hoà → nguyên văn: `max` giữ phần tử lớn nhất đầu tiên)."""
+    return max((_gh_reading(r, root, cwd) for r in _gh_readings(args)), key=_gh_rank)
 
 
 def _gh_reading(args: List[str], root: str, cwd: str) -> Tuple[str, str]:
@@ -8466,6 +8485,16 @@ def _pr_flag_merge_rule(args: List[str], rest: List[str], root: str) -> Tuple[st
     return _merge_ask(f"{EXTERNAL_ASK} — `gh pr <cờ> merge` không tự merge", selector, root, repo)
 
 
+def _gh_publish(args: List[str]) -> Tuple[str, str]:
+    """Bảng đối ngoại/huỷ của một cách đọc `gh` (`GH_ASK`, `GH_DESTROY`, `repo edit --visibility|--default-branch`)."""
+    hit = tuple(args[:1]) in GH_ASK or tuple(args[:2]) in GH_ASK
+    destroy = tuple(args[:1]) in GH_DESTROY or tuple(args[:2]) in GH_DESTROY
+    destroy = destroy or (
+        args[:2] == ["repo", "edit"] and any(a.startswith(("--visibility", "--default-branch")) for a in args)
+    )
+    return ("ask", DESTROY_ASK if destroy else EXTERNAL_ASK) if hit else ("", "")
+
+
 def _publish_rule(name: str, args: List[str]) -> Tuple[str, str]:
     """publish/deploy/push ra ngoài → ask; nhận cả `python -m <mô-đun>` và trình chạy gói (`npx wrangler deploy`)."""
     if name in INTERPRETERS and args[:1] == ["-m"] and len(args) > 1:
@@ -8475,13 +8504,8 @@ def _publish_rule(name: str, args: List[str]) -> Tuple[str, str]:
         name, args = posixpath.basename([name, *args][idx]), [name, *args][idx + 1 :]
     if set(args) and set(args) <= INFO_ONLY:
         return "", ""
-    if name == "gh":
-        hit = tuple(args[:1]) in GH_ASK or tuple(args[:2]) in GH_ASK
-        destroy = tuple(args[:1]) in GH_DESTROY or tuple(args[:2]) in GH_DESTROY
-        destroy = destroy or (
-            args[:2] == ["repo", "edit"] and any(a.startswith(("--visibility", "--default-branch")) for a in args)
-        )
-        return ("ask", DESTROY_ASK if destroy else EXTERNAL_ASK) if hit else ("", "")
+    if name == "gh":  # cả `gh` sau trình chạy gói: mọi cách đọc (D-409)
+        return max((_gh_publish(r) for r in _gh_readings(args)), key=_gh_rank)
     if name not in ASK_CMDS:
         return "", ""
     subs = ASK_CMDS[name]
@@ -11051,8 +11075,13 @@ def _xt_yaml_for(d: str) -> str:
     return ""
 
 
-# `gh pr create|edit|merge` (D-057): tiêu đề/thân PR và tiêu đề/thân commit squash (`merge --subject/--body`).
-GH_PR_TEXT_RE = re.compile(r"(?<![\w-])gh\s+pr(?:\s+(?:-R|--repo)(?:\s+|=)\S+)?\s+(?:create|new|edit|merge)\b")
+# `gh pr create|edit|merge` (D-057): tiêu đề/thân PR và tiêu đề/thân commit squash (`merge --subject/--body`). Chữ thô
+# (cửa sổ heredoc, lọc nhanh; argv đọc qua `_gh_pr_readings`): cờ bất kỳ giữa `gh`, `pr` và lệnh con trong cùng lệnh đơn
+# (`gh -R o/r pr --title x create` — AUD-SEC-578, D-409). Tuyến tính: chỉ thử ở đầu chữ/đầu đoạn (sau `\n;&|`), nhóm
+# nguyên tử chốt `gh` ĐẦU của đoạn rồi `pr` đầu sau nó — `gh` sau trong cùng đoạn không khớp được nếu `gh` đầu trượt.
+GH_PR_TEXT_RE = re.compile(
+    r"(?:\A|[\n;&|])(?>[^\n;&|]*?(?<![\w-])gh\s)(?>[^\n;&|]*?(?<!\S)pr\s)(?>[^\n;&|]*?(?<!\S)(?:create|new|edit|merge)\b)"
+)
 GH_PR_TEXT_OPTS = {"-t": "m", "--title": "m", "--subject": "m", "-b": "m", "--body": "m", "-F": "F", "--body-file": "F"}
 # cờ bool ngắn đứng trước `-t/-b/-F` gộp kiểu pflag: `create -dt x`, `-fdbX`, `-et x` (`--editor`), `merge -sdb x`
 # (AUD-SEC-188)
@@ -11119,8 +11148,14 @@ def _attribution_target(
     n = normalize(argv)
     if n[:2] == ["git", "commit"]:
         return _git_dir(argv, here) or root, _commit_msg_args(n[2:]), "commit"
-    pairs = _gh_pr_text_args(n[2:]) if n[:2] == ["gh", "pr"] else None
-    return (here or root, pairs, "pr") if pairs is not None else None
+    found = [p for r in _gh_pr_readings(n) for p in [_gh_pr_text_args(r)] if p is not None]
+    return (here or root, [x for p in found for x in p], "pr") if found else None
+
+
+def _gh_pr_readings(n: List[str]) -> List[List[str]]:
+    """Phần sau `pr` của mọi cách đọc `gh pr …` (`_gh_readings`, D-409 — `gh -R o/r pr create`, `gh pr --title x
+    create`: AUD-SEC-578) của argv đã chuẩn hoá `n`; không phải `gh pr` → []."""
+    return [r[1:] for r in _gh_readings(n[1:]) if r[:1] == ["pr"]] if n[:1] == ["gh"] else []
 
 
 def ai_attribution(cmd: str, commands: List[Tuple[List[str], Optional[str]]], root: str) -> str:
@@ -11338,9 +11373,8 @@ def title_rule(cmd: str, commands: List[Tuple[List[str], Optional[str]]], root: 
         gdir, _, kind = target
         n = normalize(argv)
         if kind == "pr":
-            bad = next(
-                ((t, p) for t in _gh_pr_titles(n[2:]) if not _opaque(t) for p in [pr_title_problem(t)] if p), None
-            )
+            titles = [t for r in _gh_pr_readings(n) for t in _gh_pr_titles(r)]  # mọi cách đọc (D-409)
+            bad = next(((t, p) for t in titles if not _opaque(t) for p in [pr_title_problem(t)] if p), None)
             if bad:
                 return f"Tiêu đề PR bị khung chặn ({bad[1]}: {bad[0][:100]!r} — LOOP-HARNESS-029, D-056): {TITLE_FIX}."
             continue
@@ -14928,8 +14962,14 @@ def _gh_flag_files(args: List[str], split_at: bool = True) -> List[str]:
 
 
 def _gh_upload_files(args: List[str]) -> List[str]:
-    """File `gh` đăng lên GitHub: `gh gist create|edit` (không file hoặc `-` = stdin), `gh release upload|create`
-    (bỏ hậu tố `#nhãn` của tài sản — review PR #182), `gh api -F k=@f`/`--input f`, cờ đọc file (`_gh_flag_files`)."""
+    """File `gh` đăng lên GitHub ở mọi cách đọc (`_gh_readings` — `gh --input .env -X POST api …`: AUD-SEC-579, D-409)."""
+    return list(dict.fromkeys(f for r in _gh_readings(args) for f in _gh_reading_uploads(r)))
+
+
+def _gh_reading_uploads(args: List[str]) -> List[str]:
+    """File một cách đọc `gh` đăng lên GitHub: `gh gist create|edit` (không file hoặc `-` = stdin), `gh release
+    upload|create` (bỏ hậu tố `#nhãn` của tài sản — review PR #182), `gh api -F k=@f`/`--input f`, cờ đọc file
+    (`_gh_flag_files`)."""
     head = tuple(_positionals(args, GH_UPLOAD_VALUE_OPTS)[:2])
     if head[:1] == ("api",):
         return _gh_api_files(args)
@@ -15357,7 +15397,7 @@ def _bash_decision(
     deny_reason = deny_reason or find_root_scan(cmd, root, cwd) or _commit_after_write(commands)
     deny_reason = deny_reason or (
         ai_attribution(cmd, every, root) or title_rule(cmd, every, root)
-        if res["commit"] or GH_PR_TEXT_RE.search(cmd)
+        if res["commit"] or GH_PR_TEXT_RE.search(cmd) or any(_gh_pr_readings(normalize(a)) for a, _ in every)
         else ""
     )
     if deny_reason:
@@ -15549,8 +15589,10 @@ def permission_output(out: Dict[str, object]) -> str:
     )
 
 
-# Lệnh merge/ghi GitHub: guard lỗi giữa chừng với lệnh này thì hỏi thay vì cho qua (fail-closed cho merge).
-MERGE_CMD_RE = re.compile(r"\bgh\s+(pr\b.*\bmerge|api)\b", re.S)
+# Lệnh merge/ghi GitHub: guard lỗi giữa chừng với lệnh này thì hỏi thay vì cho qua (fail-closed cho merge). Cờ bất kỳ
+# trước `pr`/`api` (`gh -R o/r pr merge`, `gh -X PUT api …` — D-409). Tuyến tính như `GH_POST_RE`: thử từ đầu chữ, nhóm
+# nguyên tử chốt `gh` đầu rồi `pr`/`api` đầu sau nó.
+MERGE_CMD_RE = re.compile(r"\A(?>.*?\bgh\s)(?:(?>.*?\bpr\b).*?\bmerge\b|(?>.*?\bapi\b))", re.S)
 
 
 def _failure_decision(mode: str, payload: object, cmd: object) -> Dict[str, object]:
