@@ -505,6 +505,14 @@
     "AUD-CODE-049",
     "AUD-SEC-503"
    ]
+  },
+  {
+   "reason": "Điều kiện ký của `xt.py release-sign` và đánh giá `promotion` (ADR-0074) đọc GO-NO-GO trên cây và trên ref nhánh chính, sổ `.autopilot/`, khoá `release_signoff` — không thuộc nhóm ca PR/rollup/review/guard; đỡ bằng Gate unittest tests.test_release_signoff (AUD-SEC-542: ReleaseSignRealCheckTest.test_rejected_in_tree_not_overridden, test_refusal_kept_on_main_after_tree_delete, ReleaseSignTest.test_refuses_when_promotion_rejected, test_main_ref_unreadable_fails_closed; AUD-SEC-543: test_promotion_counts_agent_row_only_with_key; AUD-HAR-339: test_unchecked_must_blocks_sign)",
+   "ids": [
+    "AUD-HAR-339",
+    "AUD-SEC-542",
+    "AUD-SEC-543"
+   ]
   }
  ]
 }
