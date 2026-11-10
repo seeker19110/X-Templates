@@ -1437,6 +1437,7 @@ class ReasonCodeLockTest(unittest.TestCase):
         ("UNRESOLVED_TARGET", "parallel --arg-s ,, echo ,, a b"),
         ("UNRESOLVED_TARGET", "ls | xargs chmod 000"),
         ("BUDGET", "echo " + "a" * guard.CMD_MAX_CHARS),  # vượt ngân sách quét (mẫu ở EXAMPLES là lớp tập con)
+        ("BUDGET", "gh pr merge$Z 5"),  # tên lệnh/tên cờ gh có mở rộng (AUD-SEC-587)
     )
 
     def test_every_marker_blocks_a_real_command(self):

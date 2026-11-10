@@ -395,3 +395,17 @@
 - Chọn: Một điểm vào duy nhất: mọi luật đọc lệnh gh nhận dạng chuẩn hoá cobra (đường lệnh con theo cobra stripFlags, KHÔNG phụ thuộc bảng nhóm khi xác định token đầu — để alias/extension/lệnh lạ cũng được nhận đúng) và dạng nguyên văn; quyết định chặt hơn thắng; thay D-408 ở phạm vi (D-408 chỉ áp trong _gh_rule)
 - Lý do (tiêu chí chất lượng cuối): (1) đúng và an toàn: đã vá từng luật hai lần (570, 571) và vẫn sót ba lớp — một điểm vào đóng cả lớp kể cả luật thêm sau; đọc hai cách giữ chiều chặt; (3) một hàm, test bằng corpus đối chiếu dạng cờ-trước-lệnh-con với dạng chuẩn cho MỌI ca gh đang có
 - Đường lùi: Revert PR sửa
+
+### D-410 · 2026-11-10T06:37:59+00:00 · Review #491: phần gỡ chặn oan REVIEW_FORGE (AUD-HAR-364: GH_POST_ARGV_RE, _gh_wrapped điều kiện dương) nới hai đường giả dấu review mà main chặn (lệnh con dính mở rộng rỗng gh pr comment$Z; lệnh trong tham số sh -c và giá trị TÊN=… như GIT_EDITOR). Xử lý thế nào?
+
+- Phương án: (1) Rút phần AUD-HAR-364 khỏi #491, khôi phục hành vi main cho lọc dấu review, thêm test ghim mọi dạng giả dấu reviewer tìm ra (deny REVIEW_FORGE); AUD-HAR-364 về mở, làm lại ở PR riêng với thiết kế chặt · (2) Vá ngay trong #491 (đuôi regex nhận $/backtick, quay về phép thử chữ ghép khi có token động, đọc giá trị TÊN=… như chữ shell)
+- Chọn: Rút phần AUD-HAR-364 khỏi #491, khôi phục hành vi main cho lọc dấu review, thêm test ghim mọi dạng giả dấu reviewer tìm ra (deny REVIEW_FORGE); AUD-HAR-364 về mở, làm lại ở PR riêng với thiết kế chặt
+- Lý do (tiêu chí chất lượng cuối): (1) đúng và an toàn: REVIEW_FORGE là luật 🔴; gỡ một chặn oan 🟢 không đáng đổi bằng hai đường giả dấu — rút về main là chắc chắn không nới; vá tại chỗ là thiết kế mới chưa được review; (2) đường lùi: PR riêng cho AUD-HAR-364; (3) test ghim giữ chiều chặt cho lần sau
+- Đường lùi: Khôi phục phần AUD-HAR-364 ở PR riêng sau review
+
+### D-411 · 2026-11-10T07:46:13+00:00 · AUD-SEC-587 (tên lệnh/cờ gh có mở rộng): ở XT_GUARD_POLICY=strict trả ask/BUDGET hay raise ScanTooComplex (chặn ở mọi chính sách như lớp A ADR-0065)?
+
+- Phương án: (1) ask/BUDGET: mặc định chặn, strict hỏi người; lệnh có dấu review giữ mã REVIEW_FORGE · (2) ScanTooComplex: chặn ở mọi chính sách; ca REVIEW_FORGE đổi thành BUDGET
+- Chọn: ask/BUDGET: mặc định chặn, strict hỏi người; lệnh có dấu review giữ mã REVIEW_FORGE
+- Lý do (tiêu chí chất lượng cuối): (1) an toàn: không có đường cho qua — mặc định chặn, strict là chế độ người duyệt từng lệnh nên hỏi là đúng ngữ nghĩa strict; (3) giữ mã REVIEW_FORGE chính xác hơn cho lệnh giả dấu, test ghim D-410 không phải đổi
+- Đường lùi: Đổi _gh_dyn_name sang raise ScanTooComplex
