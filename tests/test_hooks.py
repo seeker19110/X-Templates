@@ -3571,13 +3571,14 @@ class GuardDeltaAuditTest(unittest.TestCase):
         for cmd in (
             "gh api repos/{owner}/{repo}/rulesets --input f.json",
             "gh api repos/o/r/merges --input b.json",
-            "gh api --input=b.json repos/o/r/git/refs",
             "gh api repos/o/r/releases --input -",
             "gh api -X PUT repos/{owner}/{repo}/pulls/5/merge -f sha=abc --input b.json",
             "gh repo set-default evil/repo",
         ):
             with self.subTest(cmd):
                 self.assertEqual(self.dec(cmd), "ask")
+        # ghi ref với thân `--input` guard không đọc tại chỗ: có thể mang `force` → chặn như push --force (AUD-SEC-555)
+        self.assertEqual(self.dec("gh api --input=b.json repos/o/r/git/refs"), "deny")
         for cmd in ("gh api repos/o/r/pulls/5", "gh api -X GET search/issues --input q.json", "gh repo view"):
             with self.subTest(cmd):
                 self.assertEqual(self.dec(cmd), "")
@@ -8939,6 +8940,351 @@ class GuardGhDynNameTest(_GuardDebtCase):
         self.assertFalse(has("--all", "a", ""))
         self.assertFalse(has("x", "a", ""))
         self.assertFalse(has("-1Ra", "a", "R"))  # `a` là giá trị dính của `-R`
+
+
+class GuardGhRestSplitDebtTest(_GuardDebtCase):
+    """Nợ 🟠 #485/#491: đường REST của lệnh gh xoá đã DESTROY (AUD-SEC-583); `gh api` ghi ref với `force` = force-push
+    (AUD-SEC-555); token bash tách/bung thành cờ ở lệnh gh có luật cờ và glob ở tên lệnh → BUDGET (AUD-SEC-590)."""
+
+    REST_DESTROY = (
+        "gh api -X DELETE repos/o/r/issues/1",
+        "gh api -X DELETE repos/o/r/actions/runs/1",
+        "gh api -X DELETE repos/o/r/actions/runs/1/logs",
+        "gh api -X DELETE repos/o/r/labels/x",
+        "gh api -X DELETE repos/o/r/labels/good%20first",
+        "gh api -X DELETE gists/x",
+        "gh api -X DELETE user/codespaces/x",
+        "gh api -X DELETE repos/o/r/actions/caches",
+        "gh api -X DELETE 'repos/o/r/actions/caches?key=k'",
+        "gh api -X DELETE repos/o/r/releases/1",
+        "gh api --method DELETE projects/1",
+        "gh api -XDELETE repos/o/r/issues/1",
+        "gh api --method=delete /repos/o/r/issues/1",
+        "gh api -X delete https://api.github.com/repos/o/r/labels/x",
+        "gh api -X DELETE repos/{owner}/{repo}/actions/runs/5/",
+        "gh -X DELETE api gists/abc",
+        "gh api -X PUT user/codespaces/secrets/S -f encrypted_value=x",
+    )
+    REST_KEPT = (  # xoá tái tạo được / gỡ liên kết — không phải lệnh CLI DESTROY: giữ hỏi thường (chính sách cho qua)
+        "gh api -X DELETE repos/o/r/actions/caches/12",
+        "gh api -X DELETE repos/o/r/issues/1/labels/bug",
+        "gh api -X DELETE gists/abc/star",
+    )
+    REST_READS = ("gh api repos/o/r/issues/1", "gh api gists/abc", "gh api repos/o/r/actions/runs/1")
+    REF_FORCE = (
+        "gh api -X PATCH repos/o/r/git/refs/heads/x -F force=true",
+        "gh api -X PATCH repos/o/r/git/refs/heads/x -f force=true -f sha=abc",
+        "gh api -X PATCH repos/o/r/git/refs/heads/x --field force=true",
+        "gh api -X PATCH repos/o/r/git/refs/heads/x --raw-field=force=true",
+        "gh api -X PATCH repos/o/r/git/refs/heads/x -Fforce=1",
+        "gh api -X PATCH repos/o/r/git/refs/heads/x -F 'force[]=true'",
+        "gh api -X PATCH repos/o/r/git/refs/heads/x --input body.json",
+        "gh api -X PATCH repos/o/r/git/refs/tags/v1 -F force=true",
+        "gh api repos/o/r/git/refs -F ref=refs/heads/x -F sha=a -F force=true",
+        "gh api -X PATCH /repos/{owner}/{repo}/git/refs/heads/main -F sha=a -F force=true",
+        "gh api -X PATCH https://api.github.com/repos/o/r/git/refs/heads/x -F force=TRUE",
+        "gh api -X PATCH repos/o/r/git/ref/heads/x -F force=true",
+        "gh api --method patch repos/o/r/git/refs/heads/x -F force=@f",
+        "gh -X PATCH api repos/o/r/git/refs/heads/x -F force=true",
+    )
+    REF_KEPT = (  # fast-forward (không `force`, `force=false`) và ghi khác: hành vi cũ — hỏi thường
+        "gh api -X PATCH repos/o/r/git/refs/heads/x -F sha=abc",
+        "gh api -X PATCH repos/o/r/git/refs/heads/x -F sha=abc -F force=false",
+        "gh api -X PATCH repos/o/r/git/refs/heads/x -F sha=abc -f force=False",
+        "gh api -X PATCH repos/o/r/issues/1 -F force=true",
+    )
+    SPLIT = (
+        "gh pr merge 5 $X",
+        "gh pr merge 5 --squash --match-head-commit abc $X",
+        "gh pr merge 5 --squash --match-head-commit $SHA",
+        "gh pr merge 5 -d$Z",
+        'gh pr merge 5 -d"$Z"',
+        "gh pr merge 5 ${X}",
+        'gh pr merge 5 ""$X',
+        "gh pr merge 5 $(echo --admin)",
+        "gh pr merg? 5",
+        "gh p* merge 5",
+        "gh pr [m]erge 5",
+        "gh pr merge? 5",
+        "gh pr close 5 $X",
+        'gh pr close 5 "$X"$Y',
+        "gh pr close 5 -*",
+        "gh pr close 5 ??",
+        "gh pr close 5 $(echo -d)",
+        "gh cache delete $X",
+        "gh repo edit $X",
+        "gh auth status $X",
+        "gh api repos/o/r $X",
+        "gh -R $R pr merge 5",
+        "gh pr 2>/dev/null close 5 $X",
+        "timeout 5 gh pr close 5 $X",
+        "echo $(gh pr close 5 $X)",
+    )
+    SPLIT_OK = (  # đối chứng: trong nháy, sau chữ nguyên văn, lệnh không có luật cờ, sau `--`, ra số, chữ thoát
+        'gh pr view "$PR"',
+        "gh pr view $PR",
+        "gh pr view $PR --json title",
+        "gh pr checks $PR",
+        'gh api "repos/$R/pulls"',
+        "gh api 'repos/o/r/pulls?per_page=100'",
+        "gh api repos/o/r/pulls?per_page=100",
+        'gh pr close "$PR"',
+        "gh pr close 5 -- $X",
+        "gh pr close 5 $?",
+        "gh pr close 5 $((1+2))",
+        "gh pr close 5 \\$X",
+        "gh pr close 5 '-*'",
+        'gh pr close 5 "\\*"',
+        "gh pr diff 5 -- -$P --x$P",
+    )
+
+    def test_rest_delete_paths_destroy(self):  # AUD-SEC-583
+        """DELETE REST ứng với lệnh gh xoá đã DESTROY → DESTROY ở mọi cách viết phương thức và tiền tố đường; strict hỏi."""
+        self.assert_code(self.REST_DESTROY, "DESTROY")
+        raw = self.g.bash_decision("gh api -X DELETE repos/o/r/issues/1", self.feat, self.feat)
+        self.assertEqual(raw["decision"], "ask")  # strict: người duyệt
+
+    def test_rest_delete_controls(self):  # AUD-SEC-583: đối chứng
+        """Xoá tái tạo được vẫn là ghi thường (chính sách mặc định cho qua); đọc không hỏi."""
+        for cmd in self.REST_KEPT:
+            with self.subTest(cmd):
+                res = self.out(cmd)
+                self.assertEqual((res["raw"], res["decision"], res.get("code")), ("ask", "", "OTHER_ASK"))
+        self.assert_allowed(self.REST_READS)
+
+    def test_ref_force_denied_like_force_push(self):  # AUD-SEC-555
+        """Ghi ref REST với `force` (mọi cờ trường, `--input`, POST/PATCH, tags, số ít `git/ref/`) → deny cùng lý do
+        `git push --force` (RULE_DENY) ở mọi chính sách."""
+        push = self.out("git push --force origin x")
+        self.assertEqual((push["decision"], push.get("code")), ("deny", "RULE_DENY"))
+        self.assert_code(self.REF_FORCE, "RULE_DENY")
+        for cmd in self.REF_FORCE[:2]:
+            with self.subTest(cmd):
+                raw = self.g.bash_decision(cmd, self.feat, self.feat)
+                self.assertEqual(raw["decision"], "deny")  # strict cũng chặn — như force-push
+                self.assertIn(self.g.PUSH_FORCE_WHY, raw["reason"])
+                self.assertIn("AUD-SEC-555", raw["reason"])
+
+    def test_ref_fast_forward_kept(self):  # AUD-SEC-555: đối chứng
+        """PATCH ref không `force` (fast-forward) giữ hành vi hiện có: hỏi thường; đọc ref không hỏi."""
+        for cmd in self.REF_KEPT:
+            with self.subTest(cmd):
+                res = self.out(cmd)
+                self.assertEqual((res["raw"], res["decision"], res.get("code")), ("ask", "", "OTHER_ASK"))
+        self.assert_allowed(("gh api repos/o/r/git/refs/heads/x",))
+        force = self.g._gh_api_ref_force
+        self.assertFalse(force(["repos/o/r/git/refs/heads/x"]))  # GET
+        self.assertFalse(force(["-X", "DELETE", "repos/o/r/git/refs/heads/x"]))  # luật xoá ref (D-407) lo
+        self.assertFalse(force(["-X", "PATCH", "a", "b", "-F", "force=true"]))  # hai endpoint: gh báo lỗi
+        self.assertTrue(force(["repos/o/r/git/refs", "--input", "-"]))
+
+    def test_split_flags_budget(self):  # AUD-SEC-590
+        """Token bash tách/bung thành cờ ở lệnh gh có luật cờ, glob ở tên lệnh → BUDGET (mặc định chặn); strict hỏi."""
+        self.assert_code(self.SPLIT, "BUDGET")
+        raw = self.g.bash_decision("gh pr merge 5 $X", self.feat, self.feat)
+        self.assertEqual(raw["decision"], "ask")  # D-411: strict hỏi người
+        self.assertIn("viết lại", self.out("gh pr merg? 5")["reason"])
+
+    def test_split_flags_controls(self):  # AUD-SEC-590: đối chứng — không chặn oan
+        """Mở rộng trong nháy, sau chữ nguyên văn, ở lệnh không có luật cờ, sau `--`: hành vi cũ."""
+        self.assert_allowed(self.SPLIT_OK)
+        self.assertEqual(self.out('gh pr merge "$PR" --squash --match-head-commit "$SHA"').get("code"), "UNVERIFIED")
+        self.assertEqual(self.out("gh pr merge 5$X").get("code"), "UNVERIFIED")  # sau chữ nguyên văn: luật merge cũ
+
+    def test_deny_rules_win_over_budget(self):  # AUD-SEC-590: deny phẳng giữ ở strict (ADR-0036 §3)
+        """Lệnh vừa có token tách vừa trúng luật deny: deny thắng ở cả strict — không thành câu hỏi người duyệt."""
+        for cmd, code in (
+            ("gh pr merge 5 --auto $X", "AUTO_MERGE_ENABLE"),
+            ("gh pr merge 5 --auto --x$Z", "AUTO_MERGE_ENABLE"),
+            ("gh pr merge 5 --admin $X", "MERGE_ADMIN"),
+            ("gh pr close 5 -d $X", "REMOTE_DELETE"),
+        ):
+            with self.subTest(cmd):
+                raw = self.g.bash_decision(cmd, self.feat, self.feat)
+                self.assertEqual((raw["decision"], self.g.decide(raw).code), ("deny", code))
+
+    def test_split_words_reader(self):  # AUD-SEC-590
+        """Bộ đọc từ tách: nháy không đóng → mọi token có `$`/glob tính (chặt); không `gh` → rỗng; mảnh `$(` không nháy."""
+        words = self.g._gh_split_words
+        self.assertEqual(words("echo $X"), frozenset())
+        self.assertEqual(words('gh pr close 5 "x'), frozenset({self.g.GH_SPLIT_ANY}))
+        self.assertIn("$", words("gh pr close 5 $(echo -d)"))
+        self.assertNotIn("n=$N", words("gh api graphql -F n=$N"))
+        token = self.g.GH_SPLIT_WORDS.set(frozenset({self.g.GH_SPLIT_ANY}))
+        try:
+            self.assertTrue(self.g._gh_splits("$X"))
+            self.assertTrue(self.g._gh_splits("-*"))
+            self.assertFalse(self.g._gh_splits("5"))
+        finally:
+            self.g.GH_SPLIT_WORDS.reset(token)
+        self.assertFalse(self.g._gh_splits("$X"))  # ngoài `bash_decision`: không biết nháy → không tính (gọi trực tiếp)
+
+    def test_concurrent_decisions_match(self):
+        """Quyết định chạy đồng thời giống tuần tự: `GH_SPLIT_WORDS` là ContextVar, không rò giữa các lệnh/luồng."""
+        cmds = list(self.SPLIT + self.SPLIT_OK + self.REF_FORCE[:4] + self.REST_DESTROY[:4]) * 2
+
+        def code(cmd: str) -> tuple:
+            res = self.out(cmd)
+            return res["decision"], res.get("code")
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
+            together = list(pool.map(code, cmds))
+        self.assertEqual(together, [code(c) for c in cmds])
+
+
+class GuardGhReview492Test(_GuardDebtCase):
+    """Review #492 (đo trên gh 2.89): từ tách xét theo lệnh đơn gọi gh, cả mảnh `${X:- …}` (AUD-SEC-594); tên `gh` đã
+    bỏ nháy (AUD-SEC-595); `--` là giá trị của cờ (AUD-SEC-596/597); câu hỏi BUDGET không nuốt lỗi tập con ở strict
+    (AUD-SEC-598); cụm cờ ngắn của `gh api` (AUD-SEC-599)."""
+
+    BRACED = (  # AUD-SEC-594: khoảng trắng trong `${…}` không nháy — `tokenize` cắt, bash tách thành cờ
+        "gh api repos/o/r ${X:--X DELETE}",
+        "gh auth status ${X:- --show-token}",
+        "gh pr close 5 ${X:- --delete-branch}",
+        "gh api repos/o/r/git/refs/heads/x ${X:- -X PATCH -F force=true -F sha=abc}",
+        "gh api repos/o/r ${X:- -X DELETE}",
+    )
+    OTHER_CMD = (  # AUD-SEC-594: mở rộng/glob không nháy ở LỆNH KHÁC không tính cho token đã nháy của gh
+        'echo $PR; gh pr close "$PR"',
+        'gh pr close "$PR"; echo $PR',
+        'echo $URL; gh api "$URL"',
+        "ls *; gh pr close '*'",
+        'echo $PR && gh pr close "$PR" --comment "x"',
+        'echo $R | gh api "$R"',
+    )
+    DEQUOTED_NAME = (  # AUD-SEC-595: tên lệnh có nháy/thoát vẫn là gh
+        "g\\h pr close 5 $X",
+        "g''h auth status $X",
+        "command g\\h pr close 5 $X",
+        "g\\h pr close 5 -*",
+        "/usr/bin/g\\h pr close 5 $X",
+        '"g"h api repos/o/r $X',
+    )
+    DASHDASH_VALUE = (  # AUD-SEC-596/597: gh 2.89 `gh pr close 5 -c -- --help` in trợ giúp — `-c` ăn `--`
+        "gh pr close 5 -c -- $X",
+        "gh pr close 5 --comment -- $X",
+        "gh api repos/o/r -t -- $X",
+        "gh auth status -h -- $X",
+        "gh cache delete -r -- $X",
+        "gh pr close 5 --repo o/r -c -- $X",
+        "gh pr -c -- close 5 $X",
+        "gh repo edit -d -- $X",
+        "gh pr close 5 -c -- --delete-branch$Z",
+        "gh auth status -h -- --show-token$Z",
+        "gh api repos/o/r -t -- -XDELETE$Z",
+    )
+    STRICT_SUBSET = (  # AUD-SEC-598: tập con chuẩn chặn (deny) trước câu hỏi BUDGET mới — cả strict
+        "gh pr close 5 ${a[@]}",
+        "gh pr close 5 ${a[0]}",
+        "gh pr close 5 ${!X}",
+        "gh pr close ${a[0]}",
+        "gh cache delete $IFSeval",
+    )
+    API_CLUSTER = (  # AUD-SEC-599: gh 2.89 nhận `gh api -iX DELETE --help`, `-iXDELETE`, `-iF k=v`
+        ("gh api -iX DELETE repos/o/r", "DESTROY"),
+        ("gh api -iXDELETE repos/o/r", "DESTROY"),
+        ("gh api -iX DELETE repos/o/r/labels/x", "DESTROY"),
+        ("gh api -iX=DELETE repos/o/r/releases/1", "DESTROY"),
+        ("gh api -X PATCH repos/o/r/git/refs/heads/x -iF force=true -F sha=abc", "RULE_DENY"),
+        ("gh api -X PATCH repos/o/r/git/refs/heads/x -iFforce=true -F sha=abc", "RULE_DENY"),
+        ("gh api -iX PATCH repos/o/r/git/refs/heads/x -F force=true", "RULE_DENY"),
+        ("gh -iX DELETE api repos/o/r", "BUDGET"),  # cobra: `-iX` không ăn token kế — `DELETE` là tên lệnh lạ
+        ("gh api -iX DELETE repos/o/r/git/refs/heads/other", "REMOTE_DELETE"),
+    )
+    CONTROLS = (  # đối chứng: hành vi cũ
+        "gh pr view $PR",
+        'gh api "repos/$R/pulls"',
+        "gh api -i repos/o/r",
+        "gh api -q -iX repos/o/r",
+        "gh api -iq .x repos/o/r",
+        "gh api repos/o/r -- -iX",
+        "gh pr close 5 -- $X",
+        "gh pr close 5 -c x -- $X",
+        "gh auth status -h github.com",
+        "gh pr diff 5 -- -$P --x$P",
+    )
+
+    def test_braced_spaces_split(self):  # AUD-SEC-594
+        """`${X:- -X DELETE}` không nháy: mọi mảnh `tokenize` cắt ra tính là token bash tách → BUDGET."""
+        self.assert_code(self.BRACED, "BUDGET")
+        raw = self.g.bash_decision(self.BRACED[0], self.feat, self.feat)
+        self.assertEqual(raw["decision"], "ask")  # D-411: strict hỏi người
+
+    def test_other_command_words_not_counted(self):  # AUD-SEC-594: chặn oan cũ
+        """Biến không nháy ở lệnh đơn khác không làm token đã nháy của gh thành token tách."""
+        self.assert_allowed(self.OTHER_CMD)
+        self.assert_code(("echo $X; gh pr close 5 $X",), "BUDGET")  # chính lệnh gh không nháy: vẫn chặn
+
+    def test_dequoted_gh_name(self):  # AUD-SEC-595
+        """Lệnh đơn gọi gh nhận theo tên đã bỏ nháy, không theo chữ thô `gh`."""
+        self.assert_code(self.DEQUOTED_NAME, "BUDGET")
+
+    def test_dashdash_as_flag_value(self):  # AUD-SEC-596/597
+        """`--` là giá trị của cờ ăn token kế không kết thúc cờ: token sau nó vẫn xét."""
+        self.assert_code(self.DASHDASH_VALUE, "BUDGET")
+        self.assert_allowed(self.CONTROLS)
+        res = self.out("gh pr close 5 -- -d")  # hành vi hiện có (chặt): `-d` sau `--` vẫn tính
+        self.assertEqual((res["decision"], res.get("code")), ("deny", "REMOTE_DELETE"))
+        self.assertEqual(self.out('gh pr merge "$PR" --squash --match-head-commit "$SHA"').get("code"), "UNVERIFIED")
+
+    def test_flag_scan_reader(self):  # AUD-SEC-596
+        """`_gh_flag_scan`: chỉ số `--` kết thúc cờ theo pflag; trợ giúp trước nó; `-h` ăn giá trị khi là cờ của lệnh."""
+        scan, close = self.g._gh_flag_scan, self.g.GH_PR_CLOSE_VALUE_FLAGS
+        self.assertEqual(scan(["5", "-c", "--", "$X"], close, "d"), (False, 4))
+        self.assertEqual(scan(["5", "-dc", "--", "--", "$X"], close, "d"), (False, 3))
+        self.assertEqual(scan(["-c", "x", "--", "$X"], close, "d"), (False, 2))
+        self.assertEqual(scan(["--help", "--", "x"], close, "d"), (True, 1))
+        self.assertEqual(scan(["-dh"], close, "d"), (True, 1))
+        self.assertEqual(scan(["-h", "--", "x"], ("-h",), "at"), (False, 3))  # `auth status -h <host>`
+        self.assertEqual(scan(["-c", "--", "x"], (), ""), (False, 1))  # lệnh không có bảng: `--` đầu
+        self.assertFalse(self.g._gh_help_asked(["-c", "--help"], close, "d"))  # giá trị của `-c`
+
+    def test_strict_budget_keeps_subset_deny(self):  # AUD-SEC-598
+        """Câu hỏi BUDGET của gh không làm lỗi tập con chuẩn (deny) thành câu hỏi người duyệt ở strict."""
+        self.assert_code(self.STRICT_SUBSET, "BUDGET")
+        for cmd in self.STRICT_SUBSET:
+            with self.subTest(cmd):
+                raw = self.g.bash_decision(cmd, self.feat, self.feat)
+                self.assertEqual((raw["decision"], raw.get("code")), ("deny", "BUDGET"))
+                self.assertIn("ADR-0063", raw["reason"])
+        raw = self.g.bash_decision("gh pr close 5 $X", self.feat, self.feat)
+        self.assertEqual(raw["decision"], "ask")  # trong tập con: câu hỏi BUDGET giữ (D-411)
+
+    def test_api_short_clusters(self):  # AUD-SEC-599
+        """Cụm cờ ngắn của `gh api` (`-iX DELETE`, `-iXDELETE`, `-iF k=v`) đọc như pflag."""
+        for cmd, code in self.API_CLUSTER:
+            with self.subTest(cmd):
+                res = self.out(cmd)
+                self.assertEqual((res["decision"], res.get("code")), ("deny", code), res)
+        unb = self.g._gh_api_unbundled
+        self.assertEqual(unb(["api", "-iX", "DELETE", "r"]), ["api", "-i", "-X", "DELETE", "r"])
+        self.assertEqual(unb(["api", "-iXDELETE", "r"]), ["api", "-i", "-XDELETE", "r"])
+        self.assertEqual(unb(["api", "-q", "-iX", "r"]), ["api", "-q", "-iX", "r"])  # giá trị của `-q`
+        self.assertEqual(unb(["api", "--jq", "-iX", "r"]), ["api", "--jq", "-iX", "r"])
+        self.assertEqual(unb(["api", "r", "--", "-iX", "D"]), ["api", "r", "--", "-iX", "D"])
+        self.assertEqual(unb(["api", "-iZ", "-", "-i", "-iX"]), ["api", "-iZ", "-", "-i", "-i", "-X"])
+        self.assertEqual(unb(["pr", "-iX", "D"]), ["pr", "-iX", "D"])  # chỉ `api`
+
+    def test_split_words_reader(self):  # AUD-SEC-594/595
+        """Bộ đọc từ tách: theo lệnh đơn gọi gh; chữ guard không tách chắc (`)#`) → mọi token có `$` tính."""
+        words = self.g._gh_split_words
+        self.assertEqual(words("echo $X; gh pr view 5"), frozenset())
+        self.assertEqual(words("g\\h pr close 5 $X"), frozenset({"$X"}))
+        self.assertEqual(words("a=(1)# gh pr close 5 $X"), frozenset({self.g.GH_SPLIT_ANY}))
+        self.assertTrue({"${X:-", "-X", "DELETE}"} <= words("gh api r ${X:- -X DELETE}"))
+
+    def test_concurrent_decisions_match(self):
+        """Quyết định chạy đồng thời giống tuần tự (`GH_SPLIT_WORDS` là ContextVar)."""
+        cmds = list(self.BRACED + self.OTHER_CMD + self.DASHDASH_VALUE + self.CONTROLS) * 2
+        cmds += [c for c, _ in self.API_CLUSTER]
+
+        def code(cmd: str) -> tuple:
+            res = self.out(cmd)
+            return res["decision"], res.get("code")
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
+            together = list(pool.map(code, cmds))
+        self.assertEqual(together, [code(c) for c in cmds])
 
 
 class GuardAppendParallelTest(unittest.TestCase):

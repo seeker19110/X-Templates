@@ -3616,9 +3616,10 @@ def _argv_shell_check(
 ) -> None:
     """Chặn (BUDGET) khi `_argv_shell_why` có lý do — trừ khi câu hỏi nguy hiểm của luật cũ đã làm lệnh bị chặn (giữ mã
     của luật cũ: HOOK_BYPASS…). Chữ lỏng (guard tự dựng) không qua tập con. Cờ bỏ hook đã đặt trong `res` đi theo lỗi
-    (review #433 R1 — adapter host khác đọc `push_no_verify`)."""
+    (review #433 R1 — adapter host khác đọc `push_no_verify`). Câu hỏi mã BUDGET (`gh pr close 5 ${a[@]}` — AUD-SEC-598)
+    không tính: nó là ask ở strict, lỗi tập con là deny ở mọi chính sách."""
     why = _argv_shell_why(cmd, tokens, root, cwd) if strict else ""
-    if why and not _asks_denied(asks):
+    if why and not _asks_denied([a for a in asks if reason_code("ask", a) != BUDGET]):
         err = ScanTooComplex(f"ngoài tập con guard đọc chắc — {why} (ADR-0063)")
         setattr(err, "flags", {k: True for k in ("no_verify", "push_no_verify") if res.get(k)})
         raise err
@@ -5311,6 +5312,9 @@ def _stricter(a: Tuple[str, str], b: Tuple[str, str]) -> Tuple[str, str]:
     return b if VERDICT_RANK.get(b[0], 0) > VERDICT_RANK.get(a[0], 0) else a
 
 
+PUSH_FORCE_WHY = "push --force/--mirror/+refspec ghi đè lịch sử"  # cả REST ghi ref có `force` (AUD-SEC-555)
+
+
 def _git_push(args: List[str], cwd: Optional[str] = None) -> Tuple[str, str]:
     """push: deny --force/--mirror/+refspec và xoá nhánh chính; ask khi đẩy thẳng nhánh chính — kể cả khi không có
     refspec hoặc đích là `HEAD` mà nhánh hiện tại (ở `cwd`) là nhánh chính — và khi `--all`/`--tags` (mọi nhánh/tag)."""
@@ -5320,7 +5324,7 @@ def _git_push(args: List[str], cwd: Optional[str] = None) -> Tuple[str, str]:
     force = any(x.startswith("--force") and x != "--force-if-includes" or x == "--mirror" for x in args) or "f" in flags
     refs = _push_refs(args)
     if force or any(r.startswith("+") for r in refs):
-        return "deny", "push --force/--mirror/+refspec ghi đè lịch sử"
+        return "deny", PUSH_FORCE_WHY
     if "--prune" in args:  # xoá mọi ref remote không có bản cục bộ (D-407)
         gone = "--prune: mọi ref remote không có bản cục bộ"
         return "deny", REMOTE_DELETE_WHY.format(gone, _current_branch(cwd) or "không rõ")
@@ -6274,6 +6278,8 @@ GH_API_VALUE_FLAGS: Tuple[str, ...] = (
     *("-X", "--method", "-H", "--header", "-q", "--jq", "-t", "--template", "-p", "--preview", "--cache", "--hostname"),
     *("-R", "--repo"),
 )
+# gh 2.89 `gh api --help`: `-i/--include` là cờ bool ngắn duy nhất — cụm `-iX DELETE` (AUD-SEC-599).
+GH_API_BOOL_SHORT = "i"
 
 
 def _flag_value(args: List[str], flag: str) -> Optional[str]:
@@ -8270,15 +8276,47 @@ def _gh_readings(args: List[str]) -> List[List[str]]:
     """ĐIỂM VÀO DUY NHẤT của mọi luật đọc lệnh gh (`args` sau `gh`; D-409): nguyên văn; dạng bash đưa cho gh — bỏ
     chuyển hướng, đích và fd liền trước (`{fd}`, một chữ số) — và dạng giữ chữ số đó (số PR: `gh pr merge 5 >/dev/null`)
     trừ khi nó rơi vào vị trí tên lệnh (`gh --version 2>&1`) — AUD-SEC-582; mỗi dạng thêm dạng cobra chạy (cờ đứng
-    trước lệnh con — AUD-SEC-571/575/577/578/579/581). Luật xét MỌI cách đọc, cách chặt hơn thắng."""
+    trước lệnh con — AUD-SEC-571/575/577/578/579/581) và dạng cobra của `api` với cụm cờ ngắn tách như pflag
+    (`_gh_api_unbundled` — AUD-SEC-599). Luật xét MỌI cách đọc, cách chặt hơn thắng."""
     fd = _drop_redirect_ops(args, GH_FD_DIGITS, fd_vars=True)
     kept = _drop_redirect_ops(args, 0, fd_vars=True)
     named = any(kept[k].isdigit() and len(kept[k]) <= GH_FD_DIGITS for k in _gh_path(kept))
     out = [args]
-    for r in (r for form in ((fd,) if named else (fd, kept)) for r in (form, _gh_canonical(form))):
-        if r not in out:
-            out.append(r)
+    for form in (fd,) if named else (fd, kept):
+        canon = _gh_canonical(form)
+        for r in (form, canon, _gh_api_unbundled(canon)):
+            if r not in out:
+                out.append(r)
     return out
+
+
+def _gh_api_unbundled(args: List[str]) -> List[str]:
+    """Cách đọc `api …` (dạng cobra) với cụm cờ ngắn tách như pflag (gh 2.89 nhận `gh api -iX DELETE …`): chữ bool
+    (`GH_API_BOOL_SHORT`) thành cờ riêng, chữ ăn giá trị giữ phần còn lại dính liền (`-iXDELETE` → `-i -XDELETE`, `-iF
+    k=v` → `-i -F k=v`); token kế của cờ ăn giá trị giữ nguyên (`-q -iX`); dừng ở `--`. Lệnh khác: giữ nguyên."""
+    if args[:1] != ["api"]:
+        return args
+    vals = "".join(f[1] for f in GH_API_VALUE_FLAGS if len(f) == 2)
+    out, i = args[:1], 1
+    while i < len(args) and args[i] != "--":
+        a = args[i]
+        short = a[:1] == "-" and a[1:2] not in ("", "-")
+        parts, eats = _gh_short_split(a, GH_API_BOOL_SHORT, vals) if short else ([a], a in GH_API_VALUE_FLAGS)
+        out += parts + args[i + 1 : i + 1 + eats]
+        i += 1 + eats
+    return out + args[i:]
+
+
+def _gh_short_split(a: str, bools: str, vals: str) -> Tuple[List[str], bool]:
+    """(cụm cờ ngắn `a` tách như pflag, có ăn token kế không): chữ bool đọc lần lượt thành `-x`; chữ ăn giá trị lấy phần
+    còn lại của cụm (`-XDELETE`, `-X=PUT` — luật đọc giá trị dính sẵn), hết cụm thì ăn token kế; ký tự khác (pflag báo
+    lỗi) hay cụm chỉ chữ bool: giữ nguyên."""
+    for k, ch in enumerate(a[1:], 1):
+        if ch in vals:
+            return [*(f"-{c}" for c in a[1:k]), f"-{a[k:]}"], k == len(a) - 1
+        if ch not in bools:
+            break
+    return [a], False
 
 
 def _gh_rank(v: Tuple[str, str]) -> Tuple[int, bool, bool]:
@@ -8292,12 +8330,14 @@ def _gh_rank(v: Tuple[str, str]) -> Tuple[int, bool, bool]:
 def _gh_rule(args: List[str], root: str, cwd: str) -> Tuple[str, str]:
     """Mọi luật của `gh` (`args` sau `gh`, cờ repo đầu đã dời ra sau) đọc mọi cách của `_gh_readings` (`gh --method
     DELETE api repos/o/r`, `gh repo --visibility public edit` — AUD-SEC-571, D-408/D-409); cách nào chặt hơn thắng
-    (hoà → nguyên văn: `max` giữ phần tử lớn nhất đầu tiên). Tên lệnh/tên cờ có mở rộng ở cách đọc nào → `GH_DYN_NAME`
-    trước mọi luật (AUD-SEC-587)."""
+    (hoà → nguyên văn: `max` giữ phần tử lớn nhất đầu tiên). Tên lệnh/tên cờ có mở rộng, hay token bash tách thành cờ, ở
+    cách đọc nào → `GH_DYN_NAME` (AUD-SEC-587/590) — trừ khi một luật đã deny: deny phẳng giữ ở strict (`--auto $X` vẫn
+    AUTO_MERGE_ENABLE, ADR-0036 §3; `--admin`, force-push, xoá ref)."""
     readings = _gh_readings(args)
-    if any(map(_gh_dyn_name, readings)):
+    verdict = max((_gh_reading(r, root, cwd) for r in readings), key=_gh_rank)
+    if verdict[0] != "deny" and any(map(_gh_dyn_name, readings)):
         return "ask", GH_DYN_NAME_WHY
-    return max((_gh_reading(r, root, cwd) for r in readings), key=_gh_rank)
+    return verdict
 
 
 # ADR-0065 lớp (A) cho `gh` (AUD-SEC-587): mọi luật gh so token chính xác (`pr merge`, `--input`, `auth token`…) — tên
@@ -8306,21 +8346,93 @@ def _gh_rule(args: List[str], root: str, cwd: str) -> Tuple[str, str]:
 # vị trí có mở rộng (`gh pr view "$PR"`, `--body="$X"`, `-F body=@"$f"`, `gh api "repos/$R/pulls"`) không tính.
 GH_DYN_NAME_MARK = "tên lệnh/tên cờ `gh` có mở rộng shell"
 GH_DYN_NAME_WHY = (
-    f"{GH_DYN_NAME_MARK} (`gh pr merge$Z`, `--input$Z`, `-$Z`) — guard không biết bash mở rộng ra lệnh con/cờ nào"
-    " (AUD-SEC-587, ADR-0065); viết lại: tên lệnh con và tên cờ nguyên văn, mở rộng chỉ ở giá trị"
-    ' (`gh pr view "$PR"`, `--body "$X"`)'
+    f"{GH_DYN_NAME_MARK} hay glob (`gh pr merge$Z`, `--input$Z`, `-$Z`, `gh pr merg?`), hoặc mở rộng/glob không nháy"
+    " bash tách thành cờ của lệnh gh có luật cờ (`gh pr merge 5 $X`, `-d$Z`, `gh pr close 5 -*`) — guard không biết bash"
+    " mở rộng ra lệnh con/cờ nào (AUD-SEC-587/590, ADR-0065); viết lại: tên lệnh con và tên cờ nguyên văn, mở rộng chỉ ở"
+    ' giá trị và trong nháy kép (`gh pr view "$PR"`, `--body "$X"`, `gh api "repos/$R/pulls"`)'
 )
 GH_DYN_RAW_RE = re.compile(r"[$`]")
+GH_DYN_NAME_RE = re.compile(
+    r"[$`*?\[]"
+)  # tên lệnh: mở rộng hay glob (`gh pr merg?` bung theo tệp `merge` — AUD-SEC-590)
+# Token (đã bỏ nháy) của lệnh gh trong lệnh Bash đang xét mà bash còn tách từ/bung glob (AUD-SEC-590/594) —
+# `bash_decision` đặt, lệnh lồng cộng dồn (token lệnh lồng đến từ chữ lệnh ngoài: `find -exec gh … $X \;` lồng lại
+# bằng `shlex.join` đã có nháy).
+# `GH_SPLIT_ANY`: chữ không tách được thành từ (nháy không đóng) — mọi token có `$`/backtick/glob tính là tách (chặt).
+GH_SPLIT_ANY = "\0xt-split-any"
+GH_SPLIT_WORDS: contextvars.ContextVar[FrozenSet[str]] = contextvars.ContextVar("GH_SPLIT_WORDS", default=frozenset())
+GH_GLOB_CHARS = "*?["
+
+
+def _gh_split_words(cmd: str) -> FrozenSet[str]:
+    """Token (theo `tokenize`, đã bỏ nháy) mà bash có thể biến thành đối số bắt đầu bằng `-` guard không thấy
+    (`_gh_lead_flag`) — chỉ từ của lệnh đơn gọi `gh`: lệnh có từ mà tên đã bỏ nháy là `gh` (`g\\h`, `g''h`, `command gh`,
+    `/usr/bin/gh`, `find … -exec gh` — AUD-SEC-595). Từ của lệnh khác không tính (`echo $PR; gh pr close "$PR"` —
+    AUD-SEC-594). Mỗi từ góp mọi mảnh `tokenize` cắt ra (`_gh_word_pieces`). Chữ không tách chắc (nháy hở, `)#` —
+    `_bash_decision` chặn với lý do riêng): mọi token có `$`/backtick/glob tính (`GH_SPLIT_ANY`)."""
+    try:
+        raw = _raw_tokens(cmd, subst=True)  # thân heredoc có nháy trong `"$(…)"` là chữ: ngoặc lẻ không làm hỏng
+        if raw is None:
+            return frozenset({GH_SPLIT_ANY})
+        calls = (c for c in split_commands(raw) if any("h" in w and posixpath.basename(_dequote(w)) == "gh" for w in c))
+        lead = [w for c in calls for w in c if any(ch in w for ch in GH_LEAD_CHARS) and _gh_lead_flag(w)]
+        return frozenset(p for w in lead for p in _gh_word_pieces(w))
+    except ScanTooComplex:
+        return frozenset({GH_SPLIT_ANY})
+
+
+def _gh_word_pieces(word: str) -> List[str]:
+    """Token mà một từ thô góp vào argv của gh: dạng bỏ nháy, và mọi mảnh `tokenize` cắt từ đó tới dấu đầu tiên —
+    `${X:- -X DELETE}` → `${X:-`, `-X`, `DELETE}` (khoảng trắng trong `${…}` — AUD-SEC-594); `$(echo -d)` → `$` (argv
+    của gh giữ mảnh trước `(`)."""
+    return [_dequote(word), *itertools.takewhile(lambda t: not _is_punct(t), tokenize(word))]
+
+
+GH_LEAD_CHARS = "$`" + GH_GLOB_CHARS
+GH_EXPANSION_RE = re.compile(r"\$(?:\{[^}]*\}|\([^)]*\)|\w+|[@*#?$!-])")  # mở rộng có thể rỗng (trong nháy)
+
+
+def _gh_lead_flag(word: str) -> bool:
+    """Từ thô mà bash có thể biến thành đối số bắt đầu bằng `-` (AUD-SEC-590): mở rộng không nháy đứng đầu từ (`$X`,
+    `${X}`, `""$X`, `$(…)`) — tách từ cho ra cờ; glob không nháy đứng đầu từ hay trong từ bắt đầu bằng `-` (`??`, `-*`)
+    — bung theo tên tệp (`--admin`). Mở rộng sau chữ nguyên văn (`n=$N`, `repos/$R`) không tính; `$?`/`$((…))` ra số.
+    Backtick: tập con chuẩn chặn trước (ADR-0063); ở chữ lỏng, mảnh `-x…\\`` là cụm cờ có mở rộng (`_gh_flag_dyn`)."""
+    v = _CodeView(word)
+    hits = [i for i, c in enumerate(word) if c in GH_LEAD_CHARS and v.kind[i] == "c" and v.top[i]]
+    empty = bool(hits) and not GH_EXPANSION_RE.sub("", _dequote(word[: hits[0]]))  # `"$X"$Y`: X rỗng thì Y đứng đầu
+    lead = empty and (word[hits[0]] != "$" or _word_splits(word))
+    return lead or any(word[i] in GH_GLOB_CHARS for i in hits) and _dequote(word).startswith("-")
+
+
+def _gh_splits(token: str) -> bool:
+    """Token (đã bỏ nháy) bash có thể tách/bung thành cờ ở lệnh Bash đang xét (`GH_SPLIT_WORDS`)."""
+    words = GH_SPLIT_WORDS.get()
+    return token in words or GH_SPLIT_ANY in words and any(c in token for c in "$`" + GH_GLOB_CHARS)
 
 
 def _gh_dyn_name(args: List[str]) -> bool:
     """Một cách đọc `gh` (`args` sau `gh`) có tên lệnh (`_gh_path`: mọi tên khi tên đầu là nhóm, không thì chỉ tên đầu —
-    như `_gh_canonical`) hay tên cờ (`--tên` trước `=`, `-` liền mở rộng; trước `--`) mang `$`/backtick."""
+    như `_gh_canonical`) mang `$`/backtick/glob, hay tên cờ (`--tên` trước `=`, `-` liền mở rộng; trước `--` kết thúc
+    cờ) mang `$`/backtick; lệnh có luật cờ (`GH_FLAG_RULED`) thêm: token trước `--` bash tách/bung thành cờ, cụm cờ
+    ngắn có mở rộng trước `=` (`-d$Z`) — AUD-SEC-590. `--` là giá trị của cờ ăn token kế (`-c -- $X`) không kết thúc
+    cờ (`_gh_flag_scan` theo bảng cờ của lệnh có luật cờ — AUD-SEC-596/597)."""
     path = _gh_path(args)
-    names = [args[k] for k in (path if path and args[path[0]] in GH_GROUPS else path[:1])]
-    flags = [a.split("=", 1)[0] for a in args[: args.index("--") if "--" in args else len(args)]]
+    keep = path if path and args[path[0]] in GH_GROUPS else path[:1]
+    names = [args[k] for k in keep]
+    ruled = GH_FLAG_RULED.get(tuple(names))
+    others = [a for k, a in enumerate(args) if k not in keep]
+    rest = others[: _gh_flag_scan(others, *(ruled or ((), "")))[1]]
+    flags = [a.split("=", 1)[0] for a in rest]
     flags = [f for f in flags if f.startswith("--") or f[:1] == "-" and f[1:2] in ("$", "`")]
-    return any(GH_DYN_RAW_RE.search(t) for t in names + flags)
+    if any(GH_DYN_NAME_RE.search(t) for t in names) or any(GH_DYN_RAW_RE.search(f) for f in flags):
+        return True
+    return ruled is not None and any(map(_gh_flag_dyn, rest))
+
+
+def _gh_flag_dyn(a: str) -> bool:
+    """Token của lệnh gh có luật cờ có thể thành cờ guard không thấy: bash tách/bung (`_gh_splits`), hay cụm cờ ngắn có
+    mở rộng trước `=` (`-d$Z`, `-d"$Z"` — nháy không đổi chữ cờ bash dựng)."""
+    return _gh_splits(a) or a[:1] == "-" and bool(GH_DYN_RAW_RE.search(a.split("=", 1)[0]))
 
 
 def _gh_reading(args: List[str], root: str, cwd: str) -> Tuple[str, str]:
@@ -8361,8 +8473,39 @@ def _gh_own_rule(args: List[str], root: str, cwd: str) -> Tuple[str, str]:
     if args[:2] == ["alias", "import"]:  # `alias set`: ADR-0063 lát C chặn trước
         return "ask", "gh alias đặt lệnh tắt — guard không thấy lệnh thật khi alias chạy"
     if args[:1] == ["api"] and _gh_api_writes(args[1:]):
-        return ("ask", DESTROY_ASK) if _gh_api_destroy(args[1:]) else _gh_api_merge_rule(args[1:], root)
+        return _gh_api_write_rule(args[1:], root)
     return "", ""
+
+
+def _gh_api_write_rule(args: List[str], root: str) -> Tuple[str, str]:
+    """`gh api` ghi (`args` sau `api`): ghi ref có `force` → deny như `git push --force` (AUD-SEC-555); huỷ → DESTROY;
+    còn lại luật merge REST."""
+    if _gh_api_ref_force(args):
+        return "deny", GH_API_FORCE_WHY
+    return ("ask", DESTROY_ASK) if _gh_api_destroy(args) else _gh_api_merge_rule(args, root)
+
+
+# `PATCH …/git/refs/<ref>` (cả POST `…/git/refs`, số ít `git/ref/` — chặt) có trường `force` khác `false` ghi đè ref
+# không fast-forward = force-push (AUD-SEC-555). Thân `--input` guard không đọc tại chỗ (tệp/stdin đổi được sau lúc xét)
+# → coi như có `force`. Giá trị `@tệp`, `$biến`, rỗng, mảng `force[]` → cũng tính (chỉ chữ `false` là không force).
+GH_API_REF_WRITE_RE = re.compile(r"/?repos/[^/\s]+/[^/\s]+/git/refs?(?:/.*)?")
+GH_API_FORCE_WHY = (
+    f"{PUSH_FORCE_WHY}: `gh api` ghi ref (`…/git/refs/…`) với `force` khác `false` hay thân `--input` (AUD-SEC-555);"
+    " cập nhật fast-forward bằng `-F sha=<sha>` không `force`, hoặc `git push` không `--force`"
+)
+
+
+def _gh_api_ref_force(args: List[str]) -> bool:
+    """`gh api …` (đối số sau `api`) ghi ref REST với `force` (hay thân `--input` mờ). Phương thức: cờ cuối thắng như gh;
+    không cờ thì trường/`--input` là POST."""
+    pos = _positionals(args, GH_API_VALUE_FLAGS)
+    path = _api_path(pos[0]) if len(pos) == 1 else ""
+    opaque = any(a.split("=", 1)[0] == "--input" for a in args)
+    pairs = [v.partition("=") for v in _gh_api_field_values(args)]
+    methods = _gh_api_methods(args) or ["POST" if pairs or opaque else "GET"]
+    if methods[-1] in ("GET", "DELETE") or not GH_API_REF_WRITE_RE.fullmatch(path):
+        return False
+    return opaque or any(k.split("[", 1)[0].strip() == "force" and v.strip().lower() != "false" for k, _, v in pairs)
 
 
 # `gh api` huỷ repo/nhánh chính (AUD-SEC-048): DELETE repo hay ref nhánh chính, PATCH `archived=true` — như `gh repo
@@ -8481,32 +8624,40 @@ def _gh_help_asked(rest: List[str], value_flags: Tuple[str, ...], bools: str) ->
     """Lệnh con gh gặp cờ trợ giúp thật thì cobra in trợ giúp, không chạy (AUD-HAR-353): `--help`, `-h`, cụm cờ bool
     ngắn có `h` (`-dh`). Không tính: giá trị của cờ ăn token kế (`-b --help`, `-dc -h` — gh chạy lệnh), `-h=…`,
     `-test.…` (pflag bỏ qua), sau `--`. `bools` = chữ cờ bool ngắn của lệnh con."""
+    return _gh_flag_scan(rest, value_flags, bools)[0]
+
+
+def _gh_flag_scan(rest: List[str], value_flags: Tuple[str, ...], bools: str) -> Tuple[bool, int]:
+    """(cờ trợ giúp thật trước `--`, chỉ số `--` kết thúc cờ — không có thì `len(rest)`) theo pflag của lệnh con:
+    `--` là giá trị của cờ ăn token kế (`-c -- x`, `--comment -- x`, `-dc -- x`) thì không kết thúc cờ — gh 2.89
+    `gh pr close 5 -c -- --help` in trợ giúp (AUD-SEC-596/597)."""
     vals = "".join(f[1] for f in value_flags if len(f) == 2)
-    skip = False
-    for a in rest:
+    skip = helped = False
+    for k, a in enumerate(rest):
         if skip:
             skip = False
         elif a == "--":
-            return False
+            return helped, k
         elif a == "--help":
-            return True
+            helped = True
         elif a.startswith("-") and not a.startswith("--"):
-            helped, skip = _gh_short_help(a, bools, vals)
-            if helped:
-                return True
+            asked, skip = _gh_short_help(a, bools, vals)
+            helped = helped or asked
         else:
             skip = a in value_flags
-    return False
+    return helped, len(rest)
 
 
 def _gh_short_help(a: str, bools: str, vals: str) -> Tuple[bool, bool]:
-    """(cụm cờ ngắn `a` gọi trợ giúp, ăn token kế) theo pflag: chữ bool đọc lần lượt; `h` (không có `=` liền sau) là trợ
-    giúp; chữ ăn giá trị lấy phần còn lại của cụm, hết cụm thì token kế; ký tự khác dừng (pflag báo lỗi/bỏ qua)."""
+    """(cụm cờ ngắn `a` gọi trợ giúp, ăn token kế) theo pflag: chữ bool đọc lần lượt; chữ ăn giá trị lấy phần còn lại
+    của cụm, hết cụm thì token kế; `h` (không có `=` liền sau) là trợ giúp — trừ khi lệnh con dùng `-h` làm cờ ăn giá
+    trị (`auth status -h <host>`, `repo edit -h <url>`: cobra không gắn `-h` trợ giúp); ký tự khác dừng (pflag báo
+    lỗi/bỏ qua)."""
     for k, ch in enumerate(a[1:], 1):
-        if ch == "h" and a[k + 1 : k + 2] != "=":
-            return True, False
         if ch in vals:
             return False, k == len(a) - 1
+        if ch == "h" and a[k + 1 : k + 2] != "=":
+            return True, False
         if ch not in bools:
             break
     return False, False
@@ -8534,6 +8685,15 @@ GH_API_GUARDED_RE = re.compile(
     # review #97 lần 2: environment (bí mật/biến/luật bảo vệ), deploy key, khoá SSH/GPG của tài khoản, biến Actions
     r"|/?repos/[^/\s]+/[^/\s]+/(environments/[^/\s]+(/.*)?|keys(/.*)?|actions/variables(/.*)?)/?"
     r"|/?orgs/[^/\s]+/actions/variables(/.*)?|/?user/(keys|gpg_keys|ssh_signing_keys)(/.*)?"
+    r"|/?user/codespaces/secrets(/.*)?"  # bí mật codespace của tài khoản — như `gh secret … --user` (AUD-SEC-583)
+)
+# DELETE REST ứng với lệnh gh xoá đã DESTROY (AUD-SEC-580/583): `release delete`, `run delete` (cả xoá log của run),
+# `label delete`, `issue delete` (REST không có — chặn vẫn đúng), `gist delete`, `codespace delete`, `project delete`
+# (project cổ điển), `cache delete --all` (`DELETE …/actions/caches[?key=…]` — xoá một cache theo id thì không).
+# Đoạn cuối `[^/]+`: tên đã giải mã có thể chứa khoảng trắng (`labels/good%20first`).
+GH_API_DELETE_DESTROY_RE = re.compile(
+    r"/?repos/[^/\s]+/[^/\s]+/(?:releases/[^/]+|actions/runs/[^/]+(?:/logs)?|labels/[^/]+|issues/[^/]+|actions/caches)/?"
+    r"|/?(?:gists|user/codespaces|projects)/[^/]+/?"
 )
 # Mutation graphql huỷ/chuyển repo — như `gh repo delete|archive`.
 GRAPHQL_DESTROY_RE = re.compile(r"\b(deleteRepository|transferRepository|archiveRepository)\b")
@@ -8552,7 +8712,7 @@ def _gh_api_destroy(args: List[str]) -> bool:
     ):
         return True
     if method == "DELETE":
-        return bool(GH_API_REPO_RE.fullmatch(path) or GH_API_MAIN_REF_RE.fullmatch(path))
+        return any(r.fullmatch(path) for r in (GH_API_REPO_RE, GH_API_MAIN_REF_RE, GH_API_DELETE_DESTROY_RE))
     fields = [v.replace(" ", "").lower() for v in _gh_api_field_values(args)]
     # Như `gh repo edit --visibility <bất kỳ>`: đổi `private`/`visibility` (kể cả sang private) là chặn; thân `--input`
     # không đọc được tại chỗ nên không xác minh được → chặn như `archived=true`.
@@ -8591,6 +8751,22 @@ def _gh_publish(args: List[str]) -> Tuple[str, str]:
 GH_DESTROY_FLAGS: Dict[Tuple[str, ...], Tuple[Tuple[str, ...], str, str]] = {
     ("repo", "edit"): (("--visibility", "--default-branch"), "", ""),
     ("cache", "delete"): (("--all",), "a", "rR"),
+}
+GH_REPO_EDIT_VALUE_FLAGS = (  # gh 2.89 `gh repo edit --help`: `-d`, `-h` là cờ ăn giá trị (không cờ bool ngắn)
+    *("-d", "--description", "-h", "--homepage", "--add-topic", "--remove-topic", "--default-branch", "--visibility"),
+    "--squash-merge-commit-message",
+)
+# Lệnh gh mà luật quyết định của guard đọc cờ (merge, `close -d`, `GH_DESTROY_FLAGS`, in token, `api` ghi/huỷ): token
+# bash tách/bung thành cờ ở đây → BUDGET (`_gh_dyn_name`, AUD-SEC-590). Lệnh khác (`pr view $PR`) không; thân/tiêu đề
+# của lệnh đăng chữ là việc của lớp đăng review (ADR-0063 — `--body $(date)` là nguồn chữ nó chấp nhận). Giá trị: (cờ ăn
+# token kế, chữ cờ bool ngắn) theo gh 2.89 `<lệnh> --help` — để biết `--` nào kết thúc cờ (`_gh_flag_scan`, AUD-SEC-596).
+GH_FLAG_RULED: Dict[Tuple[str, ...], Tuple[Tuple[str, ...], str]] = {
+    ("pr", "merge"): (GH_MERGE_VALUE_FLAGS, "dmrs"),
+    ("pr", "close"): (GH_PR_CLOSE_VALUE_FLAGS, "d"),
+    ("api",): (GH_API_VALUE_FLAGS, GH_API_BOOL_SHORT),
+    ("auth", "status"): (("-h", "--hostname", "--jq", "--json", "--template"), "at"),
+    ("cache", "delete"): (("-r", "--ref", *GH_REPO_FLAGS), "a"),
+    ("repo", "edit"): (GH_REPO_EDIT_VALUE_FLAGS, ""),
 }
 
 
@@ -15333,7 +15509,9 @@ def bash_decision(
     lệnh (`ScanTooComplex`) → chặn, không đoán. Thư mục mở bằng `<` trong chữ lệnh (cả lệnh lồng) cộng dồn vào `FD_DIRS`
     suốt lần quét (AUD-SEC-521)."""
     token = FD_DIRS.set(tuple(dict.fromkeys((*FD_DIRS.get(), *_fd_open_dirs(cmd)))))
+    split = GH_SPLIT_WORDS.set(GH_SPLIT_WORDS.get())
     try:
+        GH_SPLIT_WORDS.set(GH_SPLIT_WORDS.get() | _gh_split_words(cmd))  # lệnh lồng cộng dồn (AUD-SEC-590)
         return _bash_decision(cmd, root, cwd, depth, budget, rewrites)
     except ScanTooComplex as e:
         reason = f"Lệnh quá phức tạp để guard quét hết ({e}): {clean_text(cmd)[:200]}{BUDGET_REWRITE}"
@@ -15348,6 +15526,7 @@ def bash_decision(
         out.update(getattr(e, "flags", {}))  # review #433 R1: giữ cờ bỏ hook (`no_verify`/`push_no_verify`) cho adapter
         return out
     finally:
+        GH_SPLIT_WORDS.reset(split)
         FD_DIRS.reset(token)
 
 
