@@ -8493,7 +8493,7 @@ class GuardReview489DebtTest(_GuardDebtCase):
 
         def scan(n: int) -> None:
             for unit in units:
-                for rx in (self.g.GH_POST_RE, self.g.GH_PR_TEXT_RE, self.g.MERGE_CMD_RE):
+                for rx in (self.g.GH_POST_RE, self.g.GH_POST_ARGV_RE, self.g.GH_PR_TEXT_RE, self.g.MERGE_CMD_RE):
                     rx.search(unit * n)
 
         cpu_budget.assert_not_quadratic(self, scan, 4000)
@@ -8600,6 +8600,222 @@ class GuardReview490DebtTest(_GuardDebtCase):
         self.assertIn(["pr", "merge", "12"], readings(["pr", "merge", "12", ">", "/dev/null"]))
         self.assertIn(["pr", "merge", "5"], readings(["pr", "{fd}", ">", "/dev/null", "merge", "5"]))
         self.assertEqual(readings(["pr", "view"]), [["pr", "view"]])
+
+
+class GuardGhDestroyDebtTest(_GuardDebtCase):
+    """Nợ review #489/#490 (đo trên gh 2.89): lệnh gh xoá/thu hồi không đảo ngược → DESTROY như `gh repo delete`, kể cả
+    nhóm lồng `repo deploy-key` và cờ đứng trước lệnh con (AUD-SEC-580, D-409); `gh auth token`/`auth status -t` in token
+    ra transcript → chặn; `gh release list|view` không hỏi (AUD-HAR-361); lọc chữ `gh` đăng chữ không xét chữ của lệnh
+    khác hay giá trị cờ của `gh` không đăng chữ (AUD-HAR-364)."""
+
+    DESTROY = (
+        "gh repo deploy-key delete 1",
+        "gh ssh-key delete 1",
+        "gh ssh-key delete 1 --yes",
+        "gh gpg-key delete ABCD --yes",
+        "gh cache delete --all",
+        "gh cache delete -a",
+        "gh cache delete --all=true",
+        "gh cache delete -ar refs/heads/x",
+        "gh run delete 1",
+        "gh label delete bug --yes",
+        "gh issue delete 1 --yes",
+        "gh gist delete abc --yes",
+        "gh codespace delete --all",
+        "gh codespace delete -c x -f",
+        "gh project delete 1 --owner o",
+        "gh auth logout",
+        "gh auth logout -h github.com -u me",
+    )
+    # cờ trước lệnh con: cobra nhấc lệnh con lên (D-409) — cùng quyết định với dạng trơn
+    LIFTED = (
+        "gh repo --repo o/r deploy-key delete 1",
+        "gh repo deploy-key --repo o/r delete 1",
+        "gh -R o/r repo deploy-key delete 1",
+        "gh --help=false repo deploy-key delete 1",
+        "gh repo 2>/dev/null deploy-key delete 1",
+        "gh --help=false ssh-key delete 1",
+        "gh --help=false gpg-key delete ABCD",
+        "gh cache -R o/r delete --all",
+        "gh -R o/r cache delete -a",
+        "gh run -R o/r delete 1",
+        "gh label -R o/r delete bug",
+        "gh issue -R o/r delete 1",
+        "gh --help=false gist delete abc",
+        "gh --help=false codespace delete --all",
+        "gh --help=false project delete 1",
+        "gh --help=false auth logout",
+        "gh auth --hostname github.com logout",
+    )
+    TOKEN = (
+        "gh auth token",
+        "gh auth token -h github.com",
+        "gh --help=false auth token",
+        "gh auth --hostname github.com token",
+        "gh auth status -t",
+        "gh auth status --show-token",
+        "gh auth status -at",
+        "gh auth status --show-token=true",
+        "gh auth --hostname github.com status -t",
+        "echo $(gh auth token)",
+        "GH_TOKEN=$(gh auth token) make x",
+    )
+    READS = (
+        "gh issue list",
+        "gh issue view 1",
+        "gh run list",
+        "gh run view 1",
+        "gh run watch 1",
+        "gh cache list",
+        "gh cache delete 123",  # một cache theo id/khoá — tái tạo được, không phải `--all`
+        "gh label list",
+        "gh gist list",
+        "gh gist view abc",
+        "gh auth status",
+        "gh auth status -a",
+        "gh auth status -h github.com",
+        "gh ssh-key list",
+        "gh gpg-key list",
+        "gh repo deploy-key list",
+        "gh repo --repo o/r deploy-key list",
+        "gh project list",
+        "gh codespace list",
+        "gh -R o/r issue list",
+        "gh release list",
+        "gh release ls",
+        "gh release view v1",
+        "gh release download v1",
+        "gh release verify v1",
+        "gh -R o/r release list",
+        "gh repo view o/r",
+    )
+    RELEASE_WRITES = (
+        "gh release create v1",
+        "gh release new v1",
+        "gh release upload v1 a.tgz",
+        "gh release edit v1 --draft=false",
+        "gh release delete-asset v1 a.tgz",
+        "gh release -R o/r create v1",
+    )
+
+    def setUp(self):
+        super().setUp()
+        self.mark = "<!-- xt-review v1 head=" + "a" * 40 + " verdict=clean -->\n"
+        Path(self.feat, "r.md").write_text(self.mark, encoding="utf-8")
+
+    def code(self, cmd: str) -> tuple:
+        res = self.out(cmd)
+        return res["decision"], res.get("code")
+
+    def strict(self, cmd: str) -> str:
+        """Quyết định ở chế độ strict: quyết định bộ luật, không qua chính sách mặc định (ask = hỏi người)."""
+        return str(self.g.bash_decision(cmd, self.feat, self.feat)["decision"])
+
+    def test_destroy_commands_denied(self):  # AUD-SEC-580
+        """Xoá/thu hồi không đảo ngược → DESTROY (deny mặc định, hỏi khi strict) — dạng trơn và cờ trước lệnh con."""
+        self.assert_code(self.DESTROY + self.LIFTED, "DESTROY")
+        for cmd in ("gh ssh-key delete 1", "gh repo --repo o/r deploy-key delete 1"):
+            with self.subTest(cmd):
+                self.assertEqual(self.strict(cmd), "ask")
+        # `cs` (tên gọi khác của codespace) ngoài `GH_BUILTINS` nên lớp tập con chặn trước (BUDGET); bảng vẫn xếp DESTROY
+        self.assertEqual(self.out("gh cs delete --all")["decision"], "deny")
+        self.assertEqual(self.g._gh_publish(["cs", "delete", "--all"]), ("ask", self.g.DESTROY_ASK))
+        self.assertEqual(self.g._gh_publish(["cache", "delete", "-Ro/a", "k"]), ("", ""))  # `a` là giá trị của `-R`
+        self.assertEqual(self.g._gh_publish(["cache", "delete", "1"]), ("", ""))
+        self.assertEqual(self.g._gh_publish(["cache", "list"]), ("", ""))
+
+    def test_token_print_denied(self):  # AUD-SEC-580
+        """`gh auth token` và `gh auth status -t|--show-token` in token ra transcript → chặn ở mọi chính sách."""
+        self.assert_code(self.TOKEN, "RULE_DENY")
+        self.assertIn("token", self.out("gh auth token")["reason"])
+        self.assertEqual(self.strict("gh auth token"), "deny")
+
+    def test_daily_reads_allowed(self):  # AUD-SEC-580, AUD-HAR-361
+        """Lệnh đọc hằng ngày của các nhóm vừa có luật không bị chặn hay hỏi (cả strict)."""
+        self.assert_allowed(self.READS)
+        for cmd in ("gh release list", "gh release view v1", "gh auth status"):
+            with self.subTest(cmd):
+                self.assertEqual(self.strict(cmd), "")
+
+    def test_release_writes_still_ask(self):  # AUD-HAR-361
+        """Lệnh con ghi của release vẫn hỏi (đối ngoại) — cả tên gọi khác `new`; `delete` giữ DESTROY."""
+        for cmd in self.RELEASE_WRITES:
+            with self.subTest(cmd):
+                self.assertEqual(self.g.bash_decision(cmd, self.feat, self.feat)["decision"], "ask")
+                self.assertEqual(self.strict(cmd), "ask")
+        self.assert_code(("gh release delete v1 --yes", "gh release -R o/r delete v1"), "DESTROY")
+
+    def test_concurrent_decisions_match(self):
+        """Quyết định chạy đồng thời giống chạy tuần tự (không trạng thái dùng chung giữa các lệnh)."""
+        cmds = list(self.DESTROY + self.LIFTED + self.TOKEN + self.READS) * 2
+        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
+            together = list(pool.map(self.code, cmds))
+        self.assertEqual(together, [self.code(c) for c in cmds])
+
+    def test_wrapped_scan_linear(self):  # AUD-HAR-364: đọc lại đối số như chữ shell không bậc hai
+        """`_gh_wrapped` đọc lại đối số (lồng tới `POST_NEST_MAX` tầng) — thời gian tuyến tính theo độ dài lệnh."""
+        units = ("gh pr x ", "x gh pr comment-ish ", "sh -c gh -f ", "a; gh api ")
+
+        def scan(n: int) -> None:
+            for unit in units:
+                self.g._gh_wrapped(["sh", "-c", unit * n])
+                self.g._gh_wrapped(["git", "commit", "-m", unit * n, unit * n])
+
+        cpu_budget.assert_not_quadratic(self, scan, 2000)
+
+    def test_gh_path_nested_group(self):  # AUD-SEC-580
+        """Nhóm lồng (`repo deploy-key`, `repo autolink`, `codespace ports`): cobra tìm tới tên thứ ba; nhóm thường dừng
+        ở hai tên."""
+        path = self.g._gh_path
+        self.assertEqual(path(["repo", "--repo", "o/r", "deploy-key", "delete", "1"]), [0, 3, 4])
+        self.assertEqual(path(["repo", "deploy-key", "-R", "o/r", "delete"]), [0, 1, 4])
+        self.assertEqual(path(["cs", "ports", "visibility", "1:public"]), [0, 1, 2])
+        self.assertEqual(path(["pr", "merge", "5"]), [0, 1])
+        self.assertEqual(path(["repo", "delete", "o/r"]), [0, 1])
+        self.assertEqual(path(["deploy-key", "delete", "1"]), [0, 1])  # không phải nhóm lồng: hai tên
+        canon = self.g._gh_canonical(["repo", "--repo", "o/r", "deploy-key", "delete", "1"])
+        self.assertEqual(canon, ["repo", "deploy-key", "delete", "--repo", "o/r", "1"])
+
+    def test_post_filter_reads_gh_argv_only(self):  # AUD-HAR-364
+        """Chữ nhắc `gh pr … review`/`gh -F … api` trong thông điệp commit, giá trị `--search` của `gh pr list` không
+        làm lệnh thành `gh` đăng chữ; dạng đăng thật (cả bọc trong shell, `xargs`, cờ nhiều từ trước lệnh con) giữ chặn."""
+        self.assert_allowed(
+            (
+                'git commit -m "docs: gh pr flow, reviewer must review (#$PR)"',
+                'git commit -m "fix: gh -F field before api ($N)"',
+                'gh pr list --search "review:approved author:$U" < r.md',
+                'gh issue list --search "comment:x $Q" < r.md',
+                "gh api repos/o/r/pulls --jq '.[] | select(.x)' < r.md",
+            )
+        )
+        for cmd in (
+            "sh -c 'gh pr comment 5 -F -' < r.md",
+            "bash -c 'bash -c \"gh pr comment 5 -F -\"' < r.md",
+            "echo r.md | xargs -I{} gh pr comment 5 -F {}",
+            "gh pr --body 'x y' --body-file r.md comment 5",
+            "gh pr list --search x; gh pr comment 5 -F - < r.md",
+            "gh -F body=@r.md api repos/o/r/issues/1/comments",
+            "sh -c 'cd . && gh pr review 5 -F -' < r.md",
+            "sh -c 'g\"\"h pr comment 5 -F -' < r.md",
+            'git commit -m "x $Y"; sh -c "gh pr comment 5 -F -" < r.md',
+        ):
+            with self.subTest(cmd):  # luật dấu review bắt; lớp khác (tập con chuẩn — BUDGET) có thể chặn trước
+                self.assertTrue(self.g._review_forge_hit(cmd, self.g.tokenize(cmd), self.feat))
+                self.assertEqual(self.out(cmd)["decision"], "deny")
+        self.assertTrue(self.g._gh_posts(["gh", "pr", "review", "5"]))
+        self.assertFalse(self.g._gh_posts(["gh", "pr", "list", "--search", "review:approved"]))
+        self.assertFalse(self.g._gh_wrapped(["git", "commit", "-m", "docs: gh pr flow, review (#$PR)"]))
+        self.assertTrue(self.g._gh_wrapped(["sh", "-c", "gh pr comment 5 -F -"]))
+        self.assertFalse(self.g._gh_wrapped(["gh", "pr", "comment", "5"]))  # đăng thẳng, không phải bọc
+        self.assertTrue(self.g._gh_wrapped(["git", "commit", "-m", "x", "gh pr comment 5 -F -"]))  # không phải message
+        self.assertTrue(self.g._gh_text_posts("echo hi", self.g.POST_NEST_MAX))  # lồng quá sâu: coi như bọc
+        self.assertFalse(self.g._gh_text_posts("docs: gh pr flow (#$PR)", 0))
+        # còn chặt: chữ ngoài message git có `gh` thành từ riêng rồi lệnh con đăng chữ đọc như lệnh bọc chạy `gh`
+        self.assertTrue(self.g._gh_wrapped(["echo", "docs: gh pr flow, review"]))
+        self.assertEqual(
+            self.g._git_message_values(["git", "tag", "-a", "v1", "--message=gh pr review"]), {"gh pr review"}
+        )
+        self.assertEqual(self.g._git_message_values(["git", "log", "-m", "x"]), set())
 
 
 class GuardAppendParallelTest(unittest.TestCase):

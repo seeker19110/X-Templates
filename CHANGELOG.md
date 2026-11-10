@@ -82,8 +82,19 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
   (`cd ~ && shred 2026 >/dev/null`, `rsync --delete … 2026 >/dev/null`) bị xét như đích (`WIPE_OUTSIDE`).
 - Guard (nợ review #487 AUD-HAR-354): `=` không còn tách cụm cờ không chỉ chữ của `gh pr close` — token gh từ chối hay
   bỏ qua (`-4=d`, `-test.=d`) tính là có `-d` (chặt hơn).
+- Guard (lý do chạm hàng rào: nợ review #489 AUD-SEC-580): `gh repo deploy-key|ssh-key|gpg-key|run|label|issue|gist|
+  codespace|project delete`, `gh cache delete --all|-a` và `gh auth logout` bị chặn `DESTROY` như REST tương ứng (cả cờ
+  đứng trước lệnh con, nhóm lồng `repo deploy-key` đọc tới tên thứ ba), `gh auth token`/`gh auth status -t|--show-token`
+  (in token ra transcript) bị chặn ở mọi chính sách.
 
 ### Fixed
+
+- Guard (nợ review #489 AUD-HAR-361): `gh release list|view|download|verify` không còn hỏi ở chế độ strict — chỉ lệnh
+  con ghi của release (`create`/`new`, `upload`, `edit`, `delete-asset`, `delete`) hỏi.
+- Guard (nợ review #490 AUD-HAR-364): luật dấu review chỉ coi `gh` ở vị trí tên lệnh là đăng chữ — thông điệp `git
+  commit -m "… gh pr …, reviewer must review ($PR)"` và giá trị `gh pr list --search "review:approved …"` không còn bị
+  chặn `REVIEW_FORGE`; lệnh bọc chạy `gh` trong chuỗi (`sh -c`, `ssh h '…'`, `xargs`) vẫn bị xét.
+- Test đối chiếu cờ trước lệnh con gh dùng `assertLessEqual` thay `assertTrue(a <= b)` (CodeQL "Imprecise assert").
 
 - Guard (nợ review #487 AUD-HAR-353): dạng trợ giúp thật không còn bị chặn oan — `gh pr close 12 -d --help`/`-dh`,
   `git replace -h 2>&1` (`2` của chuyển hướng không còn đọc là đối tượng), `git push -h` ở `main`; `-h`/`--help` là giá

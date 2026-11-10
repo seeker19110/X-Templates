@@ -69,7 +69,7 @@ class GuardGhLiftedParityTest(unittest.TestCase):
     def test_corpus_gh_cases_with_lifted_flag_are_not_looser(self):
         rows = gh_cases()
         self.assertGreater(len(rows), 150)  # corpus có ~270 ca gh: lọc sai thì test rỗng nghĩa
-        self.assertTrue(set(EXCUSED) <= {c["id"] for c in rows})
+        self.assertLessEqual(set(EXCUSED), {c["id"] for c in rows})  # ca miễn nào cũng còn trong corpus
         looser: List[str] = []
         with tempfile.TemporaryDirectory(prefix="xt-gh-parity-") as tmp:
             env = xt.BenchEnv(Path(tmp).resolve())
