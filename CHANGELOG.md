@@ -86,7 +86,7 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
   codespace|project delete`, `gh cache delete --all|-a` và `gh auth logout` mang mã `DESTROY` (mặc định chặn, strict
   hỏi) — cả cờ đứng trước lệnh con, nhóm lồng `repo deploy-key` đọc tới tên thứ ba; tên gọi khác `gh cs delete` bị lớp
   tập con chặn trước (`BUDGET`). Chỉ xoá khoá deploy/SSH/GPG khớp REST tương ứng (`gh api -X DELETE …/keys/…` đã
-  `DESTROY`); REST xoá nhãn/run/gist/cache vẫn chỉ hỏi như ghi đối ngoại. `gh auth token`/`gh auth status
+  `DESTROY`); REST xoá nhãn/run/gist/cache: xem mục AUD-SEC-583 bên dưới (`DESTROY`). `gh auth token`/`gh auth status
   -t|--show-token` (in token ra transcript) bị chặn ở mọi chính sách.
 - Guard (lý do chạm hàng rào: review #491 AUD-SEC-587, có từ trước): tên lệnh gh (nhóm/lệnh con, cả nhóm lồng) hay tên
   cờ (`--tên` trước `=`, `-` liền mở rộng) có `$`/backtick — `gh pr merge$Z 5`, `gh repo delete$Z o/r`, `gh auth
@@ -96,7 +96,7 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
 - Guard (lý do chạm hàng rào: nợ review #491 AUD-SEC-583): `gh api -X DELETE` tới đường REST của lệnh gh xoá đã
   `DESTROY` — `…/issues/N`, `…/actions/runs/N[/logs]`, `…/labels/<tên>`, `…/releases/N`, `…/actions/caches[?key=…]`,
   `gists/<id>`, `user/codespaces/<tên>`, `projects/N` — mang mã `DESTROY` ở mọi cách viết phương thức (`-XDELETE`,
-  `--method=delete`) và tiền tố đường (`/repos/…`, `{owner}/{repo}`, URL đầy đủ); ghi `user/codespaces/secrets/…` như
+  `--method=delete`, cụm cờ ngắn `-iX DELETE`/`-iXDELETE` — AUD-SEC-599) và tiền tố đường (`/repos/…`, `{owner}/{repo}`, URL đầy đủ); ghi `user/codespaces/secrets/…` như
   `gh secret`. Xoá một cache theo id, gỡ nhãn khỏi issue, bỏ sao gist vẫn là ghi thường.
 - Guard (lý do chạm hàng rào: nợ review #485 AUD-SEC-555): `gh api` ghi ref (`PATCH …/git/refs/<ref>`, POST
   `…/git/refs`, tags, số ít `git/ref/`) với trường `force` khác `false` (`-F`/`-f`/`--field`/`--raw-field`, `@tệp`,
@@ -109,6 +109,13 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
   định chặn, strict hỏi — D-411). Luật deny phẳng thắng `BUDGET` ở mọi chính sách: `gh pr merge 5 --auto $X` vẫn
   `AUTO_MERGE_ENABLE` ở strict (ADR-0036 §3 — trước đây `--auto --x$Z` thành câu hỏi). Trong nháy kép (`"$PR"`), sau
   chữ nguyên văn (`-F n=$N`, `repos/$R`), lệnh không có luật cờ (`gh pr view $PR`), sau `--`: không đổi.
+- Guard (lý do chạm hàng rào: review #492 AUD-SEC-594…599): lớp AUD-SEC-590 xét từ theo lệnh đơn gọi gh — tên đã bỏ
+  nháy (`g\h`, `g''h`, `command g\h` — 595), mọi mảnh của `${X:- -X DELETE}` có khoảng trắng (594); mở rộng/glob
+  không nháy ở lệnh khác (`echo $PR; gh pr close "$PR"`, `ls *; gh pr close '*'`) không còn chặn oan. `--` là giá trị
+  của cờ ăn token kế (`gh pr close 5 -c -- $X`, `gh auth status -h -- --show-token$Z` — gh 2.89 `-c` ăn `--`) không
+  kết thúc cờ (596/597). Lỗi tập con chuẩn không bị câu hỏi `BUDGET` hạ thành hỏi ở strict (`gh pr close 5 ${a[@]}` —
+  598). `gh api` đọc cụm cờ ngắn như pflag (`-iX DELETE`, `-iXDELETE`, `-iF force=true` — 599): xoá REST `DESTROY`,
+  ghi ref `force` `RULE_DENY`.
 
 ### Fixed
 
