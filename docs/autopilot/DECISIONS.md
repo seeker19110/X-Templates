@@ -423,3 +423,10 @@
 - Chọn: Từ chối ký (fail-closed); cần loop init trước — đường /complete đã có bước này
 - Lý do (tiêu chí chất lượng cuối): (1) đúng và an toàn: .autopilot/ không commit nên clone riêng không biết sổ dự án chính — coi vắng là sạch mở lại đúng lỗ AUD-HAR-340; (2) đường lùi: loop init tạo sổ rỗng; khoá release_signoff hiện chưa bật nên không chặn ai
 - Đường lùi: Cho sổ vắng ở mọi worktree là không có việc chờ
+
+### D-414 · 2026-11-10T15:03:52+00:00 · Workflow thiết kế AUD-SEC-591/592/593 phát hiện lỗi gốc: từ chỉ gồm toán tử shell trong nháy (';' hay dấu ống trong nháy đơn) làm tokenize/split_commands cắt lệnh ở MỌI luật (git push có --force sau ';' trong nháy được cho qua — đã tái hiện). Thứ tự làm và 4 điểm spec để phiên chính quyết?
+
+- Phương án: (1) Sửa gốc tokenizer trước ở PR riêng (🔴), rồi PR cài spec 591/592/593 không cần vá tạm R0; nhận cả 4 khuyến nghị của spec: bỏ miễn trừ thân không nháy, pr close chế độ tail, bảng 12 hàng lệnh đăng chữ · (2) Cài spec kèm vá tạm R0 trong lớp gh trước, mở dòng 🔴 cho gốc làm sau
+- Chọn: Sửa gốc tokenizer trước ở PR riêng (🔴), rồi PR cài spec 591/592/593 không cần vá tạm R0; nhận cả 4 khuyến nghị của spec: bỏ miễn trừ thân không nháy, pr close chế độ tail, bảng 12 hàng lệnh đăng chữ
+- Lý do (tiêu chí chất lượng cuối): (1) đúng và an toàn: lỗi gốc lách cả luật force-push và no-verify, nặng hơn ba nợ 🟠 — sửa gốc đóng mọi luật, vá tạm chỉ đóng gh; (3) đơn giản hơn: không thêm R0 rồi gỡ; các khuyến nghị spec đều là cách hiểu chặt hơn và đã đo 0 chặn oan trên lệnh thật
+- Đường lùi: Tách lại: R0 trong lớp gh
