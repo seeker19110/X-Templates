@@ -12436,8 +12436,11 @@ def _release_tree(base: Path) -> Tuple[Dict[str, str], Optional[str], bool]:
             False,
         )
     spec = ("--", ".", ":(exclude).autopilot")
+    # cờ ghim đè cấu hình repo: `status.showUntrackedFiles no` giấu tệp chưa track, `submodule.<tên>.ignore`/
+    # `diff.ignoreSubmodules` giấu submodule bẩn — "cây sạch" phải đúng dù cấu hình nói gì (AUD-HAR-334, như review #327)
+    pin = ("--untracked-files=all", "--ignore-submodules=none")
     try:
-        status = _release_git_stdout(base, "status", "--porcelain", *spec)
+        status = _release_git_stdout(base, "status", "--porcelain", *pin, *spec)
         index = _release_git_stdout(base, "ls-files", "-v", "-z", *spec)
     except _ReleaseTreeError as exc:
         return _release_row("tree", "FAIL", str(exc)), head, False
@@ -13863,9 +13866,55 @@ def _sign_scope_check(base: Path) -> None:
             f"{RELEASE_SIGN_BLUEPRINT} khai `scale: {meta.get('scale', '')}` — agent chỉ ký quy mô S (M/L: GO-NO-GO dòng 20"
             " là BLOCKER người dùng thử, người ký)"
         )
-    waiting = _deferred(read_state(base) or {})
+    waiting = _sign_deferred(base)
     if waiting:
-        raise ReleaseSignError(f"còn việc chờ người (`loop defer`): {', '.join(sorted(waiting))} — agent không ký")
+        raise ReleaseSignError(f"còn việc chờ người (`loop defer`): {', '.join(waiting)} — agent không ký")
+
+
+def _sign_state_files(base: Path) -> List[Path]:
+    """`.autopilot/state.json` (kể cả symlink gãy) của dự án ở MỌI worktree của repo, cùng thư mục con như `base`
+    (AUD-HAR-340): sổ máy không theo git và riêng mỗi worktree (`loop_root`) — đọc theo cwd thì ký từ worktree khác thoát
+    việc `loop defer` của cây chính. Không liệt kê được worktree → ReleaseSignError."""
+    env = _perf_env()
+    prefix = _git(base, "rev-parse", "--show-prefix", env=env)
+    trees = _git(base, "worktree", "list", "--porcelain", "-z", env=env)
+    if prefix.returncode or trees.returncode:
+        raise ReleaseSignError(
+            "không liệt kê được worktree của repo (`git rev-parse`/`git worktree list`) — không biết còn việc"
+            " `loop defer` ở cây chính, agent không ký"
+        )
+    sub = prefix.stdout.rstrip("\n")
+    roots = [base, *(Path(x[9:]) / sub for x in trees.stdout.split("\0") if x.startswith("worktree "))]
+    files = dict.fromkeys(state_dir(r.resolve()) / "state.json" for r in roots)
+    return [f for f in files if os.path.lexists(f)]
+
+
+def _sign_deferred(base: Path) -> List[str]:
+    """ID `loop defer` còn chờ ở mọi worktree của dự án (fail-closed, AUD-HAR-340): không worktree nào có sổ máy (clone
+    riêng — sổ không theo git nên không thấy sổ của dự án chính — hay chưa `loop init`) hoặc một sổ không đọc được/hỏng
+    → không biết còn việc chờ người → ReleaseSignError."""
+    files = _sign_state_files(base)
+    if not files:
+        raise ReleaseSignError(
+            "không thấy `.autopilot/state.json` ở worktree nào của repo — sổ máy không theo git, nên clone riêng (hay"
+            " chưa `loop init`) không biết còn việc `loop defer` của dự án; chạy `release-sign` từ checkout có vòng"
+            " `/complete` — agent không ký"
+        )
+    waiting: set[str] = set()
+    for f in files:
+        try:
+            st = json.loads(f.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:  # thư mục, symlink gãy, không phải UTF-8/JSON
+            raise ReleaseSignError(
+                f"không đọc được {f}: {exc} — không biết còn việc `loop defer`, agent không ký"
+            ) from exc
+        if not isinstance(st, dict):
+            raise ReleaseSignError(f"{f} hỏng: state không phải object — agent không ký")
+        deferred = st.get("deferred", {})
+        if not isinstance(deferred, dict):
+            raise ReleaseSignError(f"{f} hỏng: `deferred` không phải object — agent không ký")
+        waiting.update(deferred)
+    return sorted(waiting)
 
 
 def _sign_remote_check(base: Path) -> None:

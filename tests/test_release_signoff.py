@@ -78,6 +78,11 @@ class SignoffRepo(TmpRepoCase):
         (self.proj / "VERSION").write_text("1.2.0\n", encoding="utf-8")
         self.doc.write_text(GO_DOC, encoding="utf-8")
         self.blueprint("S")
+        # sổ máy của vòng `/complete` (`loop init`), không theo git như `.gitignore` dự án đích (AUD-HAR-340)
+        (self.repo / ".git/info/exclude").write_text(".autopilot/\n", encoding="utf-8")
+        self.state = self.proj / ".autopilot" / "state.json"
+        self.state.parent.mkdir()
+        self.state.write_text("{}", encoding="utf-8")
         self.set_key("agent")
         self.enterContext(unittest.mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(self.proj)}))
 
@@ -198,11 +203,73 @@ class ReleaseSignTest(SignoffRepo):
         (self.repo / "BLUEPRINT.md").unlink()
         self.refused("không đọc được BLUEPRINT.md")
         self.blueprint("S")
-        state = self.repo / ".autopilot" / "state.json"
-        state.parent.mkdir()
-        state.write_text('{"deferred": {"T-9": {"reason": "tiền thật"}}}', encoding="utf-8")
+        self.state.write_text('{"deferred": {"T-9": {"reason": "tiền thật"}}}', encoding="utf-8")
         self.refused("còn việc chờ người (`loop defer`): T-9")
-        state.write_text('{"deferred": {}}', encoding="utf-8")
+        self.state.write_text('{"deferred": {}}', encoding="utf-8")
+        self.assertEqual(self.sign(), "docs/ops/GO-NO-GO-2026-11-08-v1.2.0.md")
+
+    def worktree(self, name="wt"):
+        path = self.tmp / name
+        self.git("worktree", "add", "-q", "--detach", str(path))
+        return path
+
+    def test_deferred_read_from_every_worktree(self):
+        """AUD-HAR-340: `.autopilot/` riêng mỗi worktree (không theo git) — ký từ worktree khác không thoát việc
+        `loop defer` của cây chính, ký từ cây chính không thoát việc của worktree; không còn việc nào → ký được."""
+        wt = self.worktree()
+        doc = wt / self.doc.relative_to(self.repo)
+        self.state.write_text('{"deferred": {"T-9": {"reason": "tiền thật"}}}', encoding="utf-8")
+        with self.assertRaises(xt.ReleaseSignError) as ctx:
+            xt.release_sign(wt, "", "máy đạt", rc())
+        self.assertIn("còn việc chờ người (`loop defer`): T-9", str(ctx.exception))
+        self.assertEqual(doc.read_text(encoding="utf-8"), GO_DOC)
+        self.state.write_text('{"deferred": {}}', encoding="utf-8")
+        (wt / ".autopilot").mkdir()
+        (wt / ".autopilot/state.json").write_text('{"deferred": {"T-8": {"reason": "khoá thật"}}}', "utf-8")
+        self.refused("còn việc chờ người (`loop defer`): T-8")
+        (wt / ".autopilot/state.json").write_text('{"deferred": {}}', "utf-8")
+        self.assertEqual(xt.release_sign(wt, "", "máy đạt", rc()), "docs/ops/GO-NO-GO-2026-11-08-v1.2.0.md")
+        self.assertIn("| agent | GO |", doc.read_text(encoding="utf-8"))
+        self.assertEqual(self.doc.read_text(encoding="utf-8"), GO_DOC)
+
+    def test_unknown_or_broken_state_refuses(self):
+        """AUD-HAR-340 fail-closed: không có sổ máy ở worktree nào (clone riêng, chưa `loop init`), sổ hỏng hay không
+        liệt kê được worktree → không biết còn `loop defer` → từ chối."""
+        clone = self.tmp / "clone"
+        subprocess.run(["git", "clone", "-q", str(self.repo), str(clone)], check=True)
+        with self.assertRaises(xt.ReleaseSignError) as ctx:
+            xt._sign_scope_check(clone)
+        self.assertIn("không thấy `.autopilot/state.json`", str(ctx.exception))
+        self.state.unlink()
+        self.refused("không thấy `.autopilot/state.json`")
+        for text, msg in (
+            ("{hỏng", "không đọc được"),
+            ("[]", "state không phải object"),
+            ('{"deferred": ["T-9"]}', "`deferred` không phải object"),
+            ('{"deferred": null}', "`deferred` không phải object"),
+        ):
+            with self.subTest(text=text):
+                self.state.write_text(text, encoding="utf-8")
+                self.refused(msg)
+        self.state.unlink()
+        self.state.mkdir()
+        self.refused("không đọc được")
+        self.state.rmdir()
+        self.state.symlink_to(self.tmp / "vắng.json")
+        self.refused("không đọc được")
+        self.state.unlink()
+        self.state.write_text("{}", encoding="utf-8")
+        real = xt._git
+        for cmd in ("worktree", "rev-parse"):
+            with self.subTest(cmd=cmd):
+
+                def fails(cwd, *args, cmd=cmd, **kw):
+                    if args[0] == cmd:
+                        return subprocess.CompletedProcess(args, 128, "", "fatal: hỏng")
+                    return real(cwd, *args, **kw)
+
+                with unittest.mock.patch.object(xt, "_git", side_effect=fails):
+                    self.refused("không liệt kê được worktree")
         self.assertEqual(self.sign(), "docs/ops/GO-NO-GO-2026-11-08-v1.2.0.md")
 
     def test_document_selection(self):
@@ -557,6 +624,15 @@ class ReleaseSignSubdirTest(RealCheckRepo):
 
     def test_baseline_signs(self):
         self.assert_signs()
+
+    def test_deferred_at_project_subdir_of_main_worktree(self):
+        """AUD-HAR-340: sổ máy của dự án ở thư mục con — worktree khác đọc `apps/web/.autopilot/` của cây chính."""
+        wt = self.tmp / "wt"
+        self.git("worktree", "add", "-q", "--detach", str(wt))
+        self.state.write_text('{"deferred": {"T-7": {"reason": "người dùng thử"}}}', encoding="utf-8")
+        with self.assertRaises(xt.ReleaseSignError) as ctx:
+            xt._sign_scope_check(wt / self.SUB)
+        self.assertIn("`loop defer`): T-7", str(ctx.exception))
 
     def test_refusal_on_main_deleted_in_tree(self):
         self.write(self.REFUSED, refusal_doc())
