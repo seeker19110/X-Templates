@@ -9287,6 +9287,182 @@ class GuardGhReview492Test(_GuardDebtCase):
         self.assertEqual(together, [code(c) for c in cmds])
 
 
+class GuardQuotedOperatorTest(_GuardDebtCase):
+    """AUD-SEC-605: từ chỉ gồm ký tự dấu mà có nháy/thoát (`';'`, `"|"`, `\\;`, `$';'`, `'&&'`) là ĐỐI SỐ nguyên văn của
+    bash (argv `[push][origin][feat/me][;][--force]`), không phải toán tử — trước đây `tokenize` bỏ nháy rồi mọi bộ tách
+    lệnh cắt ở đó, phần sau không luật nào xét. Thay tiến trình/thay lệnh giữa đối số (`<(echo)`, `$(echo)`) không che
+    phần sau: từ sau `)` vẫn là đối số của cùng lệnh."""
+
+    # (dạng trơn, các dạng có từ-dấu-có-nháy chen giữa): cùng quyết định thô với dạng trơn
+    SAME_AS_PLAIN = (
+        (
+            "git commit -m x --no-verify",
+            (
+                "git commit -m ';' --no-verify",
+                'git commit -m ";" --no-verify',
+                "git commit -m \\; --no-verify",
+                "git commit -m $';' --no-verify",
+                "git commit -m '&&' --no-verify",
+                "git commit -m '|' --no-verify",
+                "git commit -m '\n' --no-verify",
+            ),
+        ),
+        (
+            "git push origin feat/me --force",
+            (
+                "git push origin feat/me ';' --force",
+                'git push origin feat/me ";" --force',
+                "git push origin feat/me \\; --force",
+                "git push origin feat/me \\|\\| --force",
+                "git push origin feat/me '&&' --force",
+                "git push origin feat/me '|&' --force",
+                "git push origin feat/me '&' --force",
+                "git push origin feat/me '(' --force",
+                "git push origin feat/me ')' --force",
+                "git push origin feat/me '<(' --force",
+                "git push origin feat/me $'\\x3b' --force",
+                "git push origin feat/me ';'';' --force",
+            ),
+        ),
+        ("rm -rf x /", ("rm -rf x '&&' /", "rm -rf x ';' /", 'rm -rf x "||" /', "rm -rf x \\& /")),
+        (
+            "gh pr merge 5 --admin",
+            ("gh pr merge 5 '|' --admin", "gh pr merge 5 \\| --admin", "gh pr merge 5 ';' --admin"),
+        ),
+        ("gh pr close 5 -d", ("gh pr close 5 -c ';' -d", "gh pr close 5 -c '&&' -d", 'gh pr close 5 -c "|" -d')),
+    )
+    NESTED = (  # lệnh lồng: thân `sh -c`/`eval`, lệnh bọc chạy argv trực tiếp — từ vẫn là chữ ở tầng trong
+        "sh -c \"git push origin feat/me ';' --force\"",
+        "bash -c 'git push origin feat/me \\; --force'",
+        "eval git push origin feat/me \"';'\" --force",
+        "eval echo \\; git push --force",  # eval nối đối số rồi bash đọc lại: `;` thành toán tử ở tầng đó
+        "timeout 5 git push origin feat/me ';' --force",
+        "env git push origin feat/me ';' --force",
+        "nohup git push origin feat/me ';' --force",
+        "nice -n 1 git push origin feat/me ';' --force",
+        "command git push origin feat/me '|' --force",
+        "env -S \"git push origin feat/me ';' --force\"",
+        "find build -exec rm -rf / ';'",
+        "xargs -I{} git push origin feat/me ';' --force",
+    )
+    SUBST_MID = (  # thay tiến trình/thay lệnh giữa đối số: phần sau `)` là đối số của cùng lệnh
+        "gh pr close 5 <(echo) -d",
+        "git push origin feat/me <(echo) --force",
+        "git push origin feat/me < <(echo) --force",
+        "git push origin feat/me >(cat) --force",
+        "git push origin feat/me <(echo)<(echo) --force",
+        "git push origin feat/me <(echo <(echo)) --force",
+        "git push origin feat/me <(echo; echo) --force",
+        "git push origin feat/me <(echo)>/dev/null --force",
+        "rm -rf x $(echo) /",
+        "rm -rf x <(echo) /",
+        "git push origin feat/me $((1)) --force",
+        "gh pr merge 5 <(echo) --admin",
+    )
+    CONTROLS = (  # đối chứng: giữ hành vi cũ (cho qua)
+        "a; b",
+        "a && b",
+        "echo ';'",
+        "echo '|' \\; '&&'",
+        "git commit -m 'a; b'",
+        "grep '|' f | wc -l",
+        "diff <(gh api a) <(gh api b)",
+        "cat <(echo a) <(echo b) | wc -l",
+        "echo x '|' sh",
+        "find build -name '*.o' -exec echo {} ';'",
+    )
+    DENIED_CONTROLS = ("git status; git push --force", "echo a && rm -rf /", "cat <(git push --force)")
+
+    def test_quoted_operator_word_is_argument(self):
+        for plain, variants in self.SAME_AS_PLAIN:
+            want = self.out(plain)["raw"]
+            self.assertIn(want, ("deny", "ask"), plain)
+            for cmd in variants:
+                with self.subTest(cmd):
+                    self.assertEqual(self.out(cmd)["raw"], want, (cmd, self.out(cmd)))
+
+    def test_nested_and_substitution_denied(self):
+        for cmd in self.NESTED + self.SUBST_MID + self.DENIED_CONTROLS:
+            with self.subTest(cmd):
+                self.assertIn(self.out(cmd)["raw"], ("deny", "ask"), (cmd, self.out(cmd)))
+        for cmd in ("gh pr close 5 <(echo) -d", "git push origin feat/me <(echo) --force", "rm -rf x $(echo) /"):
+            with self.subTest(cmd):
+                self.assertEqual(self.out(cmd)["raw"], "deny", self.out(cmd))
+
+    def test_controls_unchanged(self):
+        for cmd in self.CONTROLS:
+            with self.subTest(cmd):
+                self.assertEqual(self.out(cmd)["raw"], "", self.out(cmd))
+
+    def test_tokenize_marks_quoted_operators(self):
+        g = self.g
+        toks = g.tokenize("a ';' \"|\" \\& $'>' '' ';'x ; b")
+        self.assertEqual([str(t) for t in toks], ["a", ";", "|", "&", ">", "", ";x", ";", "b"])
+        self.assertEqual([isinstance(t, g.LitWord) for t in toks], [False, *[True] * 4, False, False, False, False])
+        self.assertEqual(g.split_commands(toks), [["a", *toks[1:7]], ["b"]])
+        self.assertEqual(g.split_commands(g.tokenize("x '&'& y")), [["x", g.LitWord("&")], ["y"]])
+        self.assertEqual(g.pipelines(g.tokenize("a '|' b | c")), [[["a", g.LitWord("|"), "b"], ["c"]]])
+        self.assertEqual(g.tokenize(shlex.join(toks[:2])), toks[:2])  # nháy lại: lệnh lồng tách lại vẫn là chữ
+        self.assertEqual(g._join_tokens(toks[:2]), "a ';'")
+
+    def test_litword_equality(self):
+        lit = self.g.LitWord(";")
+        self.assertFalse(lit == ";")
+        self.assertFalse(";" == lit)
+        self.assertTrue(lit != ";")
+        self.assertNotIn(lit, (";", "|"))
+        self.assertNotIn(lit, {";", "&&"})
+        self.assertTrue(lit == self.g.LitWord(";"))
+        self.assertFalse(lit != self.g.LitWord(";"))
+        self.assertFalse(lit == 1)
+        self.assertEqual(hash(lit), hash(";"))
+        self.assertEqual(str(lit), ";")
+        self.assertIs(type(str(lit)), str)
+        self.assertFalse(self.g._is_punct(lit))
+        self.assertTrue(self.g._is_punct(";"))
+        here = self.g.HereWord("EOF")
+        self.assertTrue(here == "EOF")  # chữ thường (không phải dấu) vẫn so như chuỗi
+        self.assertFalse(self.g._is_punct(self.g.HereWord(";")))
+
+    def test_dequote_keeps_literal(self):
+        dq = self.g._dequote
+        for raw in ("';'", '"|"', "\\;", "'&&'"):
+            with self.subTest(raw):
+                self.assertIsInstance(dq(raw), self.g.LitWord)
+        self.assertNotIsInstance(dq(";"), self.g.LitWord)
+        self.assertNotIsInstance(dq("\n>"), self.g.LitWord)  # toán tử trơn (xuống dòng bị shlex bỏ) vẫn là toán tử
+        self.assertNotIsInstance(dq("'a'"), self.g.LitWord)
+        self.assertIsInstance(dq(self.g.LitWord(";")), self.g.LitWord)
+        self.assertEqual(self.g.split_commands(self.g._raw_tokens("a ';' b; c") or []), [["a", "';'", "b"], ["c"]])
+
+    def test_substitution_keeps_outer_argv(self):
+        g = self.g
+        sp = g.split_commands
+        p = g.PROCSUB_WORD
+        self.assertEqual(sp(g.tokenize("a <(b c) d")), [["a", p, "d"], ["b", "c"], ["d"]])
+        self.assertEqual(sp(g.tokenize("a $(b) c")), [["a", "$", "c"], ["b"], ["c"]])
+        self.assertEqual(sp(g.tokenize("a <(b) c <(d) e")), [["a", p, "c", p, "e"], ["b"], ["c"], ["d"], ["e"]])
+        self.assertEqual(sp(g.tokenize("a <(b)>f g; h")), [["a", p, ")>", "f", "g"], ["b", ")>", "f", "g"], ["h"]])
+        self.assertEqual(sp(g.tokenize("a <(b) | c d")), [["a", p], ["b"], ["c", "d"]])
+        self.assertEqual(sp(g.tokenize("(a) b <(c (d) e) f")), [["a"], ["b", p, "f"], ["c"], ["d"], ["e"], ["f"]])
+        self.assertEqual(sp(g.tokenize(") a <(b) c")), [["a", p, "c"], ["b"], ["c"]])  # `)` lẻ: ngăn xếp rỗng
+        lead, cmds = g._simple_commands(g.tokenize("cd x && gh pr close 5 <(echo) -d"))
+        self.assertEqual(cmds[1][0], ["gh", "pr", "close", "5", p, "-d"])
+        self.assertEqual(g._sep_commands(g._raw_tokens("a <(b) c") or [])[0], [["a", p, "c"], ["b"], ["c"]])
+        self.assertEqual(g._find_exec_argvs(["find", ".", "-exec", "rm", g.LitWord(";"), "-delete"]), [["rm"]])
+
+    def test_concurrent_decisions_match(self):
+        """Bộ đọc token không có trạng thái dùng chung: đồng thời giống tuần tự."""
+        cmds = [c for _, v in self.SAME_AS_PLAIN for c in v] + list(self.SUBST_MID + self.CONTROLS)
+
+        def raw(cmd: str) -> str:
+            return str(self.out(cmd)["raw"])
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
+            together = list(pool.map(raw, cmds * 2))
+        self.assertEqual(together, [raw(c) for c in cmds * 2])
+
+
 class GuardAppendParallelTest(unittest.TestCase):
     """T-3564 (D-217): AUD-SEC-125 — gán `TÊN+=v` là phép gán của bash (`X+=1 rm -rf /` chạy rm), không phải tên lệnh;
     giá trị nối vào giá trị cũ guard không biết. AUD-SEC-121 — `parallel ::: '<lệnh>'` không mẫu lệnh chạy mỗi đối số

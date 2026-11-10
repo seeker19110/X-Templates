@@ -848,6 +848,7 @@ class StageGuardTest(unittest.TestCase):
             "python3 scripts/xt.py --fr stage stage `echo approve` --sha 1234567",
             "python3 scripts/xt.py --framework $(echo fw) stage approve --sha 1234567",
             "python3 scripts/xt.py --framework <(true) stage approve --sha 1234567",
+            'python3 scripts/xt.py --framework "$F" "$S" approve --sha 1234567',  # giá trị mờ (AUD-SEC-605: `<(` hết cắt)
             "python3 scripts/xt.py -$(echo -framework fw stage) approve --sha 1234567",
             'python3 "$XT" --framework fw stage approve --sha 1234567',
             'python3 "$XT" -- stage approve --sha 1234567',

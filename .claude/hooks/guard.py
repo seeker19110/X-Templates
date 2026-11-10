@@ -2512,7 +2512,9 @@ def _sep_commands(raw: List[str]) -> Tuple[List[List[str]], List[str]]:
     seps: List[str] = []
     cur: List[str] = []
     sep = ""
-    for t in raw + [";"]:
+    track = _SubstTrack()
+    for prev, t in zip(["", *raw], raw + [";"]):
+        track.token(t, prev, cur)
         if not (_is_punct(t) and not _is_redirect(t)):
             cur.append(t)
         elif cur:
@@ -3570,11 +3572,13 @@ def _raw_group_end(s: str, i: int, opener: str) -> int:
 
 
 def _dequote(t: str) -> str:
-    """Từ bash sau khi bỏ nháy/thoát (`"bash"`, `\\bash`, `$'bash'`, `ev"al"` → tên lệnh)."""
+    """Từ bash sau khi bỏ nháy/thoát (`"bash"`, `\\bash`, `$'bash'`, `ev"al"` → tên lệnh). Từ có nháy chỉ còn dấu
+    (`';'`, `\\|`) → `LitWord`: vẫn là chữ, không thành toán tử khi so (AUD-SEC-605)."""
     try:
-        return "".join(shlex.split(expand_ansi_c(t)))
+        out = "".join(shlex.split(expand_ansi_c(t)))
     except ValueError:
         return t
+    return LitWord(out) if _is_punct(out) and not _is_punct(t) else out
 
 
 def _raw_heads_why(cmd: str) -> str:
@@ -4410,7 +4414,9 @@ def tokenize(cmd: str) -> List[str]:
     strip_comments(cmd, True)  # `)#` chặn TRƯỚC khi `$IFS`/`$(pwd)` bị viết lại (`$(pwd)#` thành `$PWD#`, AUD-SEC-195)
     cmd = IFS_RE.sub(" ", cmd)
     cmd = PWD_SUBST_RE.sub("$PWD", cmd)
-    lex = shlex.shlex(strip_comments(cmd, True), posix=True, punctuation_chars="();<>|&\n")
+    text = strip_comments(cmd, True)
+    lexer = _Lexer if QUOTED_PUNCT_RE.search(text) else shlex.shlex  # không dấu nào ngay sau nháy/`\` → không `LitWord`
+    lex = lexer(text, posix=True, punctuation_chars="();<>|&\n")
     lex.whitespace = " \t\r"
     lex.whitespace_split = True
     lex.commenters = ""  # comment đã bỏ ở strip_comments; mặc định của shlex là "#" (mở comment cả giữa từ)
@@ -4422,8 +4428,53 @@ def tokenize(cmd: str) -> List[str]:
         return [t if _is_punct(t) else re.sub(r"[\\'\"]", "", t) for t in raw]  # bỏ nháy/`\\`: `\\rm`, `'r'm` (D-276)
 
 
-class HereWord(str):
-    """Token dấu kết của heredoc CÓ NHÁY đã đóng, mang thân (`body`) — chữ bash đưa nguyên vào stdin (AUD-SEC-512)."""
+class LitWord(str):
+    """Từ chỉ gồm ký tự dấu (`;`, `|`, `&&`, `>`, `(`, xuống dòng…) mà có nháy/thoát (`';'`, `"|"`, `\\;`, `$';'`): bash
+    đưa nó nguyên văn làm đối số, KHÔNG phải toán tử (AUD-SEC-605). Không bằng chuỗi dấu thường (`== ";"`, `in ("|",
+    "|&")`, khoá tập/từ điển đều sai) và `_is_punct` sai — mọi tầng đọc toán tử bỏ qua nó; `shlex.join`/`_join_tokens`
+    nháy lại nên lệnh lồng tách lại vẫn là chữ. Giá trị giữ nguyên: `eval`/`trap` nối bằng khoảng trắng rồi bash đọc
+    lại (`eval echo \\; git push` — `;` thành toán tử ở tầng đó, đúng như bash)."""
+
+    __slots__ = ()
+
+    def __eq__(self, other: object) -> bool:
+        return (
+            isinstance(other, str) and str.__eq__(self, other) and (isinstance(other, LitWord) or not _is_punct(other))
+        )
+
+    def __ne__(self, other: object) -> bool:
+        return not self == other
+
+    __hash__ = str.__hash__
+
+
+# Ký tự dấu đầu tiên của một `LitWord` luôn đứng ngay sau nháy mở hay `\` (trước nó trong token chỉ có nháy đóng/mở).
+QUOTED_PUNCT_RE = re.compile(r"['\"\\][();<>|&\n]")
+
+
+class _Lexer(shlex.shlex):
+    """`shlex` ghi lại token đang đọc có đi qua trạng thái nháy/thoát không: token dấu có nháy thành `LitWord`."""
+
+    quoted = False
+
+    @property
+    def state(self) -> Optional[str]:
+        return self._state
+
+    @state.setter
+    def state(self, value: Optional[str]) -> None:
+        self._state = value
+        self.quoted = self.quoted or value in ("'", '"', "\\")
+
+    def read_token(self) -> Optional[str]:
+        self.quoted = False
+        tok = super().read_token()
+        return LitWord(tok) if self.quoted and _is_punct(tok or "") else tok
+
+
+class HereWord(LitWord):
+    """Token dấu kết của heredoc CÓ NHÁY đã đóng, mang thân (`body`) — chữ bash đưa nguyên vào stdin (AUD-SEC-512).
+    Là chữ (`LitWord`): dấu kết `';'` không phải toán tử."""
 
     body = ""
 
@@ -4448,7 +4499,8 @@ PUNCT = set("();<>|&\n")
 
 
 def _is_punct(t: str) -> bool:
-    return bool(t) and set(t) <= PUNCT
+    """Token toán tử/chuyển hướng (chỉ ký tự dấu, không nháy/thoát — `LitWord` là chữ, AUD-SEC-605)."""
+    return bool(t) and not isinstance(t, LitWord) and set(t) <= PUNCT
 
 
 def _is_redirect(t: str) -> bool:
@@ -4457,9 +4509,12 @@ def _is_redirect(t: str) -> bool:
 
 
 def split_commands(tokens: List[str]) -> List[List[str]]:
-    """Danh sách lệnh đơn (argv). `<(`/`>(`/`;`/`|`/`&&`/`(`… mở lệnh mới; chuyển hướng `>`/`<` giữ lại làm token."""
+    """Danh sách lệnh đơn (argv). `<(`/`>(`/`;`/`|`/`&&`/`(`… mở lệnh mới; chuyển hướng `>`/`<` giữ lại làm token.
+    Lệnh ngoài của thay tiến trình/thay lệnh nhận cả từ sau `)` đóng nó (`_SubstTrack`, AUD-SEC-605)."""
     cmds: List[List[str]] = [[]]
-    for t in tokens:
+    track = _SubstTrack()
+    for prev, t in zip(["", *tokens], tokens):
+        track.token(t, prev, cmds[-1])
         if _is_punct(t) and not _is_redirect(t):
             cmds.append([])
         else:
@@ -4467,10 +4522,54 @@ def split_commands(tokens: List[str]) -> List[List[str]]:
     return [c for c in cmds if c]
 
 
+class _SubstTrack:
+    """Ngăn xếp `(` dùng chung cho các bộ tách lệnh (`split_commands`, `pipelines`, `_simple_commands`, `_sep_commands`):
+    bộ tách vẫn cắt như cũ ở mọi dấu (đoạn sau `)` vẫn là một lệnh — `)` của mẫu `case` trong thay lệnh có đóng nhầm cũng
+    không mất lệnh nào), còn argv NGOÀI của thay tiến trình/thay lệnh (`<(`, `>(`, `(` ngay sau từ tận cùng `$`) nhận thêm
+    `PROCSUB_WORD` (chỉ `<(`/`>(` — `$` đã ở argv) và mọi từ sau `)` đóng nó tới dấu tách kế: `gh pr close 5 <(echo) -d`,
+    `rm -rf x $(echo) /` — từ sau là đối số của cùng lệnh như bash (AUD-SEC-605). `outer`: mỗi `(` đang mở — (argv ngoài,
+    từ thay chỗ), None với subshell/số học; `extra`: argv ngoài đang nhận tiếp."""
+
+    def __init__(self) -> None:
+        self.outer: List[Optional[Tuple[List[str], List[str]]]] = []
+        self.extra: List[List[str]] = []
+
+    def token(self, t: str, prev: str, cur: List[str]) -> None:
+        """Gọi TRƯỚC khi bộ tách xử lý `t`; `cur` = argv bộ tách đang dựng, `prev` = token trước."""
+        if not _is_punct(t):
+            for argv in self.extra:
+                argv.append(t)
+        elif self.extra or self.outer or "(" in t:
+            self.pieces(PUNCT_PIECE_RE.findall(t), prev.endswith("$"), cur)
+            for argv in self.extra if _is_redirect(t) else []:
+                argv.append(t)
+
+    def pieces(self, pieces: List[str], dollar: bool, cur: List[str]) -> None:
+        for k, piece in enumerate(pieces):
+            top = self.outer[-1] if self.outer else None
+            if piece in ("<(", ">(") or piece == "(" and dollar and not k:
+                self.outer.append(((self.extra or [cur])[0], [PROCSUB_WORD] if piece != "(" else []))
+                self.extra = []
+            elif piece == ")" and top:
+                self.outer.pop()
+                top[0].extend(top[1])
+                self.extra = [top[0]]
+            elif piece == "(":
+                self.outer.append(None)
+                self.extra = []
+            elif piece == ")":
+                self.outer = self.outer[:-1]
+                self.extra = []
+            elif not _is_redirect(piece):
+                self.extra = []
+
+
 def pipelines(tokens: List[str]) -> List[List[List[str]]]:
-    """Nhóm lệnh theo ống `|` (để nhận `curl … | sh`)."""
+    """Nhóm lệnh theo ống `|` (để nhận `curl … | sh`); lệnh ngoài của thay tiến trình/thay lệnh như `split_commands`."""
     groups: List[List[List[str]]] = [[[]]]
-    for t in tokens:
+    track = _SubstTrack()
+    for prev, t in zip(["", *tokens], tokens):
+        track.token(t, prev, groups[-1][-1])
         if t in ("|", "|&"):
             groups[-1].append([])
         elif _is_punct(t) and not _is_redirect(t):
@@ -4782,11 +4881,14 @@ SimpleCmds = List[Tuple[List[str], List[str]]]  # (argv, mảnh tách đứng sa
 
 
 def _simple_commands(tokens: List[str]) -> Tuple[List[str], SimpleCmds]:
-    """(mảnh tách đứng trước lệnh đầu, [(argv, mảnh tách đứng sau nó)]) — tách theo `SEP_PIECE_RE`."""
+    """(mảnh tách đứng trước lệnh đầu, [(argv, mảnh tách đứng sau nó)]) — tách theo `SEP_PIECE_RE`; lệnh ngoài của thay
+    tiến trình/thay lệnh như `split_commands` (`_SubstTrack`)."""
     lead: List[str] = []
     out: SimpleCmds = []
     cur: List[str] = []
-    for t in tokens:
+    track = _SubstTrack()
+    for prev, t in zip(["", *tokens], tokens):
+        track.token(t, prev, cur)
         if _is_punct(t) and not _is_redirect(t):
             pieces = SEP_PIECE_RE.findall(t)
             if cur:
@@ -6651,6 +6753,7 @@ def build_local_command(n: List[str], argv: List[str], root: str, cwd: Optional[
 
 
 FIND_EXEC = {"-exec", "-execdir", "-ok", "-okdir"}
+FIND_EXEC_END = (";", "+")  # so bằng `str(t)`: `\;`/`';'` là `LitWord` (chữ `;` find nhận), không bằng toán tử `;`
 
 
 def _find_rule(args: List[str], root: str, cwd: Optional[str]) -> Tuple[str, str]:
@@ -6662,7 +6765,8 @@ def _find_rule(args: List[str], root: str, cwd: Optional[str]) -> Tuple[str, str
         if a not in FIND_EXEC:
             continue
         sub = [
-            FIND_FOUND if t == "{}" else t for t in itertools.takewhile(lambda t: t not in (";", "+"), args[k + 1 :])
+            FIND_FOUND if t == "{}" else t
+            for t in itertools.takewhile(lambda t: str(t) not in FIND_EXEC_END, args[k + 1 :])
         ]
         # lệnh của -exec bắt đầu ở độ sâu 2: còn hai lớp shell lồng (`bash -c '… sh -c "…"'`, review #159)
         verdict = bash_decision(shlex.join(sub), root, cwd, MAX_NEST - 2)
@@ -12210,7 +12314,7 @@ def _find_exec_argvs(n: List[str]) -> List[List[str]]:
     out: List[List[str]] = []
     for i, a in enumerate(n):
         if a in ("-exec", "-execdir", "-ok", "-okdir"):
-            sub = list(itertools.takewhile(lambda x: x not in (";", "\\;", "+"), n[i + 1 :]))
+            sub = list(itertools.takewhile(lambda x: str(x) not in (*FIND_EXEC_END, "\\;"), n[i + 1 :]))
             out.append(sub)
     return out
 

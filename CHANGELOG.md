@@ -119,6 +119,16 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
 
 ### Fixed
 
+- Guard (lý do chạm hàng rào: AUD-SEC-605 🔴, D-414 — lệnh nguy hiểm lọt hẳn): từ chỉ gồm ký tự dấu mà có nháy/thoát
+  (`';'`, `"|"`, `\;`, `$';'`, `'&&'`, `'\n'`) là đối số nguyên văn như bash, không còn bị coi là toán tử — trước đây
+  `tokenize` bỏ nháy rồi mọi bộ tách lệnh cắt ở đó nên phần sau không luật nào xét (`git push origin x ';' --force`,
+  `git commit -m ';' --no-verify`, `rm -rf x '&&' /`, `gh pr close 5 -c ';' -d` từng cho qua). Sửa gốc: `tokenize`
+  trả token đó dạng `LitWord` (không bằng chuỗi toán tử, `_is_punct` sai, `shlex.join` nháy lại nên lệnh lồng
+  `sh -c`/`timeout`/`env`/`find -exec` vẫn thấy chữ; `eval` nối đối số rồi đọc lại như bash); `_dequote` giữ dấu đó cho
+  token còn nháy. Thay tiến trình/thay lệnh giữa đối số (`gh pr close 5 <(echo) -d`, `git push origin x < <(echo)
+  --force`, `rm -rf x $(echo) /`) không còn che phần sau: lệnh ngoài nhận cả từ sau `)` ở mọi bộ tách lệnh
+  (`_SubstTrack`), đoạn sau `)` vẫn được xét riêng như cũ. Chặn oan bớt: `echo ';' git push --force` (chỉ in) không còn
+  bị chặn. Không đổi ID/mức mục checklist.
 - `release-check` (nợ review #474 AUD-HAR-334): hàng `tree` gọi `git status --porcelain --untracked-files=all
   --ignore-submodules=none` — `status.showUntrackedFiles no` không còn giấu tệp chưa track (vân tay `subject.content`
   gồm tệp đó mà hàng `tree` từng PASS "cây sạch"), `submodule.<tên>.ignore`/`diff.ignoreSubmodules all` không còn giấu
