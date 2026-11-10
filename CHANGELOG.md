@@ -51,9 +51,31 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
 - Guard (lý do chạm hàng rào: nợ review #487 AUD-SEC-570): lệnh con `gh pr close`/`gh pr merge` tìm như cobra — cờ đứng
   trước lệnh con ăn token kế (`gh pr -c x close 12 -d`, `gh -c x pr close 12 -d`, `gh pr -t x merge 12`, `gh -b x pr
   merge 12 --auto`) nên bị xét như cờ đứng sau (`REMOTE_DELETE`, subject, `--auto`, `--admin`).
-- Guard (lý do chạm hàng rào: nợ review #488 AUD-SEC-571, D-408): mọi luật `gh` đọc thêm dạng cobra chạy khi cờ ăn
-  giá trị đứng trước lệnh con (`gh --method DELETE api repos/o/r`, `gh -X DELETE api …/git/refs/heads/x`, `gh -X PUT api
-  …/pulls/7/merge`, `gh repo --visibility public edit`, `gh release --repo o/r delete v1`), cách đọc nào chặt hơn thắng.
+- Guard (lý do chạm hàng rào: nợ review #488 AUD-SEC-571, D-408): các luật huỷ/xoá ref/merge/đối ngoại của `gh`
+  (`_gh_rule`) đọc thêm dạng cobra chạy khi cờ ăn giá trị đứng trước lệnh con (`gh --method DELETE api repos/o/r`, `gh -X
+  DELETE api …/git/refs/heads/x`, `gh -X PUT api …/pulls/7/merge`, `gh repo --visibility public edit`, `gh release
+  --repo o/r delete v1`), cách đọc nào chặt hơn thắng. Đính chính (AUD-DOC-281): bản trước ghi "mọi luật `gh`" — các
+  luật khác chỉ đọc dạng cobra từ mục D-409 dưới đây.
+- Guard (lý do chạm hàng rào: nợ review #489 AUD-SEC-575/577/578/579, D-409): MỌI luật đọc lệnh `gh` đi qua một điểm
+  vào (`_gh_readings`: nguyên văn + dạng cobra chạy; token đầu theo cobra `stripFlags`, không cần bảng nhóm — bảng chỉ
+  quyết định dời tên thứ hai), cách đọc chặt hơn thắng. AUD-SEC-575: dấu review qua cờ ghi đứng trước `api` (`gh -F
+  body=@r.md api …/comments`, `gh --field …`, cả khi lồng `sh -c`/`$(…)`) bị chặn `REVIEW_FORGE`. AUD-SEC-577: alias/
+  extension/lệnh lạ sau cờ (`gh --help=false alias set …`, `gh --help=false extension install o/r`, `gh -R o/r x`) bị
+  chặn như dạng chuẩn. AUD-SEC-578: ghi công AI/tiêu đề PR đọc `gh pr --body … create`, `gh -R o/r pr create …`, `gh pr
+  --title … create` (cả thân heredoc). AUD-SEC-579: `gh --input .env -X POST api …` bị chặn gửi bí mật. Bảng đối
+  ngoại/huỷ cũng đọc hai cách khi `gh` chạy qua trình chạy gói (`npx gh --repo o/r release delete v1` → `DESTROY`). Lưới
+  khi guard lỗi (`MERGE_CMD_RE`) cũng nhận cờ trước `pr`/`api`; `gh api` đọc `-R/--repo` như cờ ăn giá trị (gh 2.89
+  `api` không nhận `-R`, đọc chặt). Lọc chữ thô (`GH_POST_RE`, `GH_PR_TEXT_RE`, `MERGE_CMD_RE`) quét tuyến tính — bản
+  cũ của `GH_POST_RE` siêu tuyến tính với `gh api` lặp lại. AUD-DOC-281: CHANGELOG và `harness-files.md` nêu đúng phạm vi. AUD-TEST-095: test `adjacent` của
+  `_drop_redirect_ops`, ca corpus `gh -XDELETE api …`/`gh -X=DELETE api …`.
+- Guard (lý do chạm hàng rào: review #490 AUD-SEC-581/582, D-409): `--version` (cờ bool của gốc gh) không ăn token kế
+  trước tên lệnh đầu — `gh --version zz` (alias/extension/lệnh lạ) bị chặn như `gh zz` (AUD-SEC-581). Điểm vào chung
+  `_gh_readings` đọc thêm dạng bash đưa cho gh: bỏ chuyển hướng, đích và fd liền trước (`{fd}`, một chữ số), cùng dạng
+  giữ chữ số đó (số PR) trừ khi nó rơi vào vị trí tên lệnh — `gh pr 2>/dev/null merge 5`, `gh api -X DELETE repos/o/r
+  >/dev/null`, `gh repo 2>&1 edit --visibility public`, `gh gist 2>/dev/null create .env`, `gh pr 2>&1 create --title
+  …` ra đúng mã như dạng trơn; `gh --version 2>&1`, `gh --help 2>&1 | head`, `gh -h 2>&1` không còn bị chặn oan
+  (AUD-SEC-582). Merge đã kiểm (`allow`) xếp trên "không luật" khi gộp cách đọc (còn qua kiểm lệnh trơn); `&` của
+  chuyển hướng không ngắt cửa sổ heredoc của `GH_PR_TEXT_RE`.
 - Guard (lý do chạm hàng rào: nợ review #488 AUD-SEC-573): tên nhánh nhiều chữ số đứng trước chuyển hướng ở `git push
   --delete` (`--delete 1234 >/dev/null`) bị chặn `REMOTE_DELETE`; một chữ số vẫn đọc là fd (`--delete <nhánh> 2>&1`).
 - Guard (lý do chạm hàng rào: nợ review #488 AUD-SEC-574): đối số toàn chữ số trước chuyển hướng của lệnh xoá
