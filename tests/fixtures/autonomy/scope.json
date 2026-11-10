@@ -527,6 +527,12 @@
    "ids": [
     "AUD-DOC-281"
    ]
+  },
+  {
+   "reason": "Chặn oan `gh --version|--help|-h` kèm chuyển hướng (dạng cobra lấy từ argv còn chuyển hướng) — ca đối chứng allow nằm trong corpus aud582-* (guard.json) nhưng bộ chấm chỉ ánh xạ ID 🔴/🟠 lỗ cho qua; đỡ bằng tests.test_hooks.GuardReview490DebtTest và tests.test_guard_gh_parity (biến thể chuyển hướng).",
+   "ids": [
+    "AUD-HAR-362"
+   ]
   }
  ]
 }
