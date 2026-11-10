@@ -119,6 +119,17 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
 
 ### Fixed
 
+- `release-check` (nợ review #474 AUD-HAR-334): hàng `tree` gọi `git status --porcelain --untracked-files=all
+  --ignore-submodules=none` — `status.showUntrackedFiles no` không còn giấu tệp chưa track (vân tay `subject.content`
+  gồm tệp đó mà hàng `tree` từng PASS "cây sạch"), `submodule.<tên>.ignore`/`diff.ignoreSubmodules all` không còn giấu
+  submodule bẩn.
+- `release-sign` (nợ review #480 AUD-HAR-340): điều kiện "không còn `loop defer`" đọc `.autopilot/state.json` của dự
+  án ở **mọi** worktree của repo (`git worktree list`, cùng thư mục con) thay vì chỉ thư mục đang chạy — ký từ worktree
+  khác không thoát việc chờ người của cây chính và ngược lại. Fail-closed: `.autopilot/` không theo git (`.gitignore`),
+  nên khi không worktree nào có `state.json` (clone riêng, chưa `loop init`), sổ không đọc được/không phải object/
+  `deferred` không phải object, hay không liệt kê được worktree → từ chối, exit 2. Vòng `/complete` luôn `loop init`
+  trước nên đường chuẩn không đổi.
+
 - Guard (nợ review #489 AUD-HAR-361): `gh release list|view|download|verify` không còn hỏi ở chế độ strict — chỉ lệnh
   con ghi của release (`create`/`new`, `upload`, `edit`, `delete-asset`) hỏi; `delete` giữ `DESTROY`.
 - Guard (review #491, D-410): rút bản gỡ chặn oan AUD-HAR-364 khỏi #491 — nó nới lọc dấu review: lệnh con dính mở rộng

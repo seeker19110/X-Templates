@@ -486,6 +486,43 @@ class PromotionTest(ReleaseCase):
                 self.git("restore", "--", tracked.name)
                 self.assertEqual(self.promotion()[2]["state"], "approved")
 
+    def test_status_config_cannot_hide_dirty_tree(self):
+        """AUD-HAR-334: `status.showUntrackedFiles no` giấu tệp chưa track, `submodule.<tên>.ignore`/
+        `diff.ignoreSubmodules all` giấu submodule bẩn khỏi `git status` mặc định — hàng `tree` vẫn FAIL."""
+        self.setup_xt()
+        self.go_no_go()
+        self.git("config", "status.showUntrackedFiles", "no")
+        stray = self.repo / "b.py"
+        stray.write_text("print(2)\n", encoding="utf-8")
+        self.assertEqual(self.git("status", "--porcelain"), "")
+        rc, result, promotion = self.promotion()
+        self.assertEqual((rc, result["fails"], promotion["state"]), (1, ["tree"], "blocked"))
+        self.assertIn("b.py", self.by_id(result)["tree"]["evidence"])
+        stray.unlink()
+        self.assertEqual(self.promotion()[2]["state"], "approved")
+
+        sub = self.repo / "sub"
+        sub.mkdir()
+        subprocess.run(["git", "init", "-q", "-b", "main", str(sub)], check=True)
+        (sub / "s.txt").write_text("s\n", encoding="utf-8")
+        for args in (("add", "s.txt"), ("commit", "-q", "-m", "s")):
+            subprocess.run(
+                ["git", "-C", str(sub), "-c", "user.name=t", "-c", "user.email=t@example.invalid", *args], check=True
+            )
+        (self.repo / ".gitmodules").write_text('[submodule "sub"]\n\tpath = sub\n\turl = ./sub\n', "utf-8")
+        self.commit()
+        self.go_no_go()
+        self.assertEqual(self.promotion()[2]["state"], "approved")
+        (sub / "s.txt").write_text("đổi\n", encoding="utf-8")
+        for key, value in (("submodule.sub.ignore", "all"), ("diff.ignoreSubmodules", "all")):
+            with self.subTest(key=key):
+                self.git("config", key, value)
+                self.assertEqual(self.git("status", "--porcelain"), "")
+                rc, result, promotion = self.promotion()
+                self.assertEqual((rc, result["fails"], promotion["state"]), (1, ["tree"], "blocked"))
+                self.assertIn("sub", self.by_id(result)["tree"]["evidence"])
+                self.git("config", "--unset", key)
+
     def test_sparse_checkout_blocks_promotion(self):
         source = self.repo / "src"
         source.mkdir()
