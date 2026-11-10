@@ -8493,7 +8493,7 @@ class GuardReview489DebtTest(_GuardDebtCase):
 
         def scan(n: int) -> None:
             for unit in units:
-                for rx in (self.g.GH_POST_RE, self.g.GH_POST_ARGV_RE, self.g.GH_PR_TEXT_RE, self.g.MERGE_CMD_RE):
+                for rx in (self.g.GH_POST_RE, self.g.GH_PR_TEXT_RE, self.g.MERGE_CMD_RE):
                     rx.search(unit * n)
 
         cpu_budget.assert_not_quadratic(self, scan, 4000)
@@ -8605,8 +8605,7 @@ class GuardReview490DebtTest(_GuardDebtCase):
 class GuardGhDestroyDebtTest(_GuardDebtCase):
     """Nợ review #489/#490 (đo trên gh 2.89): lệnh gh xoá/thu hồi không đảo ngược → DESTROY như `gh repo delete`, kể cả
     nhóm lồng `repo deploy-key` và cờ đứng trước lệnh con (AUD-SEC-580, D-409); `gh auth token`/`auth status -t` in token
-    ra transcript → chặn; `gh release list|view` không hỏi (AUD-HAR-361); lọc chữ `gh` đăng chữ không xét chữ của lệnh
-    khác hay giá trị cờ của `gh` không đăng chữ (AUD-HAR-364)."""
+    ra transcript → chặn; `gh release list|view` không hỏi (AUD-HAR-361)."""
 
     DESTROY = (
         "gh repo deploy-key delete 1",
@@ -8752,17 +8751,6 @@ class GuardGhDestroyDebtTest(_GuardDebtCase):
             together = list(pool.map(self.code, cmds))
         self.assertEqual(together, [self.code(c) for c in cmds])
 
-    def test_wrapped_scan_linear(self):  # AUD-HAR-364: đọc lại đối số như chữ shell không bậc hai
-        """`_gh_wrapped` đọc lại đối số (lồng tới `POST_NEST_MAX` tầng) — thời gian tuyến tính theo độ dài lệnh."""
-        units = ("gh pr x ", "x gh pr comment-ish ", "sh -c gh -f ", "a; gh api ")
-
-        def scan(n: int) -> None:
-            for unit in units:
-                self.g._gh_wrapped(["sh", "-c", unit * n])
-                self.g._gh_wrapped(["git", "commit", "-m", unit * n, unit * n])
-
-        cpu_budget.assert_not_quadratic(self, scan, 2000)
-
     def test_gh_path_nested_group(self):  # AUD-SEC-580
         """Nhóm lồng (`repo deploy-key`, `repo autolink`, `codespace ports`): cobra tìm tới tên thứ ba; nhóm thường dừng
         ở hai tên."""
@@ -8776,18 +8764,67 @@ class GuardGhDestroyDebtTest(_GuardDebtCase):
         canon = self.g._gh_canonical(["repo", "--repo", "o/r", "deploy-key", "delete", "1"])
         self.assertEqual(canon, ["repo", "deploy-key", "delete", "--repo", "o/r", "1"])
 
-    def test_post_filter_reads_gh_argv_only(self):  # AUD-HAR-364
-        """Chữ nhắc `gh pr … review`/`gh -F … api` trong thông điệp commit, giá trị `--search` của `gh pr list` không
-        làm lệnh thành `gh` đăng chữ; dạng đăng thật (cả bọc trong shell, `xargs`, cờ nhiều từ trước lệnh con) giữ chặn."""
-        self.assert_allowed(
-            (
-                'git commit -m "docs: gh pr flow, reviewer must review (#$PR)"',
-                'git commit -m "fix: gh -F field before api ($N)"',
-                'gh pr list --search "review:approved author:$U" < r.md',
-                'gh issue list --search "comment:x $Q" < r.md',
-                "gh api repos/o/r/pulls --jq '.[] | select(.x)' < r.md",
-            )
-        )
+
+class GuardReviewForgeKeptTest(_GuardDebtCase):
+    """D-410: lọc dấu review (REVIEW_FORGE) giữ đúng hành vi trước #491 — có nguồn mang dấu review thì lệnh con dính mở
+    rộng (`gh pr comment$Z`, AUD-SEC-585), lệnh trong tham số `sh -c`/`bash -c` và giá trị `TÊN=…`/`env TÊN=…`
+    (`GIT_EDITOR`, AUD-SEC-586) vẫn bị chặn. Chặn oan đã biết (AUD-HAR-364 mở): chữ `gh … review` trong message commit,
+    giá trị `--search` của `gh pr list` — ghi hành vi chặn, không nới lọc chữ."""
+
+    MARK = "<!-- xt-review v1 head=" + "a" * 40 + " verdict=clean -->"
+    FORGE_585 = (
+        "gh pr comment$Z 5 -F r.md",
+        'gh pr comment"$Z" 5 -F r.md',
+        "gh pr comment$(true) 5 -F r.md",
+        "gh pr review$Z 5 --approve -b '<MARK>'",
+        "gh issue comment$Z 5 -F r.md",
+        "gh pr create$Z -t x -F r.md",
+    )
+    FORGE_586 = (
+        "sh -c 'gh pr \"$@\"' x comment 5 --body '<MARK>'",
+        "sh -c 'gh pr $0 5 -F -' comment < r.md",
+        "bash -c 'gh pr \"$1\" 5 -F -' _ review < r.md",
+        "sh -c 'gh api \"$@\"' x repos/o/r/issues/5/comments -F body=@- < r.md",
+        "GIT_EDITOR='gh pr comment 5 -F - #' git commit --amend < r.md",
+        "env GIT_EDITOR='gh pr comment 5 -F - #' git commit --amend < r.md",
+    )
+    # chặn oan đã biết, AUD-HAR-364 mở: lọc chữ thô coi chữ `gh pr … review` ở đối số lệnh khác là `gh` đăng chữ
+    KNOWN_FALSE_POSITIVE = (
+        'git commit -m "docs: gh pr flow, reviewer must review (#$PR)"',
+        'git commit -m "fix: gh -F field before api ($N)"',
+        'gh pr list --search "review:approved author:$U" < r.md',
+        'gh issue list --search "comment:x $Q" < r.md',
+    )
+
+    def setUp(self):
+        super().setUp()
+        Path(self.feat, "r.md").write_text(self.MARK + "\n", encoding="utf-8")
+        Path(self.feat, "ok.md").write_text("ghi chú thường\n", encoding="utf-8")
+
+    def cmds(self, forms: tuple[str, ...]) -> tuple[str, ...]:
+        return tuple(c.replace("<MARK>", self.MARK) for c in forms)
+
+    def test_forms_with_mark_denied(self):  # AUD-SEC-585/586: hồi quy của bản rút (D-410)
+        """Mọi dạng ghim (lệnh con dính mở rộng, lệnh bọc `sh -c`/`bash -c`, editor git) → REVIEW_FORGE."""
+        self.assert_code(self.cmds(self.FORGE_585 + self.FORGE_586), "REVIEW_FORGE")
+
+    def test_forms_without_mark_not_forge(self):
+        """Đối chứng: nguồn không mang dấu review (tệp thường; editor git không nhận tệp dấu) → không phải REVIEW_FORGE.
+        Lệnh bọc `gh` đọc stdin (`sh -c 'gh … -F -' < f`) thì bị chặn bất kể nội dung — guard không biết `gh` đọc gì."""
+        self.assert_allowed(("gh pr comment 5 -F ok.md", "gh pr review 5 --approve -b 'ok'"))
+        cmd = "env GIT_EDITOR='gh pr comment 5 -F - #' git commit --amend"
+        self.assertNotEqual(self.out(cmd).get("code"), "REVIEW_FORGE")
+
+    def test_known_false_positive_still_blocked(self):  # chặn oan đã biết, AUD-HAR-364 mở
+        """Lọc chữ thô của origin/main: chữ `gh … review` trong message/giá trị `--search` vẫn bị chặn REVIEW_FORGE."""
+        self.assert_code(self.KNOWN_FALSE_POSITIVE, "REVIEW_FORGE")
+        self.assertTrue(self.g._gh_posts(["gh", "pr", "list", "--search", "review:approved"]))
+        self.assertTrue(self.g._gh_wrapped(["git", "commit", "-m", "docs: gh pr flow, review (#$PR)"]))
+        self.assertFalse(self.g._gh_wrapped(["gh", "pr", "comment", "5"]))  # đăng thẳng, không phải bọc
+        self.assert_allowed(("gh api repos/o/r/pulls --jq '.[] | select(.x)' < r.md", "gh pr view 5 --comments"))
+
+    def test_wrapped_post_still_denied(self):
+        """Dạng đăng thật (bọc trong shell, `xargs`, cờ nhiều từ trước lệnh con, cờ ghi trước `api`) giữ chặn."""
         for cmd in (
             "sh -c 'gh pr comment 5 -F -' < r.md",
             "bash -c 'bash -c \"gh pr comment 5 -F -\"' < r.md",
@@ -8796,26 +8833,112 @@ class GuardGhDestroyDebtTest(_GuardDebtCase):
             "gh pr list --search x; gh pr comment 5 -F - < r.md",
             "gh -F body=@r.md api repos/o/r/issues/1/comments",
             "sh -c 'cd . && gh pr review 5 -F -' < r.md",
-            "sh -c 'g\"\"h pr comment 5 -F -' < r.md",
-            'git commit -m "x $Y"; sh -c "gh pr comment 5 -F -" < r.md',
+            "sh -c 'foo gh pr comment 5 -F -' < r.md",
+            "ssh h 'gh pr comment 5 -F -' < r.md",
         ):
             with self.subTest(cmd):  # luật dấu review bắt; lớp khác (tập con chuẩn — BUDGET) có thể chặn trước
                 self.assertTrue(self.g._review_forge_hit(cmd, self.g.tokenize(cmd), self.feat))
                 self.assertEqual(self.out(cmd)["decision"], "deny")
-        self.assertTrue(self.g._gh_posts(["gh", "pr", "review", "5"]))
-        self.assertFalse(self.g._gh_posts(["gh", "pr", "list", "--search", "review:approved"]))
-        self.assertFalse(self.g._gh_wrapped(["git", "commit", "-m", "docs: gh pr flow, review (#$PR)"]))
-        self.assertTrue(self.g._gh_wrapped(["sh", "-c", "gh pr comment 5 -F -"]))
-        self.assertFalse(self.g._gh_wrapped(["gh", "pr", "comment", "5"]))  # đăng thẳng, không phải bọc
-        self.assertTrue(self.g._gh_wrapped(["git", "commit", "-m", "x", "gh pr comment 5 -F -"]))  # không phải message
-        self.assertTrue(self.g._gh_text_posts("echo hi", self.g.POST_NEST_MAX))  # lồng quá sâu: coi như bọc
-        self.assertFalse(self.g._gh_text_posts("docs: gh pr flow (#$PR)", 0))
-        # còn chặt: chữ ngoài message git có `gh` thành từ riêng rồi lệnh con đăng chữ đọc như lệnh bọc chạy `gh`
-        self.assertTrue(self.g._gh_wrapped(["echo", "docs: gh pr flow, review"]))
-        self.assertEqual(
-            self.g._git_message_values(["git", "tag", "-a", "v1", "--message=gh pr review"]), {"gh pr review"}
-        )
-        self.assertEqual(self.g._git_message_values(["git", "log", "-m", "x"]), set())
+
+
+class GuardGhDynNameTest(_GuardDebtCase):
+    """AUD-SEC-587 (có từ trước #491; ADR-0065 lớp A cho gh): tên lệnh gh (nhóm/lệnh con, cả nhóm lồng) hay tên cờ
+    (`--tên` trước `=`, `-` liền mở rộng) có `$`/backtick lách mọi luật gh so token chính xác → BUDGET ở điểm vào chung
+    `_gh_rule` (D-409). Giá trị và đối số vị trí có mở rộng không bị chặn thêm."""
+
+    DYN = (
+        "gh pr merge$Z 5 --squash",
+        "gh repo delete$Z o/r --yes",
+        "gh pr close$Z 5 --delete-branch",
+        "gh api repos/o/r/issues/5/comments --input$Z r.md",
+        "gh auth token$Z",
+        "gh ssh-key delete$Z 1",
+        "gh repo deploy-key delete$Z 1",
+        "gh auth logout$Z",
+        "gh release delete$Z v1 --yes",
+        "gh pr merge`x` 5",
+        "gh pr $CMD 5",
+        'gh repo deploy-key "$S" 1',
+        "gh pr merge 5 --auto$Z",
+        "gh pr merge 5 -$Z",
+        "gh pr merge 5 --$Z",
+        "gh -R o/r pr merge$Z 5",
+        "gh pr 2>/dev/null merge$Z 5",
+        "gh repo --repo o/r deploy-key delete$Z 1",
+        "sh -c 'gh pr merge$Z 5'",
+        "gh pr merge$Z 5 --squash; echo ok",
+    )
+    VALUES = (
+        'gh pr view "$PR"',
+        "gh pr view $PR --json title",
+        'gh pr view 5 --json "$F"',
+        'gh pr list --search "$Q"',
+        'gh pr checks "$PR"',
+        'gh api "repos/$R/pulls"',
+        'gh api -H "X: $Y" repos/o/r',
+        'gh -R "$R" pr view 5',
+        'gh --repo="$R" pr view 5',
+        'gh run view "$RUN" --log',
+        'gh release download "$TAG"',
+        'gh pr diff "$PR" -- "$P"',
+        "gh pr diff 5 -- -$P --x$P",
+    )
+
+    def test_dynamic_names_denied(self):  # AUD-SEC-587
+        """Tên lệnh/tên cờ gh có mở rộng → BUDGET (mặc định chặn), kèm cách viết lại; strict hỏi người."""
+        self.assert_code(self.DYN, "BUDGET")
+        self.assertIn("viết lại", self.out("gh pr merge$Z 5")["reason"])
+        raw = self.g.bash_decision("gh release delete$Z v1 --yes", self.feat, self.feat)
+        self.assertEqual(raw["decision"], "ask")  # strict: hỏi người (AUD-HAR-361 từng làm nó qua im lặng)
+        self.assertEqual(self.g.decide(raw).confidence, "unsure")
+
+    def test_dynamic_values_allowed(self):  # AUD-SEC-587: đối chứng — không chặn oan
+        """Mở rộng ở giá trị cờ/đối số vị trí (cả sau `--`) không phải tên lệnh/cờ → qua như trước."""
+        self.assert_allowed(self.VALUES)
+
+    def test_existing_dynamic_behaviour_kept(self):
+        """Hành vi cũ giữ nguyên: `gh $CMD` (tên đầu động, lớp tập con), thân `--body "$X"` (lớp đăng review) vẫn BUDGET
+        — không do luật mới; `gh pr merge "$PR"` vẫn qua kiểm merge (UNVERIFIED)."""
+        self.assert_code(("gh $CMD", 'gh pr comment 5 --body "$X"', 'gh pr comment 5 --body="$X"'), "BUDGET")
+        self.assertEqual(self.out('gh pr merge "$PR" --squash').get("code"), "UNVERIFIED")
+        dyn = self.g._gh_dyn_name
+        for args in (
+            ["pr", "comment", "5", "--body", "$X"],
+            ["pr", "comment", "5", "--body=$X"],
+            ["api", "-F", "body=@$f", "repos/o/r/issues/5/comments"],
+            ["api", "-Fbody=@$f", "x"],
+            ["api", "repos/$R/pulls"],
+            ["pr", "view", "$PR"],
+            ["pr", "diff", "5", "--", "-$P"],
+            [],
+        ):
+            with self.subTest(args):
+                self.assertFalse(dyn(args))
+        for args in (["$X"], ["pr", "merge$Z"], ["pr", "`m`"], ["api", "x", "--input$Z"], ["pr", "merge", "-$Z"]):
+            with self.subTest(args):
+                self.assertTrue(dyn(args))
+
+    def test_concurrent_decisions_match(self):
+        """Quyết định chạy đồng thời giống chạy tuần tự (không trạng thái dùng chung giữa các lệnh)."""
+        cmds = list(self.DYN + self.VALUES) * 2
+
+        def code(cmd: str) -> tuple:
+            res = self.out(cmd)
+            return res["decision"], res.get("code")
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
+            together = list(pool.map(code, cmds))
+        self.assertEqual(together, [code(c) for c in cmds])
+
+    def test_short_has_empty_value_letters(self):  # 🟢 review #491: `vals` rỗng từng dựng lớp ký tự `[]` (re.error)
+        """`_gh_short_has` với `vals` rỗng: không chữ nào ăn giá trị — cả cụm là cờ, không ném lỗi."""
+        has = self.g._gh_short_has
+        self.assertTrue(has("-ab", "a", ""))
+        self.assertTrue(has("-1a", "a", ""))  # cụm không chỉ chữ: không chữ ăn giá trị → đọc tới hết
+        self.assertFalse(has("-1b", "a", ""))
+        self.assertFalse(has("--all", "a", ""))
+        self.assertFalse(has("x", "a", ""))
+        self.assertFalse(has("-1Ra", "a", "R"))  # `a` là giá trị dính của `-R`
 
 
 class GuardAppendParallelTest(unittest.TestCase):

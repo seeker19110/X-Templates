@@ -83,19 +83,27 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
 - Guard (nợ review #487 AUD-HAR-354): `=` không còn tách cụm cờ không chỉ chữ của `gh pr close` — token gh từ chối hay
   bỏ qua (`-4=d`, `-test.=d`) tính là có `-d` (chặt hơn).
 - Guard (lý do chạm hàng rào: nợ review #489 AUD-SEC-580): `gh repo deploy-key|ssh-key|gpg-key|run|label|issue|gist|
-  codespace|project delete`, `gh cache delete --all|-a` và `gh auth logout` bị chặn `DESTROY` như REST tương ứng (cả cờ
-  đứng trước lệnh con, nhóm lồng `repo deploy-key` đọc tới tên thứ ba), `gh auth token`/`gh auth status -t|--show-token`
-  (in token ra transcript) bị chặn ở mọi chính sách.
+  codespace|project delete`, `gh cache delete --all|-a` và `gh auth logout` mang mã `DESTROY` (mặc định chặn, strict
+  hỏi) — cả cờ đứng trước lệnh con, nhóm lồng `repo deploy-key` đọc tới tên thứ ba; tên gọi khác `gh cs delete` bị lớp
+  tập con chặn trước (`BUDGET`). Chỉ xoá khoá deploy/SSH/GPG khớp REST tương ứng (`gh api -X DELETE …/keys/…` đã
+  `DESTROY`); REST xoá nhãn/run/gist/cache vẫn chỉ hỏi như ghi đối ngoại. `gh auth token`/`gh auth status
+  -t|--show-token` (in token ra transcript) bị chặn ở mọi chính sách.
+- Guard (lý do chạm hàng rào: review #491 AUD-SEC-587, có từ trước): tên lệnh gh (nhóm/lệnh con, cả nhóm lồng) hay tên
+  cờ (`--tên` trước `=`, `-` liền mở rộng) có `$`/backtick — `gh pr merge$Z 5`, `gh repo delete$Z o/r`, `gh auth
+  token$Z`, `gh api … --input$Z f`, `gh pr $CMD 5`, `gh pr merge 5 -$Z` — lách mọi luật gh so token chính xác; giờ hỏi
+  mã `BUDGET` ở điểm vào chung `_gh_rule` (mặc định chặn, strict hỏi; như ADR-0065 lớp A). Mở rộng ở giá trị/đối số vị
+  trí (`gh pr view "$PR"`, `--repo="$R"`, `gh api "repos/$R/pulls"`) không đổi.
 
 ### Fixed
 
 - Guard (nợ review #489 AUD-HAR-361): `gh release list|view|download|verify` không còn hỏi ở chế độ strict — chỉ lệnh
-  con ghi của release (`create`/`new`, `upload`, `edit`, `delete-asset`, `delete`) hỏi.
-- Guard (nợ review #490 AUD-HAR-364): luật dấu review chỉ coi `gh` ở vị trí tên lệnh là đăng chữ — thông điệp `git
-  commit -m "… gh pr …, reviewer must review ($PR)"` và giá trị `gh pr list --search "review:approved …"` không còn bị
-  chặn `REVIEW_FORGE`; lệnh bọc chạy `gh` trong chuỗi (`sh -c`, `ssh h '…'`, `xargs`) vẫn bị xét.
+  con ghi của release (`create`/`new`, `upload`, `edit`, `delete-asset`) hỏi; `delete` giữ `DESTROY`.
+- Guard (review #491, D-410): rút bản gỡ chặn oan AUD-HAR-364 khỏi #491 — nó nới lọc dấu review: lệnh con dính mở rộng
+  (`gh pr comment$Z 5 -F r.md`, AUD-SEC-585), lệnh trong tham số `sh -c`/`bash -c` và giá trị `GIT_EDITOR=…`/`env
+  GIT_EDITOR=…` (AUD-SEC-586) lọt `REVIEW_FORGE`. Lọc dấu review giữ đúng hành vi trước #491; chặn oan AUD-HAR-364
+  (chữ `gh pr … review` trong message `git commit -m`, giá trị `gh pr list --search "review:…"`) còn mở.
+- `_gh_short_has` với tập chữ ăn giá trị rỗng không còn dựng lớp ký tự `[]` (`re.error`).
 - Test đối chiếu cờ trước lệnh con gh dùng `assertLessEqual` thay `assertTrue(a <= b)` (CodeQL "Imprecise assert").
-
 - Guard (nợ review #487 AUD-HAR-353): dạng trợ giúp thật không còn bị chặn oan — `gh pr close 12 -d --help`/`-dh`,
   `git replace -h 2>&1` (`2` của chuyển hướng không còn đọc là đối tượng), `git push -h` ở `main`; `-h`/`--help` là giá
   trị của cờ khác (`gh pr merge 12 -b --help --auto`, `git push -o -h`) hay sau `--` vẫn bị xét như lệnh thật; chữ số

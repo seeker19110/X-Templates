@@ -7069,26 +7069,16 @@ REVIEW_MARK_RE = re.compile(
 )
 # `gh api` chỉ khi GHI (cờ trường/`--input`/phương thức ghi) — `gh api … --jq` đọc comment không bị chặn (review #159).
 GH_API_WRITE_TEXT = r"(?:\s-[fF]|\s--(?:field|raw-field|input)\b|\s(?:-X\s*|--method[=\s]+)(?:POST|PATCH|PUT)\b)"
-
-
-def _gh_post_re(end: str) -> "re.Pattern[str]":
-    """Mẫu `gh` đăng chữ; `end` = điều kiện sau tên lệnh con (`comment`, `review`…)."""
-    return re.compile(
-        rf"\A(?>.*?\bgh\b)(?:(?>.*?\b(?:pr|issue)\b).*?\s(?:comment|review|create|edit|close|reopen){end}"
-        rf"|(?>.*?\bapi\b).*?{GH_API_WRITE_TEXT}|(?>.*?{GH_API_WRITE_TEXT}).*?\bapi\b)",
-        re.S,
-    )
-
-
-# Chữ thô (lọc nhanh): cờ ở BẤT KỲ đâu giữa `gh`, nhóm và lệnh con — kể cả giá trị nhiều từ (`gh pr --body 'a b'
-# comment`) và cờ ghi đứng trước `api` (`gh -F k=@f api …`, cobra nhấc lệnh con — AUD-SEC-575, D-409); cờ trường dính
-# (`-fbody=…`), `close/reopen -c` — AUD-SEC-193. Tuyến tính (review lát C: ReDoS): chỉ thử từ đầu chữ (`\A`), nhóm nguyên
-# tử `(?>…)` chốt lần gặp ĐẦU của `gh` rồi của nhóm/`api`/cờ ghi — có bộ ba theo thứ tự ở đâu đó thì bộ ba bắt đầu từ
-# các lần gặp đầu cũng khớp (không giới hạn đoạn, `re.S`), nên không mất ca nào.
-GH_POST_RE = _gh_post_re(r"\b")
-# Trên argv của MỘT lệnh `gh` (`_gh_posts`): tên lệnh con là cả một token — cobra so khớp nguyên tên, nên giá trị cờ
-# như `--search "review:approved"` không phải lệnh con `review` (AUD-HAR-364).
-GH_POST_ARGV_RE = _gh_post_re(r"(?!\S)")
+GH_POST_RE = re.compile(
+    # Chữ thô (lọc nhanh; argv đọc qua `_gh_readings`): cờ ở BẤT KỲ đâu giữa `gh`, nhóm và lệnh con — kể cả giá trị nhiều
+    # từ (`gh pr --body 'a b' comment`) và cờ ghi đứng trước `api` (`gh -F k=@f api …`, cobra nhấc lệnh con — AUD-SEC-575,
+    # D-409); cờ trường dính (`-fbody=…`), `close/reopen -c` — AUD-SEC-193. Tuyến tính (review lát C: ReDoS): chỉ thử từ
+    # đầu chữ (`\A`), nhóm nguyên tử `(?>…)` chốt lần gặp ĐẦU của `gh` rồi của nhóm/`api`/cờ ghi — có bộ ba theo thứ tự
+    # ở đâu đó thì bộ ba bắt đầu từ các lần gặp đầu cũng khớp (không giới hạn đoạn, `re.S`), nên không mất ca nào.
+    rf"\A(?>.*?\bgh\b)(?:(?>.*?\b(?:pr|issue)\b).*?\s(?:comment|review|create|edit|close|reopen)\b"
+    rf"|(?>.*?\bapi\b).*?{GH_API_WRITE_TEXT}|(?>.*?{GH_API_WRITE_TEXT}).*?\bapi\b)",
+    re.S,
+)
 GH_TEXT_NOISE_RE = re.compile(r"['\"\\]")
 
 
@@ -7857,33 +7847,10 @@ def _span_files(ctx: _BodyScan, sp: ScanSpan, depth: int) -> _Sources:
     return ctx.cached(("f", sp[0], sp[1], depth), work)
 
 
-def _gh_wrapped(argv: List[str], depth: int = 0) -> bool:
-    """Lệnh khác bọc `gh` đăng chữ (`sh -c 'gh … -F -' < f`, `xargs -I{} gh …`, `ssh h 'gh …'`) — guard không biết `gh`
-    đọc gì từ stdin của nó (AUD-SEC-180). Chỉ khi `gh` đứng ở vị trí tên lệnh: token `gh` sau tên lệnh (lệnh bọc chạy
-    phần sau nó), hay lệnh đơn trong một đối số đọc lại như chữ shell — lồng tới `POST_NEST_MAX` tầng, sâu hơn coi như
-    bọc. Chữ `gh` giữa câu (`git commit -m "docs: gh pr …, reviewer must review"`), giá trị cờ của `gh` không đăng chữ
-    (`--search "review:approved"`) và message của `git commit|tag` (git không chạy nó) không tính (AUD-HAR-364)."""
-    if _gh_posts(argv):
-        return False
-    k = next((i for i, t in enumerate(argv) if i and posixpath.basename(t) == "gh"), 0)
-    if k and _gh_posts(argv[k:]):
-        return True
-    data = _git_message_values(normalize(argv))
-    return any(_gh_text_posts(t, depth) for t in argv if t not in data and _gh_post_text(t))
-
-
-def _gh_text_posts(text: str, depth: int) -> bool:
-    """Chữ `text` (đối số của lệnh khác) đọc như chữ shell có lệnh đơn là `gh` đăng chữ hay bọc nó."""
-    if depth >= POST_NEST_MAX:
-        return True
-    return any(_gh_posts(c) or _gh_wrapped(c, depth + 1) for c in split_commands(tokenize(text)))
-
-
-def _git_message_values(n: List[str]) -> Set[str]:
-    """Message chữ của `git commit|tag` (`-m`, `--message=`, `-am"x"`): git ghi nó, không chạy nó."""
-    if n[:2] not in (["git", "commit"], ["git", "tag"]):
-        return set()
-    return {v for kind, v in _commit_msg_args(n[2:]) if kind == "m"}
+def _gh_wrapped(argv: List[str]) -> bool:
+    """Lệnh khác bọc `gh` đăng chữ trong chuỗi của nó (`sh -c 'gh … -F -' < f`) — guard không biết `gh` đọc gì từ stdin
+    của nó (AUD-SEC-180)."""
+    return not _gh_posts(argv) and bool(GH_POST_RE.search(" ".join(argv)))
 
 
 def _gh_files(argv: List[str]) -> List[str]:
@@ -8038,7 +8005,7 @@ def _review_forge_hit(cmd: str, tokens: List[str], cwd: Optional[str], budget: O
 def _gh_posts(argv: List[str]) -> bool:
     """`gh` đăng/sửa comment, review, thân PR/issue, hay `gh api` ghi — ở một cách đọc bất kỳ (`_gh_readings`, D-409)."""
     n = normalize(argv)
-    return n[:1] == ["gh"] and any(GH_POST_ARGV_RE.search(" ".join(["gh", *r])) for r in _gh_readings(n[1:]))
+    return n[:1] == ["gh"] and any(GH_POST_RE.search(" ".join(["gh", *r])) for r in _gh_readings(n[1:]))
 
 
 def _strings(value: object) -> Iterator[str]:
@@ -8325,8 +8292,35 @@ def _gh_rank(v: Tuple[str, str]) -> Tuple[int, bool, bool]:
 def _gh_rule(args: List[str], root: str, cwd: str) -> Tuple[str, str]:
     """Mọi luật của `gh` (`args` sau `gh`, cờ repo đầu đã dời ra sau) đọc mọi cách của `_gh_readings` (`gh --method
     DELETE api repos/o/r`, `gh repo --visibility public edit` — AUD-SEC-571, D-408/D-409); cách nào chặt hơn thắng
-    (hoà → nguyên văn: `max` giữ phần tử lớn nhất đầu tiên)."""
-    return max((_gh_reading(r, root, cwd) for r in _gh_readings(args)), key=_gh_rank)
+    (hoà → nguyên văn: `max` giữ phần tử lớn nhất đầu tiên). Tên lệnh/tên cờ có mở rộng ở cách đọc nào → `GH_DYN_NAME`
+    trước mọi luật (AUD-SEC-587)."""
+    readings = _gh_readings(args)
+    if any(map(_gh_dyn_name, readings)):
+        return "ask", GH_DYN_NAME_WHY
+    return max((_gh_reading(r, root, cwd) for r in readings), key=_gh_rank)
+
+
+# ADR-0065 lớp (A) cho `gh` (AUD-SEC-587): mọi luật gh so token chính xác (`pr merge`, `--input`, `auth token`…) — tên
+# lệnh hay tên cờ có `$`/backtick thì bash mở rộng ra tên guard không biết (`gh pr merge$Z`, `--input$Z`, `-$Z`). Hỏi mã
+# BUDGET (không chắc → chặn ở mọi chính sách; câu hỏi khác của cùng lệnh — dấu review — giữ mã của nó). Giá trị và đối số
+# vị trí có mở rộng (`gh pr view "$PR"`, `--body="$X"`, `-F body=@"$f"`, `gh api "repos/$R/pulls"`) không tính.
+GH_DYN_NAME_MARK = "tên lệnh/tên cờ `gh` có mở rộng shell"
+GH_DYN_NAME_WHY = (
+    f"{GH_DYN_NAME_MARK} (`gh pr merge$Z`, `--input$Z`, `-$Z`) — guard không biết bash mở rộng ra lệnh con/cờ nào"
+    " (AUD-SEC-587, ADR-0065); viết lại: tên lệnh con và tên cờ nguyên văn, mở rộng chỉ ở giá trị"
+    ' (`gh pr view "$PR"`, `--body "$X"`)'
+)
+GH_DYN_RAW_RE = re.compile(r"[$`]")
+
+
+def _gh_dyn_name(args: List[str]) -> bool:
+    """Một cách đọc `gh` (`args` sau `gh`) có tên lệnh (`_gh_path`: mọi tên khi tên đầu là nhóm, không thì chỉ tên đầu —
+    như `_gh_canonical`) hay tên cờ (`--tên` trước `=`, `-` liền mở rộng; trước `--`) mang `$`/backtick."""
+    path = _gh_path(args)
+    names = [args[k] for k in (path if path and args[path[0]] in GH_GROUPS else path[:1])]
+    flags = [a.split("=", 1)[0] for a in args[: args.index("--") if "--" in args else len(args)]]
+    flags = [f for f in flags if f.startswith("--") or f[:1] == "-" and f[1:2] in ("$", "`")]
+    return any(GH_DYN_RAW_RE.search(t) for t in names + flags)
 
 
 def _gh_reading(args: List[str], root: str, cwd: str) -> Tuple[str, str]:
@@ -8427,11 +8421,14 @@ def _gh_short_has(a: str, flag: str, vals: str) -> bool:
     """Cụm cờ ngắn `a` của một lệnh con gh mang chữ cờ `flag`. Cụm chỉ chữ (trước `=`): mọi chữ là cờ (chặt, như
     `_short_flags`). Cụm khác: pflag đọc chữ cờ lần lượt tới chữ ăn giá trị đầu tiên (`vals`) — phần sau là giá trị dính
     liền, bất kể ký tự gì (`-dRo/r`, `-dc.` — AUD-SEC-566). `=` không tách (AUD-HAR-354): chỉ khác trên token gh từ chối
-    hay bỏ qua (`-4=d`, `-test.=d`), tính là có cờ — chặt hơn, gọn hơn."""
+    hay bỏ qua (`-4=d`, `-test.=d`), tính là có cờ — chặt hơn, gọn hơn. `vals` rỗng: không chữ nào ăn giá trị — cả cụm
+    là cờ (không dựng lớp ký tự rỗng `[]`)."""
     if not a.startswith("-") or a.startswith("--"):
         return False
-    head = a[1:].split("=", 1)[0]
-    return flag in (head if head.isalpha() else re.split(f"[{re.escape(vals)}]", a[1:], maxsplit=1)[0])
+    body = a[1:]
+    head = body.split("=", 1)[0]
+    cut = next((i for i, ch in enumerate(body) if ch in vals), len(body))
+    return flag in (head if head.isalpha() else body[:cut])
 
 
 # cobra (gh 2.89) tìm lệnh con TRƯỚC khi biết cờ của nó (`stripFlags`/`argsMinusFirstX`): `-x`/`--tên` không `=` ăn token
@@ -15609,6 +15606,7 @@ REASON_CODES: Tuple[Tuple[str, str], ...] = (
     (REF_DESTROY_MARK, "REMOTE_DELETE"),  # xoá ref remote/viết lại mọi ref không phải của phiên (AUD-SEC-551, D-407)
     (PERM_NO_TARGET_WHY, UNRESOLVED_TARGET),  # `… | xargs chmod 000` (T-3532)
     ("vượt ngân sách quét", BUDGET),
+    (GH_DYN_NAME_MARK, BUDGET),  # `gh pr merge$Z`: tên lệnh/cờ gh guard không biết (AUD-SEC-587, ADR-0065 lớp A)
     ("brace expansion quá nhiều", BRACE_OVERFLOW),
 )
 # Giữ tên cũ cho mã/ test đọc danh sách dấu nguy hiểm.
