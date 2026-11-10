@@ -8489,7 +8489,7 @@ class GuardReview489DebtTest(_GuardDebtCase):
 
     def test_gh_text_filters_linear(self):  # D-409: lọc chữ thô nhận cờ ở mọi vị trí mà không bậc hai (ReDoS)
         """`GH_POST_RE`/`GH_PR_TEXT_RE`/`MERGE_CMD_RE` trên `gh` lặp không có lệnh con: thời gian tuyến tính theo độ dài."""
-        units = ("gh ", "gh pr ", "gh api ", "gh -f ", "gh x; ", "gh pr x| ")
+        units = ("gh ", "gh pr ", "gh api ", "gh -f ", "gh x; ", "gh pr x| ", "gh pr 2>&1 ", "gh &>f & ")
 
         def scan(n: int) -> None:
             for unit in units:
@@ -8502,11 +8502,104 @@ class GuardReview489DebtTest(_GuardDebtCase):
         self.assertFalse(self.g.GH_POST_RE.search("gh pr view 5 --comments"))
         self.assertTrue(self.g.GH_PR_TEXT_RE.search("echo gh; x=1 gh -R o/r pr --title 'a b' create"))
         self.assertFalse(self.g.GH_PR_TEXT_RE.search("gh pr view; echo create"))
+        self.assertTrue(self.g.GH_PR_TEXT_RE.search("gh pr 2>&1 create --body-file - <<'E'"))  # `&` của chuyển hướng
+        self.assertFalse(self.g.GH_PR_TEXT_RE.search("gh pr view & echo create"))
         self.assertTrue(self.g.MERGE_CMD_RE.search("gh x\ngh -R o/r pr --auto merge 7"))
 
     def test_drop_redirect_ops_adjacent(self):  # AUD-TEST-095
         """Toán tử chuyển hướng thứ hai không bỏ token đứng trước toán tử thứ nhất (`adjacent`)."""
         self.assertEqual(self.g._drop_redirect_ops(["1", "2", ">", "f", ">", "g"], 1), ["1"])
+
+
+class GuardReview490DebtTest(_GuardDebtCase):
+    """Nợ review #490 (đo trên gh 2.89): cờ bool gốc `--version` không ăn token kế lúc cobra tìm lệnh con (`gh --version
+    zz` chạy alias `zz` — AUD-SEC-581); chuyển hướng trong argv của gh bị bỏ trước khi đọc (bash bỏ nó khỏi argv — AUD-SEC
+    -582): `gh pr 2>/dev/null merge 5` là `gh pr merge 5`, `gh --version 2>&1` là `gh --version`."""
+
+    SA = "a" * 40
+    # (dạng có chuyển hướng, dạng trơn) — cùng quyết định và mã; dạng trơn có luật áp
+    REDIRECTED = (
+        ("gh pr 2>/dev/null merge 5 --squash", "gh pr merge 5 --squash"),
+        ("gh pr 2>&1 merge 5 --auto", "gh pr merge 5 --auto"),
+        (
+            f"gh api -X PUT repos/o/r/pulls/7/merge -f sha={SA} >/dev/null",
+            f"gh api -X PUT repos/o/r/pulls/7/merge -f sha={SA}",
+        ),
+        ("gh api -X DELETE repos/o/r >/dev/null", "gh api -X DELETE repos/o/r"),
+        ("gh api -X DELETE repos/o/r 2>&1", "gh api -X DELETE repos/o/r"),
+        ("gh api -X DELETE repos/o/r/git/refs/heads/main >/dev/null", "gh api -X DELETE repos/o/r/git/refs/heads/main"),
+        ("gh api -X PATCH repos/o/r -f archived=true >/dev/null", "gh api -X PATCH repos/o/r -f archived=true"),
+        ("gh repo 2>/dev/null delete o/r --yes", "gh repo delete o/r --yes"),
+        ("gh repo 2>&1 edit --visibility public", "gh repo edit --visibility public"),
+        ("gh release 2>/dev/null delete v1 --yes", "gh release delete v1 --yes"),
+        ("gh pr 2>/dev/null close 12 --delete-branch", "gh pr close 12 --delete-branch"),
+        ("gh gist 2>/dev/null create --public .env", "gh gist create --public .env"),
+        ("gh release 2>&1 upload v1 .env", "gh release upload v1 .env"),
+        ("gh pr 2>&1 create --title 'WIP do stuff'", "gh pr create --title 'WIP do stuff'"),
+        (
+            "gh pr 2>/dev/null create --title 'feat: x' --body 'Claude-Session: x'",
+            "gh pr create --title 'feat: x' --body 'Claude-Session: x'",
+        ),
+        ("gh pr merge 5 >/dev/null --auto", "gh pr merge 5 --auto"),  # số PR một chữ số trước chuyển hướng
+        ("gh pr {fd}>/dev/null merge 5 --auto", "gh pr merge 5 --auto"),  # fd do bash cấp
+    )
+
+    def setUp(self):
+        super().setUp()
+        Path(self.feat, "xt.yaml").write_text("ai_attribution: forbid\n", encoding="utf-8")
+        Path(self.feat, "ok.md").write_text("ghi chú thường\n", encoding="utf-8")
+
+    def code(self, cmd: str) -> tuple:
+        res = self.out(cmd)
+        return res["decision"], res.get("code")
+
+    def test_version_before_alias(self):  # AUD-SEC-581
+        """`--version` là cờ bool của gốc gh: trước tên lệnh đầu nó không ăn token kế — alias/extension sau nó vẫn chạy."""
+        self.assert_code(("gh --version zz", "gh --version x", "gh --version myext --do=it"), "BUDGET")
+        self.assert_code(("gh pr --version x merge 5 --auto",), "AUTO_MERGE_ENABLE")  # ở `pr`: `--version` ăn `x`
+        self.assert_allowed(("gh --version", "gh --version 2>&1", "gh --help"))
+        self.assertEqual(self.g._gh_path(["--version", "zz"]), [1])
+        self.assertEqual(self.g._gh_path(["pr", "--version", "x", "merge"]), [0, 3])
+
+    def test_redirects_in_gh_argv(self):  # AUD-SEC-582
+        """Chuyển hướng chen trong argv gh không đổi luật áp dụng: cùng mã với dạng trơn — kể cả khi chạy đồng thời."""
+        for redirected, plain in self.REDIRECTED:
+            with self.subTest(redirected):
+                self.assertNotEqual(self.code(plain)[1], "NONE")  # dạng trơn có luật áp (chặn hoặc hỏi)
+                self.assertEqual(self.code(redirected), self.code(plain))
+        cmds = [c for pair in self.REDIRECTED for c in pair] * 2
+        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
+            together = list(pool.map(self.code, cmds))
+        self.assertEqual(together, [self.code(c) for c in cmds])
+
+    def test_redirects_with_info_forms_allowed(self):  # AUD-SEC-582: chặn oan mới của #490
+        """`gh --version/--help/-h` và lệnh gh hằng ngày kèm chuyển hướng (cả stdin thân `-F - < f`) cho chạy."""
+        self.assert_allowed(
+            (
+                "gh --version 2>&1",
+                "gh --version 2>&1 | head -2",
+                "gh --version 2>/dev/null",
+                "gh --version >/dev/null 2>&1 && echo ok",
+                "gh --help 2>&1 | head -20",
+                "gh -h 2>&1",
+                "gh pr view 5 2>/dev/null",
+                "gh pr list --json number >/dev/null 2>&1",
+                "gh pr comment 5 -F - < ok.md",
+                "gh api repos/o/r >/dev/null",
+            )
+        )
+
+    def test_gh_readings_drop_redirects(self):  # AUD-SEC-582
+        """Điểm vào chung: nguyên văn, rồi dạng bỏ chuyển hướng (chữ số một ký tự liền trước là fd; thêm cách đọc giữ chữ
+        số khi nó không rơi vào vị trí tên lệnh) và dạng cobra của chúng."""
+        readings = self.g._gh_readings
+        self.assertEqual(readings(["--version", "2", ">&", "1"]), [["--version", "2", ">&", "1"], ["--version"]])
+        got = readings(["pr", "merge", "5", ">", "/dev/null"])
+        self.assertIn(["pr", "merge"], got)
+        self.assertIn(["pr", "merge", "5"], got)
+        self.assertIn(["pr", "merge", "12"], readings(["pr", "merge", "12", ">", "/dev/null"]))
+        self.assertIn(["pr", "merge", "5"], readings(["pr", "{fd}", ">", "/dev/null", "merge", "5"]))
+        self.assertEqual(readings(["pr", "view"]), [["pr", "view"]])
 
 
 class GuardAppendParallelTest(unittest.TestCase):

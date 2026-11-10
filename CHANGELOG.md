@@ -68,6 +68,14 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
   `api` không nhận `-R`, đọc chặt). Lọc chữ thô (`GH_POST_RE`, `GH_PR_TEXT_RE`, `MERGE_CMD_RE`) quét tuyến tính — bản
   cũ của `GH_POST_RE` siêu tuyến tính với `gh api` lặp lại. AUD-DOC-281: CHANGELOG và `harness-files.md` nêu đúng phạm vi. AUD-TEST-095: test `adjacent` của
   `_drop_redirect_ops`, ca corpus `gh -XDELETE api …`/`gh -X=DELETE api …`.
+- Guard (lý do chạm hàng rào: review #490 AUD-SEC-581/582, D-409): `--version` (cờ bool của gốc gh) không ăn token kế
+  trước tên lệnh đầu — `gh --version zz` (alias/extension/lệnh lạ) bị chặn như `gh zz` (AUD-SEC-581). Điểm vào chung
+  `_gh_readings` đọc thêm dạng bash đưa cho gh: bỏ chuyển hướng, đích và fd liền trước (`{fd}`, một chữ số), cùng dạng
+  giữ chữ số đó (số PR) trừ khi nó rơi vào vị trí tên lệnh — `gh pr 2>/dev/null merge 5`, `gh api -X DELETE repos/o/r
+  >/dev/null`, `gh repo 2>&1 edit --visibility public`, `gh gist 2>/dev/null create .env`, `gh pr 2>&1 create --title
+  …` ra đúng mã như dạng trơn; `gh --version 2>&1`, `gh --help 2>&1 | head`, `gh -h 2>&1` không còn bị chặn oan
+  (AUD-SEC-582). Merge đã kiểm (`allow`) xếp trên "không luật" khi gộp cách đọc (còn qua kiểm lệnh trơn); `&` của
+  chuyển hướng không ngắt cửa sổ heredoc của `GH_PR_TEXT_RE`.
 - Guard (lý do chạm hàng rào: nợ review #488 AUD-SEC-573): tên nhánh nhiều chữ số đứng trước chuyển hướng ở `git push
   --delete` (`--delete 1234 >/dev/null`) bị chặn `REMOTE_DELETE`; một chữ số vẫn đọc là fd (`--delete <nhánh> 2>&1`).
 - Guard (lý do chạm hàng rào: nợ review #488 AUD-SEC-574): đối số toàn chữ số trước chuyển hướng của lệnh xoá

@@ -3862,12 +3862,14 @@ class _GhLine(NamedTuple):
 
 
 class _GhCmd(NamedTuple):
-    """Một lệnh `gh` có thể đăng: argv chuẩn hoá, chạy sau khi đổi thư mục, các khâu trước nó trong ống."""
+    """Một lệnh `gh` có thể đăng: một cách đọc argv (`_gh_readings`), chạy sau khi đổi thư mục, các khâu trước nó trong
+    ống, ngữ cảnh dòng, argv chuẩn hoá còn chuyển hướng (`raw` — stdin của thân: `-F - < f`)."""
 
     n: List[str]
     moved: bool
     up: List[List[str]]
     line: _GhLine
+    raw: List[str]
 
 
 def _gh_path_bad(path: str, moved: bool, home: bool) -> bool:
@@ -3953,7 +3955,7 @@ def _gh_body_dynamic(val: str, c: _GhCmd) -> bool:
 def _gh_stdin_seen(c: _GhCmd) -> bool:
     """stdin của `gh`: chuyển hướng trên chính `gh` (heredoc gập — thân thay lệnh để lại `<<< $(…)` —, `< tệp` nguyên
     văn ở thư mục biết, `<&-`), hoặc ống mà mọi khâu trước thấy chữ; nhóm/hàm/`exec <`/`>(…)` → không."""
-    n = c.n
+    n = c.raw
     redirs = [(op, w) for op, w in zip(n, n[1:]) if op in ("<", "<<", "<<-", "<<<", "<&")]
     for op, w in redirs:
         dyn = bool(GH_DYN_RE.search(w))
@@ -3991,21 +3993,23 @@ def _gh_cmd_why(raw: List[str], moved: bool, line: _GhLine, up: List[List[str]])
         n, wrapped = n[n.index("gh") :], True
     if len(n) < 2:
         return ""
-    readings = [[n[0], *r] for r in _gh_readings(n[1:])]  # D-409: mọi cách đọc, cách nào có lý do thì chặn
+    # D-409: mọi cách đọc (≥ 2 token: dạng bỏ chuyển hướng có thể chỉ còn tên), cách nào có lý do thì chặn
+    readings = [[n[0], *r] for r in _gh_readings(n[1:]) if r]
     if n[0] != "gh":
         dyn = GH_DYN_RE.search(n[0]) and any(r[1] in GH_TOPICS for r in readings)
         return "tên `gh` dựng lúc chạy (AUD-SEC-192)" if dyn else ""
-    return next((why for r in readings for why in [_gh_reading_why(r, moved, line, up, wrapped)] if why), "")
+    cmds = (_GhCmd(r, moved, up, line, n) for r in readings)
+    return next((why for c in cmds for why in [_gh_reading_why(c, wrapped)] if why), "")
 
 
-def _gh_reading_why(n: List[str], moved: bool, line: _GhLine, up: List[List[str]], wrapped: bool) -> str:
-    """Lý do chặn của một cách đọc `n` (`gh …`, ≥ 2 token) ở lớp đăng review (ADR-0063)."""
-    kind = _gh_kind(n, line)
+def _gh_reading_why(c: _GhCmd, wrapped: bool) -> str:
+    """Lý do chặn của một cách đọc `c.n` (`gh …`, ≥ 2 token) ở lớp đăng review (ADR-0063)."""
+    kind = _gh_kind(c.n, c.line)
     if kind == "deny":
         return "`gh alias`/`extension`/lệnh con lạ — có thể đăng thân guard không thấy (AUD-SEC-193)"
     if kind and wrapped:
         return "`gh` đăng qua hàm/`coproc`/`xargs` — guard không thấy thân (AUD-SEC-191/192)"
-    return _gh_body_why(_GhCmd(n, moved, up, line)) if kind else ""
+    return _gh_body_why(c) if kind else ""
 
 
 def _gh_strict_why(folded: str, live: str, cwd: Optional[str]) -> str:
@@ -5654,16 +5658,17 @@ def _replace_names(args: List[str], _cwd: Optional[str]) -> RefNames:
     return _replace_reading(args) + _replace_reading(dropped, ambiguous)
 
 
-def _drop_redirect_ops(args: List[str], fd_max: int = 0) -> List[str]:
+def _drop_redirect_ops(args: List[str], fd_max: int = 0, fd_vars: bool = False) -> List[str]:
     """Bỏ toán tử chuyển hướng và đích của nó, GIỮ token đứng trước (`1234 >/dev/null`: chữ số có thể là đối số) — trừ
-    token chữ số dài ≤ `fd_max` (đọc là fd: `2>&1`)."""
+    token chữ số dài ≤ `fd_max` (đọc là fd: `2>&1`) và, khi `fd_vars`, biến fd bash cấp (`{fd}>f`)."""
     out: List[str] = []
     skip = adjacent = False  # `adjacent`: token cuối của `out` đứng ngay trước token đang xét
     for a in args:
         if skip:
             skip = adjacent = False
         elif _is_redirect(a):
-            if adjacent and out[-1].isdigit() and len(out[-1]) <= fd_max:
+            fd = adjacent and (out[-1].isdigit() and len(out[-1]) <= fd_max or fd_vars and FD_VAR_RE.fullmatch(out[-1]))
+            if fd:
                 out.pop()
             skip, adjacent = True, False
         else:
@@ -8249,16 +8254,30 @@ def _gh_canonical(args: List[str]) -> List[str]:
     return [args[k] for k in path] + [a for k, a in enumerate(args) if k not in path]
 
 
+GH_FD_DIGITS = 1  # như push (AUD-SEC-576): một chữ số liền trước chuyển hướng là fd (`2>&1`)
+
+
 def _gh_readings(args: List[str]) -> List[List[str]]:
-    """ĐIỂM VÀO DUY NHẤT của mọi luật đọc lệnh gh (`args` sau `gh`; D-409): nguyên văn, rồi dạng cobra chạy khi khác
-    (cờ đứng trước lệnh con — AUD-SEC-571/575/577/578/579). Luật xét MỌI cách đọc, cách chặt hơn thắng."""
-    canon = _gh_canonical(args)
-    return [args] if canon == args else [args, canon]
+    """ĐIỂM VÀO DUY NHẤT của mọi luật đọc lệnh gh (`args` sau `gh`; D-409): nguyên văn; dạng bash đưa cho gh — bỏ
+    chuyển hướng, đích và fd liền trước (`{fd}`, một chữ số) — và dạng giữ chữ số đó (số PR: `gh pr merge 5 >/dev/null`)
+    trừ khi nó rơi vào vị trí tên lệnh (`gh --version 2>&1`) — AUD-SEC-582; mỗi dạng thêm dạng cobra chạy (cờ đứng
+    trước lệnh con — AUD-SEC-571/575/577/578/579/581). Luật xét MỌI cách đọc, cách chặt hơn thắng."""
+    fd = _drop_redirect_ops(args, GH_FD_DIGITS, fd_vars=True)
+    kept = _drop_redirect_ops(args, 0, fd_vars=True)
+    named = any(kept[k].isdigit() and len(kept[k]) <= GH_FD_DIGITS for k in _gh_path(kept))
+    out = [args]
+    for r in (r for form in ((fd,) if named else (fd, kept)) for r in (form, _gh_canonical(form))):
+        if r not in out:
+            out.append(r)
+    return out
 
 
-def _gh_rank(v: Tuple[str, str]) -> Tuple[int, bool]:
-    """Độ chặt của một quyết định: deny > ask > rỗng; cùng ask thì ask mà chính sách mặc định chặn (DESTROY…) hơn."""
-    return VERDICT_RANK.get(v[0], 0), policy_action(decide({"decision": v[0], "reason": v[1]})) == "deny"
+def _gh_rank(v: Tuple[str, str]) -> Tuple[int, bool, bool]:
+    """Độ chặt của một quyết định: deny > ask > allow > rỗng; cùng ask thì ask mà chính sách mặc định chặn (DESTROY…)
+    hơn. `allow` (merge đã kiểm) hơn rỗng: nó còn phải qua kiểm "lệnh đứng một mình và trơn" (`PLAIN_MERGE_RE`) — cách
+    đọc nguyên văn không nhận ra merge (`gh pr 2>/dev/null merge …`) không được xoá kiểm đó (AUD-SEC-582)."""
+    deny = policy_action(decide({"decision": v[0], "reason": v[1]})) == "deny"
+    return VERDICT_RANK.get(v[0], 0), deny, v[0] == "allow"
 
 
 def _gh_rule(args: List[str], root: str, cwd: str) -> Tuple[str, str]:
@@ -8355,6 +8374,9 @@ def _gh_close_short_deletes(a: str) -> bool:
 # kế, trừ cờ bool đã đăng ký — chỉ `--help` (persistent của gốc gh); `-h` chưa đăng ký lúc tìm nên cũng ăn token kế
 # (đo: `gh pr -c x close --help` và `gh -c x pr close --help` in trợ giúp của close, `gh pr -h close` in của `pr`).
 GH_FIND_BOOL_FLAGS = ("--help",)
+# Cờ bool riêng của gốc gh (gh 2.89 `gh --help` mục FLAGS: `--help`, `--version`): chỉ trước tên lệnh đầu — ở nhóm, cobra
+# không biết nó nên nó ăn token kế (đo: `gh --version zz` chạy alias `zz` với đối số `--version` — AUD-SEC-581).
+GH_ROOT_BOOL_FLAGS = ("--version",)
 
 
 def _gh_path(args: List[str]) -> List[int]:
@@ -8367,7 +8389,8 @@ def _gh_path(args: List[str]) -> List[int]:
         if a == "--":
             break
         if a.startswith("-"):
-            i += "=" not in a and a not in GH_FIND_BOOL_FLAGS and (a.startswith("--") or len(a) == 2)
+            bools = GH_FIND_BOOL_FLAGS if out else GH_FIND_BOOL_FLAGS + GH_ROOT_BOOL_FLAGS
+            i += "=" not in a and a not in bools and (a.startswith("--") or len(a) == 2)
         elif a:
             out.append(i - 1)
     return out
@@ -11079,8 +11102,12 @@ def _xt_yaml_for(d: str) -> str:
 # (cửa sổ heredoc, lọc nhanh; argv đọc qua `_gh_pr_readings`): cờ bất kỳ giữa `gh`, `pr` và lệnh con trong cùng lệnh đơn
 # (`gh -R o/r pr --title x create` — AUD-SEC-578, D-409). Tuyến tính: chỉ thử ở đầu chữ/đầu đoạn (sau `\n;&|`), nhóm
 # nguyên tử chốt `gh` ĐẦU của đoạn rồi `pr` đầu sau nó — `gh` sau trong cùng đoạn không khớp được nếu `gh` đầu trượt.
+# `&` của chuyển hướng (`2>&1`, `&>f`) thuộc đoạn, không ngắt (AUD-SEC-582): mỗi `&` hoặc là ngắt hoặc là chữ — đúng một.
+GH_TEXT_SEP = r"(?:[\n;|]|(?<![<>])&(?!>))"
+GH_TEXT_SEG = r"(?:[^\n;&|]|(?<=[<>])&|&(?=>))"
 GH_PR_TEXT_RE = re.compile(
-    r"(?:\A|[\n;&|])(?>[^\n;&|]*?(?<![\w-])gh\s)(?>[^\n;&|]*?(?<!\S)pr\s)(?>[^\n;&|]*?(?<!\S)(?:create|new|edit|merge)\b)"
+    rf"(?:\A|{GH_TEXT_SEP})(?>{GH_TEXT_SEG}*?(?<![\w-])gh\s)(?>{GH_TEXT_SEG}*?(?<!\S)pr\s)"
+    rf"(?>{GH_TEXT_SEG}*?(?<!\S)(?:create|new|edit|merge)\b)"
 )
 GH_PR_TEXT_OPTS = {"-t": "m", "--title": "m", "--subject": "m", "-b": "m", "--body": "m", "-F": "F", "--body-file": "F"}
 # cờ bool ngắn đứng trước `-t/-b/-F` gộp kiểu pflag: `create -dt x`, `-fdbX`, `-et x` (`--editor`), `merge -sdb x`
