@@ -93,6 +93,22 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
   token$Z`, `gh api … --input$Z f`, `gh pr $CMD 5`, `gh pr merge 5 -$Z` — lách mọi luật gh so token chính xác; giờ hỏi
   mã `BUDGET` ở điểm vào chung `_gh_rule` (mặc định chặn, strict hỏi; như ADR-0065 lớp A). Mở rộng ở giá trị/đối số vị
   trí (`gh pr view "$PR"`, `--repo="$R"`, `gh api "repos/$R/pulls"`) không đổi.
+- Guard (lý do chạm hàng rào: nợ review #491 AUD-SEC-583): `gh api -X DELETE` tới đường REST của lệnh gh xoá đã
+  `DESTROY` — `…/issues/N`, `…/actions/runs/N[/logs]`, `…/labels/<tên>`, `…/releases/N`, `…/actions/caches[?key=…]`,
+  `gists/<id>`, `user/codespaces/<tên>`, `projects/N` — mang mã `DESTROY` ở mọi cách viết phương thức (`-XDELETE`,
+  `--method=delete`) và tiền tố đường (`/repos/…`, `{owner}/{repo}`, URL đầy đủ); ghi `user/codespaces/secrets/…` như
+  `gh secret`. Xoá một cache theo id, gỡ nhãn khỏi issue, bỏ sao gist vẫn là ghi thường.
+- Guard (lý do chạm hàng rào: nợ review #485 AUD-SEC-555): `gh api` ghi ref (`PATCH …/git/refs/<ref>`, POST
+  `…/git/refs`, tags, số ít `git/ref/`) với trường `force` khác `false` (`-F`/`-f`/`--field`/`--raw-field`, `@tệp`,
+  biến) hay thân `--input` bị chặn cùng lý do `git push --force` (`RULE_DENY`, mọi chính sách); PATCH fast-forward
+  (không `force`/`force=false`) giữ hỏi thường.
+- Guard (lý do chạm hàng rào: nợ review #491 AUD-SEC-590): ở lệnh gh có luật cờ (`pr merge|close`, `api`, `auth
+  status`, `cache delete`, `repo edit`) token mà bash tách/bung thành cờ — mở rộng không nháy
+  đứng đầu từ (`gh pr merge 5 $X`, `--match-head-commit $SHA`, `$(…)`), cụm cờ ngắn có mở rộng (`-d$Z`), glob không nháy
+  bung được ra `-…` (`gh pr close 5 -*`) — và glob ở tên lệnh (`gh pr merg?`, `gh pr [m]erge`) hỏi mã `BUDGET` (mặc
+  định chặn, strict hỏi — D-411). Luật deny phẳng thắng `BUDGET` ở mọi chính sách: `gh pr merge 5 --auto $X` vẫn
+  `AUTO_MERGE_ENABLE` ở strict (ADR-0036 §3 — trước đây `--auto --x$Z` thành câu hỏi). Trong nháy kép (`"$PR"`), sau
+  chữ nguyên văn (`-F n=$N`, `repos/$R`), lệnh không có luật cờ (`gh pr view $PR`), sau `--`: không đổi.
 
 ### Fixed
 
