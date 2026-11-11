@@ -617,6 +617,21 @@ class LegacyMigrationTest(unittest.TestCase):
         self.assertTrue((self.target / ".xstored").is_symlink())
         self.assertTrue((outside / "giu.txt").exists())
 
+    def test_legacy_manifest_not_copied_through_dangling_symlink(self):
+        """AUD-SEC-616: `.xtemplates/harness.sha256.json` là liên kết treo → manifest cũ không được chép xuyên liên kết
+        (tạo file ngoài dự án); liên kết bị gỡ, manifest ghi tại chỗ."""
+        self.make_legacy_install()
+        outside = self.target.parent / "tao-ngoai.json"
+        self.addCleanup(outside.unlink, missing_ok=True)
+        (self.target / ".xtemplates").mkdir()
+        (self.target / ".xtemplates" / "harness.sha256.json").symlink_to(outside)
+        code, err = self.install_quiet()
+        self.assertEqual(code, 0, err)
+        self.assertFalse(outside.exists())
+        self.assertTrue((self.target / ".xtemplates" / "harness.sha256.json").is_file())
+        self.assertFalse((self.target / ".xtemplates" / "harness.sha256.json").is_symlink())
+        self.assertIn("gỡ liên kết", err)
+
     def test_legacy_refs_scans_workflows_and_skips_binary(self):
         wf = self.target / ".github" / "workflows"
         wf.mkdir(parents=True)

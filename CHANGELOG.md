@@ -119,6 +119,10 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
 
 ### Fixed
 
+- `install.py` (AUD-SEC-616 🔴): `--pack` không còn ghi xuyên symlink `<file>.xtemplates-new` ra ngoài dự án ở nhánh
+  brownfield/đề xuất còn đó — action `skipped-symlink` ở `--plan` lẫn cài thật, kể cả liên kết treo; bước chuyển bản
+  ≤ 2.x gỡ liên kết `.xtemplates/harness.sha256.json` trước khi chép manifest cũ (trước đây liên kết treo làm `copy2`
+  tạo file ngoài dự án). **Dự án đích:** không phải làm gì.
 - Guard (lý do chạm hàng rào: AUD-SEC-605 🔴, D-414 — lệnh nguy hiểm lọt hẳn): từ chỉ gồm ký tự dấu mà có nháy/thoát
   (`';'`, `"|"`, `\;`, `$';'`, `'&&'`, `'\n'`) là đối số nguyên văn như bash, không còn bị coi là toán tử — trước đây
   `tokenize` bỏ nháy rồi mọi bộ tách lệnh cắt ở đó nên phần sau không luật nào xét (`git push origin x ';' --force`,

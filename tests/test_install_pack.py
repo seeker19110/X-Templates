@@ -6,6 +6,7 @@ from __future__ import annotations
 import io
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -374,6 +375,31 @@ class PackSymlinkTest(PackBase):
         self.assertFalse((outside / "app.ts").exists())
         self.assertIn("skipped-symlink 1", err)
         self.assertNotIn("ops/policy.json", self.manifest()["files"])
+
+    def test_new_proposal_symlink_not_written_through(self) -> None:
+        """AUD-SEC-616: `<file>.xtemplates-new` là symlink → `updated-new` (brownfield / đề xuất còn đó) cũng không ghi
+        xuyên liên kết ra ngoài dự án — cả `--plan` lẫn cài thật."""
+        for brownfield, dangling in ((True, False), (False, False), (True, True), (False, True)):
+            with self.subTest(brownfield=brownfield, dangling=dangling):
+                victim = self.tmp / "nan-nhan.txt"
+                victim.write_text("của người khác\n", encoding="utf-8")
+                if dangling:  # liên kết treo: `exists()` đi theo liên kết trả False — đích không được tạo ra
+                    victim = self.tmp / "chua-co.txt"
+                shutil.rmtree(self.target)
+                (self.target / "ops").mkdir(parents=True)
+                if brownfield:
+                    (self.target / "package.json").write_text("{}", encoding="utf-8")
+                # fresh: `.xtemplates-new` có sẵn (symlink tới file có thật) cũng đi nhánh sớm `updated-new`
+                (self.target / "ops" / "policy.json.xtemplates-new").symlink_to(victim)
+                plan = self.pack_plan(self.v1)
+                self.assertEqual(self.actions(plan["managed"])["ops/policy.json"], "skipped-symlink")
+                err = self.install(self.v1)
+                if dangling:
+                    self.assertFalse(victim.exists())
+                else:
+                    self.assertEqual(victim.read_text(encoding="utf-8"), "của người khác\n")
+                self.assertIn("bỏ qua symlink", err)
+                self.assertNotIn("ops/policy.json", self.manifest()["files"])
 
     def test_xt_yaml_symlink_or_unreadable_not_written(self) -> None:
         outside = self.tmp / "ngoai.yaml"

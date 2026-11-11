@@ -1387,7 +1387,11 @@ def managed_action(target: Path, rel: str, src: Path, files: dict[str, str], mod
     if under_symlink(target, rel):
         return "skipped-symlink", b""
     dst = target / rel
-    if not dst.exists() and (mode == "brownfield" or dst.with_name(dst.name + ".xtemplates-new").exists()):
+    proposal = dst.with_name(dst.name + ".xtemplates-new")
+    # nhánh sớm dưới ghi đúng file này: không ghi xuyên liên kết, kể cả liên kết treo (AUD-SEC-616, như AUD-HAR-010)
+    if proposal.is_symlink():
+        return "skipped-symlink", b""
+    if not dst.exists() and (mode == "brownfield" or proposal.exists()):
         return "updated-new", source_bytes(src)
     return classify_copy(src, dst, installed_hash=files.get(rel))
 
@@ -1861,6 +1865,7 @@ def migrate_legacy(target: Path) -> None:
     legacy = target / LEGACY_DIR
     if legacy.is_dir() and not legacy.is_symlink():
         old_manifest = legacy / "harness.sha256.json"
+        drop_symlink(target / MANIFEST)  # liên kết treo qua được `exists()` rồi copy2 ghi xuyên nó (AUD-SEC-616)
         if old_manifest.is_file() and not (target / MANIFEST).exists():
             shutil.copy2(old_manifest, target / MANIFEST)
         shutil.rmtree(legacy)
