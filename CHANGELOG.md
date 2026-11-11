@@ -127,6 +127,10 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
 
 ### Fixed
 
+- Guard (lý do chạm hàng rào: AUD-SEC-621 🔴 — xoá/ghi đè ref remote lọt mọi luật push): plumbing đẩy `git send-pack`,
+  `git http-push` và remote helper `git remote-<x>`/`git-remote-*` bị chặn (`REMOTE_DELETE`) ở mọi dạng — alias,
+  `git-<tên>` chạy thẳng, tên khác hoa thường. Các lệnh này không qua luật `git push` và không chạy hook pre-push. Chỉ
+  in cách dùng (`-h` đứng một mình, `send-pack --help`) được qua.
 - Guard (lý do chạm hàng rào: AUD-SEC-615 🔴, AUD-TEST-100; D-417, D-418): luật `GO_SIGN` không còn bị lách bằng mồi
   Markdown (chú thích HTML, khối rào, `\r` trần, BOM). **Dự án đích: agent sửa `GO-NO-GO*.md` bằng Write cả file** — mọi
   Edit/MultiEdit/NotebookEdit lên file đó bị chặn; agent ký qua `xt.py release-sign` (ADR-0074). Write/MCP so dòng ký §5
