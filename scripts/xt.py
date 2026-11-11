@@ -12916,21 +12916,27 @@ def _release_run(base: Path, blueprint: str, key: str, what: str) -> Tuple[Dict[
 
 GO_NO_GO_DIRS = ("docs/ops", "docs", ".")  # nơi tìm `GO-NO-GO*.md` (repo khung: docs/ops; mẫu dự án đích: gốc)
 # Dòng ký của bảng §5: `| vai trò | tên | quyết định | YYYY-MM-DD |` — tên và ngày khác rỗng (mẫu để trống hai ô này).
-GO_SIGN_ROW_RE = re.compile(r"^\|[^|\n]*\|\s*[^|\s][^|\n]*\|[^|\n]*\|\s*\d{4}-\d{2}-\d{2}\s*\|\s*$", re.M)
+# MỘT dòng (`[^\S\n]*`, AUD-SEC-615): `_markdown_shown` xoá dòng ẩn — hai dòng thô nối lại không thành dòng ký.
+# Lời từ chối giữ regex rộng (`\s*` qua dòng — chặt cho NO-GO): `GO_REFUSAL_ROW_RE`.
+GO_SIGN_ROW_RE = re.compile(
+    r"^\|[^|\n]*\|[^\S\n]*[^|\s][^|\n]*\|[^|\n]*\|[^\S\n]*\d{4}-\d{2}-\d{2}[^\S\n]*\|[^\S\n]*$", re.M
+)
+GO_REFUSAL_ROW_RE = re.compile(r"^\|[^|\n]*\|\s*[^|\s][^|\n]*\|[^|\n]*\|\s*\d{4}-\d{2}-\d{2}\s*\|\s*$", re.M)
 
 
-def _go_sign_rows(text: str) -> List[Tuple[str, str]]:
+def _go_sign_rows(text: str, row_re: "re.Pattern[str]" = GO_SIGN_ROW_RE) -> List[Tuple[str, str]]:
     """(quyết định, ngày) của các dòng ký có tên + ngày ở §5 (Ký) của GO-NO-GO — chỉ phần người ký thấy
     (`_markdown_shown`, AUD-HAR-323): dòng ký, tiêu đề `## ` trong khối code/chú thích HTML không tính. Guard `GO_SIGN`
-    giữ luật riêng, chặt hơn (đọc văn bản thô). Lời từ chối thì đọc cả văn bản thô: `_go_no_go_refusals`."""
+    chép đúng cách đọc này và so thêm luật thô của nó (AUD-SEC-615). Lời từ chối đọc cả văn bản thô, regex rộng:
+    `_go_no_go_refusals`."""
     part = re.split(r"^## 5\b.*$", _markdown_shown(text), maxsplit=1, flags=re.M)
     if len(part) != 2:
         return []
-    return _sign_rows_in(re.split(r"^## ", part[1], maxsplit=1, flags=re.M)[0])
+    return _sign_rows_in(re.split(r"^## ", part[1], maxsplit=1, flags=re.M)[0], row_re)
 
 
-def _sign_rows_in(section: str) -> List[Tuple[str, str]]:
-    cells = [m[0].strip().strip("|").split("|") for m in GO_SIGN_ROW_RE.finditer(section)]
+def _sign_rows_in(section: str, row_re: "re.Pattern[str]" = GO_SIGN_ROW_RE) -> List[Tuple[str, str]]:
+    cells = [m[0].strip().strip("|").split("|") for m in row_re.finditer(section)]
     return [(c[2].strip(), c[3].strip()) for c in cells]
 
 
@@ -12939,7 +12945,8 @@ def _go_no_go_refusals(text: str) -> List[str]:
     #467): bộ lọc `_markdown_shown` lệch trình xem (ẩn thừa) hay `## ` giả trong khối code (cắt mục nếu tách theo tiêu
     đề thô) không được làm mất lời từ chối người thấy — ẩn thêm chỉ an toàn cho GO; NO-GO thì đọc rộng (chặt)."""
     head = re.search(r"^## 5\b", text, flags=re.M)
-    rows = (_sign_rows_in(text[head.start() :]) if head else []) + _go_sign_rows(text)
+    raw = _sign_rows_in(text[head.start() :], GO_REFUSAL_ROW_RE) if head else []
+    rows = raw + _go_sign_rows(text, GO_REFUSAL_ROW_RE)
     return [d for d, _ in rows if _decision(d) == "no"]
 
 

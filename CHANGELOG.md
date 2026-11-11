@@ -122,6 +122,12 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
 
 ### Fixed
 
+- Guard (lý do chạm hàng rào: AUD-SEC-615 🔴, AUD-TEST-100; D-417, D-418): luật `GO_SIGN` không còn bị lách bằng mồi
+  Markdown (chú thích HTML, khối rào, `\r` trần, BOM). **Dự án đích: agent sửa `GO-NO-GO*.md` bằng Write cả file** — mọi
+  Edit/MultiEdit/NotebookEdit lên file đó bị chặn; agent ký qua `xt.py release-sign` (ADR-0074). Write/MCP so dòng ký §5
+  theo hai cách đọc (văn bản thô ∪ đúng phần `release-check` thấy), chặn `\r` không kèm `\n`, BOM lệch đĩa, đĩa không
+  đọc được; đổi tiêu đề/`subject:` của file đã ký so trên cả hai cách đọc; dòng ký GO chỉ là một dòng ở cả `xt.py` lẫn guard
+  (lời từ chối NO-GO vẫn đọc rộng). Chạy lại `install.py`.
 - Guard (lý do chạm hàng rào: AUD-SEC-622 🟠 — xoá ref người khác lọt REMOTE_DELETE): graphql `updateRefs`/`updateRef`
   (`afterOid` toàn 0 = xoá ref, `force` = ghi đè) bị chặn như `deleteRef`; đích không đọc chắc nên luôn chặn.
 - Gói `web-api-ts` (AUD-CODE-064 🟠): `pnpm build` không còn ném `ENOBUFS` khi cây đóng gói vượt 1 MiB — tar ghi
