@@ -2,7 +2,9 @@
 
 - **Trạng thái:** Đã chấp nhận 2026-11-04 (chủ dự án: "cho phép Agent quyết định khi nào đã đạt và tuyên bố đạt MVP";
   phiên chính chốt cách làm theo tiêu chí chất lượng cuối, ADR-0008 — **D-352**; ghi lúc đầu là D-342 rồi D-347, đánh số lại khi gộp
-  `main` vì #438 đã dùng D-342 và #439 đã dùng D-347).
+  `main` vì #438 đã dùng D-342 và #439 đã dùng D-347). [ADR-0075](0075-end-to-end-factory.md) (2026-11-11) đề xuất mở
+  giai đoạn 2/3 cho agent qua khoá trần `stage_approval_max` (`docs/specs/SPEC-factory-scale.md` F-142); tới khi lát đó
+  có mã, giới hạn "agent chỉ duyệt giai đoạn 1" còn nguyên.
 - **Trạng thái triển khai:** đã làm cùng PR: `scripts/xt.py` (`stage_agent_approval`, `stage approve` trong phiên agent,
   `stage_facts.agent_approval`, `next-step` trả `stage-approve`), `.claude/hooks/guard.py` (`agent_stage_approval`,
   `_plain_approve`, `_stage_approve_denied`), `tests/test_stage_agent_approval.py`, mẫu `framework/templates/xt.yaml`.
