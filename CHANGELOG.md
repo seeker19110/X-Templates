@@ -32,6 +32,9 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
 
 ### Changed
 
+- `check-links.py` (AUD-PERF-027): `mask_code_spans`/`table_cells` nhảy tới ký tự đặc biệt bằng regex thay vì duyệt
+  từng ký tự — dòng `lint` của `gate-fast` bớt khoảng nửa thời gian kiểm link (đo 1 789 → 876 ms khi máy tải); kết quả
+  kiểm không đổi (so vi sai trên mọi file `.md` của repo và fuzz).
 - Guard (lý do chạm hàng rào: nợ review #480 AUD-SEC-551, D-407): mã mới `REMOTE_DELETE` (máy chặn) cho xoá nhánh/tag
   remote khác nhánh hiện tại của phiên (`git push --delete|-d`, `:<ref>`, `--prune`, `gh api -X DELETE …/git/refs/…`,
   graphql `deleteRef`) và `git filter-branch --all`/nhiều ref, `git filter-repo`; xoá nhánh của chính phiên và `git
