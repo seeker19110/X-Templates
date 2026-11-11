@@ -8581,12 +8581,14 @@ def _gh_api_ref_force(args: List[str]) -> bool:
 GH_API_REPO_RE = re.compile(r"/?repos/[^/\s]+/[^/\s]+/?")
 GH_API_MAIN_REF_RE = re.compile(r"/?repos/[^/\s]+/[^/\s]+/git/refs/heads/(main|master)/?")
 GH_API_REF_RE = re.compile(r"/?repos/[^/\s]+/[^/\s]+/git/refs/(\S+?)/?")  # ref REST: `heads/<nhánh>`, `tags/<tag>`
-GRAPHQL_REF_DELETE_RE = re.compile(r"\bdeleteRef\b")  # mutation xoá ref theo id mờ — không biết nhánh nào
+# Mutation xoá/ghi đè ref, đích không đọc chắc (id mờ, biến `-F`) → chặn mọi dạng: `deleteRef`; `updateRefs` (`afterOid`
+# 0…0 = xoá, `force` = ghi đè — AUD-SEC-622); `updateRef` (`force`, AUD-SEC-562).
+GRAPHQL_REF_DELETE_RE = re.compile(r"\b(?:deleteRef|updateRefs?)\b")
 
 
 def _gh_api_ref_delete(args: List[str]) -> Optional[str]:
-    """Ref mà `gh api …` (đối số sau `api`) xoá: `-X DELETE …/git/refs/<ref>` → `<ref>`; graphql `deleteRef` → "" (id
-    mờ); không xoá ref → None. Phương thức: cờ cuối thắng như gh."""
+    """Ref mà `gh api …` (đối số sau `api`) xoá: `-X DELETE …/git/refs/<ref>` → `<ref>`; graphql `GRAPHQL_REF_DELETE_RE` →
+    "" (đích mờ); không xoá ref → None. Phương thức: cờ cuối thắng như gh."""
     pos = _positionals(args, GH_API_VALUE_FLAGS)
     path = _api_path(pos[0]) if len(pos) == 1 else ""
     if path.rstrip("/").rsplit("/", 1)[-1] == "graphql":
@@ -8742,7 +8744,7 @@ def _gh_ref_delete_rule(args: List[str], cwd: str) -> Tuple[str, str]:
     cur = _current_branch(cwd) if gone else ""
     if _session_ref(gone, cur):
         return "", ""
-    return "deny", REMOTE_DELETE_WHY.format(gone or "ref của `deleteRef`", cur or "không rõ")
+    return "deny", REMOTE_DELETE_WHY.format(gone or "ref của graphql `deleteRef`/`updateRef(s)`", cur or "không rõ")
 
 
 # Ghi lên bí mật, quyền, bảo vệ nhánh, ruleset, webhook, chuyển chủ repo (review #97) — như `gh secret`/đổi ruleset.

@@ -122,6 +122,8 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
 
 ### Fixed
 
+- Guard (lý do chạm hàng rào: AUD-SEC-622 🟠 — xoá ref người khác lọt REMOTE_DELETE): graphql `updateRefs`/`updateRef`
+  (`afterOid` toàn 0 = xoá ref, `force` = ghi đè) bị chặn như `deleteRef`; đích không đọc chắc nên luôn chặn.
 - Gói `web-api-ts` (AUD-CODE-064 🟠): `pnpm build` không còn ném `ENOBUFS` khi cây đóng gói vượt 1 MiB — tar ghi
   thẳng `dist/app.tar` thay vì qua stdout; cờ tar/gzip và digest không đổi; thêm `test/build.test.ts`. **Dự án đích
   (đã cài gói web-api-ts):** `scripts/build.ts` thuộc dự án nên `install.py` không ghi đè — sửa tay: đổi `-cf -` thành
