@@ -3,7 +3,7 @@
 | Trường | Giá trị |
 |---|---|
 | ID tính năng | F-151 — chủ dự án 2026-11-11 "thiết lập sau khi lên bản dev", ADR-0075 §Quyết định 5 |
-| Trạng thái | Approved for implementation (phiên chính tự duyệt, ADR-0008 — D-422; sửa sau review độc lập — D-423) |
+| Trạng thái | Approved for implementation (phiên chính tự duyệt, ADR-0008 — D-422; sửa sau hai lượt review độc lập — D-423, D-424) |
 | Phiên bản | 1 |
 | Dữ kiện | [`research/2026-11-11-factory-e2e-facts.md`](../../research/2026-11-11-factory-e2e-facts.md) §3; research 2026-11-08 §6 lát S8 |
 | Kế hoạch | [`PLAN-factory-e2e.md`](../autopilot/PLAN-factory-e2e.md) T-3859 |
@@ -35,9 +35,9 @@ trạng thái (`đạt` / `thiếu` / `không đọc được` / `không áp d�
 |---|---|---|
 | `repo` | Tạo repo remote cho sản phẩm (khi sản phẩm mới chỉ có ở phiên) | `git remote get-url origin` |
 | `bot-token` | Một GitHub App hoặc token để PR do worker mở tự chạy CI và steward merge | tên secret theo `RUNBOOK-PR-STEWARD` có trong danh sách secret (chỉ tên) |
-| `ruleset` | Ruleset sống khớp file ruleset của repo | `GET /repos/{o}/{r}/rules/branches/main` so với file |
+| `ruleset` | Ruleset sống khớp file ruleset của repo — cả ruleset nhánh chính lẫn ruleset tag `v*` (SPEC-factory-scale §2.5) | `GET /repos/{o}/{r}/rules/branches/main` và danh sách ruleset của repo so với file; trường không đọc được bằng quyền đọc (vd danh sách bypass) → `không đọc được` |
 | `gated-keys` | Merge PR bật các khoá chỉ người đổi mà dự án muốn (`release_signoff`, `release_signoff_scale`, `stage_approval`, `stage_approval_max`, `merge_hard_exceptions`) — trạng thái `tuỳ chọn` khi chưa bật | giá trị khoá ở bản đã commit của nhánh chính |
-| `deploy-target` | Với mỗi môi trường khác `dev`: khai lệnh, tạo đích, thêm `- grant: deploy` vào PLAN | khoá `deploy_/smoke_/rollback_<env>`; `grant-check deploy env=<env>` |
+| `deploy-target` | Với mỗi môi trường khác `dev`: khai lệnh, tạo đích, thêm `- grant: deploy` vào PLAN | khoá `deploy_/smoke_/digest_/rollback_<env>` (đủ cả bốn, ở nhánh chính); `grant-check deploy env=<env>` |
 | `deploy-secrets` | Tạo các secret mà lệnh triển khai cần (tên khai ở khoá `deploy_secrets`) | tên secret có trong danh sách (chỉ tên) |
 | `worker-budget` | Merge PR đặt trần chi phí và số lượt cho worker ngoài phiên (khoá chỉ người đổi — SPEC-factory-parallel §2.3) | `worker_budget_usd`, `worker_max_turns` ở bản đã commit của **nhánh chính**; giá trị ở cây làm việc không tính |
 | `worker-launcher` | Bật một nơi khởi động worker (workflow, scheduled task hoặc máy riêng) | workflow mẫu có trong `.github/workflows/`; scheduled task: `không đọc được` — kiểm tay |
@@ -49,15 +49,17 @@ trạng thái (`đạt` / `thiếu` / `không đọc được` / `không áp d�
 `gated-keys` in đúng diff một dòng cho từng khoá và nói rõ hệ quả của khoá đó; máy không mở PR bật khoá thay người.
 
 ### 2.3 File `SETUP-ONCE.md`
-Một bảng theo §2.2, chỉ gồm mục `thiếu` và `không đọc được`, sắp theo thứ tự làm (repo → token → ruleset → khoá → đích
-triển khai → worker → còn lại); cuối file là ngày, HEAD và digest bản dev. Không chứa giá trị secret, không chứa token.
+Một bảng theo §2.2 gồm mục `thiếu` và `không đọc được`, sắp theo thứ tự làm (repo → token → ruleset → khoá → đích
+triển khai → worker → còn lại); tiếp theo là mục riêng **"Tuỳ chọn — quyền chủ dự án có thể bật"** liệt kê các khoá
+`tuỳ chọn` kèm diff một dòng và hệ quả (đây là chỗ checklist nói "khoá `HARD_GATED` cần bật" của ADR-0075); cuối file là
+ngày, HEAD và digest bản dev. Không chứa giá trị secret, không chứa token.
 
 ## 3. Tiêu chí chấp nhận
 
 ### S-601 Liệt kê đủ khi chưa thiết lập gì
 - Given dự án mới từ gói, có bản dev `deployed`, chưa có remote, chưa có khoá nới
 - When `xt.py admin-plan --json`
-- Then exit 1; có các mục `repo`, `bot-token`, `gated-keys`, `worker-budget` ở trạng thái `thiếu`; dòng đầu ghi digest bản dev
+- Then exit 1; có các mục `repo`, `bot-token`, `worker-budget` ở trạng thái `thiếu`, `gated-keys` ở `tuỳ chọn`; dòng đầu ghi digest bản dev
 
 ### S-602 Chỉ đọc
 - Given `gh` giả ghi lại mọi lời gọi · When `admin-plan` (mọi cờ) · Then mọi lời gọi REST là GET; không file nào ngoài `--out` đổi

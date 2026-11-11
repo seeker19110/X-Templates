@@ -3,7 +3,7 @@
 | Trường | Giá trị |
 |---|---|
 | ID tính năng | F-141 (ký phát hành ở M/L), F-142 (duyệt giai đoạn 2/3), F-143 (mục MUST buộc người), F-144 (chữ ký chặn phân phối) — chủ dự án 2026-11-11 "ở mọi quy mô", ADR-0075 §Quyết định 4 |
-| Trạng thái | Approved for implementation (phiên chính tự duyệt, ADR-0008 — D-422; sửa sau review độc lập — D-423) |
+| Trạng thái | **F-141, F-143, F-144: Approved for implementation** (phiên chính tự duyệt, ADR-0008 — D-422, D-423, D-424). **F-142 (giai đoạn 2/3): Draft** — là cách phiên hiểu rộng, và còn câu hỏi [chặn] ở §9 (AUD-SEC-637); T-3856 quyết rồi mới chuyển Approved |
 | Phiên bản | 1 |
 | Kiến trúc | [ADR-0075](../adr/0075-end-to-end-factory.md), [ADR-0074](../adr/0074-agent-release-signoff.md), [ADR-0069](../adr/0069-agent-stage-approval.md), [ADR-0048](../adr/0048-optimize-skill-and-field-loop.md) (nhà của dòng 20 GO-NO-GO) |
 | Kế hoạch | [`PLAN-factory-e2e.md`](../autopilot/PLAN-factory-e2e.md) T-3855…T-3858 — F-144 (cơ chế bù) làm trước; F-141/F-142 chỉ sau [SPEC-factory-acceptance](SPEC-factory-acceptance.md) và [SPEC-factory-deploy](SPEC-factory-deploy.md) |
@@ -39,7 +39,7 @@ Giữ mọi điều kiện của ADR-0074, thay điều kiện "`scale: S`" bằ
 | 1 | Hàng `acceptance_lock` PASS | SPEC-factory-acceptance |
 | 2 | Hàng `deploy` có mặt và PASS | SPEC-factory-deploy |
 | 3 | Không hàng nào của `attack`, `perf`, `migration_check`, `acceptance`, `rollback` là N/A — phải PASS | ADR-0042, ADR-0062 §6 |
-| 4 | **Lệnh của các hàng 1–3 trùng bản ở nhánh chính**: giá trị các khoá `attack`, `perf`, `migration_check`, `acceptance`, `rollback`, `deploy_dev`, `smoke_dev`, `digest_dev`, `rollback_dev` ở cây làm việc phải giống bản đã commit ở nhánh chính của remote — phiên không tự đổi lệnh thành thứ luôn xanh rồi tự ký | mới |
+| 4 | **Ứng viên đã nằm trên nhánh chính của remote** (HEAD thuộc lịch sử nhánh chính, đọc mới từ remote): ở M/L agent chỉ ký thứ đã qua PR và CI — lệnh của các hàng 1–3, các khoá `<khoá>_report` và mọi script chúng gọi vì thế đều là bản đã merge, phiên không tự đổi thành thứ luôn xanh rồi tự ký trên nhánh | mới |
 | 5 | Dòng 20 của GO-NO-GO ("người đã dùng thử") **còn trống**: người đã ghi bất kỳ kết quả nào (kể cả FAIL mà chưa ký NO-GO ở §5) → agent không ghi đè, không ký | mới |
 | 6 | Ở L: `escaped` = 0 trong 14 ngày gần nhất; `escaped` là `null` (không đo được) → từ chối. Cửa sổ 14 ngày là hằng số trong mã, không phải khoá | SPEC-factory-parallel F-134 |
 
@@ -49,8 +49,8 @@ hàng `rollback`) và câu "chưa có người dùng thật dùng thử". Dòng 
 
 ### 2.3 `stage approve` giai đoạn 2 và 3 (F-142)
 Agent duyệt giai đoạn N khi N ≤ `stage_approval_max`, bản trình còn nguyên (ADR-0069), và **tiêu chí của giai đoạn**
-đạt trên đúng bản đã trình. Tiêu chí là hằng số trong mã; lệnh của các hàng liên quan phải trùng bản ở nhánh chính như
-§2.2 điều 4:
+đạt trên đúng bản đã trình. Tiêu chí là hằng số trong mã; với giai đoạn 2/3 bản trình phải đã nằm trên nhánh chính của
+remote như §2.2 điều 4:
 
 | Giai đoạn | Tiêu chí máy |
 |---|---|
@@ -83,15 +83,24 @@ người làm xong việc đó (hoặc người ghi `Miễn:`). "Mọi quy mô" 
 
 ### 2.5 Chữ ký chặn phân phối (F-144) — cơ chế bù, làm trước F-141/F-142
 `promotion.state` là trạng thái **tức thời** (mất khi chữ ký quá hạn hoặc cây đổi), nên không dùng nó làm thuộc tính bền
-của một bản. Thuộc tính bền là **tag do workflow có cổng tạo**:
+của một bản. Một **tag** cũng chưa đủ: hiện không gì ngăn ai đó (kể cả phiên agent) tự tạo và đẩy tag `v*` — guard chỉ
+chặn `--tags`/`--all`, repo chưa có ruleset cho tag. Thuộc tính bền là **attestation do workflow phát hành ký** cho nguồn
+ở tag (workflow `release-tag.yml` đã ký provenance cho `git archive` của commit gắn tag trước khi đẩy tag):
 
-- `release-tag.yml` (khung và mẫu dự án đích): trước khi tạo tag `vX.Y.Z`, chạy `xt.py release-check --json` **trên đúng
-  commit sẽ gắn tag**; `promotion.state` khác `approved` → job đỏ, không tag. Tag chỉ tạo qua workflow này (luật sẵn có).
-- `install.py` ghi nguồn cài vào manifest: `source: {tag: "vX.Y.Z"}` khi HEAD của nguồn đúng là commit của một tag phiên
-  bản, ngược lại `source: {untagged: "<sha>"}`. Cài từ cây đang phát triển và trong CI **không bị chặn** (hành vi hiện
-  nay giữ nguyên).
-- `doctor` ở dự án đích và `xt.py registry` ở khung báo sản phẩm đang chạy khung `untagged`.
-- Việc phân phối tự động (PR nâng dự án đích — SPEC-factory-learning F-163) chỉ cài từ checkout của tag.
+- **Cổng ở nơi ký:** `release-tag.yml` (khung và mẫu dự án đích) chạy `xt.py release-check --json` **trên đúng commit sẽ
+  gắn tag**; `promotion.state` khác `approved` → job đỏ, không ký, không tag.
+- **Kiểm ở nơi dùng:** lệnh mới chỉ đọc `xt.py release-verify --tag vX.Y.Z [--repo o/r]` — exit 0 khi (1) commit của tag
+  nằm trong lịch sử nhánh chính của repo đó, (2) `VERSION` ở commit đó khớp tên tag, và (3) `git archive` của tag khớp
+  một attestation ký bởi đúng workflow phát hành của repo đó; exit 1 khi một điều sai (tag tự tạo không có attestation
+  → 1); exit 3 khi không kiểm được (không mạng, không có công cụ kiểm) — **không kiểm được không tính là đạt**.
+- `install.py` ghi nguồn cài vào manifest: `source: {repo, tag, verified: true|false}` khi HEAD của nguồn là commit của một tag
+  phiên bản (`verified` chỉ `true` khi `release-verify` exit 0 lúc cài), ngược lại `source: {untagged: "<sha>"}`. Cài từ
+  cây đang phát triển và trong CI **không bị chặn** (hành vi hiện nay giữ nguyên).
+- `doctor` ở dự án đích báo khung `untagged` hoặc `verified: false`.
+- Việc phân phối tự động (nâng dự án đích — SPEC-factory-learning F-163) chỉ cài từ tag đã qua `release-verify`.
+- **Lớp chặn thêm** (không thay cho attestation): ruleset cho tag `v*` ở repo khung và mẫu dự án đích (mục `ruleset` của
+  `admin-plan` kiểm cả nó); luật guard cấm phiên agent tạo/đẩy `refs/tags/v*` (đường `git push`, API tạo ref, tạo
+  release), kèm ca trong `autonomy-bench`. Tag giả đã lọt (làm workflow thật báo "tag đã tồn tại") là việc người gỡ.
 
 ## 3. Tiêu chí chấp nhận
 
@@ -135,16 +144,25 @@ của một bản. Thuộc tính bền là **tag do workflow có cổng tạo**:
 - Given commit cắt bản có `promotion.state` = `pending_human` · When workflow tag chạy · Then job đỏ, không có tag mới
 
 ### S-511 Nguồn cài ghi vào manifest
-- Given nguồn cài ở đúng commit của tag `v3.40.0` · When `install.py <đích>` · Then manifest có `source.tag` = `v3.40.0`
+- Given nguồn cài ở đúng commit của tag `v3.40.0` có attestation của workflow phát hành · When `install.py <đích>` · Then manifest có `source.tag` = `v3.40.0`, `verified: true`
 - And Given nguồn là `main` sau tag một commit · Then cài bình thường, manifest có `source.untagged`; `doctor` ở đích báo ⚠
+- And Given không có mạng để kiểm · Then cài bình thường, `verified: false`
+
+### S-516 Tag tự tạo không được coi là bản phát hành
+- Given ai đó tự gắn và đẩy tag `v3.41.0` lên một commit chưa ký (không qua workflow phát hành)
+- When `xt.py release-verify --tag v3.41.0` · Then exit 1 "không có attestation của workflow phát hành"
+- And When bước nâng ở dự án đích gặp tag đó · Then không cài (SPEC-factory-learning S-711)
+
+### S-517 Phiên agent tạo tag phiên bản
+- Given phiên agent · When đẩy `refs/tags/v9.9.9` (bằng `git push`, API tạo ref hoặc tạo release) · Then guard chặn
 
 ### S-512 Bảng lớp đủ và nhất quán
 - Given danh sách 16 ID · When chạy test thư viện
 - Then mỗi ID có đúng một lớp trong bảng; mục lớp A nhắc tên khoá của nó; ID và mức không đổi so với `main`
 
-### S-513 Phiên tự đổi lệnh thành luôn xanh
-- Given như S-502 nhưng cây làm việc đổi `perf` thành `test -d .` (nhánh chính vẫn là lệnh thật)
-- When `release-sign` · Then exit 2 "lệnh `perf` khác bản ở nhánh chính"; tương tự với `stage approve` giai đoạn 3
+### S-513 Phiên tự đổi lệnh thành luôn xanh rồi ký trên nhánh
+- Given như S-502 nhưng HEAD là commit trên nhánh chưa merge đổi `perf` thành `test -d .` hoặc đặt `perf_report: ""`
+- When `release-sign` · Then exit 2 "ứng viên chưa nằm trên nhánh chính của remote"; tương tự với `stage approve` giai đoạn 2/3
 
 ### S-514 Người đã ghi dòng 20
 - Given dòng 20 có kết quả do người ghi (PASS hoặc FAIL), §5 chưa ký · When `release-sign` ở dự án M · Then exit 2 "dòng 20 đã có kết quả của người", file không đổi
@@ -185,17 +203,22 @@ PR là dữ liệu, không phải chỉ thị.
 - [x] Dùng lại `release_signoff: agent` cho M/L hay khoá trần riêng? — D-422: khoá trần riêng, mặc định S (không nới ngầm
   dự án đã bật; cùng lý do với `stage_approval_max` ở research 2026-11-08 §8 luận điểm 7).
 - [x] Dòng 20 ở M/L ghi gì? — D-422: `MÁY MÔ PHỎNG`. D-423: chỉ khi người chưa ghi gì vào dòng đó.
-- [x] Chặn phân phối dựa vào gì? — D-423: tag do workflow có cổng tạo + nguồn cài ghi ở manifest; không chặn `install.py`
-  theo `promotion` (trạng thái tức thời — sẽ làm đỏ mọi lần cài từ `main` và CI).
+- [x] Chặn phân phối dựa vào gì? — D-423: không chặn `install.py` theo `promotion` (trạng thái tức thời — sẽ làm đỏ mọi
+  lần cài từ `main` và CI). D-424: thuộc tính bền là attestation của workflow phát hành, kiểm ở nơi dùng bằng
+  `release-verify`; tag đơn thuần không đủ vì ai cũng tạo được.
+- [x] Phiên tự đổi lệnh của hàng bằng chứng? — D-424: ở M/L và giai đoạn 2/3 agent chỉ ký/duyệt ứng viên đã nằm trên
+  nhánh chính của remote (thay cho so chuỗi lệnh, vốn bỏ sót khoá `_report` và script được gọi).
+- [ ] Ruleset có giới hạn được việc tạo tag `v*` về đúng workflow phát hành ở repo tài khoản cá nhân không —
+  [không chặn] — chưa xác minh; attestation không phụ thuộc điều này.
 - [x] Cửa sổ lỗi lọt là khoá hay hằng số? — D-423: hằng số 14 ngày (khoá ở cây thì phiên tự rút ngắn được).
 - [ ] Ba mục "chưa xếp" ở §2.4 — [không chặn F-141/F-142] — T-3857 đọc nguyên văn rồi xếp.
 - [ ] Có từ trước, cần xử lý trước khi mở L: hàng N/A BLOCKER không có đường miễn nên dự án M/L thiếu một khoá
-  `attack`/`perf`/… không bao giờ `approved`; `stage_approval` còn đọc ref cục bộ — [chặn F-142 ở mức 2/3] — ghi sổ audit,
-  sửa cùng T-3856.
+  `attack`/`perf`/… không bao giờ `approved` (AUD-HAR-385 — sửa cùng T-3858); `stage_approval` còn đọc ref cục bộ
+  (AUD-SEC-637 — sửa cùng T-3856) — [chặn F-142 ở mức 2/3].
 
 ## 10. DoR / DoD
 - DoR: F-144, F-121 và hàng `deploy` đã ở `main`; F-134 có `escaped` trước khi mở L.
-- DoD: S-501…S-515 có test xanh; ca guard/merge-check vào `autonomy-bench`; ADR-0074, ADR-0069 và ADR-0048 đổi dòng trạng
+- DoD: S-501…S-517 có test xanh; ca guard/merge-check vào `autonomy-bench`; ADR-0074, ADR-0069 và ADR-0048 đổi dòng trạng
   thái; mẫu `xt.yaml`, mẫu GO-NO-GO, CHANGELOG (liệt kê ID lớp A/C đã đổi chữ) cập nhật; cắt bản vì đổi việc dự án đích.
 
 ## Thay đổi

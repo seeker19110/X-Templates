@@ -3,7 +3,7 @@
 | Trường | Giá trị |
 |---|---|
 | ID tính năng | F-101 (lệnh triển khai + receipt + sổ), F-102 (bản dev của gói `web-api-ts`), F-103 (production) — chủ dự án 2026-11-11, ADR-0075 §Quyết định 2, 5, 6 |
-| Trạng thái | Approved for implementation (phiên chính tự duyệt, ADR-0008 — D-422; sửa sau review độc lập — D-423) |
+| Trạng thái | Approved for implementation (phiên chính tự duyệt, ADR-0008 — D-422; sửa sau hai lượt review độc lập — D-423, D-424) |
 | Phiên bản | 1 — hợp đồng khoá và schema chốt trước task mã; ADR của T-3841 ghi quyết định kiến trúc và liên kết về đây, không chép lại |
 | Dữ kiện | [`research/2026-11-11-factory-e2e-facts.md`](../../research/2026-11-11-factory-e2e-facts.md) §1 |
 | Kế hoạch | [`PLAN-factory-e2e.md`](../autopilot/PLAN-factory-e2e.md) T-3841…T-3844, T-3860 |
@@ -44,15 +44,17 @@ trường để lệnh giữ thứ cần cho quay lui).
 ### 2.3 Trình tự của `deploy run`
 1. **Ứng viên:** `release_artifacts` phải khai, mọi artifact tồn tại và khớp sidecar `.sha256` nếu có → `subject`
    (`head`, `content`, `digest`) tính bằng đúng hàm của `release-check`. Thiếu → exit 2.
-2. **Quyền** (E khác `dev`; áp cho cả `run` lẫn `rollback`): cây git sạch; `xt.py grant-check deploy env=E` exit 0;
-   với `run` thêm: HEAD **nằm trong lịch sử nhánh chính của remote** (đọc mới từ remote, không tin ref cục bộ — mã chưa
-   merge không lên production dù đã ký trên nhánh); `promotion.state` = `approved` cho đúng `subject` này; sổ có
-   `dev.current` là bản `deployed` cùng `subject.digest`. Thiếu một điều → exit 2, không chạy gì.
+2. **Quyền** (E khác `dev`; áp cho **cả `run` lẫn `rollback`**): cây git sạch; `xt.py grant-check deploy env=E` exit 0;
+   HEAD **nằm trong lịch sử nhánh chính của remote** (đọc mới từ remote, không tin ref cục bộ) — cả mã lẫn các lệnh
+   `deploy_E`/`smoke_E`/`digest_E`/`rollback_E` chạy trên production đều phải là bản đã merge, kể cả khi đi qua tên
+   `rollback`. Với `run` thêm: `promotion.state` = `approved` cho đúng `subject` này; sổ có `dev.current` là bản
+   `deployed` cùng `subject.digest`. Thiếu một điều → exit 2, không chạy gì.
 3. **Guard:** `deploy_E`, `smoke_E`, `digest_E`, `rollback_E` qua `guard-check` trước khi chạy lệnh đầu
    (LOOP-STOP-027) → 126.
 4. Chạy `deploy_E` (trần `XT_DEPLOY_TIMEOUT`, mặc định 1200 giây). Exit ≠ 0 → bước 6.
-5. Chạy `smoke_E`, rồi `digest_E`. Smoke exit 0 **và** `digest_E` in đúng `XT_DEPLOY_DIGEST` → kết quả `deployed`, ghi
-   sổ, exit 0. Digest khác hoặc lệnh hỏng → coi như smoke đỏ → bước 6.
+5. Chạy `smoke_E`, rồi `digest_E`. `digest_E` chạy trong môi trường **không có** `XT_DEPLOY_DIGEST` và
+   `XT_DEPLOY_PREVIOUS` (không trao sẵn đáp án — nó phải hỏi bản đang phục vụ). Smoke exit 0 **và** `digest_E` in đúng
+   digest ứng viên → kết quả `deployed`, ghi sổ, exit 0. Digest khác hoặc lệnh hỏng → coi như smoke đỏ → bước 6.
 6. **Quay lui:** có bản trước → chạy `rollback_E`, `smoke_E`, `digest_E`; cả ba đạt và digest là của bản trước →
    `rolled_back`; ngược lại `rollback_failed`. Chưa có bản trước → `failed`. Cả ba ghi sổ và exit 1.
 
@@ -166,6 +168,14 @@ trường để lệnh giữ thứ cần cho quay lui).
 - Given không có `grant` cho `prod` · When `xt.py deploy rollback --env prod` · Then exit 2, không lệnh nào chạy
 - And Given `rollback_prod` chứa lệnh nhóm máy chặn · Then exit 126
 
+### S-119 Quay lui production từ nhánh chưa merge
+- Given nhánh chưa merge đổi `rollback_prod` thành lệnh khác; cây sạch; `grant` cho `prod` có sẵn
+- When `xt.py deploy rollback --env prod` · Then exit 2 "HEAD chưa nằm trong nhánh chính của remote", không lệnh nào chạy
+
+### S-120 `digest_<env>` không được trao sẵn đáp án
+- Given `digest_dev` là lệnh in giá trị biến `XT_DEPLOY_DIGEST` · When `deploy run --env dev`
+- Then lệnh in ra rỗng (biến không có trong môi trường của nó) → coi như smoke đỏ; không ghi `deployed`
+
 ### S-118 Dự án chưa khai môi trường
 - Given dự án M đang `GO`, `deploy_envs` trống · When nâng khung rồi `release-check --json` · Then không có hàng `deploy`; `verdict` và `promotion` như trước khi nâng
 
@@ -216,13 +226,14 @@ không thử cách khác cho cùng hiệu ứng.
   vẫn trung lập.
 - [x] Làm sao biết bản đang chạy đúng là ứng viên? — D-423: khoá `digest_<env>` bắt buộc; `current` là bản đang phục vụ.
 - [x] Thiếu `deploy_envs` ở M/L? — D-423: không thêm hàng (không buộc dự án đang chạy); chỉ phần nới mới đòi hàng PASS.
-- [x] Mã chưa merge có lên production được không? — D-423: không; HEAD phải nằm trong nhánh chính của remote.
+- [x] Mã chưa merge có lên production được không? — D-423: không; HEAD phải nằm trong nhánh chính của remote. D-424: áp
+  cho cả `rollback` (lệnh quay lui cũng là mã chạy trên production).
 - [ ] Nhập receipt do CI ghi vào phiên (`deploy import --run`) — [không chặn] — chưa làm; cần kiểm run, SHA và workflow.
 - [ ] Ghi thêm GitHub Deployment, attestation cho artifact, triển khai canary — [không chặn] — sau pilot 2.
 
 ## 11. DoR / DoD
 - DoR: spec này Approved; T-3841 có ADR; `release_artifacts`/`subject` đã ở `main`.
-- DoD: S-101…S-118 có test xanh; ca guard S-107, S-112, S-117 vào `autonomy-bench`; mẫu `xt.yaml`, `harness-files.md`,
+- DoD: S-101…S-120 có test xanh; ca guard S-107, S-112, S-117 vào `autonomy-bench`; mẫu `xt.yaml`, `harness-files.md`,
   README gói, CHANGELOG cập nhật; hàng mới không đổi nghĩa `go`/`verdict`/exit code của `release-check` với dự án chưa
   khai `deploy_envs`.
 

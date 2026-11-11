@@ -3,7 +3,7 @@
 | Trường | Giá trị |
 |---|---|
 | ID tính năng | F-111 (tạo dự án mới một lệnh), F-112 (skill một bước), F-113 (kênh vào bằng issue), F-114 (báo cáo pilot) — chủ dự án 2026-11-11 "con người chỉ nêu ý tưởng", ADR-0075 §Quyết định 1 |
-| Trạng thái | Approved for implementation (phiên chính tự duyệt, ADR-0008 — D-422; sửa sau review độc lập — D-423) |
+| Trạng thái | **F-111, F-112, F-114: Approved for implementation** (phiên chính tự duyệt, ADR-0008 — D-422, D-423). **F-113 (kênh issue): Draft** — còn câu hỏi [chặn] ở §9; T-3862 quyết bằng D-NNN rồi mới chuyển Approved (D-424) |
 | Phiên bản | 1 |
 | Dữ kiện | [`research/2026-11-11-factory-e2e-facts.md`](../../research/2026-11-11-factory-e2e-facts.md) §2, §3 |
 | Kế hoạch | [`PLAN-factory-e2e.md`](../autopilot/PLAN-factory-e2e.md) T-3845…T-3847, T-3862 |
@@ -164,6 +164,10 @@ Báo cáo §2.4 là nguồn của chỉ số chính của ADR-0075 (thời gian 
   cho người dùng. Không nhét sản phẩm vào repo khung.
 - [x] Skill mới hay mở rộng `/autopilot`? — D-422: skill mới gọi `/autopilot` (giữ trần kích thước và nghĩa của `/autopilot`).
 - [ ] Dạng thân issue do form sinh ra — [không chặn F-111/F-112] — chưa xác minh từ tài liệu; T-3862 đọc issue thật rồi mới viết bộ đọc.
+- [ ] **[chặn T-3862 — quyết bằng D-NNN ở đầu task]:** (1) xếp hàng bằng nhãn chưa có bước nhận nguyên tử (hai lượt cùng
+  thấy "đang rảnh") và chưa nói ai lấy issue khỏi hàng; (2) trần chi phí cho **cả một ý tưởng**: khoá worker là trần mỗi
+  lát — cần một khoá trần riêng cho phiên điều phối headless, đọc ở nhánh chính và thuộc `HARD_GATED_KEYS`; chưa có khoá
+  đó thì kênh issue không được bật.
 
 ## 10. DoR / DoD
 - DoR: F-101, F-102, F-121 ở `main` trước F-112; F-133 và thiết lập một lần trước F-113.

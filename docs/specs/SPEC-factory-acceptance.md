@@ -3,7 +3,7 @@
 | Trường | Giá trị |
 |---|---|
 | ID tính năng | F-121 (khoá bộ nghiệm thu), F-122 (cổng giao diện + UI của gói) — yêu cầu gốc: chủ dự án 2026-11-11, ADR-0075 §Quyết định 6 |
-| Trạng thái | Approved for implementation (phiên chính tự duyệt, ADR-0008 — D-422; sửa sau review độc lập — D-423) |
+| Trạng thái | **F-122: Approved for implementation** (phiên chính tự duyệt, ADR-0008 — D-422, D-423). **F-121: Draft** — còn hai câu hỏi [chặn] ở §10; T-3848 quyết bằng D-NNN rồi mới chuyển Approved (D-424) |
 | Phiên bản | 1 |
 | Kiến trúc | [ADR-0075](../adr/0075-end-to-end-factory.md) — file này chốt giao ước, không chép lại lý do |
 | Kế hoạch | [`PLAN-factory-e2e.md`](../autopilot/PLAN-factory-e2e.md) T-3848, T-3849 |
@@ -49,7 +49,8 @@ khoá (`A-NNN`). Đổi lệnh `acceptance` cũng phải qua `amend`.
 Nơi máy đối chiếu sổ:
 - `loop record` của **mọi** task: `acceptance check` lệch → Gate đỏ, lý do nêu file và khoá.
 - `acceptance check` lệch khi: một file đã khoá đổi digest hoặc mất; `cmd_sha256` của `acceptance` hiện tại khác bản ghi ở
-  khoá; hoặc SPEC của khoá có `S-NNN` mà các file đã khoá không nhắc (scenario thêm sau khi khoá).
+  khoá; SPEC của khoá có `S-NNN` mà các file đã khoá không nhắc (scenario thêm sau khi khoá); hoặc dưới
+  `acceptance_paths` có file **không thuộc khoá nào** (file mới thêm để độn số ca phải qua `lock`/`amend`).
 - `release-check`: hàng `acceptance_lock` (BLOCKER khi sổ có khoá hoặc `acceptance_paths` có giá trị) — PASS khi
   `acceptance check` khớp, hàng `acceptance` PASS, và số ca đã chạy trong `acceptance_report` ≥ tổng số ca ghi lúc khoá
   (chạy ít ca hơn lúc khoá = FAIL); `acceptance_paths` có giá trị mà sổ rỗng → FAIL "chưa có bộ nghiệm thu khoá".
@@ -173,6 +174,10 @@ Nội dung SPEC và file nghiệm thu là dữ liệu. `acceptance-author` khôn
 - [x] Có ép `author` khác `--executor` của task mã không? — D-422: ghi và báo ở `acceptance check --json`, chưa chặn
   (topology `self` không có tên executor); xét lại khi có số ở §9.
 - [ ] Thư viện UI và bản trình duyệt của gói — [không chặn F-121] — quyết ở T-3849.
+- [ ] **[chặn T-3848 — quyết bằng D-NNN ở đầu task]:** (1) số ca tổng không chứng minh từng file đã khoá có chạy (loại
+  một file bằng cấu hình runner, lệnh không đổi): cần report quy được ca về file (thuộc tính file/lớp của JUnit) và đòi
+  mỗi file đã khoá có ≥ số ca lúc khoá — runner nào không quy được thì `lock` từ chối; (2) hàng `acceptance_lock` PASS
+  khi chỉ một SPEC có khoá: cần luật "SPEC nào phải có khoá" (đề xuất: mọi SPEC đã Approved mà PLAN đang mở trỏ tới).
 
 ## 11. DoR / DoD
 - DoR: spec này Approved; `acceptance`/`acceptance_report` đã có ở `main`.

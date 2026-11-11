@@ -3,7 +3,7 @@
 | Trường | Giá trị |
 |---|---|
 | ID tính năng | F-161 (số field → task tối ưu; sự cố → kiểm thử hồi quy), F-162 (Routine phản hồi tuần chạy thật), F-163 (PR nâng khung ở dự án đích sau mỗi tag) — ADR-0075; gộp T-3555 và lát S2, B12 của research 2026-11-08 |
-| Trạng thái | Approved for implementation (phiên chính tự duyệt, ADR-0008 — D-422; sửa sau review độc lập — D-423) |
+| Trạng thái | Approved for implementation (phiên chính tự duyệt, ADR-0008 — D-422; sửa sau hai lượt review độc lập — D-423, D-424) |
 | Phiên bản | 1 |
 | Luật sẵn có (không chép lại) | `LOOP-OPT-016`, `LOOP-DESIGN-019`, `LOOP-FB-001…005`, [ADR-0010](../adr/0010-feedback-from-target-projects.md), [ADR-0048](../adr/0048-optimize-skill-and-field-loop.md) |
 | Kế hoạch | [`PLAN-factory-e2e.md`](../autopilot/PLAN-factory-e2e.md) T-3861, T-3864, T-3865 |
@@ -51,18 +51,21 @@ Giữ đúng ADR-0010: khung **không** cầm token ghi vào repo đích. Mỗi 
 - `xt.py upgrade check [--json]` (ở dự án đích): đọc tag phiên bản mới nhất của repo khung (đọc công khai, không cần
   token), so với `.xtemplates/VERSION`. Exit 0 "không có bản mới"; exit 10 "có bản mới và tới lượt"; exit 11 "có bản mới
   nhưng chưa tới lượt" (lý do); exit 3 lỗi mạng.
-- **Chỉ cài từ checkout của tag** `vX.Y.Z` (tag chỉ do workflow có cổng tạo — SPEC-factory-scale F-144); không bao giờ từ
-  đầu nhánh chính của khung.
-- **Canary trước:** `xt.yaml` của dự án đích khai `upgrade_wave: canary` hoặc `after-canary` (mặc định). Dự án canary tới
-  lượt ngay khi có tag. Dự án `after-canary` tới lượt khi cả hai đúng: tag đã có ít nhất `upgrade_soak_days` ngày (mặc
-  định 3), và `registry.json` ở nhánh chính của khung (đọc công khai) cho thấy **mọi** sản phẩm canary đã ở bản đó. Không
-  có sản phẩm canary nào trong registry → chỉ áp điều kiện số ngày.
+- **Chỉ cài từ tag đã qua `xt.py release-verify`** (attestation của workflow phát hành — SPEC-factory-scale F-144); không
+  bao giờ từ đầu nhánh chính của khung, không từ tag không kiểm được (không kiểm được → exit 3, không cài).
+- **Canary trước:** `xt.yaml` của dự án đích khai `upgrade_wave: canary` hoặc `after-canary` (mặc định). Dự án canary lấy
+  **bản mới nhất** ngay khi có. Dự án `after-canary` lấy **bản mới nhất đã đủ `upgrade_soak_days` ngày tuổi** (mặc định 3)
+  — không phải "bản mới nhất", để nhịp cắt bản dày không làm nó chờ mãi — và không nằm trong danh sách thu hồi.
+- **Danh sách thu hồi** `docs/ops/WITHDRAWN-VERSIONS.txt` ở nhánh chính của khung (mỗi dòng `X.Y.Z — lý do`, đọc công
+  khai): canary đỏ vì lỗi của khung → khung thêm bản đó vào danh sách qua PR; mọi dự án bỏ qua bản bị thu hồi. Cổng canary
+  vì vậy là "số ngày + chưa bị thu hồi", không đọc registry (schema registry không có chỗ ghi canary).
 - `xt.py upgrade open-pr`: clone khung ở tag → `install.py .` (kèm `--pack` nếu dự án dùng gói) → `blueprint-status
   --run` → mở PR "chore(xt): nâng khung X.Y.Z" bằng token của chính repo đích (token bot của nó — checklist `bot-token` —
   để CI của PR tự chạy), thân liệt kê mục đổi theo CHANGELOG. Đã có PR nâng mở → cập nhật PR đó, không mở thêm. Merge là
   việc của `pr-steward` ở repo đó.
-- Canary đỏ: PR nâng ở dự án canary có CI đỏ → dự án đó ghi phản hồi `cong-cu` (`xt.py feedback add`) trong chính PR; vì
-  canary chưa lên bản mới nên các dự án `after-canary` tự đứng chờ.
+- Canary đỏ: PR nâng ở dự án canary có CI đỏ → dự án đó ghi phản hồi `cong-cu` (`xt.py feedback add`) trong chính PR;
+  Routine phản hồi (F-162) đưa về khung; khung quyết thu hồi bản đó trong `upgrade_soak_days` ngày — đây là lý do có
+  khoảng chờ.
 - Ở repo khung: `xt.py registry pull` (SPEC-factory-deploy §2.5) cập nhật `core`/`pack.version` từ các clone; `xt.py
   registry` báo "sản phẩm × bản khung × số tuần chậm" (`LOOP-FB-005`).
 
@@ -98,13 +101,15 @@ Giữ đúng ADR-0010: khung **không** cầm token ghi vào repo đích. Mỗi 
 ### S-709 Dự án canary tới lượt ngay
 - Given dự án khai `upgrade_wave: canary`, khung có tag `v3.40.0` mới hơn bản đang cài · When `upgrade check` · Then exit 10
 
-### S-710 Dự án sau canary phải chờ
-- Given dự án `after-canary`; tag mới 1 ngày tuổi · When `upgrade check` · Then exit 11 "chưa đủ 3 ngày"
-- And Given tag 5 ngày tuổi nhưng registry cho thấy một sản phẩm canary còn ở bản cũ · Then exit 11 nêu sản phẩm đó
-- And Given đủ ngày và mọi canary đã ở bản mới · Then exit 10
+### S-710 Dự án sau canary lấy bản đã đủ ngày và chưa bị thu hồi
+- Given dự án `after-canary` đang ở 3.39.0; khung có `v3.40.0` (5 ngày tuổi), `v3.41.0` (1 ngày tuổi) · When `upgrade check` · Then exit 10 với bản 3.40.0
+- And Given chỉ có `v3.41.0` (1 ngày tuổi) · Then exit 11 "chưa đủ 3 ngày"
+- And Given `3.40.0` nằm trong danh sách thu hồi · Then bỏ qua 3.40.0; không còn bản nào đủ điều kiện → exit 11 nêu lý do
 
-### S-711 Chỉ cài từ tag
-- Given khung có tag `v3.40.0` và nhánh chính đi trước tag hai commit · When `upgrade open-pr` · Then nội dung cài trùng cây ở tag; manifest ghi `source.tag` = `v3.40.0`
+### S-711 Chỉ cài từ tag đã kiểm
+- Given khung có tag `v3.40.0` hợp lệ và nhánh chính đi trước tag hai commit · When `upgrade open-pr` · Then nội dung cài trùng cây ở tag; manifest ghi `source.tag` = `v3.40.0`, `verified: true`
+- And Given tag mới nhất là tag tự tạo không có attestation · Then `upgrade check` bỏ qua tag đó (in cảnh báo), không cài
+- And Given không kiểm được attestation (không mạng) · Then exit 3, không cài
 
 ### S-712 Không trùng PR
 - Given dự án đã có PR nâng X.Y.Z mở · When `upgrade open-pr` chạy lại · Then PR đó được cập nhật, số PR nâng mở vẫn là 1
@@ -116,14 +121,14 @@ Giữ đúng ADR-0010: khung **không** cầm token ghi vào repo đích. Mỗi 
 | Nhóm | Ca | Hành vi | Scenario |
 |---|---|---|---|
 | Rỗng/null | `field_export` trống | Workflow bỏ qua có log; không tạo file rỗng | S-706 |
-| Rỗng/null | Registry không có sản phẩm canary | Chỉ áp điều kiện số ngày | S-710 |
+| Rỗng/null | Không có file danh sách thu hồi | Coi như chưa bản nào bị thu hồi; không đọc được file do mạng → exit 3 | S-710 |
 | Cực đại | FIELD > 1 MiB | `field-check` exit 2 | S-703 |
 | Trùng lặp | Hai file FIELD cùng ngày | Tên file thêm hậu tố giờ; `next-step` lấy `exported_at` mới nhất | S-705 |
 | Song song | Hai lượt `upgrade open-pr` cùng chạy | Khoá bằng PR đang mở (một PR nâng mỗi dự án) | S-712 |
-| Mất mạng | Không đọc được tag hay registry của khung | exit 3; không coi là "không có bản mới" và không coi là "tới lượt" | S-710 |
+| Mất mạng | Không đọc được tag, danh sách thu hồi hay attestation của khung | exit 3; không coi là "không có bản mới" và không coi là "tới lượt" | S-710, S-711 |
 | Thời gian | Cửa sổ 30 ngày, 8 ngày, tuổi tag | Tính theo UTC; tuổi tag theo ngày tạo tag | S-703, S-708, S-710 |
 | Quyền | Khoá nguồn số liệu | Chỉ đọc, chỉ ở CI; phiên agent không có (`LOOP-OPT-016`) | S-706 |
-| Quyền | Tag giả trên bản sao khác của khung | Chỉ đọc tag từ URL repo khung ghi trong manifest lúc cài | S-711 |
+| Quyền | Tag giả (tự tạo ở repo khung, hoặc ở bản sao khác) | `release-verify` đòi attestation của đúng workflow phát hành của repo khung; URL repo khung lấy từ manifest lúc cài (trường `source.repo`) | S-711 |
 | Tiền/đơn vị | Đơn vị chỉ số | Theo hậu tố `value_ms`/`value_bytes`/…; `value_*` và `budget_*` phải cùng hậu tố, lệch → exit 2 | S-703 |
 
 ## 5. Lỗi
@@ -148,7 +153,8 @@ ghi vào PR.
 ## 9. Câu hỏi mở
 - [x] Bot đẩy từ khung hay dự án tự kéo? — D-423: dự án tự kéo (ADR-0010: khung không cầm token ghi chéo repo); thay cho
   "bot ở repo khung" của bản nháp.
-- [x] Chọn canary thế nào? — D-423: dự án tự khai `upgrade_wave`; không thêm trường vào registry.
+- [x] Chọn canary thế nào? — D-423: dự án tự khai `upgrade_wave`; không thêm trường vào registry. D-424: cổng cho dự án
+  sau canary là "bản mới nhất đủ ngày tuổi và chưa bị thu hồi" — bản nháp đòi đọc canary từ registry, thứ schema không có.
 - [x] Có tự merge ở repo đích không? — D-422: không; `pr-steward` của repo đó merge theo luật của nó.
 - [x] Tiêu chí Routine "chạy thật"? — D-423: có tín hiệu mới mà không có PR thì đỏ (không đòi PR khi không có gì mới).
 - [ ] Máy tự gắn nguồn repo cho scheduled task được không — [không chặn] — research 2026-11-08 §8 luận điểm 6 ghi chưa

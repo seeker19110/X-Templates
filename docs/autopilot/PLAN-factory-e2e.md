@@ -26,6 +26,9 @@
 - Dữ kiện sống của T-3866 đã có ở [`research/2026-11-11-factory-e2e-facts.md`](../../research/2026-11-11-factory-e2e-facts.md);
   công cụ container của gói đã chọn ở đặc tả deploy §10; ADR của T-3841 và T-3850 ghi quyết định kiến trúc và liên kết
   về đặc tả, không chép lại.
+- Phần đặc tả còn **Draft** (có câu hỏi [chặn] sau hai lượt review — D-424): F-131/F-133 song song và worker (T-3850 thử
+  trên git/GitHub thật), F-121 khoá nghiệm thu (T-3848), F-113 kênh issue (T-3862), F-142 giai đoạn 2/3 (T-3856). Task
+  nêu trong ngoặc quyết bằng D-NNN và đổi dòng Trạng thái của đặc tả **trước** khi viết mã.
 - Trần byte nhóm `scripts` (đo 2026-11-11: 1.304.426 B): còn ≈ 456 KB dưới trần cứng, nhưng cổng "2× mốc gần nhất"
   (ADR-0072) chỉ còn ≈ 119 KB — task nào làm nhóm vượt 2× thì ADR khai mốc mới đi cùng PR của task đó.
 - Bảy đề xuất của phiên 2026-11-11 → task: triển khai thật T-3841…T-3844, T-3860 · ý tưởng → repo T-3845, T-3846,
@@ -63,25 +66,25 @@
 - [ ] `T-3849` Gói thêm UI tối thiểu và E2E trình duyệt trong workflow gói; kiểm giao diện thành Gate máy của task UI (sau: T-3844) — Gate: `python3 -m unittest tests.test_pack_ui`
 
 ### Lát 4 — Song song theo file
-- [ ] `T-3850` ADR song song theo file và worker ngoài phiên — thay một phần D-142; đối chiếu `LOOP-STOP-014`, ADR-0009 §4, `LOOP-ORCH-006/007/020/024` ở mục Thay/Giữ (sau: T-3866) — Gate: `git grep --untracked -qiE '^# ADR-[0-9]+: .*worker ngoài phiên' -- docs/adr`
+- [ ] `T-3850` ADR song song theo file và worker ngoài phiên — thay một phần D-142; đối chiếu `LOOP-STOP-014`, ADR-0009 §4, `LOOP-ORCH-006/007/020/024` ở mục Thay/Giữ; thử trên git/GitHub thật năm điểm [chặn] của đặc tả parallel §10 rồi chuyển F-131/F-133 sang Approved (sau: T-3866) — Gate: `git grep --untracked -qiE '^# ADR-[0-9]+: .*worker ngoài phiên' -- docs/adr`
 - [ ] `T-3851` xt.py: diff thật của task nằm trong `files:` đã khai, ra ngoài thì `loop record` đỏ; đợt ≥ 2 task không giao thì `loop status` trả `parallel` mặc định; khoá lùi về `self` (sau: T-3850, T-3847; topo: review) — Gate: `python3 -m unittest tests.test_parallel_scope`
-- [ ] `T-3852` File nhiều PR cùng chạm: mảnh `changelog.d/` + `changelog compile`; worktree song song chỉ tick dòng task của mình ở PLAN; PROGRESS, sổ quyết định, sổ audit, sổ do lệnh ghi chỉ phiên điều phối ghi (sau: T-3850; topo: review) — Gate: `python3 -m unittest tests.test_shared_files`
-- [ ] `T-3853` Worker ngoài phiên trên `loop run` sẵn có: mỗi lát một worktree, một nhánh, một PR; nhận việc bằng API tạo ref, tiếp quản nhánh quá hạn; trần chi phí đọc ở nhánh chính và tính theo lát; hàng đợi nhiều dự án đọc `registry.json` (sau: T-3851, T-3852; topo: review) — Gate: `python3 -m unittest tests.test_worker_queue`
+- [ ] `T-3852` File nhiều PR cùng chạm: mảnh `changelog.d/` + `changelog compile`; worktree song song không sửa PLAN (xong = bằng chứng; tick sau merge bằng Gate chạy trên nhánh chính); PROGRESS, sổ quyết định, sổ audit, sổ do lệnh ghi chỉ phiên điều phối ghi (sau: T-3850; topo: review) — Gate: `python3 -m unittest tests.test_shared_files`
+- [ ] `T-3853` Worker ngoài phiên trên `loop run` sẵn có: mỗi lát một worktree, một nhánh, một PR; worktree do `xt.py` tạo; nhận việc bằng API tạo ref; nhánh quá hạn chỉ báo, giao lại bằng lệnh có D-NNN; trần chi phí đọc ở nhánh chính, cộng dồn theo lát qua mọi lượt; hàng đợi nhiều dự án đọc `registry.json` (sau: T-3851, T-3852; topo: review) — Gate: `python3 -m unittest tests.test_worker_queue`
 - [ ] `T-3854` Số đo: xung đột tích hợp, lead time song song so tuần tự, lỗi lọt sau merge, thời gian chờ người, chi phí mỗi lát (sau: T-3851) — Gate: `python3 -m unittest tests.test_factory_metrics`
 
 ### Lát 5 — Mọi quy mô
-- [ ] `T-3858` Chữ ký chặn phân phối (cơ chế bù — làm trước phần nới): commit cắt bản chưa `promotion: approved` thì workflow không tạo tag; `install.py` ghi nguồn cài (tag hay chưa gắn tag) vào manifest, `doctor`/`registry` báo bản chưa gắn tag (topo: review) — Gate: `python3 -m unittest tests.test_promotion_gate`
+- [ ] `T-3858` Chữ ký chặn phân phối (cơ chế bù — làm trước phần nới): commit cắt bản chưa `promotion: approved` thì workflow không ký, không tạo tag; `xt.py release-verify` kiểm attestation của workflow phát hành ở nơi dùng; ruleset tag `v*` và luật guard cấm phiên agent tạo tag phiên bản; `install.py` ghi nguồn cài vào manifest (topo: review) — Gate: `python3 -m unittest tests.test_promotion_gate`
 - [ ] `T-3855` `release-sign` ở M/L: khoá trần `release_signoff_scale` (mặc định S, thuộc `HARD_GATED_KEYS`, đọc mới từ remote); hàng bằng chứng máy (nghiệm thu khoá + hàng `deploy` + diễn tập quay lui, lệnh trùng nhánh chính) thay dòng "người đã dùng thử" khi người chưa ghi, ghi "máy mô phỏng" (sau: T-3843, T-3848, T-3858, T-3854; topo: review) — Gate: `python3 -m unittest tests.test_release_signoff_scale`
 - [ ] `T-3856` Khoá trần giai đoạn agent được duyệt (2/3) theo tiêu chí đăng ký trước; mặc định giữ 1 (sau: T-3843, T-3848, T-3858; topo: review) — Gate: `python3 -m unittest tests.test_stage_max`
 - [ ] `T-3857` Thư viện: mục MUST buộc người ở M/L (research 2026-11-08 §8 "Soát thiếu") xếp lớp A/B/C, đối chiếu theo khoá, giữ ID, CHANGELOG ghi ID (sau: T-3855, T-3856; topo: review) — Gate: `python3 -m unittest tests.test_human_must_keys`
 
 ### Lát 6 — Thiết lập một lần, production
 - [ ] `T-3859` `xt.py admin-plan` chỉ đọc: khi receipt dev xanh in một checklist (App/token, ruleset lệch, đích và khoá production, trần chi phí, khoá cần bật, mục MUST lớp B); không tự áp (sau: T-3843, T-3857; topo: review) — Gate: `python3 -m unittest tests.test_admin_plan`
-- [ ] `T-3860` Triển khai production: chỉ khi có `grant`, `promotion: approved`, HEAD nằm trong nhánh chính của remote, digest trùng digest đã qua dev; smoke đỏ thì tự quay lui; `rollback` cùng điều kiện quyền (sau: T-3859; topo: review) — Gate: `python3 -m unittest tests.test_deploy_prod`
+- [ ] `T-3860` Triển khai production: chỉ khi có `grant`, `promotion: approved`, HEAD nằm trong nhánh chính của remote, digest trùng digest đã qua dev; smoke đỏ thì tự quay lui; `rollback` cùng điều kiện quyền và cũng đòi HEAD ở nhánh chính (sau: T-3859; topo: review) — Gate: `python3 -m unittest tests.test_deploy_prod`
 
 ### Lát 7 — Vòng học, kênh vào, nghiệm thu dây chuyền
 - [ ] `T-3861` Số field do job CI xuất bằng khoá chỉ đọc; SLO đỏ mở task tối ưu; sự cố thành fixture hồi quy của gói (sau: T-3860) — Gate: `python3 -m unittest tests.test_field_trigger`
 - [ ] `T-3862` Kênh vào: issue "ý tưởng" → worker chạy skill T-3846; nội dung issue là dữ liệu, chỉ tác giả có quyền ghi (sau: T-3846, T-3853; topo: review) — Gate: `python3 -m unittest tests.test_intake`
 - [ ] `T-3864` Routine tuần: `feedback routine-check` đỏ khi có tín hiệu mới mà không có PR báo cáo (ADR-0010: không tín hiệu thì không PR); 10 nhóm phản hồi `cong-cu` phân loại thành task (sau: T-3859) — Gate: `python3 -m unittest tests.test_feedback_routine && test -s docs/ops/FEEDBACK-ROUTINE-CHECK.md`
-- [ ] `T-3865` Nâng khung ở dự án đích theo mô hình kéo: workflow của từng dự án đọc tag mới, cài từ checkout của tag, tự mở PR; canary do dự án khai, dự án sau canary chờ số ngày và registry (sau: T-3858; topo: review) — Gate: `python3 -m unittest tests.test_upgrade_bot`
+- [ ] `T-3865` Nâng khung ở dự án đích theo mô hình kéo: workflow của từng dự án đọc tag mới, chỉ cài từ tag qua `release-verify`, tự mở PR; canary do dự án khai, dự án sau canary lấy bản mới nhất đủ ngày tuổi và chưa bị thu hồi (sau: T-3858; topo: review) — Gate: `python3 -m unittest tests.test_upgrade_bot`
 - [ ] `T-3863` Pilot 2: ý tưởng → bản dev → checklist → production tự host; so với pilot 1; cắt bản (sau: T-3860, T-3862, T-3865) — Gate: `test -s docs/ops/FACTORY-PILOT-2.md`

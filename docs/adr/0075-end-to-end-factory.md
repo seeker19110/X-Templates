@@ -15,7 +15,7 @@
   tiền, dữ liệu người dùng thật, pháp nhân đứng tên qua `- grant:` và `loop defer`; các mục còn lại của D-142 (không tách
   `xt.py`, không merge queue, không reviewer LLM mọi PR, không thu nhỏ guard); một gói trong 3.x (ADR-0068); trần byte
   (ADR-0043/0050); `LOOP-ORCH-008` (trần cứng 5 mỗi đợt).
-- **Đặc tả:** `docs/specs/SPEC-factory-*.md` (bảy file, D-422/D-423) — nhà của giao ước khoá, lệnh, sổ và scenario; ADR
+- **Đặc tả:** `docs/specs/SPEC-factory-*.md` (bảy file, D-422…D-424) — nhà của giao ước khoá, lệnh, sổ và scenario; ADR
   này chỉ giữ quyết định.
 - **Đính chính 2026-11-11 (review #502 và review đặc tả; thân ADR bên dưới giữ nguyên văn đã chấp nhận):**
   - "Thay một phần" còn thiếu **ADR-0048 §Quyết định 1** — nhà của dòng 20 GO-NO-GO (M/L: người dùng thử, "không thay
