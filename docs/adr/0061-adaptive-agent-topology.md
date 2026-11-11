@@ -3,7 +3,8 @@
 - **Trạng thái:** Đã chấp nhận (chủ dự án 2026-11-01: "sử dụng kiến trúc Adaptive Agent … cho Software Factory tự quyết theo
   độ độc lập của công việc … mặc định 1 agent sở hữu việc code và tích hợp … chỉ tạo subagent khi các tác vụ có thể chạy độc
   lập … 1 agent chính mạnh, có quyền tự gọi tối đa 2–4 subagent khi thật sự cần, đồng thời giới hạn vòng review và bảo đảm CI
-  tự động"; phiên chính tự duyệt cách máy hoá theo tiêu chí chất lượng cuối, ADR-0008 — D-292)
+  tự động"; phiên chính tự duyệt cách máy hoá theo tiêu chí chất lượng cuối, ADR-0008 — D-292). [ADR-0075](0075-end-to-end-factory.md) (2026-11-11,
+  D-419) thay mặc định `self` bằng song song khi `files:` không giao, có hiệu lực khi lát song song của nó có mã.
 - **Trạng thái triển khai:** Đang triển khai — lát 1 tài liệu (ADR này, `research/2026-11-01-adaptive-agent-topology.md`,
   `LOOP-ORCH-024`, bảng topology ở `orchestration-and-subagents.md`, `LOOP-DESIGN-024`, mẫu PLAN, skill `/autopilot` bước 5,
   README); lát 2–3 harness (`loop status.topology`, `executor: null` mặc định, `plan waves --max 4`, `loop stats

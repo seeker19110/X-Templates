@@ -1,8 +1,9 @@
 # PROGRESS.md — Khung X-Templates
 
-> Giai đoạn hiện tại: G8 Vận hành & tiến hoá (khung 3.33.0, pha `harden` — D-136) · Cập nhật: 2026-11-10 · Nhánh: claude/intelligent-cori-vuunal
+> Giai đoạn hiện tại: G8 Vận hành & tiến hoá (khung 3.33.0, pha `harden` — D-136) · Cập nhật: 2026-11-11 · Nhánh: claude/upbeat-ptolemy-2n2dbr
 
 ## Đang làm
+- 2026-11-11 **ADR-0075** xưởng đầu-cuối (chủ dự án: song song theo file · thiết lập sau bản dev · mọi quy mô — D-419) + [PLAN-factory-e2e](docs/autopilot/PLAN-factory-e2e.md) (D-420, T-3740…T-3763): chưa có mã; việc đầu là T-3740.
 - 2026-11-09…10 sau 3.33.0 đã merge: #474, #475, #480 (**ADR-0074** `xt.py release-sign`, D-404…D-406), rồi chuỗi trả nợ bảo mật guard #485…#490 (D-407…D-409: `REMOTE_DELETE`, khoá đọc từ mirror, cờ gộp chữ số, viết tắt một chữ, chuẩn hoá lệnh gh theo cobra ở mọi luật, bỏ chuyển hướng trong argv gh). Mỗi PR một review Fable; 🔴 sửa trong PR, 🟠/🟢 ghi nợ. Sổ: 0 🔴 mở; nợ review mở ≈ 48 dòng (`audit check --strict` đỏ tới khi trả).
 - Chờ người: §5 ký GO-NO-GO 3.30.0…3.31.1 và [3.33.0](docs/ops/GO-NO-GO-2026-11-08-v3.33.0.md) (3.32.0 đã ký #476); bật `release_signoff: agent` ở `xt.yaml` là PR chủ repo merge (HARD_GATED, D-402). T-3557 còn `[ ]`.
 - Dự án đích (`main` 2026-11-08, [registry](docs/ops/registry.json)): cả 4 ở 3.32.0; PR nâng 3.33.0 chưa mở. Còn mở: AUD-TEST-061 (CodeQL); fixture host Codex/Gemini.
@@ -12,7 +13,7 @@
 ## Tiếp theo
 1. Phản hồi dự án đích qua `xt.py feedback`; PR nâng do `pr-steward` của từng dự án merge.
 2. **Kế tiếp:** trả nợ 🟠 còn mở (AUD-SEC-554/555/583 guard, AUD-HAR-334/340, AUD-DOC-273/274) và 🟢 → cắt 3.34.0 (#480 đổi việc dự án đích; guard chặn thêm nhiều dạng) → PR nâng ở 4 dự án → `registry.json`/`TARGETS.md`.
-3. PLAN-harden-2026-10-27-loops còn T-3554 (pilot `next-step`) và T-3555 (lát 5: field trigger, bot nâng bản, worker ngoài phiên). 🟢 mở của `perf trial`/`dev-task.sh` rà ở audit kế (sổ: AUD-HAR-294…297, AUD-TEST-082/083, AUD-PERF-020…025).
+3. PLAN-harden-2026-10-27-loops còn T-3554 (pilot `next-step`) và T-3555 (nay ở PLAN-factory-e2e: T-3750, T-3761). 🟢 mở của `perf trial`/`dev-task.sh` rà ở audit kế (sổ: AUD-HAR-294…297, AUD-TEST-082/083, AUD-PERF-020…025).
 4. Còn: máy hoá `LOOP-HARNESS-031` (dấu hook theo phiên), `LOOP-STOP-030` (ConfigChange); task `[perf]` trong `loop` (D-041); URL phiên do máy chủ MCP gắn vào thân PR; ép báo "đã đo/chưa đo" cho task UI (`LOOP-DESIGN-021`); sàn quyền token; `xt.pyz` (ADR-0010); ca đối kháng cho `autonomy-bench`; `project-commands.sh` được `source` hai lần mỗi task.
 5. Giới hạn guard đã biết: ở sổ audit và `harness-files.md`; tên dựng lúc chạy chấp nhận tới 2027-01-21 (AUD-SEC-406, ADR-0067). Đánh giá sandbox Bash opt-in cho khung trước 2027-01-21 (D-331/D-332); cùng đợt T-3709 đo chi phí compile `guard.py` mỗi lệnh Bash (ADR-0072, hạn 2027-01-21). **Xét lại hàng rào 2027-01-21** hoặc khi đổi model (LOOP-DESIGN-014; Claude Code ≥ `claude_min_version`).
 6. Giữ cổng: C901 ≤ 10, `mypy --strict`, coverage dòng + nhánh 100 %, `changelog-check`, trần byte file + tổng thư mục (`tests/test_docs_budget.py`, ADR-0043) — không `noqa`/pragma, không nới trần.

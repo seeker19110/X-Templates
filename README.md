@@ -277,6 +277,7 @@ python3 -m unittest discover -s tests    # chỉ test (cổng test còn đòi co
 - [ADR-0072](docs/adr/0072-review-dir-caps-after-2x.md) (D-373): `.claude/hooks/` vượt 2× mốc 2026-10-26 do bản vá guard #433–#442 — giữ trần `DIR_CAPS`, mốc mới 2026-11-05 cho hooks, cổng máy `SIZE_MARKS` (mỗi nhóm ≤ 2× mốc gần nhất); T-3709 đo chi phí compile `guard.py`.
 - [ADR-0073](docs/adr/0073-own-permissions-hook-form.md) (D-383): `harness_permissions: own` giữ dạng lệnh hook sẵn có của dự án — có lệnh khung dạng `${CLAUDE_PROJECT_DIR}` thì giữ tuyệt đối, không có thì tương đối (AUD-HAR-301).
 - [ADR-0074](docs/adr/0074-agent-release-signoff.md) (D-401): chủ repo cho agent ký §5 GO-NO-GO — khoá `release_signoff: agent` (cây + nhánh chính, chỉ người đổi), `xt.py release-sign` chỉ ký khi `release-check` không FAIL và chỉ còn chữ ký, ô tên ghi `agent`; mẫu dự án đích để trống.
+- [ADR-0075](docs/adr/0075-end-to-end-factory.md) (D-419): xưởng đầu-cuối theo chủ dự án 2026-11-11 — ý tưởng tới bản dev có receipt không hỏi người; song song khi `files:` không giao và diff nằm trong `files:`; agent ký/duyệt ở mọi quy mô qua khoá chỉ người bật; việc người gom một checklist sau bản dev; cơ chế chất lượng bù merge trước phần nới. Việc: [PLAN-factory-e2e](docs/autopilot/PLAN-factory-e2e.md).
 
 Nghiên cứu nền ngày 2026-10-13 ở [`research/`](research/): phân tích khung cũ, trích xuất catalog `seeker19110/stored`,
 AI agent và giao thức, cơ chế Claude Code. Khung cũ khôi phục được bằng `git archive 1b80fe4`.
