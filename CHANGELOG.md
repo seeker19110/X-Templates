@@ -9,7 +9,7 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
 ### Added
 
 - **ADR-0075** (chủ dự án 2026-11-11, D-419) và [PLAN-factory-e2e](docs/autopilot/PLAN-factory-e2e.md) (D-420,
-  T-3740…T-3763): định hướng xưởng đầu-cuối — ý tưởng tới bản dev có receipt không hỏi người, song song khi `files:`
+  T-3740…T-3765): định hướng xưởng đầu-cuối — ý tưởng tới bản dev có receipt không hỏi người, song song khi `files:`
   không giao, agent ký/duyệt ở mọi quy mô qua khoá chỉ người bật, việc người gom một checklist sau bản dev; kèm
   [nghiên cứu khoảng hở dây chuyền](research/2026-11-11-factory-end-to-end.md). Chỉ tài liệu: không đổi mã, khoá, ID
   hay mức; dự án đích chưa phải làm gì.

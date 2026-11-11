@@ -19,8 +19,11 @@
   CHANGELOG/PROGRESS; khai lại khi hai task đó xong. Trong repo khung, phần lớn task cùng ghi `scripts/xt.py` nên song
   song lợi chủ yếu ở repo sản phẩm và giữa `xt.py` · `install.py` · gói · tài liệu.
 - Công nghệ cho bản dev (ảnh, compose, runner) chưa chọn: T-3740 tra nguồn sống, T-3741 chốt bằng ADR.
-- Việc cũ gộp vào đây: T-3555 (worker ngoài phiên, field trigger — T-3750, T-3761), S6/S8/S10 của research 2026-11-08
-  (T-3754, T-3759, T-3756).
+- Bảy đề xuất của phiên 2026-11-11 → task: triển khai thật T-3741…T-3744, T-3760 · ý tưởng → repo T-3745, T-3746,
+  T-3762 · worker ngoài phiên T-3750, T-3753 · nghiệm thu độc lập T-3748 · gói có UI T-3749 · vòng học T-3761, T-3764,
+  T-3765 · đo nền T-3754 và hai pilot.
+- Việc cũ gộp vào đây: T-3555 phần worker ngoài phiên, field trigger, bot nâng bản (T-3750, T-3761, T-3765; phần event
+  policy `pull_request_target` ở lại PLAN cũ); S2/S6/S8/S10 của research 2026-11-08 (T-3764, T-3754, T-3759, T-3756).
 
 ## Ngân sách (4 con số)
 - Số vòng tối đa: bỏ trống · Chi phí: 0 đồng ngoài phiên tới hết Lát 5 · Timeout Gate: 1200 giây · Hạn: xét lại 2027-01-21
@@ -55,7 +58,7 @@
 - [ ] `T-3751` xt.py: diff thật của task nằm trong `files:` đã khai, ra ngoài thì `loop record` đỏ; đợt ≥ 2 task không giao thì `loop status` trả `parallel` mặc định; khoá lùi về `self` (sau: T-3750; topo: review) — Gate: `python3 -m unittest tests.test_parallel_scope`
 - [ ] `T-3752` File mọi PR cùng chạm (PROGRESS, CHANGELOG, sổ quyết định, sổ audit): D-NNN chọn "chỉ phiên điều phối ghi" hay "mảnh theo PR"; `changelog-check`/`progress-check` theo cách đã chọn (sau: T-3750; topo: review) — Gate: `python3 -m unittest tests.test_shared_files`
 - [ ] `T-3753` Worker ngoài phiên: `loop run` mỗi lát một worktree, một nhánh, một PR; hàng đợi nhiều dự án đọc `registry.json`, mỗi repo một worker (sau: T-3751, T-3752; topo: review; exec: deep) — Gate: `python3 -m unittest tests.test_worker_queue`
-- [ ] `T-3754` Số đo: xung đột tích hợp, lead time song song so tuần tự, lỗi lọt sau merge, thời gian chờ người (sau: T-3751) — Gate: `python3 -m unittest tests.test_factory_metrics`
+- [ ] `T-3754` Số đo: xung đột tích hợp, lead time song song so tuần tự, lỗi lọt sau merge, thời gian chờ người, chi phí mỗi lát (sau: T-3751) — Gate: `python3 -m unittest tests.test_factory_metrics`
 
 ### Lát 5 — Mọi quy mô
 - [ ] `T-3755` `release-sign` ở M/L: hàng bằng chứng máy (nghiệm thu độc lập + receipt dev + diễn tập quay lui) thay dòng "người đã dùng thử", ghi "máy mô phỏng"; khoá trong `HARD_GATED_KEYS` (sau: T-3743, T-3748; topo: review; exec: deep) — Gate: `python3 -m unittest tests.test_release_signoff_scale`
@@ -70,4 +73,6 @@
 ### Lát 7 — Vòng học, kênh vào, nghiệm thu dây chuyền
 - [ ] `T-3761` Số field do job CI xuất bằng khoá chỉ đọc; SLO đỏ mở task tối ưu; sự cố thành fixture hồi quy của gói (sau: T-3760) — Gate: `python3 -m unittest tests.test_field_trigger`
 - [ ] `T-3762` Kênh vào: issue "ý tưởng" → worker chạy skill T-3746; nội dung issue là dữ liệu, chỉ tác giả có quyền ghi (sau: T-3746, T-3753; topo: review) — Gate: `python3 -m unittest tests.test_intake`
-- [ ] `T-3763` Pilot 2: ý tưởng → bản dev → checklist → production tự host; so với pilot 1; cắt bản (sau: T-3760, T-3762) — Gate: `test -s docs/ops/FACTORY-PILOT-2.md`
+- [ ] `T-3764` Routine tuần `feedback aggregate` mở được PR báo cáo (kiểm PR thật, không tin `SUCCEEDED`); 10 nhóm phản hồi `cong-cu` phân loại thành task — Gate: `test -s docs/ops/FEEDBACK-ROUTINE-CHECK.md`
+- [ ] `T-3765` PR nâng dự án đích tự mở sau mỗi tag, một dự án canary trước, đọc `registry.json` (sau: T-3758, T-3753; topo: review) — Gate: `python3 -m unittest tests.test_upgrade_bot`
+- [ ] `T-3763` Pilot 2: ý tưởng → bản dev → checklist → production tự host; so với pilot 1; cắt bản (sau: T-3760, T-3762, T-3765) — Gate: `test -s docs/ops/FACTORY-PILOT-2.md`
