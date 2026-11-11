@@ -18,8 +18,8 @@ import xt
 
 PLAN_NAME = "PLAN-factory-e2e.md"
 PLAN_DIRS = ("docs/autopilot", "docs/archive/autopilot")  # PLAN đóng được dời vào kho (ADR-0070)
-COMPENSATING = {"T-3743", "T-3748", "T-3758"}  # hàng deploy · bộ nghiệm thu khoá · chữ ký chặn phân phối
-LOOSENING = ("T-3755", "T-3756")  # release-sign ở M/L · duyệt giai đoạn 2/3
+COMPENSATING = {"T-3843", "T-3848", "T-3858"}  # hàng deploy · bộ nghiệm thu khoá · chữ ký chặn phân phối
+LOOSENING = ("T-3855", "T-3856")  # release-sign ở M/L · duyệt giai đoạn 2/3
 
 
 def closure(tasks: List[Dict[str, Any]], task: str) -> Set[str]:
@@ -50,11 +50,11 @@ def parse(text: str) -> List[Dict[str, Any]]:
 
 OLD_ORDER = """
 ### Lát 5
-- [ ] `T-3743` hàng deploy — Gate: `true`
-- [ ] `T-3748` nghiệm thu khoá — Gate: `true`
-- [ ] `T-3755` release-sign ở M/L (sau: T-3743, T-3748) — Gate: `true`
-- [ ] `T-3756` duyệt giai đoạn 2/3 (sau: T-3748) — Gate: `true`
-- [ ] `T-3758` chữ ký chặn phân phối (sau: T-3755) — Gate: `true`
+- [ ] `T-3843` hàng deploy — Gate: `true`
+- [ ] `T-3848` nghiệm thu khoá — Gate: `true`
+- [ ] `T-3855` release-sign ở M/L (sau: T-3843, T-3848) — Gate: `true`
+- [ ] `T-3856` duyệt giai đoạn 2/3 (sau: T-3848) — Gate: `true`
+- [ ] `T-3858` chữ ký chặn phân phối (sau: T-3855) — Gate: `true`
 """
 
 
@@ -72,12 +72,12 @@ class PlanFactoryOrderTest(unittest.TestCase):
     def test_detects_order_found_by_review_502(self) -> None:
         self.assertEqual(
             missing_compensation(parse(OLD_ORDER)),
-            {"T-3755": ["T-3758"], "T-3756": ["T-3743", "T-3758"]},
+            {"T-3855": ["T-3858"], "T-3856": ["T-3843", "T-3858"]},
         )
 
     def test_transitive_dependency_counts(self) -> None:
-        text = OLD_ORDER.replace("(sau: T-3755)", "").replace("(sau: T-3748) —", "(sau: T-3755) —")
-        text = text.replace("(sau: T-3743, T-3748)", "(sau: T-3743, T-3748, T-3758)")
+        text = OLD_ORDER.replace("(sau: T-3855)", "").replace("(sau: T-3848) —", "(sau: T-3855) —")
+        text = text.replace("(sau: T-3843, T-3848)", "(sau: T-3843, T-3848, T-3858)")
         self.assertEqual(missing_compensation(parse(text)), {})
 
 

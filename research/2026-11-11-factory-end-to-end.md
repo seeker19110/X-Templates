@@ -59,7 +59,7 @@ tài khoản hay khoá của chủ, smoke xanh, có receipt máy đọc.
 - Ràng buộc còn hiệu lực: không tách `xt.py`, một gói trong 3.x (ADR-0068), trần byte (ADR-0043; nhóm `scripts` đo
   hôm nay 1.303.886 B / 1.760.431 B).
 
-## 5. Chưa xác minh (việc của T-3766)
+## 5. Chưa xác minh (việc của T-3866)
 
 Công cụ và phiên bản cho ảnh container/compose, runner CI cho bản dev, khả năng hiện hành của worktree, phiên headless và
 scheduled task của Claude Code, GitHub App manifest: chưa tra nguồn sống trong ghi chú này — không chọn công nghệ ở đây.
