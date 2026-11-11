@@ -5296,6 +5296,12 @@ def _short_flags(args: List[str], valued: str = "") -> str:
     return "".join(out)
 
 
+OPTS_END = (
+    "--",
+    "--end-of-options",
+)  # hết tuỳ chọn: mọi token sau là đối số vị trí, kể cả token bắt đầu `-` (AUD-SEC-614)
+
+
 def _positionals(args: List[str], with_value: Tuple[str, ...] = ()) -> List[str]:
     out, skip = [], False
     for x in args:
@@ -5501,17 +5507,18 @@ def _git_help(args: List[str], short_val: str, long_val: Tuple[str, ...]) -> boo
     """`-h`/`--help` là tuỳ chọn thật của lệnh git (parse-options đọc mọi vị trí trước `--`, cả trong cụm `-qh`): git in
     usage rồi thoát 129 trước khi làm gì (AUD-HAR-353). Giá trị của tuỳ chọn ăn giá trị (`-o -h`, `--repo -h`, viết tắt
     `--recu -h`) và token sau `--` không tính — đo trên git 2.43: `push -o -h` vẫn đẩy, `push main -h` thoát 129.
-    `--end-of-options` (git ≥ 2.24) kết thúc tuỳ chọn như `--`: `-h` sau nó là đối số vị trí (refspec), không phải trợ
-    giúp (AUD-SEC-614, hồi quy #488). Cắt ở token đầu tiên — nếu nó là giá trị của một tuỳ chọn thì phần sau bị coi là
-    đối số vị trí: chỉ làm lệnh bị xét thêm (chiều chặt), không bao giờ cho qua thêm."""
-    k = args.index("--end-of-options") if "--end-of-options" in args else len(args)
-    return _has_opt(_parse_opts(args[:k], short_val, long_val)[0], {"-h", "--help"})
+    `--end-of-options` (git ≥ 2.24) kết thúc tuỳ chọn như `--` (`_parse_opts` đọc đúng: không tính khi nó là giá trị của
+    `-o`): `-h` sau nó là refspec, không phải trợ giúp (AUD-SEC-614, hồi quy #488). Token chưa giải (`--end-of-options$X`,
+    `$E`, glob) có thể thành `--`/`--end-of-options` lúc chạy nên không hưởng miễn trừ (review lượt 1)."""
+    if any(REPLACE_SPLIT_RE.search(a) for a in args):
+        return False
+    return _has_opt(_parse_opts(args, short_val, long_val)[0], {"-h", "--help"})
 
 
 def _push_refs(args: List[str]) -> List[str]:
     """Đối số vị trí của `git push` (remote, refspec…): sau `--` đầu tiên MỌI token là refspec, kể cả token bắt đầu `-`
     (git parse-options — AUD-SEC-387). Cờ (force, xoá…) vẫn đọc ở mọi vị trí — chiều chặt."""
-    k = args.index("--") if "--" in args else len(args)
+    k = min((args.index(m) for m in OPTS_END if m in args), default=len(args))
     return _positionals(args[:k], PUSH_VALUE_OPTS) + args[k + 1 :]
 
 
@@ -5786,7 +5793,7 @@ def _parse_opts(args: List[str], short_val: str, long_val: Tuple[str, ...]) -> P
     while i < len(args):
         a, nxt = args[i], args[i + 1 : i + 2]
         i += 1
-        if a == "--":
+        if a in OPTS_END:  # `--end-of-options` (git ≥ 2.24) như `--`; là giá trị của `-o`… thì đã bị tuỳ chọn đó ăn
             return flags, pos + args[i:], vals
         if a.startswith("--"):
             key, eq, val = a.partition("=")
