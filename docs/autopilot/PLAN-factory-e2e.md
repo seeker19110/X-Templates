@@ -18,7 +18,7 @@
 - `files:` chưa khai ở PLAN này: trước T-3751/T-3752 lời khai không được máy đối chiếu và mọi PR cùng chạm
   CHANGELOG/PROGRESS; khai lại khi hai task đó xong. Trong repo khung, phần lớn task cùng ghi `scripts/xt.py` nên song
   song lợi chủ yếu ở repo sản phẩm và giữa `xt.py` · `install.py` · gói · tài liệu.
-- Công nghệ cho bản dev (ảnh, compose, runner) chưa chọn: T-3740 tra nguồn sống, T-3741 chốt bằng ADR.
+- Công nghệ cho bản dev (ảnh, compose, runner) chưa chọn: T-3766 tra nguồn sống, T-3741 chốt bằng ADR.
 - Bảy đề xuất của phiên 2026-11-11 → task: triển khai thật T-3741…T-3744, T-3760 · ý tưởng → repo T-3745, T-3746,
   T-3762 · worker ngoài phiên T-3750, T-3753 · nghiệm thu độc lập T-3748 · gói có UI T-3749 · vòng học T-3761, T-3764,
   T-3765 · đo nền T-3754 và hai pilot.
@@ -36,8 +36,8 @@
 ## Task
 
 ### Lát 0 — Dữ kiện sống và hợp đồng
-- [ ] `T-3740` `/research` nguồn sống có ngày: ảnh container + compose cho bản dev tự host, runner CI, worktree và phiên headless, scheduled task, GitHub App manifest — Gate: `git grep --untracked -qE '^title: .*bản dev tự host' -- research`
-- [ ] `T-3741` ADR hợp đồng triển khai: khoá `xt.yaml` theo môi trường, schema receipt, hàng `release-check`, đích dev mặc định (sau: T-3740) — Gate: `git grep --untracked -qiE '^# ADR-[0-9]+: .*receipt' -- docs/adr`
+- [ ] `T-3766` `/research` nguồn sống có ngày: ảnh container + compose cho bản dev tự host, runner CI, worktree và phiên headless, scheduled task, GitHub App manifest — Gate: `git grep --untracked -qE '^title: .*bản dev tự host' -- research`
+- [ ] `T-3741` ADR hợp đồng triển khai: khoá `xt.yaml` theo môi trường, schema receipt, hàng `release-check`, đích dev mặc định (sau: T-3766) — Gate: `git grep --untracked -qiE '^# ADR-[0-9]+: .*receipt' -- docs/adr`
 
 ### Lát 1 — Bản dev có receipt
 - [ ] `T-3742` xt.py: lệnh triển khai đọc khoá `xt.yaml`, ghi receipt (môi trường · digest · thời điểm · smoke), smoke đỏ thì quay lui; fixture âm sai digest, smoke đỏ, receipt cũ (sau: T-3741; topo: review) — Gate: `python3 -m unittest tests.test_deploy_receipt`
@@ -54,7 +54,7 @@
 - [ ] `T-3749` Gói thêm UI tối thiểu và E2E trình duyệt trong workflow gói; kiểm giao diện thành Gate máy của task UI (sau: T-3744) — Gate: `python3 -m unittest tests.test_pack_ui`
 
 ### Lát 4 — Song song theo file
-- [ ] `T-3750` ADR song song theo file và worker ngoài phiên — thay một phần D-142, đóng phần ADR của T-3555 (sau: T-3740) — Gate: `git grep --untracked -qiE '^# ADR-[0-9]+: .*worker ngoài phiên' -- docs/adr`
+- [ ] `T-3750` ADR song song theo file và worker ngoài phiên — thay một phần D-142, đóng phần ADR của T-3555 (sau: T-3766) — Gate: `git grep --untracked -qiE '^# ADR-[0-9]+: .*worker ngoài phiên' -- docs/adr`
 - [ ] `T-3751` xt.py: diff thật của task nằm trong `files:` đã khai, ra ngoài thì `loop record` đỏ; đợt ≥ 2 task không giao thì `loop status` trả `parallel` mặc định; khoá lùi về `self` (sau: T-3750; topo: review) — Gate: `python3 -m unittest tests.test_parallel_scope`
 - [ ] `T-3752` File mọi PR cùng chạm (PROGRESS, CHANGELOG, sổ quyết định, sổ audit): D-NNN chọn "chỉ phiên điều phối ghi" hay "mảnh theo PR"; `changelog-check`/`progress-check` theo cách đã chọn (sau: T-3750; topo: review) — Gate: `python3 -m unittest tests.test_shared_files`
 - [ ] `T-3753` Worker ngoài phiên: `loop run` mỗi lát một worktree, một nhánh, một PR; hàng đợi nhiều dự án đọc `registry.json`, mỗi repo một worker (sau: T-3751, T-3752; topo: review; exec: deep) — Gate: `python3 -m unittest tests.test_worker_queue`
