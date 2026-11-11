@@ -31,7 +31,7 @@
 
 ### Lát 1 — 🔴 mới
 - [ ] `T-3714` 🔴 AUD-SEC-614 guard: `--end-of-options` không còn làm `-h` thành miễn trừ trợ giúp của `git push` (topo: review) — Gate: `python3 -m unittest tests.test_hooks`
-- [ ] `T-3715` 🔴 AUD-SEC-615 + AUD-TEST-100 guard: dòng ký GO_SIGN guard thấy ⊇ xt thấy (chú thích HTML, khối rào) (topo: review) — Gate: `python3 -m unittest tests.test_guard_go_no_go`
+- [x] `T-3715` 🔴 AUD-SEC-615 + AUD-TEST-100 guard: dòng ký GO_SIGN guard thấy ⊇ xt thấy (chú thích HTML, khối rào) (topo: review) — Gate: `python3 -m unittest tests.test_guard_go_no_go`
 - [x] `T-3716` 🔴 AUD-SEC-616 install.py: `.xtemplates-new` là symlink → `skipped-symlink` (topo: review) — Gate: `python3 -m unittest tests.test_install_pack`
 
 ### Lát 2 — 🟠 mới
@@ -62,4 +62,6 @@
 - [ ] `T-3734` 🟠 AUD-SEC-624 guard: ghi công AI của gh đọc khoá ở gốc dự án (topo: review) — Gate: `python3 -m unittest tests.test_hooks.GuardAiAttributionTest tests.test_guard_fuzz.GuardFuzzTest`
 - [ ] `T-3735` 🟠 AUD-SEC-625 xt.py: khoá agent của `stage approve`/promotion đọc remote tươi, fail-closed (topo: review) — Gate: `python3 -m unittest tests.test_stage_agent_approval tests.test_release_signoff`
 - [ ] `T-3738` 🟠 AUD-SEC-626 guard: graphql gỡ bảo vệ nhánh/ruleset/environment → deny như REST (topo: review) — Gate: `python3 -m unittest tests.test_hooks`
+- [ ] `T-3739` 🔴 AUD-SEC-628 formatter không chạm `GO-NO-GO*.md` (hoặc guard xét output formatter) (topo: review) — Gate: `python3 -m unittest tests.test_hooks tests.test_guard_go_no_go`
+- [ ] `T-3740` 🟠 AUD-SEC-629/630/631 GO_SIGN: NUL ô Tên, khoảng trắng Unicode cuối `subject:`, BOM một chiều (topo: review) — Gate: `python3 -m unittest tests.test_guard_go_no_go`
 - [ ] `T-3729` Quét lại nhóm TEST, DOC, HAR (`chưa quét`) + sổ `đã sửa` cho các lát trên (sau: T-3724, T-3726) — Gate: `python3 scripts/xt.py audit check docs/ops/AUDIT-STATUS.md`

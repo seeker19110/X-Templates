@@ -1227,12 +1227,12 @@ class ReleaseSignGuardTest(TmpRepoCase):
         doc = proj / "docs/ops/GO-NO-GO-2026-11-08-v1.2.0.md"
         doc.parent.mkdir(parents=True)
         doc.write_text(GO_DOC, encoding="utf-8")
-        reason = guard._go_sign_deny(
-            str(doc),
-            "docs/ops/GO-NO-GO-2026-11-08-v1.2.0.md",
-            str(proj),
-            {"old_string": "| Chủ repo | | GO / NO-GO | |", "new_string": "| Chủ repo | agent | GO | 2026-11-08 |"},
-        )
+        rel = "docs/ops/GO-NO-GO-2026-11-08-v1.2.0.md"
+        row = ("| Chủ repo | | GO / NO-GO | |", "| Chủ repo | agent | GO | 2026-11-08 |")
+        reason = guard._go_sign_deny(str(doc), rel, str(proj), {"old_string": row[0], "new_string": row[1]})
+        self.assertIn("D-418", reason)  # mọi Edit lên GO-NO-GO bị chặn; agent ký qua `release-sign`
+        self.assertIn("release-sign", reason)
+        reason = guard._go_sign_deny(str(doc), rel, str(proj), {"content": GO_DOC.replace(*row)})
         self.assertIn("Không ghi dòng ký §5", reason)
 
 

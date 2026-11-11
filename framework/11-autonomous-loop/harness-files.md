@@ -98,16 +98,18 @@ OS/devcontainer có egress allowlist (`LOOP-HARNESS-022`) và việc phiên chí
   `exec`/`eval`/`compile`, `spec_from_file_location`) với đối số không phải chữ nguyên văn hay trỏ `xt`, và
   `-m runpy xt` bị chặn; thư viện đọc (`xt.parse_plan`, `xt.review_debt`) vẫn qua. Còn lọt: tên dựng qua đường guard không
   thấy (tệp `.py` ghi bằng Write rồi chạy).
-- **Chữ ký GO-NO-GO §5** (AUD-SEC-497, D-390; mẫu GO-NO-GO §5, ADR-0068 §Quyết định 3a; mã `GO_SIGN`): Edit/MultiEdit/Write/NotebookEdit vào file tên
-  `GO-NO-GO*.md` (mọi thư mục, không phân biệt hoa thường, cả qua symlink) làm xuất hiện hay đổi dòng ký ở §5 (ô tên + ô
-  ngày `YYYY-MM-DD` khác rỗng — cùng regex với `release-check`) → deny; xoá dòng ký, sửa phần khác, bảng mẫu trống → cho
-  chạy. File trên đĩa đã ký mà lần ghi đổi tiêu đề `# ` đầu tiên (ngoài frontmatter) hay tập dòng `subject:` (thêm/sửa/
-  xoá) và kết quả còn dòng ký → deny cùng mã (D-392: chuyển chữ ký người sang ứng viên khác) — xoá dòng ký trước (cùng lần
-  ghi cũng được), người ký lại; file chưa ký sửa tự do. Edit áp `old_string`→`new_string` lên file trên đĩa; không đọc
-  được file hay đoạn cũ không có → so chính hai đoạn, dòng ký ở đâu cũng tính. Bash ghi/dời/khôi phục file đó (chuyển hướng, `tee`, `sed -i`, đích `cp`/`mv`, `git checkout|restore
+- **Chữ ký GO-NO-GO §5** (AUD-SEC-497, D-390; mẫu GO-NO-GO §5, ADR-0068 §Quyết định 3a; mã `GO_SIGN`): file tên
+  `GO-NO-GO*.md` (mọi thư mục, không phân biệt hoa thường, cả qua symlink) chỉ sửa bằng **Write cả file** — mọi
+  Edit/MultiEdit/NotebookEdit → deny, kể cả file chưa ký (D-417, D-418: mô phỏng tool Edit lệch tool thật). Write làm xuất
+  hiện hay đổi dòng ký §5 (MỘT dòng, ô tên + ô ngày `YYYY-MM-DD` khác rỗng) theo văn bản thô HAY theo đúng phần
+  `release-check` thấy (AUD-SEC-615: bản chép `_markdown_shown`, xuống dòng như `read_text`) → deny; nội dung có `\r` không
+  kèm `\n`, BOM lệch file trên đĩa, file trên đĩa không đọc được/không phải UTF-8 → deny; xoá dòng ký, sửa phần khác, bảng
+  mẫu trống → cho chạy. File đã ký mà Write đổi tiêu đề `# ` đầu tiên (ngoài frontmatter) hay tập dòng `subject:` — trên
+  văn bản thô hay phần hiển thị — và kết quả còn dòng ký → deny cùng mã (D-392) — xoá dòng ký trước (cùng lần ghi cũng
+  được), người ký lại. Agent ký: `xt.py release-sign` (ADR-0074). Bash ghi/dời/khôi phục file đó (chuyển hướng, `tee`, `sed -i`, đích `cp`/`mv`, `git checkout|restore
   <rev> --`, glob ở tên nở ra file có sẵn, symlink có sẵn, chuỗi nguyên văn trong script trình thông dịch không chỉ đọc)
-  → deny, sửa bằng Edit; đọc, xoá cả file (`rm`, `git rm`) và `touch` (chỉ mtime) cho chạy; `truncate` vẫn chặn (cắt đuôi
-  hoàn thành được dòng ký `| … | YYYY-MM-DD |x`, như Edit bỏ `x` bị chặn). Liên kết (AUD-SEC-533): `ln`/`link`/`cp -l|--link`
+  → deny, sửa bằng Write; đọc, xoá cả file (`rm`, `git rm`) và `touch` (chỉ mtime) cho chạy; `truncate` vẫn chặn (cắt đuôi
+  hoàn thành được dòng ký `| … | YYYY-MM-DD |x`, như Write bỏ `x` bị chặn). Liên kết (AUD-SEC-533): `ln`/`link`/`cp -l|--link`
   có toán hạng là file đó (tên, symlink có sẵn; cả `ln -s`) → deny — liên kết cứng chung inode, ghi tên trung tính là ghi
   GO-NO-GO. Áp diff (AUD-SEC-534): `patch`/`git apply`/`git am` lấy diff từ tệp/stdin ở dự án có `GO-NO-GO*.md` trong
   `docs/ops`, `docs` hay gốc → deny, trừ khi mọi diff là tệp thường nêu ở đối số/`-i`/`< tệp` (≤ 1 MiB, đọc được ở mọi thư
@@ -123,7 +125,7 @@ OS/devcontainer có egress allowlist (`LOOP-HARNESS-022`) và việc phiên chí
   kỳ từ nào → deny. Mất miễn (chặn oan có chủ ý): gán `PATH`/`GIT_*`/`LESS*` đầu lệnh (`LESSOPEN=… less F`), lệnh bọc
   ngoài loại guard bóc (`env`/`command`/`nice`/`timeout` trong suốt; `npx prettier --check F` thì không), `git -c|-C`
   trước lệnh con (`git -C d diff F`). MCP (AUD-SEC-536): `mcp__*__create_or_update_file`/`push_files` ghi `GO-NO-GO*.md` có
-  dòng ký §5 → deny (guard không so được với bản trên remote, cả dòng ký có sẵn); payload lạ → không phản đối. Còn lọt:
+  dòng ký §5 hay `\r` trần → deny (guard không so được với bản trên remote, cả dòng ký có sẵn); payload lạ → không phản đối. Còn lọt:
   tên dựng lúc chạy (biến, `$(…)`, đường ghép trong script, đích từ `xargs`/stdin — như AUD-SEC-406), glob ở thư mục
   (`docs/*/*.md`), symlink tạo trong cùng lệnh, thư mục quá `OUTSIDE_SCAN_MAX` mục; liên kết cứng tạo trước khi luật có
   (hay qua đường guard không thấy) — ghi tên trung tính cùng inode bằng Edit/Bash lọt (soát: `find . -samefile
