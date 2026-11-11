@@ -37,7 +37,7 @@
 ### Lát 2 — 🟠 mới
 - [x] `T-3717` 🟠 AUD-HAR-377 xt.py: `release-sign` từ chối, hàng `verify` không PASS khi vòng `blocked` (topo: review) — Gate: `python3 -m unittest tests.test_release_signoff tests.test_release_contract`
 - [ ] `T-3718` 🟠 AUD-SEC-541 xt.py: `loop decide-prod` trong phiên agent → exit 2 (topo: review) — Gate: `python3 -m unittest tests.test_xt_cli tests.test_release_contract`
-- [ ] `T-3719` 🟠 AUD-CODE-064 gói web-api-ts: `build.ts` cho tar ghi thẳng file, digest không đổi — Gate: `python3 -m unittest tests.test_packs`
+- [x] `T-3719` 🟠 AUD-CODE-064 gói web-api-ts: `build.ts` cho tar ghi thẳng file, digest không đổi — Gate: `python3 -m unittest tests.test_packs`
 - [ ] `T-3720` 🟠 AUD-DEP-021 CI: quét lockfile npm của gói theo PR + lịch, khối npm ở dependabot — Gate: `python3 scripts/xt.py ci-check`
 
 ### Lát 3 — 🔴 guard có từ trước
