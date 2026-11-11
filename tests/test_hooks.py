@@ -7791,6 +7791,48 @@ class GuardRemoteDeleteTest(unittest.TestCase):
             with self.subTest(cmd):
                 self.assert_deleted(cmd)
 
+    def test_graphql_update_refs_denied(self):
+        """AUD-SEC-622: graphql `updateRefs` (`afterOid` 0…0 = xoá ref, `force: true` = ghi đè; ref/oid có thể qua biến
+        `-F`) và `updateRef` (`force`, AUD-SEC-562) → REMOTE_DELETE như `deleteRef` — không đọc đích, chặn mọi dạng (chặt),
+        cả khi phiên đứng ở nhánh được nêu; truy vấn đọc ref và chữ `updateRefs` ngoài `gh api graphql` vẫn qua."""
+        zero = "0" * 40
+        upd = 'mutation {{ updateRefs(input: {{repositoryId: "R", refUpdates: [{{{}}}]}}) {{ clientMutationId }} }}'
+        q = "gh api graphql -f query='" + upd + "'"
+        drop = q.format(f'name: "refs/heads/other", afterOid: "{zero}"')
+        var = q.format("name: $n, afterOid: $o").replace("mutation {", "mutation($n: GitRefname!, $o: GitObjectID!) {")
+        one = 'mutation { updateRef(input: {refId: "x", oid: "abc", force: true}) { ref { name } } }'
+        other = self.repo("other")
+        for cmd, cwd in (
+            (drop, None),
+            (q.format(f'name: "refs/heads/main", afterOid: "{zero}"'), None),
+            (q.format(f'name: "refs/tags/v1.0.0", afterOid: "{zero}"'), None),
+            (q.format('name: "refs/heads/other", afterOid: "abc", force: true'), None),
+            (drop, other),  # đích đọc không chắc: chặt
+            (f"{var} -F n=refs/heads/other -F o={zero}", None),
+            (
+                drop.replace("api graphql", "api /graphql")
+                + " -H 'Accept: application/vnd.github.update-refs-preview'",
+                None,
+            ),
+            ("bash -c " + shlex.quote(drop), None),
+            (f"gh api graphql -f query='{one}'", None),
+        ):
+            with self.subTest(cmd):
+                self.assert_deleted(cmd, cwd)
+        refs = 'query { repository(owner: "o", name: "r") { refs(refPrefix: "refs/heads/", first: 5) { totalCount } } }'
+        for cmd in (
+            f"gh api graphql -f query='{refs}'",
+            "gh api graphql -f query='query { updateRefsCount }'",  # tên khác — ranh giới từ
+            "grep -n updateRefs .claude/hooks/guard.py",
+            "gh api repos/o/r/git/refs/heads/other",
+        ):
+            with self.subTest(cmd):
+                self.assert_allowed(cmd)
+        cases = [drop, "gh api graphql -f query='query { viewer { login } }'"] * 6
+        with concurrent.futures.ThreadPoolExecutor(max_workers=6) as pool:
+            got = list(pool.map(lambda c: self.out(c)["decision"], cases))
+        self.assertEqual(got, ["deny", ""] * 6)
+
     def test_filter_rewrite_all_refs_denied(self):
         for cmd in (
             "git filter-branch -- --all",

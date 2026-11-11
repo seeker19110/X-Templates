@@ -740,16 +740,29 @@ def _gitfile_target(path: str, root: str) -> bool:
 
 # AUD-SEC-497 (D-390): dòng ký §5 của `GO-NO-GO*.md` là của người (mẫu GO-NO-GO §5: "con người, không phải agent";
 # ADR-0068 §Quyết định 3a: máy không tự nâng `pending_human` thành `approved`) — agent tự ghi thì `release-check` ra
-# `promotion: approved` không người duyệt. Edit/Write làm xuất hiện dòng ký mới hay
-# đổi dòng ký → deny; xoá dòng ký, sửa phần khác → cho chạy. Bash ghi file đó → deny (guard không so được nội dung).
+# `promotion: approved` không người duyệt. Write làm xuất hiện dòng ký mới hay đổi dòng ký → deny; xoá dòng ký, sửa
+# phần khác → cho chạy. Edit/MultiEdit/NotebookEdit, Bash ghi file đó → deny (guard không so chắc nội dung, D-418).
 # Bản sao tối thiểu của `GO_SIGN_ROW_RE`/`_go_sign_rows` ở scripts/xt.py (guard chỉ stdlib, không import xt): dòng bảng
-# `| vai trò | tên | quyết định | YYYY-MM-DD |` có ô tên và ô ngày khác rỗng, trong mục `## 5` tới `## ` kế.
+# `| vai trò | tên | quyết định | YYYY-MM-DD |` (MỘT dòng) có ô tên và ô ngày khác rỗng, trong mục `## 5` tới `## ` kế.
+# AUD-SEC-615: hai họ dòng ký so RIÊNG (chặn khi hợp các hiệu khác rỗng): luật thô cũ và đúng phần `release-check`
+# thấy — `_go_shown`, bản chép `_markdown_shown` của xt (bỏ chú thích HTML, khối rào/thụt, khối HTML ẩn; regex `GO_*`
+# dưới đây chép `HTML_COMMENT_TOKEN_RE`, `SHOWN_*_RE`, `HTML_HIDDEN_RE`; test đồng bộ: tests/test_guard_go_no_go.py).
+# Lỗi khi đọc → deny (không để hook fail-open).
+GO_COMMENT_TOKEN_RE = re.compile(r"<!---?>|<!--|--!?>|`+")
+GO_FENCE_RE = re.compile(r"^((?:[ ]*+(?:>|(?:[-*+]|\d{1,9}[.)])(?=[ ])))*+)[ ]*+(`{3,}|~{3,})(.*)$")
+GO_CLOSE_RE = re.compile(r"(`{3,}|~{3,})\s*\Z")
+GO_BLOCK_LINE_RE = re.compile(r"[ >]*+(?:#{1,6}(?:[ \t]|\s*\Z)|(?:[-*_=][ \t]*+)++\s*\Z|\||\[[^\]]*\]:|<)")
+GO_HTML_HIDDEN_RE = re.compile(r"[ >]*+<(?:(script|style)(?=[\s>]|\Z)|(\?)|!(\[CDATA\[)|![A-Za-z])", re.I)
 GO_NO_GO_NAME = "go-no-go*.md"  # so tên chữ thường: hệ tệp không phân biệt hoa thường mở cùng file
-GO_SIGN_ROW_RE = re.compile(r"^\|[^|\n]*\|\s*[^|\s][^|\n]*\|[^|\n]*\|\s*\d{4}-\d{2}-\d{2}\s*\|\s*$", re.M)
+GO_SIGN_ROW_RE = re.compile(
+    r"^\|[^|\n]*\|[^\S\n]*[^|\s][^|\n]*\|[^|\n]*\|[^\S\n]*\d{4}-\d{2}-\d{2}[^\S\n]*\|[^\S\n]*$", re.M
+)
 GO_SIGN_HEAD_RE = re.compile(r"^## 5\b.*$", re.M)
 GO_NEXT_HEAD_RE = re.compile(r"^## ", re.M)
 GO_SIGN_WHY = "chữ ký §5 là của người (mẫu GO-NO-GO §5, ADR-0068 §Quyết định 3a; AUD-SEC-497)"
-GO_SIGN_BASH_WHY = "ghi GO-NO-GO qua Bash ({}) — " + GO_SIGN_WHY + "; sửa GO-NO-GO bằng Edit để guard so dòng ký"
+GO_SIGN_BASH_WHY = (
+    "ghi GO-NO-GO qua Bash ({}) — " + GO_SIGN_WHY + "; sửa GO-NO-GO bằng Write cả file để guard so dòng ký"
+)
 GO_GLOB_CHARS = frozenset("*?[")
 GO_DELETERS = frozenset({"rm", "unlink", "shred", "rmdir"})  # xoá cả file chỉ bỏ chữ ký, không thêm (D-390 cho xoá)
 # AUD-SEC-535 (theo ADR-0066): lệnh NGOÀI danh sách trắng (`_go_reader`) có từ nguyên văn khớp `go-no-go*.md` → chặn —
@@ -779,6 +792,13 @@ GO_SUBJECT_RE = re.compile(r"^[ \t]*(?:>[ \t]*)*(?:[-*+][ \t]+)?subject[ \t]*:.*
 GO_REBIND_WHY = (
     "file đã ký: đổi tiêu đề/subject chuyển chữ ký người sang ứng viên khác — xoá dòng ký trước, người ký lại"
 )
+GO_BARE_CR_RE = re.compile(r"\r(?!\n)")
+# D-417/D-418: guard thôi mô phỏng tool Edit (lệch tool thật: xuống dòng, khớp dự phòng) — sửa GO-NO-GO chỉ bằng Write.
+GO_EDIT_WHY = (
+    "Không sửa {} bằng Edit/MultiEdit/NotebookEdit (D-417, D-418): guard không mô phỏng chắc tool Edit — ghi cả file"
+    " bằng Write (nội dung y nguyên, guard so dòng ký §5 như `release-check`); dòng ký §5 do người ghi, agent ký qua"
+    " `xt.py release-sign` khi `release_signoff: agent` bật (ADR-0074); " + GO_SIGN_WHY + "."
+)
 GoRow = Tuple[str, ...]
 
 
@@ -786,74 +806,194 @@ def _is_go_no_go(path: str) -> bool:
     return fnmatch.fnmatchcase(posixpath.basename(path.rstrip("/")).lower(), GO_NO_GO_NAME)
 
 
-def _go_sign_rows(text: str, loose: bool = False) -> Set[GoRow]:
-    """Dòng ký (các ô, bỏ khoảng trắng hai đầu) ở §5 của GO-NO-GO. `loose` (đoạn Edit, không có file để áp) và đoạn
-    không có tiêu đề §5 → mọi dòng khớp (chiều chặt)."""
+def _go_sign_rows(text: str) -> Set[GoRow]:
+    """Dòng ký (các ô, bỏ khoảng trắng hai đầu) ở §5 của GO-NO-GO: hợp hai họ của `_go_sign_views`."""
+    raw, shown = _go_sign_views(text)
+    return raw | shown
+
+
+def _go_sign_views(text: str) -> Tuple[Set[GoRow], Set[GoRow]]:
+    """(luật thô cũ, phần `release-check` thấy — như `xt._go_sign_rows` trên `_go_shown`)."""
+    return _go_raw_rows(text), _go_raw_rows(_go_shown(text))
+
+
+def _go_raw_rows(text: str) -> Set[GoRow]:
+    """Dòng ký trong mục `## 5` đầu tiên tới `## ` kế; không có tiêu đề §5 → rỗng."""
     part = GO_SIGN_HEAD_RE.split(text, maxsplit=1)
-    if len(part) == 2:
-        text = GO_NEXT_HEAD_RE.split(part[1], maxsplit=1)[0]
-    elif not loose:
-        return set()
-    return {tuple(c.strip() for c in m[0].strip().strip("|").split("|")) for m in GO_SIGN_ROW_RE.finditer(text)}
+    section = GO_NEXT_HEAD_RE.split(part[1], maxsplit=1)[0] if len(part) == 2 else ""
+    return {tuple(c.strip() for c in m[0].strip().strip("|").split("|")) for m in GO_SIGN_ROW_RE.finditer(section)}
 
 
-def _go_read(full: str, limit: int = -1) -> Optional[str]:
+def _go_signed_safe(text: str) -> bool:
+    """Nội dung MCP có dòng ký §5 hay `\\r` trần (đọc khác `release-check`); lỗi khi đọc → coi như có (chiều chặt)."""
+    try:
+        return bool(GO_BARE_CR_RE.search(text)) or bool(_go_sign_rows(_go_nl(text)))
+    except Exception:  # hook lỗi thì fail-open — không để lỗi thoát ra
+        return True
+
+
+def _go_shown(text: str) -> str:
+    """Bản chép `_markdown_shown` của xt: phần Markdown người ký thấy — nơi `release-check` đọc dòng ký §5."""
+    text = text.lstrip("\ufeff")
+    view = _GoShown()
+    return "\n".join(s for s in map(view.shown, text.split("\n")) if s is not None)
+
+
+GoFence = Tuple[str, int, int, bool]  # `_ShownFence` của xt: (rào mở, số `>`, cột rào, mở cùng dòng dấu mục)
+
+
+class _GoShown:
+    """Bản chép `_ShownView` của xt: trạng thái duyệt từng dòng của `_go_shown`."""
+
+    def __init__(self) -> None:
+        self.fence: Optional[GoFence] = None
+        self.html = ""
+        self.comment = False
+        self.block_start = True
+
+    def _inside_block(self, line: str) -> bool:
+        if self.html:
+            self.html = "" if self.html in line.lower() else self.html
+            return True
+        if self.fence is None:
+            return False
+        still, inside = _go_fence_step(self.fence, line)
+        self.fence, self.block_start = (self.fence if still else None), True
+        return inside
+
+    def _opens_block(self, line: str) -> bool:
+        if self.comment:
+            return False
+        if self.block_start and line.strip() and len(line) - len(line.lstrip(" ")) >= 4:
+            return True
+        self.fence = _go_fence_open(line)
+        end = None if self.fence else _go_html_end(line)
+        if end is None:
+            return self.fence is not None
+        self.html, self.block_start = end, True
+        return True
+
+    def shown(self, raw: str) -> Optional[str]:
+        line = raw.expandtabs(4)
+        if self._inside_block(line) or self._opens_block(line):
+            return None
+        shown, self.comment = _go_uncomment(raw, self.comment)
+        self.block_start = not shown.strip() or bool(GO_BLOCK_LINE_RE.match(shown.expandtabs(4)))
+        return shown
+
+
+def _go_fence_open(line: str) -> Optional[GoFence]:
+    m = GO_FENCE_RE.match(line)
+    if not m or (m[2][0] == "`" and "`" in m[3]):
+        return None
+    return m[2], m[1].count(">"), m.start(2), bool(re.search(r"[-*+\d]", m[1]))
+
+
+def _go_fence_step(fence: GoFence, line: str) -> Tuple[bool, bool]:
+    """Bản chép `_shown_fence_step` của xt: (rào còn mở?, dòng thuộc rào?)."""
+    mark, opened, col, in_item = fence
+    indent = len(line) - len(line.lstrip(" >"))
+    quotes, body = line[:indent].count(">"), line[indent:]
+    if quotes < opened or (in_item and body.strip() and indent < col):
+        return False, False
+    m = GO_CLOSE_RE.match(body)
+    if m and quotes == opened and indent <= col + 3:
+        return not (m[1][0] == mark[0] and len(m[1]) >= len(mark)), True
+    return True, True
+
+
+def _go_html_end(line: str) -> Optional[str]:
+    """Bản chép `_html_hidden_start` của xt: đuôi đóng khối HTML ẩn mở ở `line` ("" = đóng ngay); None = không mở."""
+    m = GO_HTML_HIDDEN_RE.match(line)
+    if not m:
+        return None
+    end = f"</{m[1].lower()}>" if m[1] else "?>" if m[2] else "]]>" if m[3] else ">"
+    return "" if end in line[m.end() :].lower() else end
+
+
+def _go_uncomment(line: str, inside: bool) -> Tuple[str, bool]:
+    """Bản sao `_strip_html_comments` của scripts/xt.py: (phần ngoài chú thích HTML của `line`, còn trong chú thích?) —
+    `<!--` trong code span (backtick đóng cùng dòng) là chữ; `<!-->`/`<!--->` trọn; `-->`/`--!>` đóng."""
+    toks = list(GO_COMMENT_TOKEN_RE.finditer(line))
+    closers: Dict[int, int] = {}
+    after: Dict[str, int] = {}
+    for i in range(len(toks) - 1, -1, -1):
+        if toks[i][0][0] == "`":
+            closers[i], after[toks[i][0]] = after.get(toks[i][0], i), i
+    parts: List[str] = []
+    last = i = 0
+    while i < len(toks):
+        tok = toks[i][0]
+        if inside:
+            if tok != "<!--" and tok[0] != "`":
+                inside, last = False, toks[i].end()
+        elif tok[0] == "`":
+            i = closers[i]  # bỏ qua nội dung code span; không đóng → backtick là chữ
+        elif tok[0] == "<":
+            parts.append(line[last : toks[i].start()])
+            inside, last = tok == "<!--", toks[i].end()
+        i += 1
+    if not inside:
+        parts.append(line[last:])
+    return "".join(parts), inside
+
+
+def _go_read(full: str, limit: int = -1, strict: bool = False) -> Optional[str]:
     """Nội dung file thường trên đĩa; không có/không phải file thường (FIFO làm treo `open`)/lỗi đọc/dài quá `limit` ký
-    tự (`limit` ≥ 0) → None."""
+    tự (`limit` ≥ 0) → None. `strict` (GO_SIGN): không phải UTF-8 → None, giữ `\\r` y nguyên."""
     if not os.path.isfile(full):
         return None
     try:
-        with open(full, encoding="utf-8", errors="replace") as f:
+        with open(
+            full, encoding="utf-8", errors="strict" if strict else "replace", newline="" if strict else None
+        ) as f:
             text = f.read(limit + 1 if limit >= 0 else -1)
     except (OSError, ValueError):
         return None
     return None if 0 <= limit < len(text) else text
 
 
-def _go_pairs(tool_input: Dict[str, object]) -> List[Tuple[str, str, bool]]:
-    """(old, new, replace_all) của Edit/MultiEdit; NotebookEdit `new_source` là đoạn mới không có đoạn cũ."""
-    edits = tool_input.get("edits")
-    if not isinstance(edits, list):
-        new = tool_input.get("new_string", tool_input.get("new_source"))
-        edits = [{**tool_input, "new_string": new}]
-    return [
-        (_text(e.get("old_string")), _text(e.get("new_string")), e.get("replace_all") is True)
-        for e in edits
-        if isinstance(e, dict)
-    ]
-
-
-def _go_texts(disk: Optional[str], tool_input: Dict[str, object]) -> Tuple[str, str, bool]:
-    """(trước, sau, loose) của lần ghi: Write → file trên đĩa `disk` (không đọc được = rỗng) và `content`; Edit/MultiEdit
-    → áp lần lượt old→new lên `disk`; không đọc được file hay `old_string` không có trong đó → chính các đoạn
-    old/new (`loose`)."""
-    if "content" in tool_input:
-        return disk or "", _text(tool_input.get("content")), False
-    pairs, after = _go_pairs(tool_input), disk
-    for old, new, every in pairs:
-        if after is None or not old or old not in after:
-            return "\n".join(p[0] for p in pairs), "\n".join(p[1] for p in pairs), True
-        after = after.replace(old, new, -1 if every else 1)
-    return disk or "", after or "", False
+def _go_nl(text: str) -> str:
+    """Xuống dòng như `Path.read_text` của `release-check` (universal newlines): `\\r\\n` và `\\r` trần → `\\n`."""
+    return text.replace("\r\n", "\n").replace("\r", "\n")
 
 
 def _go_sign_deny(path: str, rel: str, root: str, tool_input: Optional[Dict[str, object]]) -> str:
-    """Lý do deny khi lần ghi vào `GO-NO-GO*.md` (tên hay đích symlink) thêm hoặc đổi dòng ký §5; không thì ''."""
+    """Lý do deny khi lần ghi vào `GO-NO-GO*.md` (tên hay đích symlink): mọi Edit/MultiEdit/NotebookEdit (D-418); Write
+    khi đĩa không đọc chắc hay `_go_write_why`; không thì ''."""
     if not tool_input or not (_is_go_no_go(path) or _is_go_no_go(rel)):
         return ""
-    disk = _go_read(os.path.join(root, rel))
-    before, after, loose = _go_texts(disk, tool_input)
-    old_rows, new_rows = _go_sign_rows(before, loose), _go_sign_rows(after, loose)
-    new = sorted(new_rows - old_rows)
+    if "content" not in tool_input:
+        return GO_EDIT_WHY.format(rel)
+    full = os.path.join(root, rel)
+    disk = _go_read(full, strict=True)
+    if disk is None and os.path.lexists(full):
+        return f"Guard không đọc được {rel} (lỗi đọc, không phải UTF-8 hay không phải file thường): {GO_SIGN_WHY}."
+    try:
+        return _go_write_why(rel, disk or "", _text(tool_input.get("content")))
+    except Exception:  # không đọc chắc dòng ký → chặn (hook lỗi thì fail-open)
+        return f"Guard không đọc chắc dòng ký §5 của {rel}: {GO_SIGN_WHY}."
+
+
+def _go_write_why(rel: str, disk: str, content: str) -> str:
+    """Write `content` lên file có nội dung `disk`: thêm/đổi dòng ký (hợp các hiệu của hai họ, AUD-SEC-615); `\\r` trần
+    hay BOM lệch đĩa (D-417: `release-check` đọc khác nội dung gửi); file đã ký đổi tiêu đề/`subject:` (D-392)."""
+    before, after = _go_nl(disk), _go_nl(content)
+    old, now = _go_sign_views(before), _go_sign_views(after)
+    new = sorted((now[0] - old[0]) | (now[1] - old[1]))
     if new:
         row = ("| " + " | ".join(new[0]) + " |")[:160]
         return f"Không ghi dòng ký §5 vào {rel} (`{row}`): {GO_SIGN_WHY} — agent lập phần máy, để trống ô Tên/Ngày."
-    # dòng ký còn lại sau lần ghi; `loose` (không áp được lên file) → của file trừ dòng đoạn cũ bỏ, cộng dòng đoạn mới
-    signed = _go_sign_rows(disk or "")
-    kept = ((signed - old_rows) | new_rows) if loose else new_rows
-    if signed and kept and _go_anchors(before) != _go_anchors(after):
+    if GO_BARE_CR_RE.search(content) or (before[:1] == chr(0xFEFF)) != (after[:1] == chr(0xFEFF)):
+        return f"Không ghi {rel} có `\\r` không kèm `\\n` hay BOM lệch file trên đĩa (D-417): {GO_SIGN_WHY}."
+    if (old[0] | old[1]) and (now[0] | now[1]) and _go_anchor_views(before) != _go_anchor_views(after):
         return f"Không đổi tiêu đề/dòng `subject:` của {rel}: {GO_REBIND_WHY} (D-392); {GO_SIGN_WHY}."
     return ""
+
+
+def _go_anchor_views(text: str) -> Tuple[Tuple[str, List[str]], Tuple[str, List[str]]]:
+    """Neo D-392 trên văn bản thô VÀ trên phần `release-check` thấy (tráo chú thích quanh `subject:` không lọt)."""
+    return _go_anchors(text), _go_anchors(_go_shown(text))
 
 
 def _go_anchors(text: str) -> Tuple[str, List[str]]:
@@ -8581,12 +8721,14 @@ def _gh_api_ref_force(args: List[str]) -> bool:
 GH_API_REPO_RE = re.compile(r"/?repos/[^/\s]+/[^/\s]+/?")
 GH_API_MAIN_REF_RE = re.compile(r"/?repos/[^/\s]+/[^/\s]+/git/refs/heads/(main|master)/?")
 GH_API_REF_RE = re.compile(r"/?repos/[^/\s]+/[^/\s]+/git/refs/(\S+?)/?")  # ref REST: `heads/<nhánh>`, `tags/<tag>`
-GRAPHQL_REF_DELETE_RE = re.compile(r"\bdeleteRef\b")  # mutation xoá ref theo id mờ — không biết nhánh nào
+# Mutation xoá/ghi đè ref, đích không đọc chắc (id mờ, biến `-F`) → chặn mọi dạng: `deleteRef`; `updateRefs` (`afterOid`
+# 0…0 = xoá, `force` = ghi đè — AUD-SEC-622); `updateRef` (`force`, AUD-SEC-562).
+GRAPHQL_REF_DELETE_RE = re.compile(r"\b(?:deleteRef|updateRefs?)\b")
 
 
 def _gh_api_ref_delete(args: List[str]) -> Optional[str]:
-    """Ref mà `gh api …` (đối số sau `api`) xoá: `-X DELETE …/git/refs/<ref>` → `<ref>`; graphql `deleteRef` → "" (id
-    mờ); không xoá ref → None. Phương thức: cờ cuối thắng như gh."""
+    """Ref mà `gh api …` (đối số sau `api`) xoá: `-X DELETE …/git/refs/<ref>` → `<ref>`; graphql `GRAPHQL_REF_DELETE_RE` →
+    "" (đích mờ); không xoá ref → None. Phương thức: cờ cuối thắng như gh."""
     pos = _positionals(args, GH_API_VALUE_FLAGS)
     path = _api_path(pos[0]) if len(pos) == 1 else ""
     if path.rstrip("/").rsplit("/", 1)[-1] == "graphql":
@@ -8742,7 +8884,7 @@ def _gh_ref_delete_rule(args: List[str], cwd: str) -> Tuple[str, str]:
     cur = _current_branch(cwd) if gone else ""
     if _session_ref(gone, cur):
         return "", ""
-    return "deny", REMOTE_DELETE_WHY.format(gone or "ref của `deleteRef`", cur or "không rõ")
+    return "deny", REMOTE_DELETE_WHY.format(gone or "ref của graphql `deleteRef`/`updateRef(s)`", cur or "không rõ")
 
 
 # Ghi lên bí mật, quyền, bảo vệ nhánh, ruleset, webhook, chuyển chủ repo (review #97) — như `gh secret`/đổi ruleset.
@@ -10599,7 +10741,7 @@ GO_PATCH_WHY = (
     "`patch`/`git apply`/`git am` với diff guard không đọc được hay chạm GO-NO-GO ({}) — "
     + GO_SIGN_WHY
     + "; guard chỉ cho diff là tệp thường nêu ở đối số/`< tệp` (≤ 1 MiB) không có header `GO-NO-GO*.md` — sửa GO-NO-GO"
-    " bằng Edit để guard so dòng ký"
+    " bằng Write cả file để guard so dòng ký"
 )
 
 
@@ -11570,10 +11712,10 @@ def _mcp_go_sign_why(tool_name: str, tool_input: Dict[str, object]) -> str:
     files = tool_input.get("files")
     for f in [tool_input, *(files if isinstance(files, list) else [])]:
         path, content = (f.get("path"), f.get("content")) if isinstance(f, dict) else (None, None)
-        if isinstance(path, str) and isinstance(content, str) and _is_go_no_go(path) and _go_sign_rows(content):
+        if isinstance(path, str) and isinstance(content, str) and _is_go_no_go(path) and _go_signed_safe(content):
             return (
                 f"Lệnh bị khung chặn ({GO_SIGN_WHY}): {tool_name} ghi `{path[:120]}` có dòng ký §5 — guard không so được"
-                " với bản trên remote; sửa GO-NO-GO cục bộ bằng Edit (để trống ô Tên/Ngày) rồi commit/push bằng git."
+                " với bản trên remote; sửa GO-NO-GO cục bộ bằng Write (để trống ô Tên/Ngày) rồi commit/push bằng git."
             )
     return ""
 

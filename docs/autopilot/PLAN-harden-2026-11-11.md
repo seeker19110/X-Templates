@@ -31,13 +31,13 @@
 
 ### Lát 1 — 🔴 mới
 - [ ] `T-3714` 🔴 AUD-SEC-614 guard: `--end-of-options` không còn làm `-h` thành miễn trừ trợ giúp của `git push` (topo: review) — Gate: `python3 -m unittest tests.test_hooks`
-- [ ] `T-3715` 🔴 AUD-SEC-615 + AUD-TEST-100 guard: dòng ký GO_SIGN guard thấy ⊇ xt thấy (chú thích HTML, khối rào) (topo: review) — Gate: `python3 -m unittest tests.test_guard_go_no_go`
+- [x] `T-3715` 🔴 AUD-SEC-615 + AUD-TEST-100 guard: dòng ký GO_SIGN guard thấy ⊇ xt thấy (chú thích HTML, khối rào) (topo: review) — Gate: `python3 -m unittest tests.test_guard_go_no_go`
 - [x] `T-3716` 🔴 AUD-SEC-616 install.py: `.xtemplates-new` là symlink → `skipped-symlink` (topo: review) — Gate: `python3 -m unittest tests.test_install_pack`
 
 ### Lát 2 — 🟠 mới
 - [x] `T-3717` 🟠 AUD-HAR-377 xt.py: `release-sign` từ chối, hàng `verify` không PASS khi vòng `blocked` (topo: review) — Gate: `python3 -m unittest tests.test_release_signoff tests.test_release_contract`
 - [ ] `T-3718` 🟠 AUD-SEC-541 xt.py: `loop decide-prod` trong phiên agent → exit 2 (topo: review) — Gate: `python3 -m unittest tests.test_xt_cli tests.test_release_contract`
-- [ ] `T-3719` 🟠 AUD-CODE-064 gói web-api-ts: `build.ts` cho tar ghi thẳng file, digest không đổi — Gate: `python3 -m unittest tests.test_packs`
+- [x] `T-3719` 🟠 AUD-CODE-064 gói web-api-ts: `build.ts` cho tar ghi thẳng file, digest không đổi — Gate: `python3 -m unittest tests.test_packs`
 - [ ] `T-3720` 🟠 AUD-DEP-021 CI: quét lockfile npm của gói theo PR + lịch, khối npm ở dependabot — Gate: `python3 scripts/xt.py ci-check`
 
 ### Lát 3 — 🔴 guard có từ trước
@@ -56,4 +56,12 @@
 - [ ] `T-3730` 🔴 AUD-SEC-619 install.py: thư mục cha là symlink trên đường ghi harness/`.github`/adapter không ghi ra ngoài dự án (D-NNN chọn từ chối hay `under_symlink`; topo: review) — Gate: `python3 -m unittest tests.test_install`
 - [ ] `T-3736` 🟠 AUD-HAR-378 xt.py: lời báo vòng bị chặn chọn lối ra theo ca (`_loop_exit`/`_blocked_exit`) — Gate: `python3 -m unittest tests.test_release_contract`
 - [ ] `T-3737` 🟠 AUD-HAR-379 xt.py: cờ `loop block` theo sang đợt `loop init` mới hoặc `loop init` từ chối (topo: review) — Gate: `python3 -m unittest tests.test_xt_cli tests.test_release_contract`
+- [ ] `T-3731` 🔴 AUD-SEC-621 guard: chặn plumbing đẩy `git send-pack`/`git http-push` (topo: review) — Gate: `python3 -m unittest tests.test_hooks.GuardRemoteDeleteTest`
+- [x] `T-3732` 🟠 AUD-SEC-622 guard: graphql `updateRefs` → REMOTE_DELETE (topo: review) — Gate: `python3 -m unittest tests.test_hooks.GuardRemoteDeleteTest`
+- [ ] `T-3733` 🟠 AUD-SEC-623 guard: `gh repo sync --force` → như force-push (topo: review) — Gate: `python3 -m unittest tests.test_hooks -k repo_sync`
+- [ ] `T-3734` 🟠 AUD-SEC-624 guard: ghi công AI của gh đọc khoá ở gốc dự án (topo: review) — Gate: `python3 -m unittest tests.test_hooks.GuardAiAttributionTest tests.test_guard_fuzz.GuardFuzzTest`
+- [ ] `T-3735` 🟠 AUD-SEC-625 xt.py: khoá agent của `stage approve`/promotion đọc remote tươi, fail-closed (topo: review) — Gate: `python3 -m unittest tests.test_stage_agent_approval tests.test_release_signoff`
+- [ ] `T-3738` 🟠 AUD-SEC-626 guard: graphql gỡ bảo vệ nhánh/ruleset/environment → deny như REST (topo: review) — Gate: `python3 -m unittest tests.test_hooks`
+- [ ] `T-3739` 🔴 AUD-SEC-628 formatter không chạm `GO-NO-GO*.md` (hoặc guard xét output formatter) (topo: review) — Gate: `python3 -m unittest tests.test_hooks tests.test_guard_go_no_go`
+- [ ] `T-3740` 🟠 AUD-SEC-629/630/631 GO_SIGN: NUL ô Tên, khoảng trắng Unicode cuối `subject:`, BOM một chiều (topo: review) — Gate: `python3 -m unittest tests.test_guard_go_no_go`
 - [ ] `T-3729` Quét lại nhóm TEST, DOC, HAR (`chưa quét`) + sổ `đã sửa` cho các lát trên (sau: T-3724, T-3726) — Gate: `python3 scripts/xt.py audit check docs/ops/AUDIT-STATUS.md`
