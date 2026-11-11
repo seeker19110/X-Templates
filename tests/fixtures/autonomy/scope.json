@@ -549,6 +549,12 @@
    "ids": [
     "AUD-SEC-613"
    ]
+  },
+  {
+   "reason": "Thứ tự `sau:` trong PLAN-factory-e2e (cơ chế bù đóng trước phần nới, ADR-0075 §Quyết định 6; review #502) — nội dung một file PLAN, không phải quyết định cho/chặn của guard, PR, rollup hay CI mà bench mô phỏng. Khoá bằng tests.test_plan_factory_order (có ca tái hiện thứ tự cũ).",
+   "ids": [
+    "AUD-HAR-380"
+   ]
   }
  ]
 }
