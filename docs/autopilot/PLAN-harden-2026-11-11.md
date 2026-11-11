@@ -32,7 +32,7 @@
 ### Lát 1 — 🔴 mới
 - [ ] `T-3714` 🔴 AUD-SEC-614 guard: `--end-of-options` không còn làm `-h` thành miễn trừ trợ giúp của `git push` (topo: review) — Gate: `python3 -m unittest tests.test_hooks`
 - [ ] `T-3715` 🔴 AUD-SEC-615 + AUD-TEST-100 guard: dòng ký GO_SIGN guard thấy ⊇ xt thấy (chú thích HTML, khối rào) (topo: review) — Gate: `python3 -m unittest tests.test_guard_go_no_go`
-- [ ] `T-3716` 🔴 AUD-SEC-616 install.py: `.xtemplates-new` là symlink → `skipped-symlink` (topo: review) — Gate: `python3 -m unittest tests.test_install_pack`
+- [x] `T-3716` 🔴 AUD-SEC-616 install.py: `.xtemplates-new` là symlink → `skipped-symlink` (topo: review) — Gate: `python3 -m unittest tests.test_install_pack`
 
 ### Lát 2 — 🟠 mới
 - [ ] `T-3717` 🟠 AUD-HAR-377 xt.py: `release-sign` từ chối, hàng `verify` không PASS khi vòng `blocked` (topo: review) — Gate: `python3 -m unittest tests.test_release_signoff tests.test_release_contract`
@@ -53,4 +53,5 @@
 ### Lát 5 — nợ còn lại của đợt và quét lại
 - [ ] `T-3727` 🟠 AUD-DATA-011 gói: test quét `CREATE INDEX` trên bảng có sẵn phải CONCURRENTLY (0005 vào danh sách đã phát hành) + hướng dẫn migration không transaction (sau: T-3719) — Gate: `python3 -m unittest tests.test_packs`
 - [ ] `T-3728` 🟢 AUD-XFEAT-048 skill autopilot nhắc `stage-approve`; AUD-PERF-031 sửa số ở `_lib.sh` — Gate: `scripts/dev-task.sh gate-fast`
+- [ ] `T-3730` 🔴 AUD-SEC-619 install.py: thư mục cha là symlink trên đường ghi harness/`.github`/adapter không ghi ra ngoài dự án (D-NNN chọn từ chối hay `under_symlink`; topo: review) — Gate: `python3 -m unittest tests.test_install`
 - [ ] `T-3729` Quét lại nhóm TEST, DOC, HAR (`chưa quét`) + sổ `đã sửa` cho các lát trên (sau: T-3724, T-3726) — Gate: `python3 scripts/xt.py audit check docs/ops/AUDIT-STATUS.md`
