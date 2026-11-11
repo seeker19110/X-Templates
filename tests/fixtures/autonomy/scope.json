@@ -540,6 +540,12 @@
     "AUD-HAR-334",
     "AUD-HAR-340"
    ]
+  },
+  {
+   "reason": "Hồi quy chỉ tồn tại trong nhánh PR #495 (chưa từng ở main) — hành vi đúng là «y như main», đã có ca corpus aud605-* (refs AUD-SEC-605) ghim các lệnh đó; ghim đầy đủ bằng tests.test_hooks.GuardQuotedOperatorTest (test_substitution_same_as_main, test_never_weaker_than_legacy_reading).",
+   "ids": [
+    "AUD-SEC-613"
+   ]
   }
  ]
 }

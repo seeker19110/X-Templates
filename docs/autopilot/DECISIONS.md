@@ -423,3 +423,17 @@
 - Chọn: Từ chối ký (fail-closed); cần loop init trước — đường /complete đã có bước này
 - Lý do (tiêu chí chất lượng cuối): (1) đúng và an toàn: .autopilot/ không commit nên clone riêng không biết sổ dự án chính — coi vắng là sạch mở lại đúng lỗ AUD-HAR-340; (2) đường lùi: loop init tạo sổ rỗng; khoá release_signoff hiện chưa bật nên không chặn ai
 - Đường lùi: Cho sổ vắng ở mọi worktree là không có việc chờ
+
+### D-414 · 2026-11-10T15:03:52+00:00 · Workflow thiết kế AUD-SEC-591/592/593 phát hiện lỗi gốc: từ chỉ gồm toán tử shell trong nháy (';' hay dấu ống trong nháy đơn) làm tokenize/split_commands cắt lệnh ở MỌI luật (git push có --force sau ';' trong nháy được cho qua — đã tái hiện). Thứ tự làm và 4 điểm spec để phiên chính quyết?
+
+- Phương án: (1) Sửa gốc tokenizer trước ở PR riêng (🔴), rồi PR cài spec 591/592/593 không cần vá tạm R0; nhận cả 4 khuyến nghị của spec: bỏ miễn trừ thân không nháy, pr close chế độ tail, bảng 12 hàng lệnh đăng chữ · (2) Cài spec kèm vá tạm R0 trong lớp gh trước, mở dòng 🔴 cho gốc làm sau
+- Chọn: Sửa gốc tokenizer trước ở PR riêng (🔴), rồi PR cài spec 591/592/593 không cần vá tạm R0; nhận cả 4 khuyến nghị của spec: bỏ miễn trừ thân không nháy, pr close chế độ tail, bảng 12 hàng lệnh đăng chữ
+- Lý do (tiêu chí chất lượng cuối): (1) đúng và an toàn: lỗi gốc lách cả luật force-push và no-verify, nặng hơn ba nợ 🟠 — sửa gốc đóng mọi luật, vá tạm chỉ đóng gh; (3) đơn giản hơn: không thêm R0 rồi gỡ; các khuyến nghị spec đều là cách hiểu chặt hơn và đã đo 0 chặn oan trên lệnh thật
+- Đường lùi: Tách lại: R0 trong lớp gh
+
+### D-415 · 2026-11-11T03:22:00+00:00 · Review #495 BLOCKING: 7 hồi quy 🔴 đều đến từ phần mở rộng (GlueWord, _SubstTrack/PROCSUB_WORD, đường lùi flat của tokenize), còn lõi LitWord được xác nhận đúng và không chặn oan. Sửa thế nào?
+
+- Phương án: (1) Thu hẹp #495 về lõi: giữ LitWord + bỏ chuyển hướng ở chữ đọc lại (eval, echo nối ống sang sh) + watch; gỡ GlueWord, _SubstTrack/PROCSUB_WORD và đường lùi flat, trả hành vi của main cho thay tiến trình/thay lệnh; các dạng thay tiến trình/thay lệnh che phần sau (main cũng hở) ghi 🔴 mở riêng, làm ở PR sau theo hướng chặn khi không đọc chắc · (2) Vá từng hồi quy trong #495, giữ nguyên thiết kế mở rộng
+- Chọn: Thu hẹp #495 về lõi: giữ LitWord + bỏ chuyển hướng ở chữ đọc lại (eval, echo nối ống sang sh) + watch; gỡ GlueWord, _SubstTrack/PROCSUB_WORD và đường lùi flat, trả hành vi của main cho thay tiến trình/thay lệnh; các dạng thay tiến trình/thay lệnh che phần sau (main cũng hở) ghi 🔴 mở riêng, làm ở PR sau theo hướng chặn khi không đọc chắc
+- Lý do (tiêu chí chất lượng cuối): (1) đúng và an toàn: phần mở rộng đã hai lượt liên tiếp sinh hồi quy — mỗi lần vá thêm một cách đọc là thêm chỗ lệch với bash; gỡ về main chắc chắn không yếu hơn main ở lớp đó; lõi LitWord đóng đúng lỗ đã tái hiện; (2) đường lùi: PR riêng cho lớp thay tiến trình; (3) nhỏ, review được (P8) — diff hiện 647 dòng
+- Đường lùi: Khôi phục phần mở rộng ở PR riêng

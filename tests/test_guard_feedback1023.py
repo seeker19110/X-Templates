@@ -305,7 +305,10 @@ class WipeProjectRootTest(unittest.TestCase):
         ):
             with self.subTest(cmd=cmd):
                 self.assertEqual(policy(cmd)["decision"], "deny")
-        self.assertEqual(guard.tokenize("find . \\( -name a \\) -delete"), "find . ( -name a ) -delete".split())
+        toks = guard.tokenize("find . \\( -name a \\) -delete")
+        self.assertEqual([str(t) for t in toks], "find . ( -name a ) -delete".split())
+        # AUD-SEC-605: `\(`/`\)` là chữ find nhận (LitWord), không phải ngoặc subshell
+        self.assertEqual([isinstance(t, guard.LitWord) for t in toks], [False, False, True, False, False, True, False])
 
     def test_guard_wipe_project_root_git_glob(self):
         """Review bb606aa: glob nằm dưới `gốc/.git/` → deny."""
