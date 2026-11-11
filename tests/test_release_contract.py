@@ -325,6 +325,84 @@ class ReleaseReportTest(ReleaseCase):
         self.assertEqual((rc, self.by_id(d)["acceptance"]["evidence"], d["results"]), (0, "`test -d .` exit 0", []))
 
 
+class ReleaseBlockedLoopTest(ReleaseCase):
+    """AUD-HAR-377: vòng bị chặn (người phải quyết) → hàng `verify` không PASS dù Gate cũ xanh — mọi nguồn chặn của
+    `_blocked_by_state` (cờ, lỗi lặp, task đỏ quá trần) và vòng đã kết thúc `blocked`."""
+
+    def verify_row(self, body: dict) -> tuple[int, dict]:
+        state = self.repo / ".autopilot" / "state.json"
+        state.parent.mkdir(exist_ok=True)
+        state.write_text(json.dumps(body), encoding="utf-8")
+        with unittest.mock.patch.object(xt, "final_check", return_value=None):  # kiểm lại cuối xanh khớp cây
+            rc, d = self.release()
+        return rc, self.by_id(d)["verify"]
+
+    def test_blocked_loop_fails_verify_row(self):
+        self.setup_xt()
+        for body, reason in (
+            ({"blocked": True, "blocked_reason": "cần quyết kiến trúc"}, "cờ chặn — cần quyết kiến trúc"),
+            ({"blocked": True}, "cờ chặn — cần người quyết định"),
+            (
+                {"same_failure_count": 3, "max_same_failure": 3, "last_failure_task": "T-2"},
+                "cùng một lỗi lặp 3 lần (T-2)",
+            ),
+            ({"same_failure_count": 3, "max_same_failure": 3}, "cùng một lỗi lặp 3 lần (?)"),
+            ({"task_runs": {"T-1": 6, "T-3": 2}, "max_task_runs": 6}, "T-1 đỏ 6 lần (trần 6)"),
+            (
+                {"active": False, "final_verdict": {"verdict": "blocked", "reason": "PLAN mất"}},
+                "kết thúc `blocked` — PLAN",
+            ),
+            ({"active": False, "final_verdict": {"verdict": "blocked"}}, "kết thúc `blocked` — không ghi lý do"),
+        ):
+            with self.subTest(body=body):
+                rc, row = self.verify_row(body)
+                self.assertEqual((rc, row["result"]), (1, "FAIL"), row)
+                self.assertIn(f"vòng đang bị chặn ({reason}", row["evidence"])
+                self.assertIn("`loop unblock --reason …`", row["evidence"])
+        rc, row = self.verify_row({"blocked": True, "same_failure_count": 4, "task_runs": {"T-9": 7}})
+        self.assertIn(
+            "(cờ chặn — cần người quyết định; cùng một lỗi lặp 4 lần (?); T-9 đỏ 7 lần (trần 6))", row["evidence"]
+        )
+
+    def test_unblocked_or_done_loop_passes(self):
+        """Vòng xong/dừng/dưới trần/tắt trần/sai kiểu → không chặn: không đỏ oan."""
+        self.setup_xt()
+        for body in (
+            {"active": False, "final_verdict": {"verdict": "done"}},
+            {"active": False, "final_verdict": {"verdict": "stopped"}},
+            {"active": False, "final_verdict": "blocked"},
+            {"same_failure_count": 2, "max_same_failure": 3, "task_runs": {"T-1": 5}, "max_task_runs": 6},
+            {"task_runs": {"T-1": 9}, "max_task_runs": 0},
+            {"same_failure_count": "3", "blocked": False},
+        ):
+            with self.subTest(body=body):
+                rc, row = self.verify_row(body)
+                self.assertEqual((rc, row["result"]), (0, "PASS"), row)
+
+    def test_real_loop_block_then_unblock(self):
+        """Qua lệnh thật: lỗi lặp 3 lần (repro review) và `loop block` → FAIL; `loop unblock` → PASS lại."""
+        plan = self.repo / "docs/autopilot/PLAN.md"
+        plan.parent.mkdir(parents=True)
+        plan.write_text("- [x] `T-001` a — Gate: `true`\n- [ ] `T-002` b — Gate: `false`\n", encoding="utf-8")
+        (self.repo / ".git/info/exclude").write_text(".autopilot/\n", encoding="utf-8")
+        self.setup_xt()
+        self.assertEqual(run_main("loop", "init", "--plan", "docs/autopilot/PLAN.md")[0], 0)
+        for _ in range(3):
+            run_main("loop", "record", "--task", "T-002", "--", "false")
+        self.assertEqual(run_main("loop", "verify", "--all")[0], 0)
+        row = self.by_id(self.release()[1])["verify"]
+        self.assertEqual(row["result"], "FAIL", row)
+        self.assertIn("cùng một lỗi lặp 3 lần (T-002)", row["evidence"])
+        self.assertEqual(run_main("loop", "unblock", "--reason", "người xem: Gate T-002 sai")[0], 0)
+        self.assertEqual(self.by_id(self.release()[1])["verify"]["result"], "PASS")
+        self.assertEqual(run_main("loop", "block", "--reason", "cần quyết kiến trúc")[0], 0)
+        rc, d = self.release()
+        self.assertEqual((rc, self.by_id(d)["verify"]["result"]), (1, "FAIL"), d)
+        self.assertIn("cờ chặn — cần quyết kiến trúc", self.by_id(d)["verify"]["evidence"])
+        self.assertEqual(run_main("loop", "unblock", "--reason", "người đã quyết")[0], 0)
+        self.assertEqual(self.by_id(self.release()[1])["verify"]["result"], "PASS")
+
+
 class ReleaseArtifactTest(ReleaseCase):
     """T-3677: `release_artifacts` → hàng `artifacts` (chỉ khi khai) và `subject.digest`."""
 
@@ -485,6 +563,43 @@ class PromotionTest(ReleaseCase):
                 self.git("update-index", f"--no-{flag}", tracked.name)
                 self.git("restore", "--", tracked.name)
                 self.assertEqual(self.promotion()[2]["state"], "approved")
+
+    def test_status_config_cannot_hide_dirty_tree(self):
+        """AUD-HAR-334: `status.showUntrackedFiles no` giấu tệp chưa track, `submodule.<tên>.ignore`/
+        `diff.ignoreSubmodules all` giấu submodule bẩn khỏi `git status` mặc định — hàng `tree` vẫn FAIL."""
+        self.setup_xt()
+        self.go_no_go()
+        self.git("config", "status.showUntrackedFiles", "no")
+        stray = self.repo / "b.py"
+        stray.write_text("print(2)\n", encoding="utf-8")
+        self.assertEqual(self.git("status", "--porcelain"), "")
+        rc, result, promotion = self.promotion()
+        self.assertEqual((rc, result["fails"], promotion["state"]), (1, ["tree"], "blocked"))
+        self.assertIn("b.py", self.by_id(result)["tree"]["evidence"])
+        stray.unlink()
+        self.assertEqual(self.promotion()[2]["state"], "approved")
+
+        sub = self.repo / "sub"
+        sub.mkdir()
+        subprocess.run(["git", "init", "-q", "-b", "main", str(sub)], check=True)
+        (sub / "s.txt").write_text("s\n", encoding="utf-8")
+        for args in (("add", "s.txt"), ("commit", "-q", "-m", "s")):
+            subprocess.run(
+                ["git", "-C", str(sub), "-c", "user.name=t", "-c", "user.email=t@example.invalid", *args], check=True
+            )
+        (self.repo / ".gitmodules").write_text('[submodule "sub"]\n\tpath = sub\n\turl = ./sub\n', "utf-8")
+        self.commit()
+        self.go_no_go()
+        self.assertEqual(self.promotion()[2]["state"], "approved")
+        (sub / "s.txt").write_text("đổi\n", encoding="utf-8")
+        for key, value in (("submodule.sub.ignore", "all"), ("diff.ignoreSubmodules", "all")):
+            with self.subTest(key=key):
+                self.git("config", key, value)
+                self.assertEqual(self.git("status", "--porcelain"), "")
+                rc, result, promotion = self.promotion()
+                self.assertEqual((rc, result["fails"], promotion["state"]), (1, ["tree"], "blocked"))
+                self.assertIn("sub", self.by_id(result)["tree"]["evidence"])
+                self.git("config", "--unset", key)
 
     def test_sparse_checkout_blocks_promotion(self):
         source = self.repo / "src"

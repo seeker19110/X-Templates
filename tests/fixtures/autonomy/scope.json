@@ -108,6 +108,7 @@
     "AUD-XFEAT-013",
     "AUD-XFEAT-020",
     "AUD-CFG-003",
+    "AUD-SEC-616",
     "AUD-CODE-025",
     "AUD-SEC-130",
     "AUD-HAR-125",
@@ -484,6 +485,7 @@
    "reason": "Gói sản phẩm và `install.py --pack` (ADR-0068 lát B–D) — hành vi của installer, mã TypeScript và migration của gói (AUD-DATA-001, D-377) và ca sai cố ý, không phải guard/PR/CI/harness. Kiểm bằng tests.test_install_pack, tests.test_packs và workflow pack-web-api.yml (Postgres thật, mutants.json).",
    "ids": [
     "AUD-SEC-501",
+    "AUD-CODE-064",
     "AUD-HAR-223",
     "AUD-TEST-063",
     "AUD-CODE-048",
@@ -504,6 +506,54 @@
    "ids": [
     "AUD-CODE-049",
     "AUD-SEC-503"
+   ]
+  },
+  {
+   "reason": "Điều kiện ký của `xt.py release-sign` và đánh giá `promotion` (ADR-0074) đọc GO-NO-GO trên cây và trong lịch sử git (D-404), sổ `.autopilot/`, khoá `release_signoff` — không thuộc nhóm ca PR/rollup/review/guard; đỡ bằng Gate unittest tests.test_release_signoff (AUD-SEC-542: ReleaseSignRealCheckTest.test_rejected_in_tree_not_overridden, test_refusal_kept_on_main_after_tree_delete, ReleaseSignTest.test_refuses_when_promotion_rejected, test_history_unreadable_fails_closed; AUD-SEC-543: test_promotion_counts_agent_row_only_with_key; AUD-HAR-339: test_unchecked_must_blocks_sign; AUD-SEC-546: ReleaseSignRealCheckTest.test_refusal_on_pr_branch_deleted, ReleaseSignSubdirTest.test_refusal_on_main_deleted_in_tree, GoHistoryTest.test_scope_any_dir_case_version; AUD-SEC-547: ReleaseSignRealCheckTest.test_refusal_cell_not_go, test_refusal_survives_version_bump, test_refusal_undated_row_in_target, test_refusal_deleted_on_main, GoHistoryTest.test_row_rules; AUD-SEC-548: GoHistoryTest.test_isolated_git_env_and_unfetched_remote; AUD-SEC-549: ReleaseSignRealCheckTest.test_merge_ours_does_not_hide_refusal, test_shallow_fetch_refused, test_remote_ref_deleted_locally_still_seen, test_pull_ref_survives_branch_delete, test_external_repo_go_does_not_lift; AUD-SEC-550: GoHistoryTest.test_show_root_pinned, test_supersede_needs_new_signed_human_go_in_section_five, test_tables_without_decision_column_not_read, test_pins_all_refs_and_full_context, ReleaseSignRealCheckTest.test_lower_version_go_does_not_lift, test_free_form_go_and_appendix_table_not_refusal; AUD-SEC-552: ReleaseSignRealCheckTest.test_remote_key_off_refused_with_stale_tracking_ref, test_remote_key_missing_refused, ReleaseSignSubdirTest.test_remote_key_read_at_project_path; AUD-SEC-553: GoMirrorCredentialTest — clone mirror qua HTTP cần xác thực, không phải quyết định guard; AUD-SEC-559: GoMirrorCredentialTest.test_foreign_global_config_not_trusted, test_askpass_not_kept_for_clone — nguồn helper/môi trường của clone, không phải quyết định guard)",
+   "ids": [
+    "AUD-HAR-339",
+    "AUD-SEC-542",
+    "AUD-SEC-543",
+    "AUD-SEC-546",
+    "AUD-SEC-547",
+    "AUD-SEC-548",
+    "AUD-SEC-549",
+    "AUD-SEC-550",
+    "AUD-SEC-552",
+    "AUD-SEC-553",
+    "AUD-SEC-559"
+   ]
+  },
+  {
+   "reason": "Lời khai phạm vi trong CHANGELOG/harness-files/sổ (\"mọi luật gh\" đọc dạng chuẩn hoá cobra) — tài liệu, không có hành vi để mô phỏng; hành vi tương ứng được ghim bằng tests.test_guard_gh_parity (đối chiếu 778 biến thể cờ-trước-lệnh-con với dạng gốc) và các ca corpus aud575/577/578/579-*.",
+   "ids": [
+    "AUD-DOC-281"
+   ]
+  },
+  {
+   "reason": "Chặn oan `gh --version|--help|-h` kèm chuyển hướng (dạng cobra lấy từ argv còn chuyển hướng) — ca đối chứng allow nằm trong corpus aud582-* (guard.json) nhưng bộ chấm chỉ ánh xạ ID 🔴/🟠 lỗ cho qua; đỡ bằng tests.test_hooks.GuardReview490DebtTest và tests.test_guard_gh_parity (biến thể chuyển hướng).",
+   "ids": [
+    "AUD-HAR-362"
+   ]
+  },
+  {
+   "reason": "Cổng phát hành của xt.py (`release-check` hàng tree, `release-sign` đọc `loop defer`) — không phải quyết định guard/harness/pr để mô phỏng bằng corpus; đỡ bằng repo git tạm trong tests.test_release_contract (PromotionTest.test_status_config_cannot_hide_dirty_tree) và tests.test_release_signoff (test_deferred_read_from_every_worktree, test_unknown_or_broken_state_refuses, ReleaseSignSubdirTest).",
+   "ids": [
+    "AUD-HAR-334",
+    "AUD-HAR-340",
+    "AUD-HAR-377"
+   ]
+  },
+  {
+   "reason": "Hồi quy chỉ tồn tại trong nhánh PR #495 (chưa từng ở main) — hành vi đúng là «y như main», đã có ca corpus aud605-* (refs AUD-SEC-605) ghim các lệnh đó; ghim đầy đủ bằng tests.test_hooks.GuardQuotedOperatorTest (test_substitution_same_as_main, test_never_weaker_than_legacy_reading).",
+   "ids": [
+    "AUD-SEC-613"
+   ]
+  },
+  {
+   "reason": "Thứ tự `sau:` trong PLAN-factory-e2e (cơ chế bù đóng trước phần nới, ADR-0075 §Quyết định 6; review #502) — nội dung một file PLAN, không phải quyết định cho/chặn của guard, PR, rollup hay CI mà bench mô phỏng. Khoá bằng tests.test_plan_factory_order (có ca tái hiện thứ tự cũ).",
+   "ids": [
+    "AUD-HAR-380"
    ]
   }
  ]

@@ -6,13 +6,14 @@ file (AUD-SEC-536), lý do/touch (AUD-SEC-537). Payload giả như hook PreToolU
 from __future__ import annotations
 
 import os
+import random
 import shutil
 import sys
 import tempfile
 import unittest
 import unittest.mock as mock
 from pathlib import Path
-from typing import Dict, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / ".claude" / "hooks"))
@@ -60,14 +61,49 @@ class GoNoGoGuardBase(unittest.TestCase):
         out = guard.apply_policy(guard._rule_decision("mcp", payload, str(self.root)))
         return str(out["decision"]), str(out.get("code")), str(out.get("reason", ""))
 
-
-class GoNoGoEditTest(GoNoGoGuardBase):
-    """Edit/MultiEdit/Write/NotebookEdit: so tập dòng ký §5 trước và sau."""
-
     def assert_sign_denied(self, got: Tuple[str, str, str]) -> None:
         self.assertEqual(got[:2], ("deny", "GO_SIGN"), got)
         for part in ("ADR-0068 §Quyết định 3a", "mẫu GO-NO-GO §5", "AUD-SEC-497", "chữ ký §5 là của người"):
             self.assertIn(part, got[2])
+
+    def assert_edit_denied(self, got: Tuple[str, str, str]) -> None:
+        """D-418: mọi Edit/MultiEdit/NotebookEdit lên GO-NO-GO bị chặn, câu lý do chỉ lối Write cả file/`release-sign`."""
+        self.assert_sign_denied(got)
+        for part in ("Write", "release-sign", "D-418"):
+            self.assertIn(part, got[2])
+
+    def write(self, rel: str, text: str) -> str:
+        return self.edit(rel, {"content": text})[0]
+
+
+class GoNoGoEditTest(GoNoGoGuardBase):
+    """Write: so tập dòng ký §5 trước và sau; Edit/MultiEdit/NotebookEdit: luôn chặn (D-418)."""
+
+    def test_any_edit_denied_d418(self) -> None:
+        """Review lượt 3 (A1/A1b/A1c/H1/A3/A3b/A2/A4/Q1): mô hình tool Edit lệch tool thật — guard thôi mô hình hoá."""
+        trow = TEMPLATE_ROW
+        b1 = TEMPLATE_S.replace(trow, "| Chủ repo | An | GO |Z\n 2026-11-10 |\n")
+        old2 = trow.rstrip("\n").replace("ủ", "\\u1ee7")
+        h1 = HEAD + SIGN_HEAD + trow + "Ghi chú Z\n## 6. Sau phát hành\n\n" + SIGNED_ROW
+        signed_q = SIGNED_S.replace(SUBJ, SUBJ + "‘ghi chú’\n")
+        cases = [
+            ("A1", b1, {"old_string": "Z", "new_string": ""}),
+            ("A1b", b1.replace("\n", "\r\n"), {"old_string": "Z", "new_string": ""}),
+            ("A1c", b1, {"edits": [{"old_string": "Z", "new_string": ""}]}),
+            ("H1", h1, {"old_string": "Z", "new_string": ""}),
+            ("A3", TEMPLATE_S.replace("Bản vá.", "x\ry"), {"old_string": "x\ny", "new_string": SIGNED_ROW}),
+            ("A3b", TEMPLATE_S.replace(trow, "| Chủ repo | An | GO |\r\r\n 2026-11-10 |\n"), {"old_string": "\r\n"}),
+            ("A2", TEMPLATE_S, {"old_string": old2, "new_string": "\\u007c Ch\\u1ee7 repo \\u007c An \\u007c GO |"}),
+            ("A4", TEMPLATE_S, {"old_string": old2, "new_string": "| Chủ repo | | GO | 2026-11-10 |"}),
+            ("Q1", signed_q, {"old_string": "a" * 8 + "`\n'ghi chú'", "new_string": "d" * 8 + "`\n'ghi chú'"}),
+            ("benign", TEMPLATE_S, {"old_string": "Bản vá.", "new_string": "Bản vá 2."}),
+            ("notebook", TEMPLATE_S, {"notebook_path": "", "new_source": "x"}),
+        ]
+        for name, disk, tool_input in cases:
+            with self.subTest(name):
+                self.put(GO_REL, disk)
+                self.assert_edit_denied(self.edit(GO_REL, tool_input))
+        self.assert_edit_denied(self.edit("docs/ops/GO-NO-GO-none.md", {"old_string": "", "new_string": "x"}))
 
     def test_edit_adds_sign_row_denied(self) -> None:
         self.put(GO_REL, TEMPLATE)
@@ -93,35 +129,40 @@ class GoNoGoEditTest(GoNoGoGuardBase):
         got = self.edit(GO_REL, {"content": SIGNED.replace("Bản vá.", "Bản vá, thêm ghi chú.")})
         self.assertEqual(got[0], "", got)
 
-    def test_edit_section_one_allowed(self) -> None:
-        for text in (TEMPLATE, SIGNED):
+    def test_write_section_one_allowed(self) -> None:
+        for text in (TEMPLATE, SIGNED, TEMPLATE.replace("\n", "\r\n")):
             self.put(GO_REL, text)
-            got = self.edit(GO_REL, {"old_string": "Bản vá.", "new_string": "Bản vá installer."})
-            self.assertEqual(got[0], "", got)
+            self.assertEqual(self.write(GO_REL, text.replace("Bản vá.", "Bản vá installer.")), "")
 
-    def test_edit_template_table_blank_allowed(self) -> None:
+    def test_write_template_table_blank_allowed(self) -> None:
         self.put(GO_REL, TEMPLATE)
-        got = self.edit(GO_REL, {"old_string": TEMPLATE_ROW, "new_string": "| Chủ dự án | | GO / NO-GO | |\n"})
-        self.assertEqual(got[0], "", got)
-        got = self.edit("docs/ops/GO-NO-GO-y.md", {"content": TEMPLATE})
-        self.assertEqual(got[0], "", got)
+        self.assertEqual(self.write(GO_REL, TEMPLATE.replace(TEMPLATE_ROW, "| Chủ dự án | | GO / NO-GO | |\n")), "")
+        self.assertEqual(self.write("docs/ops/GO-NO-GO-y.md", TEMPLATE), "")
+
+    def test_write_from_real_template_allowed(self) -> None:
+        """Lối đúng (D-418): tạo GO-NO-GO từ mẫu thật, điền phần máy, thêm dòng §6 — Write cả file cho qua (LF, CRLF)."""
+        tpl = (ROOT / "framework" / "templates" / "GO-NO-GO.md").read_text(encoding="utf-8")
+        self.assertFalse(xt._go_sign_rows(tpl))
+        for eol in ("\n", "\r\n"):
+            with self.subTest(eol=eol):
+                text = tpl.replace("\n", eol)
+                self.assertEqual(self.write("docs/ops/GO-NO-GO-new.md", text), "")
+                self.put("docs/ops/GO-NO-GO-new.md", text)
+                filled = text + eol + "## 7. Ghi chú máy" + eol + eol + "subject: content `" + "a" * 64 + "`" + eol
+                self.assertEqual(self.write("docs/ops/GO-NO-GO-new.md", filled), "")
 
     def test_remove_sign_row_allowed(self) -> None:
         self.put(GO_REL, SIGNED)
-        got = self.edit(GO_REL, {"old_string": SIGNED_ROW, "new_string": TEMPLATE_ROW})
-        self.assertEqual(got[0], "", got)
-        self.assertEqual(self.edit(GO_REL, {"content": TEMPLATE})[0], "")
+        self.assertEqual(self.write(GO_REL, TEMPLATE), "")
 
     def test_repadding_sign_row_allowed(self) -> None:
         self.put(GO_REL, SIGNED)
-        got = self.edit(GO_REL, {"old_string": SIGNED_ROW, "new_string": "|  Chủ repo  |An|  GO |2026-11-07|\n"})
-        self.assertEqual(got[0], "", got)
+        self.assertEqual(self.write(GO_REL, SIGNED.replace(SIGNED_ROW, "|  Chủ repo  |An|  GO |2026-11-07|\n")), "")
 
     def test_row_outside_section_five_allowed(self) -> None:
         self.put(GO_REL, TEMPLATE)
-        got = self.edit(GO_REL, {"old_string": "Bản vá.", "new_string": "| Rủi ro | An | thấp | 2026-11-07 |"})
-        self.assertEqual(got[0], "", got)
-        self.assertEqual(self.edit(GO_REL, {"old_string": TAIL, "new_string": TAIL + SIGNED_ROW})[0], "")
+        self.assertEqual(self.write(GO_REL, TEMPLATE.replace("Bản vá.", "| Rủi ro | An | thấp | 2026-11-07 |")), "")
+        self.assertEqual(self.write(GO_REL, TEMPLATE + SIGNED_ROW), "")  # dòng §6
 
     def test_other_file_name_allowed(self) -> None:
         self.assertEqual(self.edit("NOTES.md", {"content": SIGNED})[0], "")
@@ -142,30 +183,28 @@ class GoNoGoEditTest(GoNoGoGuardBase):
             {"old_string": "| Chủ repo | |", "new_string": "| Chủ repo | An |"},
             {"old_string": "| GO / NO-GO | |", "new_string": "| GO | 2026-11-07 |"},
         ]
-        self.assert_sign_denied(self.edit(GO_REL, {"edits": edits}))
+        self.assert_edit_denied(self.edit(GO_REL, {"edits": edits}))
         ok = [{"old_string": "Bản vá.", "new_string": "Bản vá 2."}, "rác"]
-        self.assertEqual(self.edit(GO_REL, {"edits": ok})[0], "")
+        self.assert_edit_denied(self.edit(GO_REL, {"edits": ok}))
 
-    def test_replace_all(self) -> None:
-        self.put(GO_REL, HEAD + TEMPLATE_ROW + SIGN_HEAD + TEMPLATE_ROW + TAIL)  # dòng mẫu ở §1 đứng trước §5
-        once = {"old_string": TEMPLATE_ROW, "new_string": SIGNED_ROW}
-        self.assertEqual(self.edit(GO_REL, once)[0], "")  # chỉ lần xuất hiện đầu (§1) đổi
-        self.assert_sign_denied(self.edit(GO_REL, {**once, "replace_all": True}))
+    def test_write_row_before_section_five_allowed(self) -> None:
+        text = HEAD + TEMPLATE_ROW + SIGN_HEAD + TEMPLATE_ROW + TAIL  # dòng mẫu ở §1 đứng trước §5
+        self.put(GO_REL, text)
+        self.assertEqual(self.write(GO_REL, text.replace(TEMPLATE_ROW, SIGNED_ROW, 1)), "")  # chỉ §1 đổi
+        self.assert_sign_denied(self.edit(GO_REL, {"content": text.replace(TEMPLATE_ROW, SIGNED_ROW)}))
 
-    def test_old_string_missing_falls_back_to_snippets(self) -> None:
-        self.put(GO_REL, TEMPLATE)
-        self.assert_sign_denied(self.edit(GO_REL, {"old_string": "không có", "new_string": SIGNED_ROW}))
-        self.assertEqual(self.edit(GO_REL, {"old_string": "không có", "new_string": "chữ"})[0], "")
-        self.assertEqual(self.edit(GO_REL, {"old_string": SIGNED_ROW + "x", "new_string": SIGNED_ROW})[0], "")
-
-    def test_unreadable_file_snippets(self) -> None:
-        self.assert_sign_denied(self.edit("docs/ops/GO-NO-GO-none.md", {"old_string": "", "new_string": SIGNED}))
-        self.assertEqual(self.edit("docs/ops/GO-NO-GO-none.md", {"old_string": "", "new_string": TEMPLATE})[0], "")
+    def test_unreadable_or_non_utf8_disk_denied(self) -> None:
+        """Đĩa không đọc chắc (lỗi đọc, không phải UTF-8, không phải file thường) → deny; file chưa có → so với rỗng."""
+        self.assertEqual(self.write("docs/ops/GO-NO-GO-none.md", TEMPLATE), "")
         self.put(GO_REL, TEMPLATE)
         with mock.patch.object(guard, "open", create=True, side_effect=PermissionError("x")):
             self.assertIsNone(guard._go_read(str(self.root / GO_REL)))
-            self.assert_sign_denied(self.edit(GO_REL, {"old_string": TEMPLATE_ROW, "new_string": SIGNED_ROW}))
-            self.assertEqual(self.edit(GO_REL, {"content": TEMPLATE})[0], "")
+            got = self.edit(GO_REL, {"content": TEMPLATE})
+            self.assert_sign_denied(got)
+            self.assertIn("không đọc", got[2])
+        (self.root / GO_REL).write_bytes(TEMPLATE.encode("utf-8") + b"\xff\xfe")
+        self.assertIsNotNone(guard._go_read(str(self.root / GO_REL)))  # bộ đọc diff vẫn thay ký tự lỗi
+        self.assert_sign_denied(self.edit(GO_REL, {"content": TEMPLATE}))
 
     def test_not_a_regular_file(self) -> None:
         d = self.root / "docs" / "GO-NO-GO-dir.md"
@@ -177,7 +216,7 @@ class GoNoGoEditTest(GoNoGoGuardBase):
         got = self.edit("GO-NO-GO.md", {"notebook_path": "", "new_source": SIGNED_ROW})
         self.assert_sign_denied(got)
         payload = {"tool_input": {"notebook_path": str(self.root / "GO-NO-GO.md"), "new_source": "x"}}
-        self.assertEqual(guard._rule_decision("edit", payload, str(self.root))["decision"], "")
+        self.assertEqual(guard._rule_decision("edit", payload, str(self.root))["decision"], "deny")  # D-418
 
     def test_no_tool_input(self) -> None:
         self.assertEqual(guard.edit_decision(str(self.root / GO_REL), str(self.root)), ("", ""))
@@ -187,12 +226,264 @@ class GoNoGoEditTest(GoNoGoGuardBase):
         got = self.edit(GO_REL, {"content": SIGNED.replace("\n", "\r\n")})
         self.assert_sign_denied(got)
 
-    def test_rows_match_xt_release_check(self) -> None:
-        """Bản sao regex trong guard đúng với `xt._go_sign_rows` (nguồn của `release-check`)."""
+    def test_rows_cover_xt_release_check(self) -> None:
+        """AUD-SEC-615/AUD-TEST-100: mọi dòng `xt._go_sign_rows` (nguồn của `release-check`) tính là chữ ký thì guard
+        thấy — một chiều (guard chặt hơn), cả khi có chú thích HTML/khối rào; văn bản thường thì bằng nhau."""
         self.assertEqual(guard.GO_SIGN_ROW_RE.pattern, xt.GO_SIGN_ROW_RE.pattern)
         for text in (TEMPLATE, SIGNED, SIGNED + SIGNED_ROW, HEAD, SIGN_HEAD + "| a | b | c | 2026-01-01 |\n"):
             mine = sorted((r[2], r[3]) for r in guard._go_sign_rows(text))
             self.assertEqual(mine, sorted(set(xt._go_sign_rows(text))), text)
+        corpus = [old.replace(row, new) for old, row, new in LURES] + [
+            SIGN_HEAD + "| Chủ repo | An `<!--` | GO | 2026-11-07 | <!-- a <!-- b `c` -->\n",  # code span; mở lồng
+            SIGN_HEAD
+            + "<!-->| Chủ repo | An | GO | 2026-11-07 |<!-- x --!>\n` <!-- a --> b\n",  # chú thích trọn, `--!>`
+            HEAD + "```\n<!--\n```\n" + SIGN_HEAD + "a --> b\n" + SIGNED_ROW.replace(" |\n", " | <!-- x -->\n"),
+            HEAD + "<!-- x\n-->## 5. Ký\n" + SIGNED_ROW + "<!-- chưa đóng\n",  # `## 5` sau đuôi chú thích
+            SIGN_HEAD + SIGNED_ROW.replace("\n", "\r\n"),  # CRLF: `\r` cuối dòng vẫn là khoảng trắng một dòng
+        ]
+        for text in corpus:
+            xt_rows = set(xt._go_sign_rows(text))
+            self.assertTrue(xt_rows, text)
+            self.assertLessEqual(xt_rows, {(r[2], r[3]) for r in guard._go_sign_rows(text)}, text)
+        self.assertEqual(guard._go_sign_rows("<!-- x -->\n" + SIGNED_ROW), set())  # không có §5: như xt
+
+
+# AUD-SEC-615: (file chưa ký, dòng mẫu, dòng ký) — `## 5` mồi trong chú thích HTML/khối rào/khối HTML ẩn trước §5 thật,
+# `## x`/`## 5` trong khối rào giữa §5, dòng ký có chú thích HTML ở đuôi/đầu, BOM: xt (`_markdown_shown`) thấy dòng ký,
+# luật thô cũ không. Bốn ca cuối giết đột biến của review lượt 1 (M2 bỏ view F, M3 bỏ view T, M4 lấy `## 5` muộn nhất,
+# M8 thu hẹp dấu mở khối ẩn).
+LURE_ROW = SIGNED_ROW.replace(" |\n", " | <!-- x -->\n")
+LURES = [
+    (HEAD + "<!--\n## 5. mồi\n-->\n\n" + SIGN_HEAD + TEMPLATE_ROW, TEMPLATE_ROW, SIGNED_ROW),
+    (HEAD + "```\n## 5. mồi\n```\n\n" + SIGN_HEAD + TEMPLATE_ROW, TEMPLATE_ROW, SIGNED_ROW),
+    (HEAD + SIGN_HEAD.replace("\n\n|", "\n\n```\n## x\n```\n\n|", 1) + TEMPLATE_ROW, TEMPLATE_ROW, SIGNED_ROW),
+    (HEAD + SIGN_HEAD + TEMPLATE_ROW, TEMPLATE_ROW, LURE_ROW),
+    (chr(0xFEFF) + SIGN_HEAD + TEMPLATE_ROW, TEMPLATE_ROW, SIGNED_ROW),  # BOM trước tiêu đề §5
+    (HEAD + "```\n<!--\n```\n\n" + SIGN_HEAD + TEMPLATE_ROW, TEMPLATE_ROW, LURE_ROW),  # M2
+    (HEAD + SIGN_HEAD + "` --> ` <!-- `\n" + TEMPLATE_ROW, TEMPLATE_ROW, "x -->" + SIGNED_ROW),  # M3
+    (HEAD + SIGN_HEAD + TEMPLATE_ROW + "\n```\n## 5. ví dụ\n```\n", TEMPLATE_ROW, SIGNED_ROW),  # M4
+    *(
+        (HEAD + lure + SIGN_HEAD + TEMPLATE_ROW, TEMPLATE_ROW, SIGNED_ROW)  # M8
+        for lure in ("~~~\n## 5. mồi\n~~~\n\n", "<script>\n## 5. mồi\n</script>\n\n", "<?x\n## 5. mồi\n?>\n\n")
+    ),
+]
+# AUD-SEC-615 (review lượt 2, 🔴1): dòng ký NHIỀU DÒNG — `_markdown_shown` xoá hẳn dòng ẩn ở giữa (khối code thụt, rào,
+# `<?…?>`, `<!X`, `<script>`, rào trong trích dẫn) hay chú thích cắt đôi dòng. Dòng ký chỉ là MỘT dòng: xt không tính.
+MULTI_ROWS = {
+    "V1": ("", "| Chủ repo | An | GO |\n    x\n2026-11-07 |\n"),
+    "V1b": ("", "| Chủ repo |\n    x\nAn | GO | 2026-11-07 |\n"),
+    "V1c": ("", "| Chủ repo | An | GO | 2026-11-07\n    x\n|\n"),
+    "V2": ("", "| Chủ repo | An | GO |\n```\nx\n```\n2026-11-07 |\n"),
+    "V3": ("", "| Chủ repo | An | GO |\n<?x?>\n2026-11-07 |\n"),
+    "V4": ("", "| Chủ repo | An | GO |\n<!DOCTYPE\nfoo\n>\n2026-11-07 |\n"),
+    "V5": ("", "| Chủ repo | An | GO |\n<script>\nx\n</script>\n2026-11-07 |\n"),
+    "V14": ("", "| Chủ repo | An | GO |\n> ```\n> x\n> ```\n2026-11-07 |\n"),
+    "V6": ("```\n<!--\n```\n\n", "| Chủ repo | An | GO | <!--\nx --> 2026-11-07 |\n"),
+    "V6c": ("    <!--\n\n", "| Chủ repo | An | GO | <!--\nx --> 2026-11-07 |\n"),
+    "comment": ("", "| Chủ repo | An | GO |\n<!-- x\n` -->\n2026-11-07 |\n"),
+}
+
+
+class GoNoGoHiddenLureTest(GoNoGoGuardBase):
+    """AUD-SEC-615: guard tách §5 không được hẹp hơn `release-check` — mồi chú thích/khối rào không lách GO_SIGN."""
+
+    def test_lures_denied_write_edit_mcp(self) -> None:
+        for base, old, new in LURES:
+            with self.subTest(base=base, new=new):
+                signed = base.replace(old, new)
+                self.assertTrue(xt._go_sign_rows(signed))  # release-check tính là đã ký
+                self.put(GO_REL, base)
+                self.assert_sign_denied(self.edit(GO_REL, {"content": signed}))
+                self.assert_sign_denied(self.edit(GO_REL, {"old_string": old, "new_string": new}))
+                got = self.mcp("mcp__github__create_or_update_file", {"path": GO_REL, "content": signed, "branch": "x"})
+                self.assertEqual(got[:2], ("deny", "GO_SIGN"), got)
+                self.assertIn("An", self.edit(GO_REL, {"content": signed})[2])
+
+    def test_multi_line_row_not_a_signature(self) -> None:
+        """🔴1: xt không còn ghép hai dòng thô thành dòng ký; guard và xt cùng thấy rỗng — release-check không duyệt."""
+        self.assertNotIn(r"\s*", xt.GO_SIGN_ROW_RE.pattern)
+        for name, (prefix, rows) in MULTI_ROWS.items():
+            with self.subTest(name):
+                signed = ANCHORED + prefix + SIGN_HEAD + rows
+                self.assertEqual(xt._go_sign_rows(signed), [])
+                self.assertEqual(xt._go_signers(signed), [])
+                self.assertFalse(xt._go_no_go_signed(signed))
+                self.assertEqual(guard._go_sign_rows(signed), set())
+                self.put(GO_REL, SIGNED_S)  # chuỗi D-392: đổi dòng ký thành nhiều dòng rồi đổi `subject:`
+                self.assertEqual(self.write(GO_REL, SIGNED_S.replace(SIGNED_ROW, rows)), "")  # xoá ký
+                self.assertEqual(xt._go_sign_rows(SIGNED_S.replace(SIGNED_ROW, rows)), [])  # chữ ký đã mất với xt
+
+    def test_bare_cr_line_breaks_denied(self) -> None:
+        """Review lượt 2 🔴 (P1): `release-check` đọc file bằng `read_text` (`\\r\\n`, `\\r` trần → `\\n`); `\\r` trần trước
+        dòng ký/`## 5` không giấu được dòng ký khỏi guard — Write, MCP (Edit: luôn chặn)."""
+        rule = "|---|---|---|---|\n"
+        cr_head = TEMPLATE_S.replace("\n\n## 5. Ký", "\n\r## 5. Ký")  # `## 5` sau `\r` trần
+        for base, old, new in (
+            (TEMPLATE_S, rule + TEMPLATE_ROW, rule.rstrip("\n") + "\r" + SIGNED_ROW),
+            (TEMPLATE_S, TEMPLATE_ROW, "x\r" + SIGNED_ROW),
+            (cr_head, TEMPLATE_ROW, SIGNED_ROW),
+        ):
+            with self.subTest(base=base, new=new):
+                after = base.replace(old, new, 1)
+                path = self.put(GO_REL, base)
+                path.write_bytes(after.encode("utf-8"))
+                self.assertTrue(xt._go_sign_rows(path.read_text(encoding="utf-8")), after)  # release-check thấy
+                self.put(GO_REL, base)
+                self.assert_sign_denied(self.edit(GO_REL, {"content": after}))
+                got = self.mcp("mcp__github__create_or_update_file", {"path": GO_REL, "content": after, "branch": "x"})
+                self.assertEqual(got[:2], ("deny", "GO_SIGN"), got)
+
+    def test_bare_cr_content_denied(self) -> None:
+        """D-417: nội dung có `\\r` không kèm `\\n` ngay sau (kể cả `\\r\\r\\n`) → chặn Write và MCP, kể cả khi không thêm dòng
+        ký — chặn D-392 qua `x\\r# …`/`x\\rsubject:`; CRLF thường vẫn cho."""
+        title = "# GO-NO-GO v9.9.9\n"
+        cr_subj = "x\r" + SUBJ.replace("a" * 64, "d" * 64) + SUBJ
+        for text in (
+            SIGNED_S.replace(title, "x\r# GO-NO-GO v9.9.10\n" + title),
+            SIGNED_S.replace(SUBJ, cr_subj),
+            TEMPLATE_S.replace("Bản vá.", "x\ry"),
+            TEMPLATE_S.replace("\n", "\r\r\n"),
+        ):
+            with self.subTest(text=text):
+                self.put(GO_REL, SIGNED_S)
+                got = self.edit(GO_REL, {"content": text})
+                self.assert_sign_denied(got)
+                self.assertIn("\\r", got[2])
+                got = self.mcp("mcp__github__create_or_update_file", {"path": GO_REL, "content": text, "branch": "x"})
+                self.assertEqual(got[:2], ("deny", "GO_SIGN"), got)
+
+    def test_bom_mismatch_denied(self) -> None:
+        """A5 (review lượt 3): Write tool giữ BOM của file trên đĩa — BOM của nội dung lệch đĩa → chặn; khớp → so như thường."""
+        fm = "---\nkind: go\n---\n"
+        bom = chr(0xFEFF)
+        self.put(GO_REL, fm + SIGNED)
+        self.assert_sign_denied(self.edit(GO_REL, {"content": bom + fm + SIGNED}))  # bước 1: thêm BOM
+        self.put(GO_REL, bom + fm + SIGNED)
+        self.assert_sign_denied(self.edit(GO_REL, {"content": "---\n# GO-NO-GO v9.9.10\n---\n" + SIGNED}))  # bước 2
+        self.assertEqual(self.write(GO_REL, bom + fm + SIGNED.replace("Bản vá.", "Bản vá 2.")), "")
+        self.assertEqual(self.write("docs/ops/GO-NO-GO-new.md", bom + TEMPLATE)[:4], "deny")
+
+    def test_crlf_signed_note_allowed(self) -> None:
+        """Đối chứng: file đã ký ở CRLF, ghi chú thêm bằng Write vẫn cho chạy — chuẩn hoá không làm chặn oan."""
+        crlf = SIGNED_S.replace("\n", "\r\n")
+        self.put(GO_REL, crlf)
+        self.assertEqual(self.write(GO_REL, crlf.replace("Bản vá.", "Bản vá 2.")), "")
+        self.assertEqual(self.write(GO_REL, SIGNED_S.replace("Bản vá.", "Bản vá 2.")), "")  # CRLF → LF
+
+    def test_refusal_keeps_broad_rows(self) -> None:
+        """Lời từ chối NO-GO vẫn đọc rộng (regex cũ, cả dòng nhiều dòng) — ẩn thêm chỉ an toàn cho GO."""
+        text = SIGN_HEAD + "| Chủ repo | An | NO-GO |\n    x\n2026-11-07 |\n"
+        self.assertEqual(xt._go_no_go_refusals(text), ["NO-GO"])
+        self.assertIn(r"\s*", xt.GO_REFUSAL_ROW_RE.pattern)
+
+    def test_section_six_row_moved_up_denied(self) -> None:
+        """🔴2: dòng 4 cột có tên+ngày ở §6 không làm dòng đó thành 'đã có' ở §5 (luật thô cũ và view xt so riêng)."""
+        r6 = "| Theo dõi rollback | An | GO | 2026-11-07 |\n"
+        s6 = "\n## 6. Sau phát hành\n\n| Việc | Người | Kết quả | Ngày |\n|---|---|---|---|\n" + r6
+        for head in (HEAD, NOTED_HEAD):
+            with self.subTest(head=head):
+                disk = head + SIGN_HEAD + TEMPLATE_ROW + s6
+                self.put(GO_REL, disk)
+                self.assertEqual(xt._go_sign_rows(disk.replace(TEMPLATE_ROW, r6, 1)), [("GO", "2026-11-07")])
+                self.assert_sign_denied(self.edit(GO_REL, {"old_string": TEMPLATE_ROW, "new_string": r6}))
+                self.assert_sign_denied(self.edit(GO_REL, {"content": disk.replace(TEMPLATE_ROW, r6, 1)}))
+
+    def test_unsigned_noted_with_section_six_not_over_blocked(self) -> None:
+        """🟠: file chưa ký có chú thích + bảng 4 cột ở §6 — không bị coi là đã ký."""
+        plain = TEMPLATE_S.replace(TAIL, TAIL + "|---|---|---|---|\n")
+        for text in (plain, plain.replace("Bản vá.", "Bản vá. <!-- ghi chú -->")):
+            with self.subTest(text=text):
+                self.put(GO_REL, text)
+                self.assertEqual(guard._go_sign_rows(text), set())
+                self.assertEqual(self.write(GO_REL, text.replace(SUBJ, SUBJ.replace("a", "d"))), "")
+                self.assertEqual(self.write(GO_REL, text.replace("v9.9.9\n\n", "v9.9.10\n\n")), "")
+                self.assertEqual(self.write(GO_REL, text + "| Việc 2 | Bình | xong | 2026-11-09 |\n"), "")
+                got = self.mcp("mcp__github__create_or_update_file", {"path": GO_REL, "content": text, "branch": "x"})
+                self.assertEqual(got[0], "", got)
+
+    def test_reveal_hidden_row_denied(self) -> None:
+        """Lớp 'lật cho hiện' (có từ trước): bỏ dấu ẩn quanh dòng ký người đã ẩn ở §5 = chữ ký mới với release-check."""
+        for wrap in (("<!--\n", "-->\n"), ("```\n", "```\n")):
+            with self.subTest(wrap=wrap):
+                hidden = wrap[0] + SIGNED_ROW + wrap[1]
+                self.put(GO_REL, HEAD + SIGN_HEAD + hidden + TEMPLATE_ROW)
+                self.assertEqual(xt._go_sign_rows(HEAD + SIGN_HEAD + hidden), [])
+                self.assert_sign_denied(self.edit(GO_REL, {"content": HEAD + SIGN_HEAD + SIGNED_ROW + TEMPLATE_ROW}))
+
+    def test_raw_rule_kept(self) -> None:
+        """Luật thô cũ vẫn là một họ riêng (chặt hơn xt): thêm dòng ký trong chú thích/khối rào ở §5 bị chặn; file có
+        dòng ký thô (xt không tính) vẫn khoá tiêu đề/`subject:` (D-392)."""
+        for hidden in ("<!--\n" + SIGNED_ROW + "-->\n", "```\n" + SIGNED_ROW + "```\n"):
+            with self.subTest(hidden=hidden):
+                self.put(GO_REL, TEMPLATE_S)
+                hid = TEMPLATE_S.replace(TEMPLATE_ROW, hidden)
+                self.assertEqual(xt._go_sign_rows(hid), [])
+                self.assert_sign_denied(self.edit(GO_REL, {"content": hid}))
+                self.put(GO_REL, hid)
+                got = self.edit(GO_REL, {"content": hid.replace(SUBJ, SUBJ.replace("a" * 64, "d" * 64))})
+                self.assertEqual(got[:2], ("deny", "GO_SIGN"), got)
+                self.assertIn("D-392", got[2])
+
+    def test_rebind_on_shown_view_denied(self) -> None:
+        """D-392 so neo trên CẢ văn bản thô lẫn phần `release-check` thấy: tráo chú thích quanh hai dòng `subject:` (tập
+        thô không đổi) hay thụt `subject:` thành khối code → chặn trên file đã ký (mục 'có từ trước' của review lượt 1)."""
+        a, b = "subject: content `" + "a" * 64 + "`\n", "subject: content `" + "d" * 64 + "`\n"
+        before = HEAD + a + "<!--\n" + b + "-->\n\n" + SIGN_HEAD + SIGNED_ROW
+        self.put(GO_REL, before)
+        swapped = before.replace(a + "<!--\n" + b + "-->\n", "<!--\n" + a + "-->\n" + b)
+        self.assertEqual(guard._go_anchors(before), guard._go_anchors(swapped))  # thô y nguyên
+        got = self.edit(GO_REL, {"content": swapped})
+        self.assertIn("D-392", got[2])
+        self.assertIn("D-392", self.edit(GO_REL, {"content": before.replace(a, "\t" + a)})[2])
+
+    def test_view_failure_fails_closed(self) -> None:
+        """Guard không đọc chắc phần hiển thị (lỗi bất ngờ) → deny GO_SIGN, không fail-open của hook."""
+        self.put(GO_REL, TEMPLATE)
+        with mock.patch.object(guard, "_go_shown", side_effect=RecursionError("x")):
+            got = self.edit(GO_REL, {"content": TEMPLATE.replace("Bản vá.", "Bản vá 2.")})
+            self.assertEqual(got[:2], ("deny", "GO_SIGN"), got)
+            self.assertIn("không đọc chắc", got[2])
+            got = self.mcp("mcp__github__create_or_update_file", {"path": GO_REL, "content": "x", "branch": "x"})
+            self.assertEqual(got[:2], ("deny", "GO_SIGN"), got)
+            self.assertEqual(self.edit("NOTES.md", {"content": SIGNED})[0], "")  # file khác: luật không xét
+
+    def test_concurrent_decisions_consistent(self) -> None:
+        """Mỗi lời gọi có trạng thái duyệt riêng (`_GoShown`): chạy song song cho cùng kết quả như tuần tự."""
+        from concurrent.futures import ThreadPoolExecutor
+
+        cases = [(base, base.replace(old, new)) for base, old, new in LURES] + [(SIGNED_S, SIGNED_S + "x\n")]
+        for i, (base, _) in enumerate(cases):
+            self.put(f"docs/ops/GO-NO-GO-{i}.md", base)
+        jobs = [(f"docs/ops/GO-NO-GO-{i}.md", self.write_of(after)) for i, (_, after) in enumerate(cases)] * 4
+        want = [self.edit(rel, ti)[0] for rel, ti in jobs]
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            got = list(pool.map(lambda job: self.edit(*job)[0], jobs))
+        self.assertEqual(got, want)
+        self.assertEqual(want[: len(cases)], ["deny"] * len(LURES) + [""])
+
+    @staticmethod
+    def write_of(content: str) -> Dict[str, object]:
+        return {"content": content}
+
+    def test_lure_then_rebind_denied(self) -> None:
+        """Bước 1 thêm mồi `## 5` (không thêm dòng ký → cho chạy); bước 2 đổi `subject:` của file đã ký → D-392."""
+        signed = ANCHORED + SIGN_HEAD + SIGNED_ROW
+        for lure in ("<!--\n## 5. mồi\n-->\n", "```\n## 5. mồi\n```\n"):
+            with self.subTest(lure=lure):
+                self.put(GO_REL, signed)
+                self.assertEqual(self.write(GO_REL, signed.replace("## 1. Phạm vi", lure + "## 1. Phạm vi")), "")
+                lured = self.put(GO_REL, signed.replace("## 1. Phạm vi", lure + "## 1. Phạm vi")).read_text()
+                got = self.edit(GO_REL, {"content": lured.replace(SUBJ, SUBJ.replace("a" * 64, "d" * 64))})
+                self.assertEqual(got[:2], ("deny", "GO_SIGN"), got)
+                self.assertIn("D-392", got[2])
+                self.assertEqual(self.edit(GO_REL, {"content": lured.replace("v9.9.9\n\n", "v9.9.10\n\n")})[0], "deny")
+
+    def test_unsigned_with_comment_writes_allowed(self) -> None:
+        """File chưa ký có chú thích (như mẫu GO-NO-GO, §5 ở cuối): Write đổi tiêu đề/`subject:` vẫn cho chạy."""
+        text = ANCHORED.replace("Bản vá.", "Bản vá. <!-- ghi chú -->") + SIGN_HEAD + TEMPLATE_ROW
+        self.put(GO_REL, text)
+        self.assertEqual(self.write(GO_REL, text.replace(SUBJ, SUBJ.replace("a", "d"))), "")
+        self.assertEqual(self.write(GO_REL, text.replace("v9.9.9\n\n", "v9.9.10\n\n")), "")
 
 
 SUBJ = "subject: content `" + "a" * 64 + "`\n"
@@ -200,6 +491,123 @@ SUBJ_DIGEST = "> - Subject: digest " + "b" * 64 + "\n"
 ANCHORED = HEAD + SUBJ + SUBJ_DIGEST + "\n"
 SIGNED_S = ANCHORED + SIGN_HEAD + SIGNED_ROW + TAIL
 TEMPLATE_S = ANCHORED + SIGN_HEAD + TEMPLATE_ROW + TAIL
+NOTED_HEAD = HEAD.replace("Bản vá.", "Bản vá. <!-- ghi chú -->")
+# Mảnh dòng cho fuzz đồng bộ guard↔xt (AUD-SEC-615): tiêu đề, dòng ký trọn/mảnh, mọi cách mở/đóng khối ẩn của xt.
+FUZZ_LINES = (
+    "## 5. Ký",
+    "﻿## 5. Ký",
+    "## 6. Sau",
+    "## 1. x",
+    SIGNED_ROW[:-1],
+    SIGNED_ROW[:-1] + "\r",
+    "| Chủ repo | Bình | NO-GO | 2026-11-08 |",
+    TEMPLATE_ROW[:-1],
+    "| Chủ repo |",
+    "An | GO | 2026-11-07 |",
+    LURE_ROW[:-1],
+    "x -->" + SIGNED_ROW[:-1],
+    "|---|---|---|---|",
+    "```",
+    "````",
+    "~~~",
+    "> ```",
+    "- ```",
+    "1. ~~~",
+    "\t```",
+    "  ```",
+    "   ~~~",
+    "<!--",
+    "-->",
+    "a --> b",
+    "` --> ` <!-- `",
+    "<!-- x -->",
+    "<!-->",
+    "<?x",
+    "?>",
+    "<script>",
+    "</script>",
+    "<style>x</style>",
+    "<!DOCTYPE",
+    ">",
+    "<![CDATA[",
+    "]]>",
+    "    x",
+    "  > x",
+    "- x",
+    "chữ",
+    "",
+)
+
+
+def fuzz_texts(seed: int, count: int) -> List[str]:
+    rnd = random.Random(seed)
+    return ["\n".join(rnd.choices(FUZZ_LINES, k=rnd.randint(1, 12))) + rnd.choice(("", "\n")) for _ in range(count)]
+
+
+class GoNoGoXtSyncTest(GoNoGoGuardBase):
+    """AUD-TEST-100/AUD-SEC-615: bản chép tối thiểu `_markdown_shown` trong guard đồng bộ với xt (regex + hàm), và mọi
+    dòng ký `release-check` thấy thì guard thấy; dòng ký mới với xt thì guard chặn (fuzz seed cố định)."""
+
+    PAIRS = (
+        ("GO_SIGN_ROW_RE", "GO_SIGN_ROW_RE"),
+        ("GO_COMMENT_TOKEN_RE", "HTML_COMMENT_TOKEN_RE"),
+        ("GO_FENCE_RE", "SHOWN_FENCE_RE"),
+        ("GO_CLOSE_RE", "SHOWN_CLOSE_RE"),
+        ("GO_BLOCK_LINE_RE", "SHOWN_BLOCK_LINE_RE"),
+        ("GO_HTML_HIDDEN_RE", "HTML_HIDDEN_RE"),
+    )
+
+    def test_regex_copies_match(self) -> None:
+        for mine, theirs in self.PAIRS:
+            with self.subTest(mine):
+                a, b = getattr(guard, mine), getattr(xt, theirs)
+                self.assertEqual((a.pattern, a.flags), (b.pattern, b.flags))
+
+    def test_shown_copy_matches_fuzz(self) -> None:
+        for text in fuzz_texts(615, 4000):
+            self.assertEqual(guard._go_shown(text), xt._markdown_shown(text), repr(text))
+            mine = guard._go_sign_rows(text)
+            self.assertLessEqual(set(xt._go_sign_rows(text)), {(r[2], r[3]) for r in mine}, repr(text))
+            self.assertLessEqual(set(xt._go_signers(text)), {r[1] for r in mine}, repr(text))
+        for line in (x for t in fuzz_texts(100, 1500) for x in t.split("\n")):
+            for inside in (False, True):
+                self.assertEqual(guard._go_uncomment(line, inside), xt._strip_html_comments(line, inside), line)
+
+    def test_bytes_read_text_e2e_fuzz(self) -> None:
+        """Review lượt 2 🔴: nội dung ghi y nguyên ra BYTE, `release-check` đọc bằng `read_text` (universal newlines) —
+        dòng ký/tên xt thấy thì guard chặn Write vào file trống và MCP (xuống dòng ngẫu nhiên `\\n`/`\\r\\n`/`\\r`)."""
+        rnd = random.Random(2615)
+        path = self.root / GO_REL
+        hits = 0
+        for _ in range(4000):
+            lines = rnd.choices(FUZZ_LINES, k=rnd.randint(1, 10))
+            text = "".join(x + rnd.choice(("\n", "\r\n", "\r")) for x in lines)
+            path.write_bytes(text.encode("utf-8"))
+            shown = path.read_text(encoding="utf-8")
+            if not (xt._go_sign_rows(shown) or xt._go_signers(shown)):
+                continue
+            hits += 1
+            with mock.patch.object(guard, "_go_read", return_value=None):
+                self.assertIn("Không ghi dòng ký §5", guard._go_sign_deny(GO_REL, GO_REL, "/x", {"content": text}))
+            self.assertTrue(
+                guard._mcp_go_sign_why("mcp__github__create_or_update_file", {"path": GO_REL, "content": text})
+            )
+        self.assertGreater(hits, 40)
+
+    def test_new_xt_row_denied_fuzz(self) -> None:
+        """Lần ghi làm `release-check` thấy dòng ký mới (hay tên ký mới) → guard chặn (một chiều: guard còn luật thô)."""
+        texts = fuzz_texts(7, 3000)
+        pairs = list(zip(texts, texts[1:] + texts[:1]))
+        hits = 0
+        for before, after in pairs:
+            new = set(xt._go_sign_rows(after)) - set(xt._go_sign_rows(before))
+            new_names = set(xt._go_signers(after)) - set(xt._go_signers(before))
+            with mock.patch.object(guard, "_go_read", return_value=before):
+                why = guard._go_sign_deny(GO_REL, GO_REL, "/x", {"content": after})
+            if new or new_names:
+                hits += 1
+                self.assertIn("Không ghi dòng ký §5", why, (before, after))
+        self.assertGreater(hits, 40)  # fuzz thật sự chạm nhánh chặn
 
 
 class GoNoGoRebindTest(GoNoGoGuardBase):
@@ -223,41 +631,27 @@ class GoNoGoRebindTest(GoNoGoGuardBase):
         self.put(GO_REL, SIGNED_S)
         for old, new in self.EDITS:
             with self.subTest(old=old, new=new):
-                self.assert_rebind_denied(self.edit(GO_REL, {"old_string": old, "new_string": new}))
                 self.assert_rebind_denied(self.edit(GO_REL, {"content": SIGNED_S.replace(old, new, 1)}))
 
-    def test_unsigned_anchor_edits_allowed(self) -> None:
+    def test_unsigned_anchor_writes_allowed(self) -> None:
         self.put(GO_REL, TEMPLATE_S)
         for old, new in self.EDITS:
             with self.subTest(old=old, new=new):
-                self.assertEqual(self.edit(GO_REL, {"old_string": old, "new_string": new})[0], "")
-                self.assertEqual(self.edit(GO_REL, {"content": TEMPLATE_S.replace(old, new, 1)})[0], "")
+                self.assertEqual(self.write(GO_REL, TEMPLATE_S.replace(old, new, 1)), "")
 
     def test_drop_signature_with_anchor_change_allowed(self) -> None:
         self.put(GO_REL, SIGNED_S)
         rewritten = TEMPLATE_S.replace(SUBJ, SUBJ.replace("a" * 64, "f" * 64)).replace(
             "v9.9.9\n\n## 1", "v9.9.10\n\n## 1"
         )
-        self.assertEqual(self.edit(GO_REL, {"content": rewritten})[0], "")
-        edits = [
-            {"old_string": SIGNED_ROW, "new_string": TEMPLATE_ROW},
-            {"old_string": "# GO-NO-GO v9.9.9\n", "new_string": "# GO-NO-GO v9.9.10\n"},
-        ]
-        self.assertEqual(self.edit(GO_REL, {"edits": edits})[0], "")
-        self.assert_rebind_denied(self.edit(GO_REL, {"edits": edits[1:]}))
+        self.assertEqual(self.write(GO_REL, rewritten), "")
+        self.assert_rebind_denied(self.edit(GO_REL, {"content": SIGNED_S.replace("v9.9.9\n\n## 1", "v9.9.10\n\n## 1")}))
 
-    def test_signed_other_edits_allowed(self) -> None:
+    def test_signed_other_writes_allowed(self) -> None:
         self.put(GO_REL, SIGNED_S)
-        self.assertEqual(self.edit(GO_REL, {"old_string": "Bản vá.", "new_string": "Bản vá 2."})[0], "")
-        self.assertEqual(self.edit(GO_REL, {"old_string": "title: GO-NO-GO v9.9.9", "new_string": "title: x"})[0], "")
-        self.assertEqual(self.edit(GO_REL, {"content": SIGNED_S + "\nGhi chú.\n"})[0], "")
-
-    def test_loose_snippets_on_signed_file(self) -> None:
-        self.put(GO_REL, SIGNED_S)
-        got = self.edit(GO_REL, {"old_string": "# GO-NO-GO v1\n", "new_string": "# GO-NO-GO v2\n"})
-        self.assert_rebind_denied(got)
-        old = "# GO-NO-GO v1\n" + SIGNED_ROW  # đoạn cũ bỏ cả dòng ký: kết quả không còn chữ ký
-        self.assertEqual(self.edit(GO_REL, {"old_string": old, "new_string": "# GO-NO-GO v2\n"})[0], "")
+        self.assertEqual(self.write(GO_REL, SIGNED_S.replace("Bản vá.", "Bản vá 2.")), "")
+        self.assertEqual(self.write(GO_REL, SIGNED_S.replace("title: GO-NO-GO v9.9.9", "title: x")), "")
+        self.assertEqual(self.write(GO_REL, SIGNED_S + "\nGhi chú.\n"), "")
 
     def test_crlf_signed_title_change_denied(self) -> None:
         crlf = SIGNED_S.replace("\n", "\r\n")
@@ -274,7 +668,7 @@ class GoNoGoRebindTest(GoNoGoGuardBase):
 
 
 class GoNoGoBashTest(GoNoGoGuardBase):
-    """Bash ghi `GO-NO-GO*.md` → chặn (sửa bằng Edit để guard so dòng ký); đọc, xoá cả file, file khác → cho chạy."""
+    """Bash ghi `GO-NO-GO*.md` → chặn (sửa bằng Write để guard so dòng ký); đọc, xoá cả file, file khác → cho chạy."""
 
     def setUp(self) -> None:
         super().setUp()
@@ -708,6 +1102,9 @@ class GoNoGoMcpTest(GoNoGoGuardBase):
             ("mcp__github__delete_file", {"path": GO_REL, "content": SIGNED}),
             ("mcp__github__get_file_contents", {"path": GO_REL}),
         ):
+            # ADR-0074/D-402: tool ghi commit không nêu nhánh = nhánh mặc định → bị chặn như push `main`; ca này chỉ xét
+            # luật GO_SIGN nên ghi lên nhánh làm việc.
+            ti = {**ti, "branch": "claude/x"} if "get_file" not in name else ti
             self.assertEqual(self.mcp(name, ti)[0], "", (name, ti))
 
 

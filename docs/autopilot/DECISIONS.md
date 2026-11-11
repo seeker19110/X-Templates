@@ -333,9 +333,145 @@
 - Đường lùi: đổi ý → `loop decide` mới nhắc mục này và D-126 (kèm `--prod` nếu chuyển dịch vụ)
 - Khi chạy thật đã quyết (D-126): giữ tự host xt.py app (cục bộ, không hosting/tài khoản), chưa chuyển sang web app lưu trữ; xét lại khi thật sự cần nhiều người hay dùng trên điện thoại — chủ repo quyết 2026-11-08
 
+### D-401 · 2026-11-08T09:40:44+00:00 · Chủ repo 2026-11-08: 'cho agent ký GO-NO-GO' — agent ký §5 thế nào cho đúng và an toàn, áp ở đâu?
+
+- Phương án: (1) Khoá release_signoff: agent theo mẫu ADR-0069 (cây + nhánh chính, HARD_GATED); lệnh xt.py release-sign chỉ ký khi release-check không FAIL BLOCKER, việc người còn lại chỉ là chữ ký, subject khớp; ô tên ghi agent; guard chỉ cho một lệnh đơn chữ rõ; repo khung bật, mẫu dự án đích để trống (opt-in) · (2) Bỏ luật GO_SIGN, agent ghi dòng ký bằng Edit như người · (3) Cùng khoá nhưng mẫu dự án đích bật sẵn agent như stage_approval
+- Chọn: Khoá release_signoff: agent theo mẫu ADR-0069 (cây + nhánh chính, HARD_GATED); lệnh xt.py release-sign chỉ ký khi release-check không FAIL BLOCKER, việc người còn lại chỉ là chữ ký, subject khớp; ô tên ghi agent; guard chỉ cho một lệnh đơn chữ rõ; repo khung bật, mẫu dự án đích để trống (opt-in)
+- Lý do (tiêu chí chất lượng cuối): Tiêu chí 1 (đúng/an toàn, cách hiểu chặt): chữ ký agent chỉ có khi máy đã đạt mọi hàng BLOCKER và ghi rõ là agent (không mạo danh người, P1); quyền đến từ cấu hình đã commit ở nhánh chính nên phiên không tự cấp; tiêu chí 2: đường lùi một dòng. Dự án đích có thể có người dùng thật/DPIA nên chỉ bật khi chủ dự án chọn (phương án 3 chặt kém hơn).
+- Đường lùi: Đặt release_signoff: human hoặc xoá khoá ở xt.yaml (PR người merge); chữ ký agent cũ hết hạn sau release_approval_days
+
+### D-402 · 2026-11-08T10:03:55+00:00 · Phản biện ADR-0074: PR mồi vừa thêm release_signoff vào HARD_GATED_KEYS vừa bật khoá — steward chạy xt.py của main (chưa biết khoá) có thể tự merge; điều kiện ký chưa xét loop defer và quy mô M/L; in-process và --blueprint/--status làm giả release-check; đổi nhánh mặc định dời ruleset khỏi main. Làm gì?
+
+- Phương án: (1) Tách: PR này chỉ thêm mã + khoá dạng chú thích, PR sau bật khoá (người merge); release-sign đòi scale S và không còn loop defer; bỏ --blueprint/--status/--unchecked-must; guard chặn in-process sign/release, đổi nhánh mặc định, MCP ghi thẳng main · (2) Giữ một PR bật luôn khoá, ghi giới hạn vào ADR
+- Chọn: Tách: PR này chỉ thêm mã + khoá dạng chú thích, PR sau bật khoá (người merge); release-sign đòi scale S và không còn loop defer; bỏ --blueprint/--status/--unchecked-must; guard chặn in-process sign/release, đổi nhánh mặc định, MCP ghi thẳng main
+- Lý do (tiêu chí chất lượng cuối): Tiêu chí 1: khoá nới chỉ có hiệu lực khi người merge một PR mà máy đã biết là khoá chỉ người đổi; điều kiện ký chặt theo cách hiểu an toàn; đóng ba đường làm giả mà phản biện tìm ra. Tiêu chí 2: mỗi phần đảo ngược được bằng revert.
+- Đường lùi: Revert từng thay đổi guard/xt.py; khoá vẫn tắt nên không có hiệu lực tới khi PR bật được merge
+
 ### D-403 · 2026-11-08T10:39:31+00:00 · Cắt bản sau #472…#479 (decide-prod, AUD-HAR-325/327…331) — 3.33.0 hay 3.32.1, cắt ngay hay chờ PR đang mở (#474, #480)?
 
 - Phương án: (1) 3.33.0 (minor) cắt ngay từ main a09f7a7: thêm lệnh loop decide-prod và mẫu GO-NO-GO #18 trỏ lệnh này (đổi việc dự án đích); AUD-HAR-329 làm GO-NO-GO đã ký của dự án đích về chờ người — vá sớm; PR đang mở vào bản kế · (2) 3.32.1 (patch) cắt ngay · (3) Chờ #480/#474 merge rồi cắt chung
 - Chọn: 3.33.0 (minor) cắt ngay từ main a09f7a7: thêm lệnh loop decide-prod và mẫu GO-NO-GO #18 trỏ lệnh này (đổi việc dự án đích); AUD-HAR-329 làm GO-NO-GO đã ký của dự án đích về chờ người — vá sớm; PR đang mở vào bản kế
 - Lý do (tiêu chí chất lượng cuối): (1) đúng: SemVer — #478 thêm lệnh mới và đổi mẫu dự án đích, không phải vá thuần; AUD-HAR-329 đang làm chữ ký §5 của dự án đích về pending_human khi ghi quyết định vào bản tháng — giữ lại là để lỗi chạy tiếp; release-check trên main a09f7a7 ra GO (sau unshallow); (2) PR đang mở chưa review/CI đỏ (#480 gitleaks), chờ chúng là treo bản vá vô hạn; AGENTS §7 cắt bản sớm khi đổi việc dự án đích
 - Đường lùi: Không merge PR cắt bản; hoặc cắt bản vá sau đó
+
+### D-404 · 2026-11-09T01:53:24+00:00 · PR #480 (release-sign, ADR-0074): kiểm lại bản sửa ac81683 còn 2 🔴 (NO-GO người trên nhánh PR bị xoá rồi ký; dự án thư mục con quét rỗng) và 🟠 (ô Không GO/Hold, đổi VERSION né lọc, dòng NO-GO thiếu ngày, xoá đã lên main). Sửa thế nào?
+
+- Phương án: (1) Quét LỊCH SỬ: release_sign từ chối khi bất kỳ blob GO-NO-GO*.md (mọi thư mục, mọi độ sâu, mọi phiên bản) từng xuất hiện trong lịch sử của mọi ref cục bộ và remote (git log --all) có dòng quyết định của người (tên khác agent) mà ô quyết định không phải GO — kể cả thiếu ngày/ô ?; lời từ chối chỉ hết hiệu lực khi một commit sau nó thêm dòng GO của người, hoặc quá release_approval_days tính từ ngày commit; không đọc được lịch sử → từ chối · (2) Vá từng lỗ trên cách quét hiện có (thêm ref nhánh PR, sửa đường thư mục con, coi ô ? là từ chối, bỏ lọc VERSION) · (3) Bỏ hẳn release-sign khỏi PR này, chỉ giữ nghiên cứu + ADR ở trạng thái Đề xuất
+- Chọn: Quét LỊCH SỬ: release_sign từ chối khi bất kỳ blob GO-NO-GO*.md (mọi thư mục, mọi độ sâu, mọi phiên bản) từng xuất hiện trong lịch sử của mọi ref cục bộ và remote (git log --all) có dòng quyết định của người (tên khác agent) mà ô quyết định không phải GO — kể cả thiếu ngày/ô ?; lời từ chối chỉ hết hiệu lực khi một commit sau nó thêm dòng GO của người, hoặc quá release_approval_days tính từ ngày commit; không đọc được lịch sử → từ chối
+- Lý do (tiêu chí chất lượng cuối): (1) đúng và an toàn: lịch sử git là nơi lời từ chối của người không xoá được bằng commit mới — đóng cùng lúc nhánh PR, xoá đã lên main, đổi tên/đổi VERSION, thư mục con (pathspec theo tên ở mọi độ sâu), dòng thiếu ngày/ô ?; phương án 2 vẫn là danh sách chặn từng lỗ (đã vỡ 2 lần); (2) giữ đường lùi: khoá release_signoff vẫn tắt mặc định, bỏ dòng khoá là về người ký; (3) một luật, test được bằng fixture sẵn có; phương án 3 bỏ yêu cầu của chủ repo (D-401) khi có cách làm đúng. Còn lại có từ trước, ghi nợ: neo tin cậy ref theo dõi cũ (agent không fetch) — cùng lớp release_agent_signoff/_main_key_is
+- Đường lùi: Revert commit sửa; hoặc bỏ release-sign (phương án 3)
+
+### D-405 · 2026-11-09T02:15:25+00:00 · D-404 (quét lịch sử lời từ chối GO-NO-GO): hạn hiệu lực theo release_approval_days đọc từ xt.yaml cây làm việc — agent đặt release_approval_days: 1 là mọi NO-GO cũ hết hiệu lực. Giữ hạn thế nào?
+
+- Phương án: (1) Bỏ hết hạn theo tuổi: lời từ chối của người chỉ gỡ bằng một dòng GO của người ở commit sau (thay một phần D-404) · (2) Đưa release_approval_days vào HARD_GATED_KEYS (ảnh hưởng cả promotion) · (3) Hạn = max(cấu hình, 30 ngày) · (4) Đọc khoá cả ở nhánh chính như _main_key_is
+- Chọn: Bỏ hết hạn theo tuổi: lời từ chối của người chỉ gỡ bằng một dòng GO của người ở commit sau (thay một phần D-404)
+- Lý do (tiêu chí chất lượng cuối): (1) đúng và an toàn: không còn tham số agent sửa được trong điều kiện ký; người đã từ chối thì người gỡ — đúng ý ADR-0074 'Giữ: lời từ chối NO-GO'; phương án 3 vẫn hết hạn tự động, 2/4 thêm bề mặt cấu hình; (3) bỏ một nhánh mã và một nguồn cấu hình, test được; (4) dự án có NO-GO cũ mà người chưa ký GO lần nào sau đó thì agent không ký được — người ký một lần là gỡ
+- Đường lùi: Khôi phục nhánh hết hạn theo release_approval_days (D-404 nguyên bản)
+
+### D-406 · 2026-11-09T06:03:25+00:00 · PR #480 vòng kiểm 3: quét lịch sử git CỤC BỘ (D-404) lách được bằng lệnh guard cho qua — merge -s ours (giản lược lịch sử), fetch --depth=1 (shallow), branch -rd / filter-branch / push --delete (xoá ref), fetch repo ngoài (GO người lạ gỡ mọi NO-GO); config log.showRoot; gỡ lời từ chối toàn cục; chặn oan GO viết tự do. Neo tin cậy ở đâu?
+
+- Phương án: (1) Neo ở REMOTE: release_sign tự clone --mirror mới của remote origin (gồm refs/pull/*/head GitHub giữ vĩnh viễn) vào thư mục tạm, cấu hình git cô lập (GIT_CONFIG_GLOBAL/NOSYSTEM, -c log.showRoot=true), quét git log --all --full-history -p ở đó; lời từ chối = hợp của bản mirror và lịch sử cục bộ; dòng GO gỡ lời từ chối CHỈ tính từ bản mirror và chỉ gỡ lời từ chối cùng phiên bản (vX.Y.Z trong tên tệp/tiêu đề) hoặc phiên bản lớn hơn; không clone được (mạng, không có origin) → từ chối; nhận ô GO viết tự do (bỏ **, sau GO là dấu câu/chữ) · (2) Vá tiếp trên lịch sử cục bộ: chặn branch -rd/fetch --depth/merge -s ours ở guard, --full-history, lọc ref ngoài · (3) Rút release-sign khỏi PR #480, giữ nghiên cứu + ADR-0074 ở trạng thái Đề xuất, làm lại ở PR riêng
+- Chọn: Neo ở REMOTE: release_sign tự clone --mirror mới của remote origin (gồm refs/pull/*/head GitHub giữ vĩnh viễn) vào thư mục tạm, cấu hình git cô lập (GIT_CONFIG_GLOBAL/NOSYSTEM, -c log.showRoot=true), quét git log --all --full-history -p ở đó; lời từ chối = hợp của bản mirror và lịch sử cục bộ; dòng GO gỡ lời từ chối CHỈ tính từ bản mirror và chỉ gỡ lời từ chối cùng phiên bản (vX.Y.Z trong tên tệp/tiêu đề) hoặc phiên bản lớn hơn; không clone được (mạng, không có origin) → từ chối; nhận ô GO viết tự do (bỏ **, sau GO là dấu câu/chữ)
+- Lý do (tiêu chí chất lượng cuối): (1) đúng và an toàn: agent không viết lại được lịch sử remote (guard chặn force-push, ruleset main) và không xoá được refs/pull/* — đóng cả lớp xoá ref/shallow/rewrite/repo ngoài một lần, thay vì danh sách chặn guard (đã vỡ 3 vòng); GO gỡ chỉ từ remote nên fetch repo ngoài không gỡ được; fail-closed khi offline; (2) đường lùi: khoá release_signoff vẫn tắt mặc định; (3) một nguồn tin cậy, test bằng remote bare cục bộ; (4) chi phí: clone mirror mỗi lần ký — chấp nhận, ký hiếm. Phương án 3 bỏ yêu cầu D-401 khi đã có cách làm đúng. Giới hạn còn lại đã khai: GO_SIGN lọt tên dựng lúc chạy (dòng GO giả tên người) — ranh giới là sandbox
+- Đường lùi: Revert commit; hoặc phương án 3
+
+### D-407 · 2026-11-09T07:58:16+00:00 · AUD-SEC-551 (nợ #480): guard cho git push --delete nhánh remote khác main và filter-branch -- --all; NO-GO của người trên nhánh chưa có PR bị xoá thì release-sign ký được. Sửa thế nào?
+
+- Phương án: (1) Guard xếp vào nhóm không đảo ngược (deny): xoá nhánh/tag remote khác nhánh hiện tại của phiên — git push <remote> --delete|-d <ref>, git push <remote> :<ref>, git push --prune, gh api -X DELETE …/git/refs/…; và git filter-branch / filter-repo có --all hoặc --branches/--tags; xoá nhánh của chính phiên (HEAD hiện tại) vẫn cho · (2) Chỉ ghi luật: NO-GO của người phải đi qua PR (refs/pull/*) mới bền; không đổi guard · (3) release-sign từ chối khi reflog/ref theo dõi cục bộ có nhánh remote đã mất
+- Chọn: Guard xếp vào nhóm không đảo ngược (deny): xoá nhánh/tag remote khác nhánh hiện tại của phiên — git push <remote> --delete|-d <ref>, git push <remote> :<ref>, git push --prune, gh api -X DELETE …/git/refs/…; và git filter-branch / filter-repo có --all hoặc --branches/--tags; xoá nhánh của chính phiên (HEAD hiện tại) vẫn cho
+- Lý do (tiêu chí chất lượng cuối): (1) đúng và an toàn: xoá nhánh của người khác và viết lại mọi ref là hành động khó đảo ngược — đúng nhóm máy chặn của ADR-0018, và đóng đường xoá NO-GO khỏi neo D-406; phương án 2 để lỗ mở, 3 không đáng tin (reflog/ref cục bộ agent sửa được); (2) đường lùi: người tự chạy lệnh ngoài phiên; xoá nhánh của chính phiên vẫn được; (3) luật guard test được bằng payload giả + autonomy-bench (đo chặn oan trên corpus)
+- Đường lùi: Gỡ luật mới khỏi guard (revert PR)
+
+### D-408 · 2026-11-09T13:20:05+00:00 · AUD-SEC-571 (🔴): cờ ăn giá trị đứng trước lệnh con gh (cobra nhấc lên) lách các luật gh khác (api xoá repo, api xoá ref, api gộp PR, repo edit visibility). Sửa thế nào?
+
+- Phương án: (1) Chuẩn hoá một lần ở đầu _gh_rule: tách cờ ăn giá trị trước lệnh con theo cobra stripFlags rồi dời đường lệnh con lên đầu, mọi luật gh đọc dạng đã chuẩn hoá; giữ cách đọc cũ làm đường chặt (deny nếu một trong hai cách đọc deny) · (2) Vá từng luật (api, các cặp trong GH_ASK)
+- Chọn: Chuẩn hoá một lần ở đầu _gh_rule: tách cờ ăn giá trị trước lệnh con theo cobra stripFlags rồi dời đường lệnh con lên đầu, mọi luật gh đọc dạng đã chuẩn hoá; giữ cách đọc cũ làm đường chặt (deny nếu một trong hai cách đọc deny)
+- Lý do (tiêu chí chất lượng cuối): (1) đúng và an toàn: đóng cả lớp một lần cho mọi luật gh hiện có và sau này — vá từng luật đã để lọt ở AUD-SEC-570 rồi 571; đọc cả hai cách (như push AUD-SEC-102) giữ chiều chặt; (3) một chỗ, test được bằng corpus; (2) đường lùi: revert
+- Đường lùi: Revert PR sửa AUD-SEC-571
+
+### D-409 · 2026-11-09T16:03:32+00:00 · AUD-SEC-575/577/578/579 + AUD-DOC-281: ngoài _gh_rule, các nơi khác trong guard đọc lệnh gh nguyên văn (_gh_kind cho alias/extension/lệnh lạ, luật dấu review, luật ghi công AI/tiêu đề PR, luật gửi bí mật) nên cờ đứng trước lệnh con lách được. Sửa thế nào?
+
+- Phương án: (1) Một điểm vào duy nhất: mọi luật đọc lệnh gh nhận dạng chuẩn hoá cobra (đường lệnh con theo cobra stripFlags, KHÔNG phụ thuộc bảng nhóm khi xác định token đầu — để alias/extension/lệnh lạ cũng được nhận đúng) và dạng nguyên văn; quyết định chặt hơn thắng; thay D-408 ở phạm vi (D-408 chỉ áp trong _gh_rule) · (2) Vá từng luật còn lại
+- Chọn: Một điểm vào duy nhất: mọi luật đọc lệnh gh nhận dạng chuẩn hoá cobra (đường lệnh con theo cobra stripFlags, KHÔNG phụ thuộc bảng nhóm khi xác định token đầu — để alias/extension/lệnh lạ cũng được nhận đúng) và dạng nguyên văn; quyết định chặt hơn thắng; thay D-408 ở phạm vi (D-408 chỉ áp trong _gh_rule)
+- Lý do (tiêu chí chất lượng cuối): (1) đúng và an toàn: đã vá từng luật hai lần (570, 571) và vẫn sót ba lớp — một điểm vào đóng cả lớp kể cả luật thêm sau; đọc hai cách giữ chiều chặt; (3) một hàm, test bằng corpus đối chiếu dạng cờ-trước-lệnh-con với dạng chuẩn cho MỌI ca gh đang có
+- Đường lùi: Revert PR sửa
+
+### D-410 · 2026-11-10T06:37:59+00:00 · Review #491: phần gỡ chặn oan REVIEW_FORGE (AUD-HAR-364: GH_POST_ARGV_RE, _gh_wrapped điều kiện dương) nới hai đường giả dấu review mà main chặn (lệnh con dính mở rộng rỗng gh pr comment$Z; lệnh trong tham số sh -c và giá trị TÊN=… như GIT_EDITOR). Xử lý thế nào?
+
+- Phương án: (1) Rút phần AUD-HAR-364 khỏi #491, khôi phục hành vi main cho lọc dấu review, thêm test ghim mọi dạng giả dấu reviewer tìm ra (deny REVIEW_FORGE); AUD-HAR-364 về mở, làm lại ở PR riêng với thiết kế chặt · (2) Vá ngay trong #491 (đuôi regex nhận $/backtick, quay về phép thử chữ ghép khi có token động, đọc giá trị TÊN=… như chữ shell)
+- Chọn: Rút phần AUD-HAR-364 khỏi #491, khôi phục hành vi main cho lọc dấu review, thêm test ghim mọi dạng giả dấu reviewer tìm ra (deny REVIEW_FORGE); AUD-HAR-364 về mở, làm lại ở PR riêng với thiết kế chặt
+- Lý do (tiêu chí chất lượng cuối): (1) đúng và an toàn: REVIEW_FORGE là luật 🔴; gỡ một chặn oan 🟢 không đáng đổi bằng hai đường giả dấu — rút về main là chắc chắn không nới; vá tại chỗ là thiết kế mới chưa được review; (2) đường lùi: PR riêng cho AUD-HAR-364; (3) test ghim giữ chiều chặt cho lần sau
+- Đường lùi: Khôi phục phần AUD-HAR-364 ở PR riêng sau review
+
+### D-411 · 2026-11-10T07:46:13+00:00 · AUD-SEC-587 (tên lệnh/cờ gh có mở rộng): ở XT_GUARD_POLICY=strict trả ask/BUDGET hay raise ScanTooComplex (chặn ở mọi chính sách như lớp A ADR-0065)?
+
+- Phương án: (1) ask/BUDGET: mặc định chặn, strict hỏi người; lệnh có dấu review giữ mã REVIEW_FORGE · (2) ScanTooComplex: chặn ở mọi chính sách; ca REVIEW_FORGE đổi thành BUDGET
+- Chọn: ask/BUDGET: mặc định chặn, strict hỏi người; lệnh có dấu review giữ mã REVIEW_FORGE
+- Lý do (tiêu chí chất lượng cuối): (1) an toàn: không có đường cho qua — mặc định chặn, strict là chế độ người duyệt từng lệnh nên hỏi là đúng ngữ nghĩa strict; (3) giữ mã REVIEW_FORGE chính xác hơn cho lệnh giả dấu, test ghim D-410 không phải đổi
+- Đường lùi: Đổi _gh_dyn_name sang raise ScanTooComplex
+
+### D-412 · 2026-11-10T09:22:40+00:00 · Câu hỏi mở của executor #492 (mở rộng trong nháy kép đứng riêng ở vị trí cờ; mở rộng không nháy dính sau chữ; lệnh đăng chữ với biến đứng riêng): sửa ngay trong #492 hay ghi nợ?
+
+- Phương án: (1) Ghi nợ 🟠 riêng (AUD-SEC-591…593), làm ở lát sau với thiết kế chung (xét phương án miễn đối số vị trí đầu) · (2) Mở rộng #492 chặn mọi token chỉ gồm mở rộng ở lệnh có luật cờ
+- Chọn: Ghi nợ 🟠 riêng (AUD-SEC-591…593), làm ở lát sau với thiết kế chung (xét phương án miễn đối số vị trí đầu)
+- Lý do (tiêu chí chất lượng cuối): (1) an toàn: #492 không nới gì, chỉ chặt thêm; các dạng còn hở đã hở trên main và có dòng sổ; (3) phương án chặn rộng chặn oan lệnh đóng/merge PR có số PR trong biến — cần đo trên lệnh thật trước khi chọn; lát nhỏ (P8)
+- Đường lùi: Gộp vào lát sau
+
+### D-413 · 2026-11-10T11:52:01+00:00 · release-sign (AUD-HAR-340, #493): không worktree nào có .autopilot/state.json thì sao?
+
+- Phương án: (1) Từ chối ký (fail-closed); cần loop init trước — đường /complete đã có bước này · (2) Coi sổ vắng là không có việc chờ
+- Chọn: Từ chối ký (fail-closed); cần loop init trước — đường /complete đã có bước này
+- Lý do (tiêu chí chất lượng cuối): (1) đúng và an toàn: .autopilot/ không commit nên clone riêng không biết sổ dự án chính — coi vắng là sạch mở lại đúng lỗ AUD-HAR-340; (2) đường lùi: loop init tạo sổ rỗng; khoá release_signoff hiện chưa bật nên không chặn ai
+- Đường lùi: Cho sổ vắng ở mọi worktree là không có việc chờ
+
+### D-414 · 2026-11-10T15:03:52+00:00 · Workflow thiết kế AUD-SEC-591/592/593 phát hiện lỗi gốc: từ chỉ gồm toán tử shell trong nháy (';' hay dấu ống trong nháy đơn) làm tokenize/split_commands cắt lệnh ở MỌI luật (git push có --force sau ';' trong nháy được cho qua — đã tái hiện). Thứ tự làm và 4 điểm spec để phiên chính quyết?
+
+- Phương án: (1) Sửa gốc tokenizer trước ở PR riêng (🔴), rồi PR cài spec 591/592/593 không cần vá tạm R0; nhận cả 4 khuyến nghị của spec: bỏ miễn trừ thân không nháy, pr close chế độ tail, bảng 12 hàng lệnh đăng chữ · (2) Cài spec kèm vá tạm R0 trong lớp gh trước, mở dòng 🔴 cho gốc làm sau
+- Chọn: Sửa gốc tokenizer trước ở PR riêng (🔴), rồi PR cài spec 591/592/593 không cần vá tạm R0; nhận cả 4 khuyến nghị của spec: bỏ miễn trừ thân không nháy, pr close chế độ tail, bảng 12 hàng lệnh đăng chữ
+- Lý do (tiêu chí chất lượng cuối): (1) đúng và an toàn: lỗi gốc lách cả luật force-push và no-verify, nặng hơn ba nợ 🟠 — sửa gốc đóng mọi luật, vá tạm chỉ đóng gh; (3) đơn giản hơn: không thêm R0 rồi gỡ; các khuyến nghị spec đều là cách hiểu chặt hơn và đã đo 0 chặn oan trên lệnh thật
+- Đường lùi: Tách lại: R0 trong lớp gh
+
+### D-415 · 2026-11-11T03:22:00+00:00 · Review #495 BLOCKING: 7 hồi quy 🔴 đều đến từ phần mở rộng (GlueWord, _SubstTrack/PROCSUB_WORD, đường lùi flat của tokenize), còn lõi LitWord được xác nhận đúng và không chặn oan. Sửa thế nào?
+
+- Phương án: (1) Thu hẹp #495 về lõi: giữ LitWord + bỏ chuyển hướng ở chữ đọc lại (eval, echo nối ống sang sh) + watch; gỡ GlueWord, _SubstTrack/PROCSUB_WORD và đường lùi flat, trả hành vi của main cho thay tiến trình/thay lệnh; các dạng thay tiến trình/thay lệnh che phần sau (main cũng hở) ghi 🔴 mở riêng, làm ở PR sau theo hướng chặn khi không đọc chắc · (2) Vá từng hồi quy trong #495, giữ nguyên thiết kế mở rộng
+- Chọn: Thu hẹp #495 về lõi: giữ LitWord + bỏ chuyển hướng ở chữ đọc lại (eval, echo nối ống sang sh) + watch; gỡ GlueWord, _SubstTrack/PROCSUB_WORD và đường lùi flat, trả hành vi của main cho thay tiến trình/thay lệnh; các dạng thay tiến trình/thay lệnh che phần sau (main cũng hở) ghi 🔴 mở riêng, làm ở PR sau theo hướng chặn khi không đọc chắc
+- Lý do (tiêu chí chất lượng cuối): (1) đúng và an toàn: phần mở rộng đã hai lượt liên tiếp sinh hồi quy — mỗi lần vá thêm một cách đọc là thêm chỗ lệch với bash; gỡ về main chắc chắn không yếu hơn main ở lớp đó; lõi LitWord đóng đúng lỗ đã tái hiện; (2) đường lùi: PR riêng cho lớp thay tiến trình; (3) nhỏ, review được (P8) — diff hiện 647 dòng
+- Đường lùi: Khôi phục phần mở rộng ở PR riêng
+
+### D-416 · 2026-11-11T08:34:16+00:00 · Duyệt PLAN-harden-2026-11-11 (audit delta 454d146..7ca87a6: 3 🔴 mới, 5 🟠 mới, 4 🔴 guard có từ trước, tối ưu có số)
+
+- Phương án: (1) Sửa mọi 🔴 (mới + có từ trước) và 🟠 mới theo lát ≤150 dòng, tối ưu rủi ro thấp có số; 🟠 guard có từ trước để PLAN kế · (2) Chỉ sửa 🔴 mới rồi cắt bản; phần còn lại ghi nợ · (3) Gom mọi 🔴/🟠 mở (kể cả 16 🟠 cũ) và cache bytecode guard vào một đợt
+- Chọn: Sửa mọi 🔴 (mới + có từ trước) và 🟠 mới theo lát ≤150 dòng, tối ưu rủi ro thấp có số; 🟠 guard có từ trước để PLAN kế
+- Lý do (tiêu chí chất lượng cuối): (1) đúng và an toàn: 7 🔴 mở đều là đường lách hàng rào hoặc ghi ngoài dự án — sửa hết trước khi cắt 3.34.0; (2) giữ đường lùi: mỗi lát một PR nhỏ, test đỏ trước; (3) bền: 609/606 theo bài học D-415 (không đọc chắc → BUDGET); cache bytecode ngược AUD-SEC-074 nên cần ADR riêng; (5) phương án 3 quá rộng cho một đợt
+- Đường lùi: Revert từng PR lát; PLAN kế nhận phần còn lại
+
+### D-417 · 2026-11-11T14:21:06+00:00 · AUD-SEC-615: guard GO_SIGN mô hình tool Edit thế nào khi ba lượt review liên tiếp đều tìm ra chỗ mô hình lệch tool thật (CR trần, new_string rỗng nuốt xuống dòng, khớp dự phòng nháy cong và escape unicode, old phải duy nhất)?
+
+- Phương án: (1) Thêm tiếp từng mô hình Edit theo mã tool hiện hành · (2) Chặt: với file GO-NO-GO, Edit/MultiEdit chỉ cho qua khi không mang nội dung dạng dòng ký hay neo; mọi thay đổi chạm §5, tiêu đề, subject đi bằng Write cả file — Write là nội dung y nguyên nên guard đọc đúng như release-check; CR không kèm LF và BOM lệch đĩa thì chặn · (3) Giữ bản vá lượt 3, ghi nợ các ca còn lọt
+- Chọn: Chặt: với file GO-NO-GO, Edit/MultiEdit chỉ cho qua khi không mang nội dung dạng dòng ký hay neo; mọi thay đổi chạm §5, tiêu đề, subject đi bằng Write cả file — Write là nội dung y nguyên nên guard đọc đúng như release-check; CR không kèm LF và BOM lệch đĩa thì chặn
+- Lý do (tiêu chí chất lượng cuối): Tiêu chí 1 (đúng và an toàn, cách hiểu chặt hơn) và 3 (đơn giản, test được): mô hình theo mã tool bị minify sẽ lệch mỗi lần tool đổi bản — đúng bài học D-415 (ca không đọc chắc thì chặn, không thêm cách đọc mới). Write cả file không cần mô hình. Giá phải trả: agent sửa GO-NO-GO bằng Write thay Edit (tiêu chí 4, thấp hơn).
+- Đường lùi: Bỏ luật chặn Edit trên GO-NO-GO và quay lại mô hình hai cách áp của lượt 3 (patch lượt 3 lưu ở scratch slices/sec615.patch trước khi sửa)
+
+### D-418 · 2026-11-11T14:21:20+00:00 · D-417 nói Edit trên GO-NO-GO cho qua khi không mang nội dung dạng dòng ký — nhưng ca A1 của review lượt 3 (Edit xoá một ký tự làm hai dòng nối thành dòng ký) không mang nội dung như vậy. Phạm vi luật chặn Edit là gì?
+
+- Phương án: (1) Chặn mọi Edit/MultiEdit lên file GO-NO-GO (kể cả file chưa ký); sửa GO-NO-GO chỉ bằng Write cả file hoặc xt.py release-sign · (2) Chỉ chặn Edit có nội dung dạng dòng ký/neo như chữ của D-417
+- Chọn: Chặn mọi Edit/MultiEdit lên file GO-NO-GO (kể cả file chưa ký); sửa GO-NO-GO chỉ bằng Write cả file hoặc xt.py release-sign
+- Lý do (tiêu chí chất lượng cuối): Tiêu chí 1: một Edit bất kỳ có thể nối dòng thành chữ ký mà chuỗi old/new không lộ gì; chỉ luật không phụ thuộc mô hình tool mới đóng được lớp này. Đính chính phạm vi D-417, không đổi hướng.
+- Đường lùi: Nới về phương án 2 kèm mô hình Edit của lượt 3
+
+### D-419 · 2026-11-11T17:40:19+00:00 · Chủ dự án 2026-11-11 (tầm nhìn xưởng tự động đầu-cuối: người chỉ nêu ý tưởng, ra sản phẩm triển khai được) trả lời ba câu hỏi của phiên: song song nếu không chạm cùng file; thiết lập sau khi lên bản dev; ở mọi quy mô — máy hoá thế nào?
+
+- Phương án: (1) ADR-0075: dây chuyền đầu-cuối trên lõi hiện có — đơn vị thành công là ý tưởng tới bản dev có receipt không hỏi người; song song mặc định khi files: đã khai không giao và diff thật nằm trong files: (máy kiểm), file mọi PR cùng chạm do phiên điều phối ghi hoặc theo mảnh; agent ký và duyệt giai đoạn ở S/M/L qua khoá HARD_GATED với hàng bằng chứng máy thay dòng người dùng thử; việc người gom một checklist in ra khi bản dev xanh; cơ chế chất lượng bù (nghiệm thu độc lập, đúng digest, tự quay lui, chữ ký chặn phân phối) merge trước phần nới · (2) Giữ lộ trình cũ: ADR-0068 lát C–E và S1–S11 của research 2026-11-08, tuần tự, agent ký chỉ ở quy mô S · (3) Nền tảng điều phối tập trung quản agent, build, deploy nhiều dự án
+- Chọn: ADR-0075: dây chuyền đầu-cuối trên lõi hiện có — đơn vị thành công là ý tưởng tới bản dev có receipt không hỏi người; song song mặc định khi files: đã khai không giao và diff thật nằm trong files: (máy kiểm), file mọi PR cùng chạm do phiên điều phối ghi hoặc theo mảnh; agent ký và duyệt giai đoạn ở S/M/L qua khoá HARD_GATED với hàng bằng chứng máy thay dòng người dùng thử; việc người gom một checklist in ra khi bản dev xanh; cơ chế chất lượng bù (nghiệm thu độc lập, đúng digest, tự quay lui, chữ ký chặn phân phối) merge trước phần nới
+- Lý do (tiêu chí chất lượng cuối): Chủ dự án chốt ba trả lời; phiên chọn cách máy hoá theo tiêu chí chất lượng cuối: (1) đúng/an toàn — điều kiện song song do máy kiểm thay lời khai, khoá nới vẫn trong HARD_GATED_KEYS và người merge một lần, tiền/dữ liệu thật/pháp lý vẫn qua grant và loop defer, cơ chế bù có trước phần nới; (2) đường lùi — mỗi năng lực một khoá, mỗi lát một PR; (3) đơn giản — dựng trên xt.py, install.py, gói và registry sẵn có, không tách xt.py, một gói trong 3.x; phương án 2 không cho bản chạy và M/L luôn chờ người, phương án 3 đã loại ở ADR-0068. Thay một phần D-142 (không song song worktree), mặc định self của ADR-0061, điều kiện scale S của ADR-0074, giai đoạn 2/3 chỉ người của ADR-0058/0069 — có hiệu lực khi lát tương ứng có mã
+- Đường lùi: PR này chỉ có tài liệu: revert là về hiện trạng; khi có mã, mỗi năng lực lùi bằng khoá của nó (song song về self, release_signoff và khoá giai đoạn về human hoặc bỏ khoá)
+
+### D-420 · 2026-11-11T17:40:19+00:00 · Duyệt PLAN-factory-e2e (ADR-0075): 24 task T-3740…T-3763 trong 8 lát — thứ tự nào?
+
+- Phương án: (1) Bản dev trước (Lát 0–2, pilot 1) → chất lượng bù (Lát 3) → song song (Lát 4) → mọi quy mô (Lát 5, sau Lát 3) → thiết lập một lần và production (Lát 6) → vòng học, kênh vào, pilot 2 (Lát 7) · (2) Song song và worker ngoài phiên trước để mọi lát sau chạy nhanh hơn, rồi mới bản dev · (3) Mở mọi quy mô trước (bỏ scale S của release-sign, giai đoạn 2/3) rồi mới nghiệm thu độc lập và bản dev
+- Chọn: Bản dev trước (Lát 0–2, pilot 1) → chất lượng bù (Lát 3) → song song (Lát 4) → mọi quy mô (Lát 5, sau Lát 3) → thiết lập một lần và production (Lát 6) → vòng học, kênh vào, pilot 2 (Lát 7)
+- Lý do (tiêu chí chất lượng cuối): (1) đúng/an toàn: phần nới ở M/L chỉ vào sau khi nghiệm thu độc lập, receipt và tự quay lui đã merge — phương án 3 bỏ chốt người khi chưa có gì bù; (2) đường lùi: lát dọc mỏng trước cho số đo thật (pilot 1) trước khi đổi mô hình điều phối; (3) đơn giản: trong repo khung phần lớn task cùng ghi scripts/xt.py nên song song trước (phương án 2) ít lợi mà thêm rủi ro tích hợp khi chưa có phép so diff với files:; đúng lời chủ dự án thiết lập sau khi lên bản dev — không việc người nào trước pilot 1; công nghệ bản dev chưa chọn, T-3740 tra nguồn sống rồi T-3741 chốt bằng ADR
+- Đường lùi: Xoá hoặc sửa PLAN-factory-e2e.md bằng PR; task chưa có mã nên không cần hoàn tác gì khác
+- Đính chính (2026-11-11, cùng PR): chủ dự án hỏi "có bao gồm các đề xuất bổ sung chưa" — đối chiếu bảy đề xuất thấy sót Routine tuần/phân loại phản hồi, PR nâng dự án đích sau tag và chi phí mỗi lát → thêm T-3764, T-3765, sửa T-3754; PLAN nay 26 task T-3740…T-3765, thứ tự lát không đổi.
+- Đính chính số (khi gộp `main` #503, 2026-11-11): `main` đã cấp T-3740 cho việc khác ở PLAN-harden-2026-11-11 — task nghiên cứu của PLAN-factory-e2e đánh số lại thành T-3766 để không tái sử dụng ID; PLAN là T-3741…T-3766.
+- Đính chính số (khi gộp `main` #504, 2026-11-11): `main` tiếp tục cấp T-3741, T-3742 cho việc khác ở PLAN-harden-2026-11-11 — cả dải của PLAN-factory-e2e dời sang T-3841…T-3866 (T-37xx → T-38xx, giữ hai chữ số cuối) để hết trùng với phiên đang cấp số tuần tự; các số T-37xx ở mục này và ở commit cũ của nhánh đọc theo phép dời đó.
