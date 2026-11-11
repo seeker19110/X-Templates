@@ -5609,7 +5609,8 @@ def _git_branch(args: List[str]) -> Tuple[str, str]:
     return "", ""
 
 
-GIT_DASHED_REWRITERS = frozenset({"git-filter-repo", "git-filter-branch"})  # lệnh git chạy thẳng dạng `git-<tên>`
+# lệnh git chạy thẳng dạng `git-<tên>` (PATH, `/usr/lib/git-core/`) — xét như `git <tên>`; plumbing đẩy: `_git_dashed`
+GIT_DASHED_REWRITERS = frozenset({"git-filter-repo", "git-filter-branch"})
 FILTER_BRANCH_FLAGS = {
     "-f",
     "--force",
@@ -5656,6 +5657,43 @@ def _git_filter_branch(args: List[str]) -> Tuple[str, str]:
 def _git_filter_repo(args: List[str]) -> Tuple[str, str]:
     """filter-repo: mặc định viết lại MỌI ref (và xoá remote `origin`) — deny mọi dạng (D-407)."""
     return "deny", REF_REWRITE_WHY.format("git filter-repo " + " ".join(args)[:120])
+
+
+# AUD-SEC-621: plumbing đẩy (`send-pack`, `http-push`, remote helper `remote-<x>` — `remote-https` của remote-curl,
+# helper riêng trong PATH — đọc `push <refspec>` từ stdin) ghi/xoá ref remote mà không qua luật `git push` (force/`+ref`,
+# `:ref`, `--mirror`, `--all`, nhánh chính; refspec từ stdin guard không thấy) và không chạy hook pre-push. Không có lý
+# do hợp lệ để agent dùng (git tự gọi helper) → deny mọi dạng (chặt, đơn giản hơn dịch cú pháp riêng sang `_git_push`).
+# Tên so sau casefold: FS không phân biệt hoa thường chạy `git HTTP-PUSH` thành `git-http-push`. In cách dùng: chỉ cờ
+# trong PLUMBING_PUSH_USAGE, đứng đầu và duy nhất sau khi bỏ chuyển hướng — helper đọc `-h` là tên remote; `--help` chỉ
+# lệnh dựng sẵn (git luôn đổi thành `git help`; `git-http-push --help` chạy thẳng/qua alias đọc nó là URL).
+PLUMBING_PUSH_USAGE: Dict[str, Tuple[str, ...]] = {"send-pack": ("-h", "--help"), "http-push": ("-h",)}
+PLUMBING_PUSH_WHY = (
+    REF_DESTROY_MARK + ": `git {}` (plumbing đẩy) bỏ qua luật `git push` và hook pre-push — ghi đè/xoá được nhánh của"
+    " người khác (D-407, ADR-0018); dùng `git push`"
+)
+
+
+def _is_plumbing_push(sub: str) -> bool:
+    key = sub.casefold()
+    return key in PLUMBING_PUSH_USAGE or key.startswith("remote-")
+
+
+def _plumbing_push(sub: str, args: List[str]) -> Tuple[str, str]:
+    """Luật của lệnh con `sub` khi là plumbing đẩy (deny trừ in cách dùng); lệnh con khác → cho qua."""
+    if not _is_plumbing_push(sub):
+        return "", ""
+    usage = PLUMBING_PUSH_USAGE.get(sub.casefold(), ())
+    if args[:1] and args[0] in usage and _drop_redirect_ops(args, PUSH_FD_DIGITS) == args[:1]:
+        return "", ""
+    return "deny", PLUMBING_PUSH_WHY.format(sub)
+
+
+def _git_dashed(name: str) -> str:
+    """`git-<tên>` chạy thẳng (PATH, `/usr/lib/git-core/`) mà guard xét như `git <tên>` → `<tên>`; khác → ''."""
+    base = posixpath.basename(name)
+    if base in GIT_DASHED_REWRITERS or base[:4].casefold() == "git-" and _is_plumbing_push(base[4:]):
+        return base[4:]
+    return ""
 
 
 # AUD-SEC-119 (T-3563): Gate mẫu tối ưu đọc script/baseline từ `origin/main` (optimization-loop.md), nhưng ref remote là
@@ -6367,7 +6405,7 @@ def git_rules(n: List[str], cwd: Optional[str] = None) -> Tuple[str, str]:
         verdict = _stricter(_git_push(args, cwd), _git_push(_drop_redirects(args), cwd))
         return _stricter(verdict, _git_push(_drop_redirect_ops(args, PUSH_FD_DIGITS), cwd))
     rule = GIT_RULES.get(n[1])
-    return rule(args) if rule else ("", "")
+    return rule(args) if rule else _plumbing_push(n[1], args)
 
 
 # Hành động đối ngoại: lệnh → lệnh con (ở BẤT KỲ vị trí positional: `pnpm -r publish`, `yarn npm publish`,
@@ -7222,8 +7260,9 @@ def command_rules(n: List[str], root: str, cwd: Optional[str] = None) -> Tuple[s
         return "deny", "chmod 777"
     if name == "git":
         return git_rules(n, cwd)
-    if posixpath.basename(name) in GIT_DASHED_REWRITERS:  # `git-filter-repo` chạy thẳng (pip cài vào PATH)
-        return git_rules(["git", posixpath.basename(name)[4:], *args], cwd)
+    sub = _git_dashed(name)  # `git-filter-repo` chạy thẳng (pip cài vào PATH), `/usr/lib/git-core/git-remote-https`
+    if sub:
+        return git_rules(["git", sub, *args], cwd)
     return _external_rule(name, args, root, cwd)
 
 

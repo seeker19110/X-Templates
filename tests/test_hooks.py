@@ -7901,6 +7901,102 @@ class GuardRemoteDeleteTest(unittest.TestCase):
             with self.subTest(cmd):
                 self.assert_allowed(cmd)
 
+    def test_plumbing_push_denied(self):
+        """AUD-SEC-621: `send-pack`/`http-push` không qua luật `git push` (force, `:ref`, `--mirror`, `--all`, nhánh
+        chính, `--stdin`) và không chạy hook pre-push → deny mọi dạng, kể cả đích là nhánh của phiên; chỉ `-h` trần qua."""
+        for cmd in (
+            "git send-pack git@github.com:o/r.git :refs/heads/other",
+            "git send-pack --mirror git@github.com:o/r.git",
+            "git send-pack --force git@github.com:o/r.git HEAD:main",
+            "git send-pack git@github.com:o/r.git +HEAD:main",
+            "git send-pack git@github.com:o/r.git HEAD:main",
+            "git send-pack --all git@github.com:o/r.git",
+            "git send-pack ssh://git@github.com/o/r.git :main",
+            "git send-pack /srv/git/r.git :refs/heads/other",
+            "git send-pack --stdin /srv/git/r.git",
+            "git send-pack /srv/git/r.git feat/me",  # nhánh của phiên: vẫn không có pre-push
+            "git send-pack -h /srv/git/r.git --all",
+            "git -C . send-pack --force /srv/git/r.git main",
+            "bash -c 'git send-pack --force /srv/git/r.git main'",
+            "git -c alias.sp=send-pack sp --all /srv/git/r.git",
+            "git-send-pack --all /srv/git/r.git",
+            "/usr/lib/git-core/git-send-pack --all /srv/git/r.git",
+            "git http-push --force https://example.invalid/r.git main",
+            "git http-push -D https://example.invalid/r.git other",
+            "git-http-push --all https://example.invalid/r.git",
+            "git -c alias.http-push=status http-push --all https://example.invalid/r.git",  # git chạy `git-http-push` trước alias
+        ):
+            with self.subTest(cmd):
+                self.assert_deleted(cmd)
+        for cmd in ("git send-pack -h", "git http-push -h", "git help send-pack", "git push origin feat/me"):
+            with self.subTest(cmd):
+                self.assert_allowed(cmd)
+
+    def test_remote_helper_denied(self):
+        """Review AUD-SEC-621: remote helper chạy thẳng (`git remote-<x>`, `git-remote-<x>` — `remote-https` của
+        remote-curl, helper riêng trong PATH) đọc `push <refspec>` từ stdin: không qua luật `git push`, không chạy
+        pre-push → deny mọi dạng, kể cả `-h`/`--help` (helper đọc `-h` là tên remote; alias `x = remote-https --help`
+        chạy helper). Tên so sau casefold: FS không phân biệt hoa thường chạy `git-HTTP-PUSH` thành `git-http-push`."""
+        url = "https://github.com/o/r.git"
+        for cmd in (
+            f"printf 'push +HEAD:refs/heads/main\\n\\n' | git remote-https origin {url}",
+            f"printf 'push :refs/heads/other\\n\\n' | git remote-https origin {url}",
+            f"git remote-https origin {url} <<< 'push +HEAD:refs/heads/main'",
+            f"git-remote-https origin {url} < cmds.txt",
+            f"/usr/lib/git-core/git-remote-https origin {url} < cmds.txt",
+            "git remote-http origin http://h/r.git < cmds.txt",
+            "git remote-ftp origin ftp://h/r.git < cmds.txt",
+            "git remote-ftps origin ftps://h/r.git < cmds.txt",
+            f"git -c alias.rh=remote-https rh origin {url} < cmds.txt",
+            f"git -c alias.remote-https=status remote-https origin {url} < cmds.txt",  # lệnh ngoài chạy trước alias
+            f"git -C . remote-https origin {url} < cmds.txt",
+            f"env git remote-https origin {url} < cmds.txt",
+            f"bash -c 'git remote-https origin {url} < cmds.txt'",
+            "git remote-ext origin 'ssh h git-receive-pack r.git'",
+            "git remote-fd 0",
+            "git remote-gcrypt origin gcrypt::/srv/r.git < cmds.txt",
+            "git-remote-codecommit origin codecommit://r < cmds.txt",
+            "git remote-https -h",
+            "git remote-https --help",
+            f"git REMOTE-HTTPS origin {url} < cmds.txt",
+            f"GIT-REMOTE-HTTPS origin {url} < cmds.txt",
+            "git HTTP-PUSH --force https://example.invalid/r.git main",
+            "/usr/lib/git-core/Git-Http-Push --all https://example.invalid/r.git",
+            "git Send-Pack --all /srv/git/r.git",
+        ):
+            with self.subTest(cmd):
+                self.assert_deleted(cmd)
+        for cmd in ("git remote -v", "git remote get-url origin", "git remote show -n origin", "git help remote-https"):
+            with self.subTest(cmd):
+                self.assert_allowed(cmd)
+
+    def test_plumbing_usage_allowed(self):
+        """🟢 review AUD-SEC-621: in cách dùng không đẩy — `-h` đứng đầu và duy nhất (bỏ chuyển hướng; chữ số đứng sát
+        chuyển hướng đọc là fd), `--help` chỉ với `send-pack` (lệnh dựng sẵn: git luôn đổi thành `git help`; `git-http-push
+        --help` chạy thẳng hay qua alias đọc `--help` là URL — không đọc chắc → chặn)."""
+        for cmd in (
+            "git send-pack -h 2>&1",
+            "git send-pack -h > /dev/null",
+            "git send-pack -h 2>/dev/null",
+            "git http-push -h 2>/dev/null",
+            "git send-pack --help",
+            "git-send-pack --help",
+            "git-http-push -h 2>&1",
+        ):
+            with self.subTest(cmd):
+                self.assert_allowed(cmd)
+        for cmd in (
+            "git http-push --help",
+            "git-http-push --help",
+            "git send-pack /srv/git/r.git -h",
+            "git send-pack -h --all /srv/git/r.git 2>&1",
+            "git send-pack --help /srv/git/r.git",
+            "git send-pack 2>&1 /srv/git/r.git -h",
+            "git send-pack -H",
+        ):
+            with self.subTest(cmd):
+                self.assert_deleted(cmd)
+
     def test_current_branch_read_at_command_dir(self):
         """Nhánh hiện tại đọc ở thư mục của lệnh (`cd`, `git -C`) như PUSH_MAIN; không biết (không phải repo, detached)
         → mọi đích xoá là không phải của phiên (chặt)."""
@@ -7927,6 +8023,9 @@ class GuardRemoteDeleteTest(unittest.TestCase):
         with mock.patch.object(self.g, "build_phase", return_value=True):
             self.assert_deleted("git push origin --delete other")
             self.assert_deleted("git filter-branch -- --all")
+            self.assert_deleted("git send-pack /srv/git/r.git feat/me")
+        with mock.patch.dict(os.environ, {"XT_GUARD_POLICY": "strict"}):
+            self.assertEqual(self.g.bash_decision("git send-pack --all /srv/r.git", str(self.root))["decision"], "deny")
         import concurrent.futures
 
         other = self.repo("other")
@@ -7935,12 +8034,14 @@ class GuardRemoteDeleteTest(unittest.TestCase):
             ("git push origin --delete other", other),
             ("git push origin :feat/me", self.root),
             ("git push origin :feat/me", other),
+            ("git send-pack /srv/git/r.git feat/me", self.root),
+            ("git send-pack -h", other),
         ] * 6
         want = [self.out(c, d)["decision"] for c, d in cases]
         with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
             got = list(pool.map(lambda cd: self.out(*cd)["decision"], cases))
         self.assertEqual(got, want)
-        self.assertEqual(want[:4], ["deny", "", "", "deny"])
+        self.assertEqual(want[:6], ["deny", "", "", "deny", "deny", ""])
 
     def test_reason_code_marker(self):
         self.assertEqual(self.g.reason_code("deny", f"x {self.g.REF_DESTROY_MARK} y"), "REMOTE_DELETE")
