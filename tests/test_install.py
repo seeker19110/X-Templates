@@ -621,8 +621,9 @@ class LegacyMigrationTest(unittest.TestCase):
         """AUD-SEC-616: `.xtemplates/harness.sha256.json` là liên kết treo → manifest cũ không được chép xuyên liên kết
         (tạo file ngoài dự án); liên kết bị gỡ, manifest ghi tại chỗ."""
         self.make_legacy_install()
-        outside = self.target.parent / "tao-ngoai.json"
-        self.addCleanup(outside.unlink, missing_ok=True)
+        outside_dir = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, outside_dir, ignore_errors=True)
+        outside = outside_dir / "tao-ngoai.json"
         (self.target / ".xtemplates").mkdir()
         (self.target / ".xtemplates" / "harness.sha256.json").symlink_to(outside)
         code, err = self.install_quiet()

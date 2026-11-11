@@ -1865,7 +1865,9 @@ def migrate_legacy(target: Path) -> None:
     legacy = target / LEGACY_DIR
     if legacy.is_dir() and not legacy.is_symlink():
         old_manifest = legacy / "harness.sha256.json"
-        drop_symlink(target / MANIFEST)  # liên kết treo qua được `exists()` rồi copy2 ghi xuyên nó (AUD-SEC-616)
+        manifest = target / MANIFEST
+        if manifest.is_symlink() and not manifest.exists():
+            drop_symlink(manifest)  # liên kết treo qua được `exists()` rồi copy2 ghi xuyên nó (AUD-SEC-616)
         if old_manifest.is_file() and not (target / MANIFEST).exists():
             shutil.copy2(old_manifest, target / MANIFEST)
         shutil.rmtree(legacy)
