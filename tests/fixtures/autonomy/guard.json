@@ -23058,6 +23058,11 @@
 {"id": "aud621-http-push-help", "origin": "adversarial-reviewer", "refs": ["AUD-SEC-621"], "input": {"command": "git-http-push --help"}, "expect": {"allowed": false, "code": "REMOTE_DELETE"}, "note": "http-push đọc `--help` là URL — không đọc chắc → chặn (D-415)"},
 {"id": "aud621-ctl-send-pack-usage-redirect", "origin": "control", "refs": ["AUD-SEC-621"], "input": {"command": "git send-pack -h 2>&1"}, "expect": {"allowed": true}},
 {"id": "aud621-ctl-send-pack-help", "origin": "control", "refs": ["AUD-SEC-621"], "input": {"command": "git send-pack --help"}, "expect": {"allowed": true}},
-{"id": "aud621-ctl-git-remote", "origin": "control", "refs": ["AUD-SEC-621"], "input": {"command": "git remote get-url origin"}, "expect": {"allowed": true}}
+{"id": "aud621-ctl-git-remote", "origin": "control", "refs": ["AUD-SEC-621"], "input": {"command": "git remote get-url origin"}, "expect": {"allowed": true}},
+{"id": "aud541-decide-prod", "origin": "audit", "refs": ["AUD-SEC-541"], "input": {"command": "python3 scripts/xt.py loop decide-prod --ref D-126 --choice 'giữ tự host'"}, "expect": {"allowed": false, "code": "STAGE_APPROVE"}, "note": "agent tự quyết \"Khi chạy thật\" → prod_switch PASS → release-sign tự ký (ADR-0074)"},
+{"id": "aud541-decide-prod-env-unset", "origin": "audit", "refs": ["AUD-SEC-541"], "input": {"command": "env -u CLAUDECODE -u CLAUDE_CODE_SESSION_ID -u AI_AGENT python3 scripts/xt.py loop decide-prod --ref D-126 --choice x"}, "expect": {"allowed": false, "code": "STAGE_APPROVE"}, "note": "kiểm biến môi trường trong xt.py không đủ: lách bằng `env -u`"},
+{"id": "aud541-decide-prod-opaque-sub", "origin": "adversarial-author", "refs": ["AUD-SEC-541"], "input": {"command": "python3 scripts/xt.py loop \"$(echo decide-prod)\" --ref D-126 --choice x"}, "expect": {"allowed": false}},
+{"id": "aud541-ctl-loop-status", "origin": "control", "refs": ["AUD-SEC-541"], "input": {"command": "python3 scripts/xt.py loop status"}, "expect": {"allowed": true}},
+{"id": "aud541-ctl-loop-decide", "origin": "control", "refs": ["AUD-SEC-541"], "input": {"command": "python3 scripts/xt.py loop decide --question q --option a --option b --choice 1 --why w --revert r"}, "expect": {"allowed": true}}
  ]
 }
