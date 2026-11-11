@@ -37,6 +37,10 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
 
 ### Changed
 
+- Guard (lý do chạm hàng rào: 🔴 AUD-SEC-614, hồi quy #488, audit delta 2026-11-11): `git push … --end-of-options … -h`
+  không còn được coi là trợ giúp — sau `--end-of-options` git đọc `-h` như refspec (đo git 2.43: `src refspec -h`), nên
+  `git push --force --end-of-options origin feat/other -h`, `…feat/other:main -h` và `--delete … -h` bị chặn như khi
+  không có `-h`; `-h` đứng trước `--end-of-options` vẫn là trợ giúp thật.
 - `check-links.py` (AUD-PERF-027): `mask_code_spans`/`table_cells` nhảy tới ký tự đặc biệt bằng regex thay vì duyệt
   từng ký tự — dòng `lint` của `gate-fast` bớt khoảng nửa thời gian kiểm link (đo 1 789 → 876 ms khi máy tải); kết quả
   kiểm không đổi (so vi sai trên mọi file `.md` của repo và fuzz).

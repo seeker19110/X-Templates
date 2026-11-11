@@ -23058,6 +23058,10 @@
 {"id": "aud621-http-push-help", "origin": "adversarial-reviewer", "refs": ["AUD-SEC-621"], "input": {"command": "git-http-push --help"}, "expect": {"allowed": false, "code": "REMOTE_DELETE"}, "note": "http-push đọc `--help` là URL — không đọc chắc → chặn (D-415)"},
 {"id": "aud621-ctl-send-pack-usage-redirect", "origin": "control", "refs": ["AUD-SEC-621"], "input": {"command": "git send-pack -h 2>&1"}, "expect": {"allowed": true}},
 {"id": "aud621-ctl-send-pack-help", "origin": "control", "refs": ["AUD-SEC-621"], "input": {"command": "git send-pack --help"}, "expect": {"allowed": true}},
-{"id": "aud621-ctl-git-remote", "origin": "control", "refs": ["AUD-SEC-621"], "input": {"command": "git remote get-url origin"}, "expect": {"allowed": true}}
+{"id": "aud621-ctl-git-remote", "origin": "control", "refs": ["AUD-SEC-621"], "input": {"command": "git remote get-url origin"}, "expect": {"allowed": true}},
+{"id": "aud614-force-end-of-options-h", "origin": "audit", "refs": ["AUD-SEC-614"], "input": {"command": "git push --force --end-of-options origin feat/other -h"}, "expect": {"allowed": false}, "note": "sau `--end-of-options` git coi `-h` là refspec (đo git 2.43: `src refspec -h`), không phải trợ giúp"},
+{"id": "aud614-main-end-of-options-h", "origin": "audit", "refs": ["AUD-SEC-614"], "input": {"command": "git push --end-of-options origin feat/other:main -h"}, "expect": {"allowed": false, "code": "PUSH_MAIN"}},
+{"id": "aud614-delete-end-of-options-h", "origin": "audit", "refs": ["AUD-SEC-614"], "input": {"command": "git push --end-of-options --delete origin other -h"}, "expect": {"allowed": false, "code": "REMOTE_DELETE"}},
+{"id": "aud614-ctl-help-before-end-of-options", "origin": "control", "refs": ["AUD-SEC-614"], "input": {"command": "git push -h --end-of-options origin feat/other"}, "expect": {"allowed": true}, "note": "`-h` đứng trước `--end-of-options` vẫn là trợ giúp thật: git in usage rồi thoát"}
  ]
 }

@@ -30,7 +30,7 @@
 ## Task
 
 ### Lát 1 — 🔴 mới
-- [ ] `T-3714` 🔴 AUD-SEC-614 guard: `--end-of-options` không còn làm `-h` thành miễn trừ trợ giúp của `git push` (topo: review) — Gate: `python3 -m unittest tests.test_hooks`
+- [x] `T-3714` 🔴 AUD-SEC-614 guard: `--end-of-options` không còn làm `-h` thành miễn trừ trợ giúp của `git push` (topo: review) — Gate: `python3 -m unittest tests.test_hooks`
 - [x] `T-3715` 🔴 AUD-SEC-615 + AUD-TEST-100 guard: dòng ký GO_SIGN guard thấy ⊇ xt thấy (chú thích HTML, khối rào) (topo: review) — Gate: `python3 -m unittest tests.test_guard_go_no_go`
 - [x] `T-3716` 🔴 AUD-SEC-616 install.py: `.xtemplates-new` là symlink → `skipped-symlink` (topo: review) — Gate: `python3 -m unittest tests.test_install_pack`
 

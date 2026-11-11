@@ -8323,6 +8323,16 @@ class GuardReview487DebtTest(_GuardDebtCase):
         )
         self.assert_code(("git push --repo -h", "git push -o -h", "git push origin -- main -h"), "PUSH_MAIN", self.main)
         self.assert_code(("git push --recu -h origin main",), "PUSH_MAIN", self.main)  # viết tắt ăn giá trị
+        # AUD-SEC-614 (hồi quy #488): sau `--end-of-options` git coi `-h` là refspec, không phải trợ giúp (git 2.43:
+        # `push --dry-run --end-of-options … -h` → `src refspec -h`) — luật push vẫn áp như khi không có `-h`
+        self.assert_code(("git push --force --end-of-options origin feat/other -h",), "RULE_DENY", self.feat)
+        self.assert_code(("git push --end-of-options origin feat/other:main -h",), "PUSH_MAIN", self.feat)
+        self.assert_code(("git push --end-of-options --delete origin other -h",), "REMOTE_DELETE", self.feat)
+        # `-h` trước `--end-of-options` vẫn là trợ giúp thật; `-o` ăn `--end-of-options` làm giá trị thì `-h` sau nó
+        # là cờ thật (không cắt nhầm — chiều chặt chỉ làm lệnh bị xét, không bị cho qua)
+        self.assert_allowed(
+            ("git push -h --end-of-options origin feat/other", "git push --end-of-options origin feat/me"), self.feat
+        )
         self.assert_code(
             (
                 "git replace -f origin/main HEAD 2>&1",
