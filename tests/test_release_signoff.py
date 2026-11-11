@@ -208,6 +208,32 @@ class ReleaseSignTest(SignoffRepo):
         self.state.write_text('{"deferred": {}}', encoding="utf-8")
         self.assertEqual(self.sign(), "docs/ops/GO-NO-GO-2026-11-08-v1.2.0.md")
 
+    def test_blocked_loop_refuses_in_any_worktree(self):
+        """AUD-HAR-377: vòng bị chặn (không `loop defer`) = người phải quyết trước → agent không ký, ở cây chính lẫn
+        worktree khác, mọi nguồn chặn (cờ, lỗi lặp, task đỏ quá trần, kết thúc `blocked`); gỡ chặn → ký được."""
+        wt = self.worktree()
+        (wt / ".autopilot").mkdir()
+        (wt / ".autopilot/state.json").write_text('{"blocked": true, "blocked_reason": "cần quyết kiến trúc"}', "utf-8")
+        self.refused("vòng đang bị chặn (cờ chặn — cần quyết kiến trúc) — người xem rồi `loop unblock --reason …`")
+        self.refused(f"{wt.resolve() / '.autopilot/state.json'}: vòng đang bị chặn")
+        (wt / ".autopilot/state.json").write_text("{}", "utf-8")
+        for body, reason in (
+            ({"blocked": True, "deferred": {}}, "cờ chặn — cần người quyết định"),
+            (
+                {"same_failure_count": 3, "max_same_failure": 3, "last_failure_task": "T-2"},
+                "cùng một lỗi lặp 3 lần (T-2)",
+            ),
+            ({"task_runs": {"T-1": 6}, "max_task_runs": 6}, "T-1 đỏ 6 lần (trần 6)"),
+            ({"active": False, "final_verdict": {"verdict": "blocked", "reason": "x"}}, "kết thúc `blocked` — x"),
+        ):
+            with self.subTest(body=body):
+                self.state.write_text(json.dumps(body), encoding="utf-8")
+                self.refused(f"vòng đang bị chặn ({reason})")
+        for body in ({"blocked": False}, {"active": False, "final_verdict": {"verdict": "done"}}):
+            self.state.write_text(json.dumps(body), encoding="utf-8")
+            self.assertEqual(self.sign(), "docs/ops/GO-NO-GO-2026-11-08-v1.2.0.md")
+            self.doc.write_text(GO_DOC, encoding="utf-8")
+
     def worktree(self, name="wt"):
         path = self.tmp / name
         self.git("worktree", "add", "-q", "--detach", str(path))
