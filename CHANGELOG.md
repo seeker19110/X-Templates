@@ -119,6 +119,10 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
 
 ### Fixed
 
+- `xt.py` (AUD-HAR-377 🟠, ADR-0074): `release-sign` từ chối và hàng `verify` của `release-check` FAIL khi vòng đang bị
+  chặn — cờ (`loop block`/`ci-triage`), lỗi lặp ≥ `max_same_failure`, task đỏ ≥ `max_task_runs`, hoặc vòng kết thúc
+  `blocked` chưa `loop unblock`/`loop init`; lý do in theo từng nguồn. Trước đây vòng chờ người quyết mà agent vẫn ký
+  GO được vì chỉ `loop defer` được đọc. **Dự án đích:** chạy lại `install.py`; không phải đổi cấu hình.
 - `install.py` (AUD-SEC-616 🔴): `--pack` không còn ghi xuyên symlink `<file>.xtemplates-new` ra ngoài dự án ở nhánh
   brownfield/đề xuất còn đó — action `skipped-symlink` ở `--plan` lẫn cài thật, kể cả liên kết treo; bước chuyển bản
   ≤ 2.x gỡ liên kết `.xtemplates/harness.sha256.json` trước khi chép manifest cũ (trước đây liên kết treo làm `copy2`

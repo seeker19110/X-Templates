@@ -539,7 +539,8 @@
    "reason": "Cổng phát hành của xt.py (`release-check` hàng tree, `release-sign` đọc `loop defer`) — không phải quyết định guard/harness/pr để mô phỏng bằng corpus; đỡ bằng repo git tạm trong tests.test_release_contract (PromotionTest.test_status_config_cannot_hide_dirty_tree) và tests.test_release_signoff (test_deferred_read_from_every_worktree, test_unknown_or_broken_state_refuses, ReleaseSignSubdirTest).",
    "ids": [
     "AUD-HAR-334",
-    "AUD-HAR-340"
+    "AUD-HAR-340",
+    "AUD-HAR-377"
    ]
   },
   {
