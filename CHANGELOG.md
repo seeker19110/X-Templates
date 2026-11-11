@@ -127,6 +127,9 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
 
 ### Fixed
 
+- `install.py` (AUD-SEC-619 🔴, D-425): thư mục cha là symlink trên đường ghi harness `.claude/`, `.github/` và adapter
+  (`.codex/`, `.gemini/`…) → `skipped-symlink` kèm cảnh báo, không ghi/tạo gì ngoài dự án (trước đây `.claude -> ngoài`
+  khiến `settings.json` ngoài bị gộp quyền). `--plan` báo cùng quyết định. Dự án đích: không phải làm gì.
 - Guard (lý do chạm hàng rào: AUD-SEC-621 🔴 — xoá/ghi đè ref remote lọt mọi luật push): plumbing đẩy `git send-pack`,
   `git http-push` và remote helper `git remote-<x>`/`git-remote-*` bị chặn (`REMOTE_DELETE`) ở mọi dạng — alias,
   `git-<tên>` chạy thẳng, tên khác hoa thường. Các lệnh này không qua luật `git push` và không chạy hook pre-push. Chỉ

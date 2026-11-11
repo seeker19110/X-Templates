@@ -475,3 +475,10 @@
 - Đính chính (2026-11-11, cùng PR): chủ dự án hỏi "có bao gồm các đề xuất bổ sung chưa" — đối chiếu bảy đề xuất thấy sót Routine tuần/phân loại phản hồi, PR nâng dự án đích sau tag và chi phí mỗi lát → thêm T-3764, T-3765, sửa T-3754; PLAN nay 26 task T-3740…T-3765, thứ tự lát không đổi.
 - Đính chính số (khi gộp `main` #503, 2026-11-11): `main` đã cấp T-3740 cho việc khác ở PLAN-harden-2026-11-11 — task nghiên cứu của PLAN-factory-e2e đánh số lại thành T-3766 để không tái sử dụng ID; PLAN là T-3741…T-3766.
 - Đính chính số (khi gộp `main` #504, 2026-11-11): `main` tiếp tục cấp T-3741, T-3742 cho việc khác ở PLAN-harden-2026-11-11 — cả dải của PLAN-factory-e2e dời sang T-3841…T-3866 (T-37xx → T-38xx, giữ hai chữ số cuối) để hết trùng với phiên đang cấp số tuần tự; các số T-37xx ở mục này và ở commit cũ của nhánh đọc theo phép dời đó.
+
+### D-425 · 2026-11-11T23:57:24+00:00 · install.py gặp thư mục cha là symlink trên đường ghi harness/.github/adapter: từ chối cả lần cài hay bỏ qua file đó?
+
+- Phương án: (1) Bỏ qua file đó (skipped-symlink) kèm cảnh báo, cài tiếp phần còn lại · (2) Từ chối cả lần cài (exit 2)
+- Chọn: Bỏ qua file đó (skipped-symlink) kèm cảnh báo, cài tiếp phần còn lại
+- Lý do (tiêu chí chất lượng cuối): Cùng quy ước AUD-HAR-010 cho symlink ở đích: đúng và an toàn (không ghi ra ngoài), đường lùi giữ nguyên, người dùng thấy cảnh báo; từ chối cả lần chặn dự án monorepo hợp lệ có .github là symlink
+- Đường lùi: Đổi classify_copy trả lỗi thay vì skipped-symlink

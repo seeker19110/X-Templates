@@ -341,6 +341,12 @@ def source_bytes(src: Path, transform: Callable[[str], str] | None = None) -> by
 HASHED = ("copied", "updated", "kept", "updated-new")
 
 
+def parent_symlink(path: Path) -> bool:
+    """Một thư mục cha của `path` là symlink → ghi sẽ xuyên ra ngoài dự án (AUD-SEC-619). `install` đã `resolve()` gốc dự án
+    nên mọi symlink trong `path.parents` nằm dưới gốc; không cần biết gốc."""
+    return any(p.is_symlink() for p in path.parents)
+
+
 def classify_copy(
     src: Path,
     dst: Path,
@@ -357,7 +363,7 @@ def classify_copy(
     mẫu trước khi thay SHA HEAD); cả hai nhận `sha256:<hex>` lẫn hex trần (`manifest_hash`). Dùng chung cho
     `copy_if_absent` và `--plan` để kế hoạch không lệch hành vi thật."""
     data = source_bytes(src, transform)
-    if dst.is_symlink() or dst.with_name(dst.name + ".xtemplates-new").is_symlink():
+    if parent_symlink(dst) or dst.is_symlink() or dst.with_name(dst.name + ".xtemplates-new").is_symlink():
         return "skipped-symlink", data
     if not dst.exists() or force:
         return "copied", data
@@ -398,7 +404,8 @@ def copy_if_absent(
     (`installed_hash`, người dùng chưa sửa) thì cập nhật tại chỗ — bản sửa hook tới được dự án đã cài (AUD-HAR-004).
     Đích là symlink → bỏ qua, không đi theo (AUD-HAR-010).
     """
-    dst.parent.mkdir(parents=True, exist_ok=True)
+    if not parent_symlink(dst):  # mkdir trước khi phân loại sẽ tạo thư mục ngoài dự án qua liên kết (AUD-SEC-619)
+        dst.parent.mkdir(parents=True, exist_ok=True)
     status, data = classify_copy(src, dst, force, transform, installed_hash)
     write_copy(src, dst, status, data)
     return status
@@ -594,7 +601,7 @@ def settings_changes(
 
 def read_settings_pair(src: Path, dst: Path) -> tuple[dict[str, Any], dict[str, Any]] | str:
     """(settings khung, settings dự án) hoặc 'skipped-symlink' | 'invalid-json' (đã log lý do)."""
-    if dst.is_symlink():
+    if dst.is_symlink() or parent_symlink(dst):
         log(f"  ⚠ bỏ qua symlink {dst}")
         return "skipped-symlink"
     try:
@@ -1188,7 +1195,7 @@ def gemini_merged(dst: Path, src: Path) -> dict[str, Any] | None:
 def merge_gemini_settings(dst: Path, src: Path) -> str:
     """Ghi bản gộp của `gemini_merged` vào `.gemini/settings.json` có sẵn. Trả 'merged' | 'kept' (không đọc được/dạng lạ)
     | 'skipped-symlink' (không ghi xuyên liên kết ra ngoài dự án — AUD-HAR-207, như AUD-HAR-010)."""
-    if dst.is_symlink():
+    if dst.is_symlink() or parent_symlink(dst):
         return "skipped-symlink"
     data = gemini_merged(dst, src)
     if data is None:
@@ -1208,7 +1215,7 @@ def adapter_action(target: Path, host: str) -> str:
     """Quyết định (không ghi) cho adapter của `host`: Gemini có sẵn (không phải symlink) → 'merged' | 'kept'; còn lại như
     `classify_copy` (symlink → 'skipped-symlink')."""
     dst = target / ADAPTERS[host][1]
-    if host == "gemini" and dst.is_file() and not dst.is_symlink():
+    if host == "gemini" and dst.is_file() and not dst.is_symlink() and not parent_symlink(dst):
         return "merged" if gemini_merged(dst, adapter_src(host)) is not None else "kept"
     return classify_copy(adapter_src(host), dst)[0]
 
@@ -1231,7 +1238,7 @@ def install_adapters(target: Path, hosts: list[str]) -> None:
     for host in hosts:
         rel = ADAPTERS[host][1]
         dst = target / rel
-        if host == "gemini" and dst.is_file():
+        if host == "gemini" and dst.is_file() and not parent_symlink(dst):
             status = merge_gemini_settings(dst, adapter_src(host))
             mine = status == "merged"  # `kept` ở đây = không đọc được, giữ file của dự án
         else:

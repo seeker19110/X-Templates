@@ -538,6 +538,59 @@ class InstallAuditFixTest(unittest.TestCase):
         self.assertEqual(list((self.outside / "xt").iterdir()), [])
 
 
+class ParentSymlinkTest(unittest.TestCase):
+    """AUD-SEC-619: thư mục cha trên đường ghi harness/.github/adapter là symlink → không ghi ra ngoài dự án."""
+
+    def setUp(self):
+        self.tmp = Path(self.enterContext(tempfile.TemporaryDirectory())).resolve()
+        self.outside = self.tmp / "outside"
+        self.outside.mkdir()
+        self.target = self.tmp / "proj"
+        self.target.mkdir()
+
+    def run_install(self, *argv: str) -> tuple[int, str]:
+        err = io.StringIO()
+        with redirect_stderr(err), redirect_stdout(io.StringIO()):
+            rc = install.main([str(self.target), "--label", "t", *argv])
+        return rc, err.getvalue()
+
+    def assertOutsideEmpty(self):
+        self.assertEqual(list(self.outside.rglob("*")), [])
+
+    def test_symlinked_parent_dirs_not_followed(self):
+        cases = (
+            (".claude", ()),
+            (".claude/hooks", ()),
+            (".github", ("--with-github",)),
+            (".gemini", ("--harness", "gemini")),
+            (".codex", ("--harness", "codex")),
+        )
+        for rel, extra in cases:
+            with self.subTest(rel=rel):
+                for old in self.outside.iterdir():
+                    shutil.rmtree(old) if old.is_dir() else old.unlink()
+                link = self.target / rel
+                link.parent.mkdir(parents=True, exist_ok=True)
+                link.symlink_to(self.outside)
+                for flags in (("--plan", *extra), extra):
+                    rc, err = self.run_install(*flags)
+                    self.assertEqual(rc, 0, err)
+                    self.assertOutsideEmpty()
+                self.assertTrue(link.is_symlink())
+                link.unlink()
+                shutil.rmtree(self.target / ".claude", ignore_errors=True)
+
+    def test_parent_symlink_helper(self):
+        (self.target / "a").symlink_to(self.outside)
+        self.assertTrue(install.parent_symlink(self.target / "a" / "b" / "c.txt"))
+        self.assertFalse(install.parent_symlink(self.target / "x" / "c.txt"))
+        gemini = self.target / ".gemini"
+        gemini.symlink_to(self.outside)
+        self.assertEqual(
+            install.merge_gemini_settings(gemini / "settings.json", install.adapter_src("gemini")), "skipped-symlink"
+        )
+
+
 class LegacyMigrationTest(unittest.TestCase):
     """ADR-0007: dự án cài bản ≤ 2.x (`.xstored/`, `xs.yaml`) chạy lại install là sang tên mới."""
 
