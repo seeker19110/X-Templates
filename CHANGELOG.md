@@ -127,8 +127,18 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
   `sh -c`/`timeout`/`env`/`find -exec` vẫn thấy chữ; `eval` nối đối số rồi đọc lại như bash); `_dequote` giữ dấu đó cho
   token còn nháy. Thay tiến trình/thay lệnh giữa đối số (`gh pr close 5 <(echo) -d`, `git push origin x < <(echo)
   --force`, `rm -rf x $(echo) /`) không còn che phần sau: lệnh ngoài nhận cả từ sau `)` ở mọi bộ tách lệnh
-  (`_SubstTrack`), đoạn sau `)` vẫn được xét riêng như cũ. Chặn oan bớt: `echo ';' git push --force` (chỉ in) không còn
-  bị chặn. Không đổi ID/mức mục checklist.
+  (`_SubstTrack`). Chặn oan bớt: `echo ';' git push --force` (chỉ in) không còn bị chặn. Không đổi ID/mức mục checklist.
+- Guard (lý do chạm hàng rào: AUD-SEC-605 lượt phản biện 2 — hồi quy của mục trên và cùng lớp còn hở): thay lệnh/thay
+  tiến trình dính liền chữ là MỘT từ như bash (`GlueWord`: `--suffix=x$(echo)y`, `--suffix=<(echo)`, `-H X-Foo:a$(echo)b`,
+  `X=<(echo)y git push --force`, `git -C $(…)/sub reset --hard`) — từ thừa sau `)` từng thành đích/endpoint nên
+  `cp … .claude/settings.json --suffix=…`, `gh api -X PUT …/pulls/5/merge -H …` lọt, còn `rm -rf $(…)/build` bị chặn
+  oan (D-051). Từ sau `)` chỉ thuộc argv ngoài, không lặp thành lệnh riêng (hết chặn oan REUSE/AUD-SEC-400 của
+  `tee >(wc -l) > list.txt`, `rsync --files-from=<(…) . dst/`); có `case` trong `(` đang mở thì vẫn giữ bản sao (mẫu
+  `case` đóng nhầm). `watch` nối đối số rồi `sh -c` nên `';'` là toán tử ở tầng đó; chữ echo/printf vào shell và chữ
+  `eval` đọc lại bỏ chuyển hướng cùng đích (`echo git reset 2> ';' --hard | sh`, `eval git reset > ';' --hard`);
+  printf có `%` quét thêm các đối số nối liền (`printf '%s ' rm -rf / | bash`); thân `gh -F/--body-file/--input` từ
+  `<(…)`/`>(…)` là "không lần được" (BUDGET) thay vì tệp thường (dấu review đăng tay từng lọt); nháy lồng trong `"$(…)"`
+  đọc lại với thay lệnh là `$_` thay vì tách thô. Không đổi ID/mức mục checklist.
 - `release-check` (nợ review #474 AUD-HAR-334): hàng `tree` gọi `git status --porcelain --untracked-files=all
   --ignore-submodules=none` — `status.showUntrackedFiles no` không còn giấu tệp chưa track (vân tay `subject.content`
   gồm tệp đó mà hàng `tree` từng PASS "cây sạch"), `submodule.<tên>.ignore`/`diff.ignoreSubmodules all` không còn giấu
