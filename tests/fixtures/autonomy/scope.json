@@ -485,6 +485,7 @@
    "reason": "Gói sản phẩm và `install.py --pack` (ADR-0068 lát B–D) — hành vi của installer, mã TypeScript và migration của gói (AUD-DATA-001, D-377) và ca sai cố ý, không phải guard/PR/CI/harness. Kiểm bằng tests.test_install_pack, tests.test_packs và workflow pack-web-api.yml (Postgres thật, mutants.json).",
    "ids": [
     "AUD-SEC-501",
+    "AUD-CODE-064",
     "AUD-HAR-223",
     "AUD-TEST-063",
     "AUD-CODE-048",

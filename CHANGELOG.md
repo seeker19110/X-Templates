@@ -122,6 +122,10 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
 
 ### Fixed
 
+- Gói `web-api-ts` (AUD-CODE-064 🟠): `pnpm build` không còn ném `ENOBUFS` khi cây đóng gói vượt 1 MiB — tar ghi
+  thẳng `dist/app.tar` thay vì qua stdout; cờ tar/gzip và digest không đổi; thêm `test/build.test.ts`. **Dự án đích
+  (đã cài gói web-api-ts):** `scripts/build.ts` thuộc dự án nên `install.py` không ghi đè — sửa tay: đổi `-cf -` thành
+  `-cf dist/app.tar` và bỏ `writeFileSync("dist/app.tar", tar)`.
 - `xt.py` (AUD-HAR-377 🟠, ADR-0074): `release-sign` từ chối và hàng `verify` của `release-check` FAIL khi vòng đang bị
   chặn — cờ (`loop block`/`ci-triage`), lỗi lặp ≥ `max_same_failure`, task đỏ ≥ `max_task_runs`, hoặc vòng kết thúc
   `blocked` chưa `loop unblock`/`loop init`; lý do in theo từng nguồn. Trước đây vòng chờ người quyết mà agent vẫn ký

@@ -8,7 +8,9 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 const FILES = ["package.json", "pnpm-lock.yaml", "src", "contract"];
 
 mkdirSync("dist", { recursive: true });
-const tar = execFileSync("tar", [
+// tar ghi thẳng ra dist/app.tar, không đọc qua stdout của execFileSync (maxBuffer mặc định 1 MiB → ENOBUFS khi cây đóng
+// gói lớn hơn, AUD-CODE-064). dist/ không nằm trong FILES nên bản tar không tự gói mình.
+execFileSync("tar", [
   "--sort=name",
   "--mtime=1970-01-01 00:00:00Z",
   "--owner=0",
@@ -17,10 +19,9 @@ const tar = execFileSync("tar", [
   "--mode=u=rwX,go=rX", // quyền file không theo umask của máy build — digest chỉ phụ thuộc nội dung
   "--exclude=*.test.ts",
   "-cf",
-  "-",
+  "dist/app.tar",
   ...FILES,
 ]);
-writeFileSync("dist/app.tar", tar);
 execFileSync("gzip", ["-n", "-9", "-f", "dist/app.tar"]);
 execFileSync("mv", ["dist/app.tar.gz", "dist/app.tgz"]);
 const digest = createHash("sha256").update(readFileSync("dist/app.tgz")).digest("hex");
