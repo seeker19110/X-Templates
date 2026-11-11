@@ -61,10 +61,10 @@
 - [ ] `T-3754` Số đo: xung đột tích hợp, lead time song song so tuần tự, lỗi lọt sau merge, thời gian chờ người, chi phí mỗi lát (sau: T-3751) — Gate: `python3 -m unittest tests.test_factory_metrics`
 
 ### Lát 5 — Mọi quy mô
-- [ ] `T-3755` `release-sign` ở M/L: hàng bằng chứng máy (nghiệm thu độc lập + receipt dev + diễn tập quay lui) thay dòng "người đã dùng thử", ghi "máy mô phỏng"; khoá trong `HARD_GATED_KEYS` (sau: T-3743, T-3748; topo: review; exec: deep) — Gate: `python3 -m unittest tests.test_release_signoff_scale`
-- [ ] `T-3756` Khoá trần giai đoạn agent được duyệt (2/3) theo tiêu chí đăng ký trước; mặc định giữ 1 (sau: T-3748; topo: review) — Gate: `python3 -m unittest tests.test_stage_max`
+- [ ] `T-3758` Chữ ký chặn phân phối (cơ chế bù — làm trước phần nới): chưa `promotion: approved` thì không tag, `install.py` không cài bản đó (topo: review) — Gate: `python3 -m unittest tests.test_promotion_gate`
+- [ ] `T-3755` `release-sign` ở M/L: hàng bằng chứng máy (nghiệm thu độc lập + receipt dev + diễn tập quay lui) thay dòng "người đã dùng thử", ghi "máy mô phỏng"; khoá trong `HARD_GATED_KEYS` (sau: T-3743, T-3748, T-3758; topo: review; exec: deep) — Gate: `python3 -m unittest tests.test_release_signoff_scale`
+- [ ] `T-3756` Khoá trần giai đoạn agent được duyệt (2/3) theo tiêu chí đăng ký trước; mặc định giữ 1 (sau: T-3743, T-3748, T-3758; topo: review) — Gate: `python3 -m unittest tests.test_stage_max`
 - [ ] `T-3757` Thư viện: mục MUST buộc người ở M/L (research 2026-11-08 §8 "Soát thiếu") đối chiếu theo khoá, giữ ID, CHANGELOG ghi ID (sau: T-3755, T-3756) — Gate: `python3 -m unittest tests.test_human_must_keys`
-- [ ] `T-3758` Chữ ký chặn phân phối: chưa `promotion: approved` thì không tag, `install.py` không cài bản đó (sau: T-3755; topo: review) — Gate: `python3 -m unittest tests.test_promotion_gate`
 
 ### Lát 6 — Thiết lập một lần, production
 - [ ] `T-3759` `xt.py admin-plan` chỉ đọc: khi receipt dev xanh in một checklist (App/token, ruleset lệch, đích và khoá production, trần chi phí, khoá cần bật); không tự áp (sau: T-3743; topo: review) — Gate: `python3 -m unittest tests.test_admin_plan`
