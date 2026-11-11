@@ -5,6 +5,8 @@ from __future__ import annotations
 import contextlib
 import importlib.util
 import io
+import random
+import re
 import tempfile
 import time
 import unittest
@@ -24,6 +26,48 @@ def load_module() -> ModuleType:
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     return mod
+
+
+def ref_mask_code_spans(cl: ModuleType, text: str) -> str:
+    """Bản tham chiếu chậm (duyệt từng ký tự) của `mask_code_spans` trước AUD-PERF-027 — chuẩn hành vi."""
+    out: list[str] = []
+    i = 0
+    while i < len(text):
+        if text[i] == "\\":
+            out.append(text[i : i + 2])
+            i += 2
+        elif text[i] != "`":
+            out.append(text[i])
+            i += 1
+        else:
+            j = i
+            while j < len(text) and text[j] == "`":
+                j += 1
+            close = cl._closing_run(text, j, j - i)
+            stop = j if close < 0 else close + (j - i)
+            out.append(text[i:stop] if close < 0 else re.sub(r"[^\n]", " ", text[i:stop]))
+            i = stop
+    return "".join(out)
+
+
+def ref_table_cells(line: str) -> list[str]:
+    """Bản tham chiếu chậm của `table_cells` trước AUD-PERF-027."""
+    cells: list[str] = []
+    cur: list[str] = []
+    i = 0
+    while i < len(line):
+        if line[i] == "\\":
+            cur.append(line[i : i + 2])
+            i += 2
+        elif line[i] == "|":
+            cells.append("".join(cur))
+            cur = []
+            i += 1
+        else:
+            cur.append(line[i])
+            i += 1
+    cells.append("".join(cur))
+    return cells
 
 
 class CheckLinksModuleTest(unittest.TestCase):
@@ -206,6 +250,38 @@ class CheckLinksModuleTest(unittest.TestCase):
             self.cl.check(self.repo),
             ["a.md:3: liên kết hỏng -> mat1.md", "a.md:8: liên kết hỏng -> mat2.md"],
         )
+
+    def test_fast_scan_matches_reference_on_edge_cases_and_fuzz(self):
+        """AUD-PERF-027: bản nhảy-tới-ký-tự-đặc-biệt giữ đúng hành vi bản duyệt từng ký tự (tham chiếu chậm ở đầu file)."""
+        cases = ["", "`", "``", "a`b`c", "``a`b``c", "`a``b`", "\\`a`", "\\\\`a` [l](x)", "a\\", "`a\nb` c", "`x\\`y`"]
+        cases += ["a|b", "a\\|b|c", "|", "||", "\\", "a|`b|c`|d", "x\\\\|y", "`open [l](x.md)", "``` a ``", "é`ü`|ñ"]
+        rnd = random.Random(20261111)
+        cases += ["".join(rnd.choice("ab`\\|\n ") for _ in range(rnd.randint(0, 30))) for _ in range(3000)]
+        for s in cases:
+            self.assertEqual(self.cl.mask_code_spans(s), ref_mask_code_spans(self.cl, s), repr(s))
+            self.assertEqual(self.cl.table_cells(s), ref_table_cells(s), repr(s))
+
+    def test_fast_scan_does_not_visit_every_character(self):
+        """AUD-PERF-027: chữ thường không bị duyệt từng ký tự (số lần chỉ mục `text[i]` tỉ lệ số ký tự đặc biệt, không phải
+        độ dài); dòng rất dài vẫn tuyến tính — nhiều backtick không đóng không làm bậc hai."""
+
+        class Counting(str):
+            hits = 0
+
+            def __getitem__(self, key):
+                Counting.hits += 1
+                return str.__getitem__(self, key)
+
+        prose = "chữ thường " * 5000 + "`a` \\| `b`" + " x" * 5000
+        for fn in (self.cl.mask_code_spans, self.cl.table_cells):
+            Counting.hits = 0
+            fn(Counting(prose))
+            self.assertLess(Counting.hits, 100, fn.__name__)
+        long_line = ("`a` | \\` x " * 40000) + "`" * 3
+        start = time.monotonic()
+        self.assertEqual(self.cl.mask_code_spans(long_line), ref_mask_code_spans(self.cl, long_line))
+        self.assertEqual(self.cl.table_cells(long_line), ref_table_cells(long_line))
+        self.assertLess(time.monotonic() - start, 10.0)
 
     def test_external_urls_in_table_cells(self):
         """Review #452 🟠: `--external` không che lần hai dòng đã che theo ô — URL ở ô giữa vẫn được kiểm."""

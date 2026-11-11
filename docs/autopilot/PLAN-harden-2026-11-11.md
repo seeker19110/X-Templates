@@ -47,7 +47,7 @@
 - [ ] `T-3724` 🔴 AUD-SEC-609 guard: lệnh có luật mà đối số chứa thay lệnh/thay tiến trình không đọc chắc → BUDGET (sau: T-3723; topo: review) — Gate: `python3 -m unittest tests.test_hooks tests.test_guard_fuzz`
 
 ### Lát 4 — tối ưu có số
-- [ ] `T-3725` AUD-PERF-027 `check-links.py`: `mask_code_spans`/`table_cells` nhảy bằng regex, output y hệt — Gate: `python3 -m unittest tests.test_check_links`
+- [x] `T-3725` AUD-PERF-027 `check-links.py`: `mask_code_spans`/`table_cells` nhảy bằng regex, output y hệt — Gate: `python3 -m unittest tests.test_check_links`
 - [ ] `T-3726` AUD-PERF-028/029/030 xt.py: `doctor` nạp guard một lần, `audit plan` blame một lần, `same_command` theo khoá — Gate: `python3 -m unittest tests.test_doctor tests.test_xt`
 
 ### Lát 5 — nợ còn lại của đợt và quét lại

@@ -444,3 +444,17 @@
 - Chọn: Sửa mọi 🔴 (mới + có từ trước) và 🟠 mới theo lát ≤150 dòng, tối ưu rủi ro thấp có số; 🟠 guard có từ trước để PLAN kế
 - Lý do (tiêu chí chất lượng cuối): (1) đúng và an toàn: 7 🔴 mở đều là đường lách hàng rào hoặc ghi ngoài dự án — sửa hết trước khi cắt 3.34.0; (2) giữ đường lùi: mỗi lát một PR nhỏ, test đỏ trước; (3) bền: 609/606 theo bài học D-415 (không đọc chắc → BUDGET); cache bytecode ngược AUD-SEC-074 nên cần ADR riêng; (5) phương án 3 quá rộng cho một đợt
 - Đường lùi: Revert từng PR lát; PLAN kế nhận phần còn lại
+
+### D-417 · 2026-11-11T14:21:06+00:00 · AUD-SEC-615: guard GO_SIGN mô hình tool Edit thế nào khi ba lượt review liên tiếp đều tìm ra chỗ mô hình lệch tool thật (CR trần, new_string rỗng nuốt xuống dòng, khớp dự phòng nháy cong và escape unicode, old phải duy nhất)?
+
+- Phương án: (1) Thêm tiếp từng mô hình Edit theo mã tool hiện hành · (2) Chặt: với file GO-NO-GO, Edit/MultiEdit chỉ cho qua khi không mang nội dung dạng dòng ký hay neo; mọi thay đổi chạm §5, tiêu đề, subject đi bằng Write cả file — Write là nội dung y nguyên nên guard đọc đúng như release-check; CR không kèm LF và BOM lệch đĩa thì chặn · (3) Giữ bản vá lượt 3, ghi nợ các ca còn lọt
+- Chọn: Chặt: với file GO-NO-GO, Edit/MultiEdit chỉ cho qua khi không mang nội dung dạng dòng ký hay neo; mọi thay đổi chạm §5, tiêu đề, subject đi bằng Write cả file — Write là nội dung y nguyên nên guard đọc đúng như release-check; CR không kèm LF và BOM lệch đĩa thì chặn
+- Lý do (tiêu chí chất lượng cuối): Tiêu chí 1 (đúng và an toàn, cách hiểu chặt hơn) và 3 (đơn giản, test được): mô hình theo mã tool bị minify sẽ lệch mỗi lần tool đổi bản — đúng bài học D-415 (ca không đọc chắc thì chặn, không thêm cách đọc mới). Write cả file không cần mô hình. Giá phải trả: agent sửa GO-NO-GO bằng Write thay Edit (tiêu chí 4, thấp hơn).
+- Đường lùi: Bỏ luật chặn Edit trên GO-NO-GO và quay lại mô hình hai cách áp của lượt 3 (patch lượt 3 lưu ở scratch slices/sec615.patch trước khi sửa)
+
+### D-418 · 2026-11-11T14:21:20+00:00 · D-417 nói Edit trên GO-NO-GO cho qua khi không mang nội dung dạng dòng ký — nhưng ca A1 của review lượt 3 (Edit xoá một ký tự làm hai dòng nối thành dòng ký) không mang nội dung như vậy. Phạm vi luật chặn Edit là gì?
+
+- Phương án: (1) Chặn mọi Edit/MultiEdit lên file GO-NO-GO (kể cả file chưa ký); sửa GO-NO-GO chỉ bằng Write cả file hoặc xt.py release-sign · (2) Chỉ chặn Edit có nội dung dạng dòng ký/neo như chữ của D-417
+- Chọn: Chặn mọi Edit/MultiEdit lên file GO-NO-GO (kể cả file chưa ký); sửa GO-NO-GO chỉ bằng Write cả file hoặc xt.py release-sign
+- Lý do (tiêu chí chất lượng cuối): Tiêu chí 1: một Edit bất kỳ có thể nối dòng thành chữ ký mà chuỗi old/new không lộ gì; chỉ luật không phụ thuộc mô hình tool mới đóng được lớp này. Đính chính phạm vi D-417, không đổi hướng.
+- Đường lùi: Nới về phương án 2 kèm mô hình Edit của lượt 3
