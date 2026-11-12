@@ -47,6 +47,9 @@
 - [ ] `T-3724` 🔴 AUD-SEC-609 guard: lệnh có luật mà đối số chứa thay lệnh/thay tiến trình không đọc chắc → BUDGET (sau: T-3723; topo: review) — Gate: `python3 -m unittest tests.test_hooks tests.test_guard_fuzz`
 - [ ] `T-3748` 🔴 AUD-SEC-656 guard: nhánh `except ValueError` của `tokenize` (nháy không đóng, `\` lẻ cuối) tách `(`, `)`, `<`, `>` như `_unglue` hoặc BUDGET (sau: T-3721; topo: review) — Gate: `python3 -m unittest tests.test_hooks tests.test_guard_fuzz`
 - [ ] `T-3749` 🔴 AUD-SEC-657 guard: chuyển hướng fd có tên `{fd}>file CMD` đứng đầu lệnh không làm `{fd}` thành tên lệnh (sau: T-3721; topo: review) — Gate: `python3 -m unittest tests.test_hooks tests.test_guard_fuzz`
+- [ ] `T-3750` 🔴 AUD-SEC-659 guard: `exec -la x CMD`/`exec -ca x CMD` — cờ gộp của `exec` có `a` ăn đối số (sau: T-3721; topo: review) — Gate: `python3 -m unittest tests.test_hooks tests.test_guard_fuzz`
+- [ ] `T-3751` 🔴 AUD-SEC-660 guard: gán biến sau định nghĩa hàm, trước lời gọi → thân dùng biến không biết giá trị thì BUDGET (sau: T-3722; topo: review) — Gate: `python3 -m unittest tests.test_hooks tests.test_guard_fuzz`
+- [ ] `T-3752` 🔴 AUD-SEC-661 guard: shell trong nhóm/thân hàm đọc stdin của nhóm/lời gọi → BUDGET (sau: T-3722; topo: review) — Gate: `python3 -m unittest tests.test_hooks tests.test_guard_fuzz`
 
 ### Lát 4 — tối ưu có số
 - [x] `T-3725` AUD-PERF-027 `check-links.py`: `mask_code_spans`/`table_cells` nhảy bằng regex, output y hệt — Gate: `python3 -m unittest tests.test_check_links`

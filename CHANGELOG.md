@@ -155,6 +155,13 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
 
 ### Fixed
 
+- Guard (lý do chạm hàng rào: hai 🔴 có từ trước của Lát 3 harden, review độc lập từng lát): (AUD-SEC-610, #516) `;<`,
+  `&&<`, `||>>`, `|&<`, `)<`, `(<`, `&` + xuống dòng + `<`… không còn gộp thành một token chuyển hướng nuốt lệnh sau nó —
+  `_unglue` cắt dãy dấu theo toán tử dài nhất của bash ở cả `tokenize` lẫn `_raw_tokens`; (AUD-SEC-611, #517) thân hàm
+  khai bằng `function TÊN { … }` và `for|select TÊN do …` (không `in`) được đọc như `TÊN () { … }` / `for TÊN ; do` ở tầng
+  token (`_fn_forms`) nên mọi bộ đọc thấy thân (trước đó `function g { rm -rf /; }; g`, `function g { d=/; rm -rf $d;
+  }; g`, `for x do git push --force; done` lọt; dạng `g() {` đã chặn). Còn mở: AUD-SEC-656/657/659/660/661 (T-3748…T-3752).
+  Dự án đích: nâng bản để nhận `.claude/hooks/guard.py` mới.
 - `install.py` (AUD-SEC-619 🔴, D-425): thư mục cha là symlink trên đường ghi harness `.claude/`, `.github/` và adapter
   (`.codex/`, `.gemini/`…) → `skipped-symlink` kèm cảnh báo, không ghi/tạo gì ngoài dự án (trước đây `.claude -> ngoài`
   khiến `settings.json` ngoài bị gộp quyền). `--plan` báo cùng quyết định. Dự án đích có thư mục harness (`.claude`,

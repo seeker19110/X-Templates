@@ -823,7 +823,9 @@ class AllowlistLayerTest(unittest.TestCase):
         self.assertEqual(heads('A=1 env B=2 nice -n 5 "$c" x'), ['"$c"'])
         self.assertEqual(guard._dyn_head_why("echo 'x"), guard.DYN_HEAD_WHY)  # không tách chắc: chặn
         # review adr-guard 🔴: từ sau `{` trơn là từ lệnh (`function f { … }`, `coproc f { … }` không có dấu tách trước `{`)
-        self.assertEqual(heads('function f { "${a[@]}"; }'), ["function", '"${a[@]}"'])
+        # AUD-SEC-611 (#517): `function f {` đọc như `f () {` (`_fn_forms`) — đầu lệnh là tên hàm, thân vẫn là từ lệnh
+        self.assertEqual(heads('function f { "${a[@]}"; }'), ["f", '"${a[@]}"'])
+        self.assertEqual(heads('f() { "${a[@]}"; }'), ["f", '"${a[@]}"'])
         self.assertEqual(heads("coproc f { $c; }"), ["coproc", "$c"])
         self.assertEqual(heads("env A=1"), ["env"])  # lệnh bọc không kèm lệnh: chính nó là từ lệnh
 
