@@ -23101,6 +23101,14 @@
 {"id": "aud610-ctl-close-paren-redirect", "origin": "control", "refs": ["AUD-SEC-610"], "input": {"command": "(echo x);< /dev/null cat"}, "expect": {"allowed": true}},
 {"id": "aud610-ctl-open-paren-redirect", "origin": "control", "refs": ["AUD-SEC-610"], "input": {"command": "(< /dev/null cat)"}, "expect": {"allowed": true}},
 {"id": "aud610-ctl-case-clause-redirect", "origin": "control", "refs": ["AUD-SEC-610"], "input": {"command": "case x in x)< /dev/null cat;; esac"}, "expect": {"allowed": true}},
-{"id": "aud610-ctl-arith-shift", "origin": "control", "refs": ["AUD-SEC-610"], "input": {"command": "x=$((1<<2)); echo $x"}, "expect": {"allowed": true}}
+{"id": "aud610-ctl-arith-shift", "origin": "control", "refs": ["AUD-SEC-610"], "input": {"command": "x=$((1<<2)); echo $x"}, "expect": {"allowed": true}},
+{"id": "aud611-function-kw-force", "origin": "audit", "refs": ["AUD-SEC-611"], "input": {"command": "function g { git push origin feat/me --force; }; g"}, "expect": {"allowed": false, "code": "RULE_DENY"}, "note": "`function TÊN` không bị bỏ như `{`/`}` nên argv bắt đầu bằng `function` và luật theo lệnh bỏ qua lệnh đầu thân hàm; dạng `g() {` đã bị chặn nhờ `()` tách lệnh"},
+{"id": "aud611-function-kw-def-only", "origin": "audit", "refs": ["AUD-SEC-611"], "input": {"command": "function g { git push origin feat/me --force; }"}, "expect": {"allowed": false, "code": "RULE_DENY"}, "note": "chỉ định nghĩa, chưa gọi: thân vẫn quét như lệnh thường (cùng quyết định với dạng `g() {`)"},
+{"id": "aud611-function-kw-rm", "origin": "audit", "refs": ["AUD-SEC-611"], "input": {"command": "function g { rm -rf /; }; g"}, "expect": {"allowed": false, "code": "RULE_DENY"}},
+{"id": "aud611-function-kw-reset", "origin": "audit", "refs": ["AUD-SEC-611"], "input": {"command": "function g { git reset --hard; }; g"}, "expect": {"allowed": false, "code": "RULE_DENY"}},
+{"id": "aud611-function-kw-nested", "origin": "audit", "refs": ["AUD-SEC-611"], "input": {"command": "function g { function h { git push origin feat/me --force; }; h; }; g"}, "expect": {"allowed": false, "code": "RULE_DENY"}},
+{"id": "aud611-function-kw-after-command", "origin": "audit", "refs": ["AUD-SEC-611"], "input": {"command": "echo a; function g { git push origin feat/me --force; }; g"}, "expect": {"allowed": false, "code": "RULE_DENY"}},
+{"id": "aud611-ctl-function-kw-echo", "origin": "control", "refs": ["AUD-SEC-611"], "input": {"command": "function g { echo x; }; g"}, "expect": {"allowed": true}},
+{"id": "aud611-ctl-function-kw-status", "origin": "control", "refs": ["AUD-SEC-611"], "input": {"command": "function g { git status; }; g"}, "expect": {"allowed": true}}
  ]
 }

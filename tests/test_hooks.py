@@ -7834,6 +7834,51 @@ class GuardGluedSeparatorTest(unittest.TestCase):
         self.assertIsInstance(quoted[1], self.g.LitWord)
 
 
+class GuardFunctionKeywordTest(unittest.TestCase):
+    """AUD-SEC-611 (T-3722): `function TÊN { … }` — `_strip_prefixes` bỏ `{`/`}` nhưng không bỏ `function TÊN`, nên argv của
+    lệnh đầu thân hàm bắt đầu bằng `function` và mọi luật theo tên lệnh bỏ qua nó (`function g { rm -rf /; }; g`). Dạng
+    `g() { … }` đã được chặn vì `()` tách lệnh."""
+
+    DENY = (
+        "function g { git push origin feat/me --force; }; g",
+        "function g { git push origin feat/me --force; }",
+        "function  g   {   git push origin feat/me --force ; } ; g",
+        "function g { rm -rf /; }; g",
+        "function g { git reset --hard; }; g",
+        "function g { function h { git push origin feat/me --force; }; h; }; g",
+        "echo a; function g { git push origin feat/me --force; }; g",
+        "g() { git push origin feat/me --force; }; g",
+    )
+    ALLOW = ("function g { echo x; }; g", "function g { git status; }; g", "function ; git status", "function")
+
+    @classmethod
+    def setUpClass(cls):
+        cls.g = _guard()
+
+    def setUp(self):
+        self.enterContext(mock.patch.dict(os.environ, {"XT_GUARD_POLICY": "", "XT_GUARD_PHASE": ""}))
+
+    def decide(self, cmd: str) -> dict:
+        return self.g.apply_policy(self.g.bash_decision(cmd, str(ROOT), str(ROOT)))
+
+    def test_function_keyword_body_is_scanned_like_a_plain_command(self):
+        for cmd in self.DENY:
+            with self.subTest(cmd=cmd):
+                res = self.decide(cmd)
+                self.assertEqual((res["decision"], res.get("code")), ("deny", "RULE_DENY"), res)
+
+    def test_harmless_function_bodies_still_pass(self):
+        for cmd in self.ALLOW:
+            with self.subTest(cmd=cmd):
+                self.assertEqual(self.decide(cmd)["decision"], "", cmd)
+
+    def test_strip_prefixes_drops_function_keyword_and_name(self):
+        strip = self.g._strip_prefixes
+        self.assertEqual(strip(["function", "g", "{", "git", "status"]), ["git", "status"])
+        self.assertEqual(strip(["function", "a", "function", "b", "{", "ls"]), ["ls"])
+        self.assertEqual(strip(["function"]), ["function"])  # một mình: không có tên để bỏ
+
+
 class GuardRemoteDeleteTest(unittest.TestCase):
     """AUD-SEC-551 (D-407): xoá nhánh/tag remote KHÁC nhánh hiện tại của phiên và viết lại mọi ref (`filter-branch
     --all`, `filter-repo`) thuộc nhóm máy chặn (không đảo ngược, ADR-0018) — xoá được nhánh người khác và lời từ chối

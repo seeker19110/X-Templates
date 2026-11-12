@@ -4811,6 +4811,8 @@ def _strip_prefixes(argv: List[str], dirs: Optional[List[str]] = None) -> List[s
             del a[:2]  # toán tử + đích
         elif head.isdigit() and len(a) > 1 and _is_redirect(a[1]):
             a.pop(0)  # số fd (`2>`)
+        elif head == "function" and len(a) > 1:
+            del a[:2]  # `function TÊN`: từ khoá khai báo hàm + tên — thân hàm là lệnh thường (AUD-SEC-611)
         elif head in SHELL_KEYWORDS:
             a.pop(0)
         elif ENV_ASSIGN_RE.fullmatch(head):
