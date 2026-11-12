@@ -53,7 +53,7 @@
 ### Lát 5 — nợ còn lại của đợt và quét lại
 - [ ] `T-3727` 🟠 AUD-DATA-011 gói: test quét `CREATE INDEX` trên bảng có sẵn phải CONCURRENTLY (0005 vào danh sách đã phát hành) + hướng dẫn migration không transaction (sau: T-3719) — Gate: `python3 -m unittest tests.test_packs`
 - [ ] `T-3728` 🟢 AUD-XFEAT-048 skill autopilot nhắc `stage-approve`; AUD-PERF-031 sửa số ở `_lib.sh` — Gate: `scripts/dev-task.sh gate-fast`
-- [ ] `T-3730` 🔴 AUD-SEC-619 install.py: thư mục cha là symlink trên đường ghi harness/`.github`/adapter không ghi ra ngoài dự án (D-NNN chọn từ chối hay `under_symlink`; topo: review) — Gate: `python3 -m unittest tests.test_install`
+- [x] `T-3730` 🔴 AUD-SEC-619 install.py: thư mục cha là symlink trên đường ghi harness/`.github`/adapter không ghi ra ngoài dự án (D-NNN chọn từ chối hay `under_symlink`; topo: review) — Gate: `python3 -m unittest tests.test_install`
 - [ ] `T-3736` 🟠 AUD-HAR-378 xt.py: lời báo vòng bị chặn chọn lối ra theo ca (`_loop_exit`/`_blocked_exit`) — Gate: `python3 -m unittest tests.test_release_contract`
 - [ ] `T-3737` 🟠 AUD-HAR-379 xt.py: cờ `loop block` theo sang đợt `loop init` mới hoặc `loop init` từ chối (topo: review) — Gate: `python3 -m unittest tests.test_xt_cli tests.test_release_contract`
 - [x] `T-3731` 🔴 AUD-SEC-621 guard: chặn plumbing đẩy `git send-pack`/`git http-push` (topo: review) — Gate: `python3 -m unittest tests.test_hooks.GuardRemoteDeleteTest`
