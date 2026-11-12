@@ -581,7 +581,7 @@ class ParentSymlinkTest(unittest.TestCase):
                 shutil.rmtree(self.target / ".claude", ignore_errors=True)
 
     def test_existing_outside_settings_untouched_and_plan_matches(self):
-        """Review #511 🟠-1: `settings.json` có sẵn ở thư mục ngoài (merge quyền/hook), `--force-harness`, `.gemini` ngoài có
+        """Review #508 🟠-1: `settings.json` có sẵn ở thư mục ngoài (merge quyền/hook), `--force-harness`, `.gemini` ngoài có
         sẵn `settings.json` — byte không đổi, `--plan` báo `skipped-symlink` như cài thật, phần còn lại vẫn được cài."""
         (self.outside / "settings.json").write_text("{}\n", encoding="utf-8")
         (self.target / ".claude").symlink_to(self.outside)
@@ -607,7 +607,7 @@ class ParentSymlinkTest(unittest.TestCase):
             self.assertEqual((self.outside / "settings.json").read_text(encoding="utf-8"), gem)
 
     def test_project_root_under_symlink_still_installs(self):
-        """Review #511 🟠-2: gốc dự án nằm dưới symlink (macOS `/var → /private/var`) — `install` resolve gốc nên không
+        """Review #508 🟠-2: gốc dự án nằm dưới symlink (macOS `/var → /private/var`) — `install` resolve gốc nên không
         coi tổ tiên của gốc là symlink thư mục cha."""
         link = self.tmp / "link"
         link.symlink_to(self.target)
