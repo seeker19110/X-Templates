@@ -3,7 +3,7 @@ title: File harness: PLAN · PROGRESS · BLUEPRINT · evidence · state
 kind: module
 prefix: LOOP-HARNESS
 applies_to: [all]
-updated: 2026-11-07
+updated: 2026-11-11
 ---
 
 # File harness: PLAN · PROGRESS · BLUEPRINT · evidence · state
@@ -98,16 +98,18 @@ OS/devcontainer có egress allowlist (`LOOP-HARNESS-022`) và việc phiên chí
   `exec`/`eval`/`compile`, `spec_from_file_location`) với đối số không phải chữ nguyên văn hay trỏ `xt`, và
   `-m runpy xt` bị chặn; thư viện đọc (`xt.parse_plan`, `xt.review_debt`) vẫn qua. Còn lọt: tên dựng qua đường guard không
   thấy (tệp `.py` ghi bằng Write rồi chạy).
-- **Chữ ký GO-NO-GO §5** (AUD-SEC-497, D-390; mẫu GO-NO-GO §5, ADR-0068 §Quyết định 3a; mã `GO_SIGN`): Edit/MultiEdit/Write/NotebookEdit vào file tên
-  `GO-NO-GO*.md` (mọi thư mục, không phân biệt hoa thường, cả qua symlink) làm xuất hiện hay đổi dòng ký ở §5 (ô tên + ô
-  ngày `YYYY-MM-DD` khác rỗng — cùng regex với `release-check`) → deny; xoá dòng ký, sửa phần khác, bảng mẫu trống → cho
-  chạy. File trên đĩa đã ký mà lần ghi đổi tiêu đề `# ` đầu tiên (ngoài frontmatter) hay tập dòng `subject:` (thêm/sửa/
-  xoá) và kết quả còn dòng ký → deny cùng mã (D-392: chuyển chữ ký người sang ứng viên khác) — xoá dòng ký trước (cùng lần
-  ghi cũng được), người ký lại; file chưa ký sửa tự do. Edit áp `old_string`→`new_string` lên file trên đĩa; không đọc
-  được file hay đoạn cũ không có → so chính hai đoạn, dòng ký ở đâu cũng tính. Bash ghi/dời/khôi phục file đó (chuyển hướng, `tee`, `sed -i`, đích `cp`/`mv`, `git checkout|restore
+- **Chữ ký GO-NO-GO §5** (AUD-SEC-497, D-390; mẫu GO-NO-GO §5, ADR-0068 §Quyết định 3a; mã `GO_SIGN`): file tên
+  `GO-NO-GO*.md` (mọi thư mục, không phân biệt hoa thường, cả qua symlink) chỉ sửa bằng **Write cả file** — mọi
+  Edit/MultiEdit/NotebookEdit → deny, kể cả file chưa ký (D-417, D-418: mô phỏng tool Edit lệch tool thật). Write làm xuất
+  hiện hay đổi dòng ký §5 (MỘT dòng, ô tên + ô ngày `YYYY-MM-DD` khác rỗng) theo văn bản thô HAY theo đúng phần
+  `release-check` thấy (AUD-SEC-615: bản chép `_markdown_shown`, xuống dòng như `read_text`) → deny; nội dung có `\r` không
+  kèm `\n`, BOM lệch file trên đĩa, file trên đĩa không đọc được/không phải UTF-8 → deny; xoá dòng ký, sửa phần khác, bảng
+  mẫu trống → cho chạy. File đã ký mà Write đổi tiêu đề `# ` đầu tiên (ngoài frontmatter) hay tập dòng `subject:` — trên
+  văn bản thô hay phần hiển thị — và kết quả còn dòng ký → deny cùng mã (D-392) — xoá dòng ký trước (cùng lần ghi cũng
+  được), người ký lại. Agent ký: `xt.py release-sign` (ADR-0074). Bash ghi/dời/khôi phục file đó (chuyển hướng, `tee`, `sed -i`, đích `cp`/`mv`, `git checkout|restore
   <rev> --`, glob ở tên nở ra file có sẵn, symlink có sẵn, chuỗi nguyên văn trong script trình thông dịch không chỉ đọc)
-  → deny, sửa bằng Edit; đọc, xoá cả file (`rm`, `git rm`) và `touch` (chỉ mtime) cho chạy; `truncate` vẫn chặn (cắt đuôi
-  hoàn thành được dòng ký `| … | YYYY-MM-DD |x`, như Edit bỏ `x` bị chặn). Liên kết (AUD-SEC-533): `ln`/`link`/`cp -l|--link`
+  → deny, sửa bằng Write; đọc, xoá cả file (`rm`, `git rm`) và `touch` (chỉ mtime) cho chạy; `truncate` vẫn chặn (cắt đuôi
+  hoàn thành được dòng ký `| … | YYYY-MM-DD |x`, như Write bỏ `x` bị chặn). Liên kết (AUD-SEC-533): `ln`/`link`/`cp -l|--link`
   có toán hạng là file đó (tên, symlink có sẵn; cả `ln -s`) → deny — liên kết cứng chung inode, ghi tên trung tính là ghi
   GO-NO-GO. Áp diff (AUD-SEC-534): `patch`/`git apply`/`git am` lấy diff từ tệp/stdin ở dự án có `GO-NO-GO*.md` trong
   `docs/ops`, `docs` hay gốc → deny, trừ khi mọi diff là tệp thường nêu ở đối số/`-i`/`< tệp` (≤ 1 MiB, đọc được ở mọi thư
@@ -123,7 +125,7 @@ OS/devcontainer có egress allowlist (`LOOP-HARNESS-022`) và việc phiên chí
   kỳ từ nào → deny. Mất miễn (chặn oan có chủ ý): gán `PATH`/`GIT_*`/`LESS*` đầu lệnh (`LESSOPEN=… less F`), lệnh bọc
   ngoài loại guard bóc (`env`/`command`/`nice`/`timeout` trong suốt; `npx prettier --check F` thì không), `git -c|-C`
   trước lệnh con (`git -C d diff F`). MCP (AUD-SEC-536): `mcp__*__create_or_update_file`/`push_files` ghi `GO-NO-GO*.md` có
-  dòng ký §5 → deny (guard không so được với bản trên remote, cả dòng ký có sẵn); payload lạ → không phản đối. Còn lọt:
+  dòng ký §5 hay `\r` trần → deny (guard không so được với bản trên remote, cả dòng ký có sẵn); payload lạ → không phản đối. Còn lọt:
   tên dựng lúc chạy (biến, `$(…)`, đường ghép trong script, đích từ `xargs`/stdin — như AUD-SEC-406), glob ở thư mục
   (`docs/*/*.md`), symlink tạo trong cùng lệnh, thư mục quá `OUTSIDE_SCAN_MAX` mục; liên kết cứng tạo trước khi luật có
   (hay qua đường guard không thấy) — ghi tên trung tính cùng inode bằng Edit/Bash lọt (soát: `find . -samefile
@@ -170,6 +172,7 @@ OS/devcontainer có egress allowlist (`LOOP-HARNESS-022`) và việc phiên chí
   `--git-dir`, `--work-tree`, `--namespace`, `--config-env`, `--shallow-file`, `--attr-source`); tuỳ chọn `--…` guard
   không biết đứng trước lệnh con → `UNRESOLVED_TARGET` (D-216). Gate đọc
   `origin/main` chỉ chống nhầm lẫn — rào thật của vòng tối ưu là `perf trial` (ADR-0052 §7).
+- **Xoá ref remote / viết lại mọi ref** (AUD-SEC-551, D-407): `push --delete|-d`, `:<ref>`, `--prune`, `gh api -X DELETE …/git/refs/…`, graphql `deleteRef`/`updateRefs`/`updateRef` (đích không đọc → luôn chặn, AUD-SEC-622) với đích khác nhánh hiện tại (đọc như PUSH_MAIN; không biết → chặn; cụm cờ có chữ số `-4d`/`-4f` đọc như `-d`/`-f`, AUD-SEC-556/557), `gh pr close --delete-branch|-d` (head của PR không biết → luôn chặn, AUD-SEC-558; mọi luật đọc lệnh `gh` — huỷ/xoá ref/merge/đối ngoại (xoá/thu hồi `repo deploy-key|ssh-key|gpg-key|run|label|issue|gist|codespace|project delete`, `cache delete --all`, `auth logout` → DESTROY, in token `auth token|status -t` → chặn, AUD-SEC-580; tên lệnh/tên cờ có `$`/backtick hay glob — `gh pr merge$Z`, `--input$Z`, `gh pr merg?` — và ở lệnh có luật cờ token bash tách/bung thành cờ — `gh pr merge 5 $X`, `-d$Z`, `gh pr close 5 -*` — → BUDGET trừ khi luật khác đã deny, AUD-SEC-587/590; DELETE REST của các lệnh xoá đó cũng DESTROY, AUD-SEC-583), dấu review, alias/extension/lệnh lạ, ghi công AI/tiêu đề PR, gửi bí mật — đọc qua một điểm vào: nguyên văn, dạng bỏ chuyển hướng như bash đưa cho gh (`gh pr 2>/dev/null merge 5`; thêm cách giữ chữ số liền trước chuyển hướng — số PR) và dạng cobra chạy khi cờ đứng trước lệnh con, token đầu không cần bảng nhóm, `--version` gốc không ăn token kế — `gh -X DELETE api …`, `gh --help=false alias set …`, `gh --version zz`, `gh -R o/r pr create …`, AUD-SEC-571/575/577/578/579/581/582, D-409; cách đọc chặt hơn thắng) và `filter-branch --all|--branches|--tags|--remotes|--glob|--stdin`/nhiều ref, `filter-repo`, plumbing đẩy `send-pack`/`http-push`/remote helper `remote-<x>` (refspec từ stdin; cả `git-<tên>` chạy thẳng, tên so sau casefold; không qua luật push, không chạy pre-push — mọi dạng trừ in cách dùng `-h` đứng một mình, `send-pack --help`, AUD-SEC-621) → `REMOTE_DELETE`; `fetch --prune` qua. Còn lọt: `checkout`/`switch <nhánh người khác>` rồi xoá nó — nó thành nhánh hiện tại (cả trong cùng lệnh: `HEAD` đọc lúc guard xét, như PUSH_MAIN). `gh api` ghi `…/git/refs/…` với `force` khác `false` hay thân `--input` bị chặn như `push --force` (AUD-SEC-555). Mở rộng trong nháy kép đứng riêng (`gh pr close 5 "$X"`) hay sau chữ nguyên văn (`5$X`, `-F n=$N`) vẫn có thể thành cờ — không chặn.
 - **Gán `TÊN+=v` và `parallel :::`** (AUD-SEC-125/121): `X+=1 cmd` xét `cmd`; giá trị nối thêm là không biết (khoá cấu
   hình git nối thêm → `HOOK_BYPASS`). `parallel` không mẫu lệnh (hay có tuỳ chọn guard không biết): mỗi tổ hợp đối số
   sau `:::` quét như shell lồng, nhóm rỗng và nhóm đọc từ tệp (`::::`, `-a`) thành `""` — chỉ đọc tệp thì như chạy
@@ -268,6 +271,7 @@ YAML phẳng `khoá: lệnh`; `""` = không có, thiếu khoá = tự dò từ m
 | `preview` | `xt.py stage submit` (ghi, không chạy) | Cách chạy thử bản trình người duyệt giai đoạn (ADR-0058) — chỉ ghi vào sổ và in ở `stage status` |
 | `preview_smoke` | `xt.py stage submit` (chạy qua guard) | Gate bản trình (D-247): exit ≠ 0, để lại thay đổi trong cây hay HEAD đổi trong lúc chạy → không trình; trống → sổ ghi "không có smoke" |
 | `stage_approval` | `xt.py stage approve` · `loop next-step` · guard — đọc ở **cây và bản đã commit ở nhánh chính** | `agent` = agent tự nghiệm thu giai đoạn (ADR-0069): duyệt bản trình còn nguyên, `next-step` trả `stage-approve`; vắng/`human` = chỉ người, ngoài phiên agent (ADR-0058). `init --adopt` luôn chỉ người |
+| `release_signoff` | `xt.py release-sign` · `release-check` · guard — đọc ở **cây và bản đã commit ở nhánh chính** | `agent` = agent ký §5 GO-NO-GO (ADR-0074): chỉ khi `release-check` (blueprint/sổ ở đường mặc định) không FAIL BLOCKER, việc người còn lại chỉ là chữ ký, `BLUEPRINT.md` `scale: S`, không còn `loop defer` ở sổ máy của dự án tại mọi worktree của repo (không worktree nào có `.autopilot/state.json` — clone riêng, chưa `loop init` — hay sổ hỏng → không ký, AUD-HAR-340), dòng `subject:` khớp; ô tên ghi `agent`, `promotion.by` liệt kê người ký; guard chỉ cho một lệnh đơn chữ rõ, ghi dòng ký bằng tay vẫn chặn (`GO_SIGN`). Vắng/`human` = người ký |
 | `claude_min_version` · `ai_attribution` | `doctor` · guard | Cảnh báo Claude Code thấp hơn (`LOOP-HARNESS-026`) · `forbid` chặn commit/PR ghi tên model hay URL phiên AI (`LOOP-HARNESS-027`) |
 | `harness_permissions` | `install.py` | `own` = dự án giữ mô hình quyền riêng: không thêm `allow: Bash`/`deny` của khung, lệnh hook của khung theo dạng dự án đang dùng — có lệnh khung dạng `${CLAUDE_PROJECT_DIR}/.claude/hooks/…` thì giữ tuyệt đối, không có thì tương đối `bash .claude/hooks/x.sh` (giao ước dhcb — chủ repo 2026-10-22; ADR-0073, D-383); guard vẫn chạy trong hook. Vắng = gộp quyền theo ADR-0018 |
 

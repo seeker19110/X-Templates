@@ -219,14 +219,16 @@ class AdapterHostTest(unittest.TestCase):
         như `commit --no-verify` → deny NO_VERIFY ở mọi host; push thường và `push -n` (thử) vẫn chạy."""
         for host in ad.HOSTS:
             for cmd, deny in (
-                ("git push --no-verify origin :feat", True),
+                # `:feat` (xoá nhánh không phải của phiên) nay chặn sớm hơn bằng REMOTE_DELETE (D-407) — ca này giữ
+                # refspec `src:dst` để thấy NO_VERIFY
+                ("git push --no-verify origin HEAD:feat", True),
                 ("git push origin feat --no-verify", True),
                 ("git -c core.hooksPath=/dev/null push origin feat", True),
                 ("git push --no-veri origin feat", True),
                 ("cd /tmp && git push --no-verify origin feat", True),
                 ("bash -c 'git push --no-verify origin feat'", True),
                 # AUD-SEC-352 (review lượt 2): git đọc `-c` từ biến này (`git config --get core.hooksPath` in /dev/null)
-                ("GIT_CONFIG_PARAMETERS=\"'core.hooksPath'='/dev/null'\" git push origin :feat", True),
+                ("GIT_CONFIG_PARAMETERS=\"'core.hooksPath'='/dev/null'\" git push origin HEAD:feat", True),
                 ("GIT_CONFIG_PARAMETERS=\"'CORE.HOOKSPATH'='/x'\" git push origin feat", True),
                 ("GIT_CONFIG_PARAMETERS=\"'core.hooksPath'='/dev/null'\" git commit -m x", True),
                 ("GIT_CONFIG_PARAMETERS=\"'user.name'='x'\" git push origin feat", False),

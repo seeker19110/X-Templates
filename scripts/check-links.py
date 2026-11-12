@@ -50,6 +50,8 @@ TABLE_DELIM_RE = re.compile(r"^\s*\|?\s*:?-+:?\s*(?:\|\s*:?-+:?\s*)*\|?\s*$")
 # Dòng mở khối mới (CommonMark): tiêu đề ATX, mục danh sách, đường kẻ/setext — code span không vượt qua. Nhận rộng tay:
 # tách khối thừa chỉ làm backtick mở thành chữ (kiểm thêm link, có thể báo oan), không bao giờ che thừa link thật.
 BLOCK_START_RE = re.compile(r"^ {0,3}(?:#{1,6}(?:\s|$)|[-*+](?:\s|$)|\d{1,9}[.)](?:\s|$)|(?:[-*_=][ \t]*){3,}$|=+\s*$)")
+_SPAN_SPECIAL_RE = re.compile(r"[\\`]")  # ký tự đổi trạng thái của `mask_code_spans`
+_CELL_SPECIAL_RE = re.compile(r"[\\|]")  # ký tự đổi trạng thái của `table_cells`
 AUTOLINK_RE = re.compile(r"<(https?://[^\s<>]+)>")
 BARE_URL_RE = re.compile(r"https?://[^\s<>\[\]\"`|]+")
 SKIP_HOSTS = {"localhost", "127.0.0.1", "example.com", "example.org", "example.net"}
@@ -87,13 +89,16 @@ def mask_code_spans(text: str) -> str:
     out: list[str] = []
     i = 0
     while i < len(text):
+        hit = _SPAN_SPECIAL_RE.search(text, i)  # AUD-PERF-027: nhảy tới `\`/backtick kế, không duyệt từng ký tự
+        if hit is None:
+            out.append(text[i:])
+            break
+        if hit.start() > i:
+            out.append(text[i : hit.start()])
+            i = hit.start()
         if text[i] == "\\":
             out.append(text[i : i + 2])
             i += 2
-            continue
-        if text[i] != "`":
-            out.append(text[i])
-            i += 1
             continue
         j = i
         while j < len(text) and text[j] == "`":
@@ -111,15 +116,18 @@ def table_cells(line: str) -> list[str]:
     cur: list[str] = []
     i = 0
     while i < len(line):
+        hit = _CELL_SPECIAL_RE.search(line, i)  # AUD-PERF-027: nhảy tới `\`/`|` kế
+        if hit is None:
+            cur.append(line[i:])
+            break
+        cur.append(line[i : hit.start()])
+        i = hit.start()
         if line[i] == "\\":
             cur.append(line[i : i + 2])
             i += 2
-        elif line[i] == "|":
+        else:
             cells.append("".join(cur))
             cur = []
-            i += 1
-        else:
-            cur.append(line[i])
             i += 1
     cells.append("".join(cur))
     return cells
