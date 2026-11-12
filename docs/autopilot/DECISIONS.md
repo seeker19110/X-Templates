@@ -518,3 +518,10 @@
 - Chọn: pnpm audit --audit-level moderate với pnpm đã ghim 12.16.1 (endpoint npm bulk advisory; không thêm action hay image bên thứ ba)
 - Lý do (tiêu chí chất lượng cuối): (1) đúng/an toàn: pnpm đã là phụ thuộc tin cậy của gói và pack-web-api.yml, tự đo 2026-11-12 trên lockfile thật: pnpm 12.16.1 audit → No known vulnerabilities, exit 0; phương án 2 thêm image chỉ ghim theo tag và gửi dữ liệu ra ngoài, phương án 3 thêm hai công cụ phải tự xác minh checksum; (2) đường lùi: một bước workflow; (3) đơn giản, theo chuẩn: BASE-DEP-004 chỉ đòi quét có nhịp. Ngưỡng moderate: đỏ ở mức vừa trở lên, tránh PR đỏ vì advisory thấp ở phụ thuộc gián tiếp. Chưa đo: hành vi khi lockfile ở định dạng v13 thử nghiệm
 - Đường lùi: Xoá job pack-npm-audit khỏi dep-audit.yml và khối npm khỏi dependabot.yml; hoặc đổi sang phương án 2 bằng một PR
+
+### D-428 · 2026-11-12T06:41:12+00:00 · Mốc «Lát 2 — 🟠 mới» đã xong: chạy audit delta ngay hay sau Lát 3 (🔴 guard)?
+
+- Phương án: (1) Chạy audit delta ngay trước khi sang Lát 3 (quét lại 6 nhóm đổi file + 3 nhóm chưa quét) · (2) Sang Lát 3 trước; audit delta một lần sau Lát 3 cùng T-3729 (quét lại TEST/DOC/HAR) và trước release-check
+- Chọn: Sang Lát 3 trước; audit delta một lần sau Lát 3 cùng T-3729 (quét lại TEST/DOC/HAR) và trước release-check
+- Lý do (tiêu chí chất lượng cuối): (1) đúng/an toàn: mọi diff ngoài tài liệu từ 7ca87a6 (#497…#510, #512) đã qua review độc lập sạch ở head (ADR-0057), nên quét lại ngay trùng việc; Lát 3 là các 🔴 đã biết từ audit 11-11 — hoãn không che lỗi chưa biết trong khoảng này vì review từng PR đã rà delta. (2) đường lùi: audit delta vẫn chạy trước release-check (hàng audit và review_debt chặn GO), nên không bỏ qua, chỉ gộp một lần. (3) tiết kiệm: một lượt audit nhiều nhóm thay vì hai. Điều kiện đảo: nếu Lát 3 phát sinh 🔴 mới ngoài PLAN thì audit delta ngay.
+- Đường lùi: Chạy audit delta ngay ở giữa Lát 3 bằng /audit delta; thêm 🔴/🟠 mới vào PLAN-harden-2026-11-11
