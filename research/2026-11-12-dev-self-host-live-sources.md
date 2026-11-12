@@ -13,6 +13,15 @@ tra nguồn sống cho ba nhóm quyết định sắp tới — hợp đồng tr
 mô hình tóm tắt của công cụ fetch nên câu trích nguyên văn cần đối chiếu bản gốc trước khi đưa vào ADR. Năm của vài ngày
 phát hành chỉ suy từ ngữ cảnh (đánh dấu "năm chưa xác minh").
 
+**Quan hệ với [`2026-11-11-factory-e2e-facts.md`](2026-11-11-factory-e2e-facts.md)** (cùng T-3866, do PLAN dẫn): file này là
+lượt tra độc lập thứ hai, cùng chủ đề; hai file không thay nhau. Ba chỗ lệch giữa hai file (nguồn đọc lại 2026-11-12):
+
+| Điểm | File 2026-11-11 | File này |
+|---|---|---|
+| Claude Code CLI | "ổn định v2.1.322" | npm dist-tag: `latest` 2.1.322, `stable` 2.1.311 |
+| App manifest | "`code` sống một giờ" | cả flow phải xong trong một giờ; hạn riêng của `code` chưa xác minh |
+| Fine-grained PAT | hạn 1–366 ngày | tham số URL 1–366 hoặc `none` (chính sách org có thể chặn); mặc định 30 ngày |
+
 Gói hiện có để đối chiếu: `web-api-ts` — Node 24 (`>=24.11.0 <25`), pnpm 12.16.1, Postgres 17 (ghim digest 17.11), `os:
 linux`, host `claude-code` (`framework/templates/packs/web-api-ts/pack.json`).
 
@@ -66,7 +75,7 @@ linux`, host `claude-code` (`framework/templates/packs/web-api-ts/pack.json`).
 
 | Mục | Dữ kiện | Nguồn |
 |---|---|---|
-| git | 2.56.1 (2026-10-26). `git worktree`: `add/list/lock/unlock/move/prune/remove/repair`; `add` từ chối nhánh đã checkout ở worktree khác (trừ `--force`); `--detach` được; ref dưới `refs/` dùng chung, `HEAD` riêng từng worktree. Mục BUGS: nhiều checkout "still experimental", submodule "incomplete… NOT recommended". Tài liệu **không nói** gì về xung đột khi merge hai worktree | git-scm.com/docs/git-worktree |
+| git | 2.56.1 (tag `v2.56.1` có thật; ngày 2026-10-26 chưa xác minh — endoflife.date ghi nhánh 2.56 mới nhất là 2.56.0, 2026-09-28). `git worktree`: `add/list/lock/unlock/move/prune/remove/repair`; `add` từ chối nhánh đã checkout ở worktree khác (trừ `--force`); `--detach` được; ref dưới `refs/` dùng chung, `HEAD` riêng từng worktree. Mục BUGS: nhiều checkout "still experimental", submodule "incomplete… NOT recommended". Tài liệu **không nói** gì về xung đột khi merge hai worktree | git-scm.com/docs/git-worktree |
 | Claude Code | npm `latest` = 2.1.322 (2026-11-10), `stable` = 2.1.311 | registry.npmjs.org · code.claude.com/docs/en/changelog |
 | `claude -p` | Exit 0/khác 0; `--output-format json` có `result`, `session_id`, `total_cost_usd`; `stream-json` cần `--verbose`; `--max-turns` (không mặc định); `--max-budget-usd` (ước tính phía client, có thể vượt, tính cả subagent); `--permission-prompts none` (từ 2.1.259). Từ 2.1.302 `-p` không đặt chế độ thì bắt đầu ở **Manual** (lệnh cần duyệt bị từ chối); ở `auto`, bị chặn 3 lần liên tiếp hoặc 20 tổng thì tạm dừng và hỏi — không có người thì hành động đó không chạy nhưng lần chạy không dừng | code.claude.com/docs/en/headless · cli-reference · permission-modes |
 | `--bare` vs hook | Không `--bare` thì `-p` **chạy hook** của `.claude/settings.json` và nối `.mcp.json` không hỏi tin cậy; `--bare` bỏ hook/skill/CLAUDE.md/MCP và không đọc OAuth (cần `ANTHROPIC_API_KEY`); tài liệu nói `--bare` sẽ thành mặc định của `-p` ở bản sau (khớp luật "không `--bare`" của CLAUDE.md) | code.claude.com/docs/en/headless |
@@ -105,12 +114,12 @@ linux`, host `claude-code` (`framework/templates/packs/web-api-ts/pack.json`).
 
 ## 8. Điều lệch khỏi giả định hiện có của khung
 
-1. **Runner hosted tụt sau bản stable:** `ubuntu-24.04` mang Docker 28.0.4 (nhánh đã EOL từ 2026-05-13) và Compose 2.38.2 (bản mới: 29.9.3 và 5.7.1). Bản dev chạy trên runner phải ghi phiên bản Docker/Compose thực dùng vào receipt, hoặc tự cài bản mới.
-2. **Giới hạn pull Hub 100/6 giờ theo IP** và runner hosted dùng IP chung: ảnh nền phải ghim digest và có kho thay thế hoặc cache; thay thế nào có đủ `node`/`postgres` chưa xác minh (mục 2).
+1. **Runner hosted tụt sau bản stable:** `ubuntu-24.04` mang Docker 28.0.4 (nhánh đã EOL từ 2026-05-13) và Compose 2.38.2 (bản mới: 29.9.3 và 5.7.1). ADR cần xét việc ghi phiên bản Docker/Compose thực dùng vào receipt hoặc tự cài bản mới.
+2. **Giới hạn pull Hub 100/6 giờ theo IP** và runner hosted dùng IP chung: ADR cần xét ghim digest và kho thay thế hoặc cache cho ảnh nền; kho thay thế nào có đủ `node`/`postgres` chưa xác minh (mục 2).
 3. **Node 24 đã ở maintenance** từ 2026-10-20 (EOL 2028-04-30) trong khi `compat.node` của gói ghim `>=24.11.0 <25`; Node 26 là LTS từ 2026-10-28. Không đổi ở lát này — việc của `/upgrade`.
 4. **Postgres 17.11 vs 17.12** không thống nhất giữa nguồn; gói đang ghim 17.11 — đúng với nguồn chính thức tại ngày đọc.
-5. **`GITHUB_TOKEN` không kích workflow mới** và ruleset cho App bypass: bot mở/merge PR (T-3850, T-3865) cần token cài đặt của App chứ không phải `GITHUB_TOKEN`. Bật auto-merge chỉ có GraphQL — bị proxy phiên cloud chặn (xem mục 6), nên merge ghim head bằng REST là đường khả thi (khớp ADR-0036).
-6. **`claude -p` mặc định chạy hook** nếu không `--bare`; worker ngoài phiên cần `--permission-mode auto` hoặc `--permission-prompts none` tường minh vì mặc định là Manual; `--max-budget-usd` là ước tính phía client và có thể vượt.
+5. **`GITHUB_TOKEN` không kích workflow mới** và ruleset cho App bypass: bot mở/merge PR (T-3850, T-3865) cần token cài đặt của App hoặc PAT (tài liệu GitHub khuyến nghị cả hai) thay vì `GITHUB_TOKEN`. Bật auto-merge chỉ có GraphQL — bị proxy phiên cloud chặn (xem mục 6), nên merge ghim head bằng REST là đường khả thi (khớp ADR-0036).
+6. **`claude -p` mặc định chạy hook** nếu không `--bare`; chế độ quyền của `-p` mặc định là Manual và chính `--permission-mode` quyết định mọi lời gọi (`--permission-prompts none` chỉ bỏ chờ host và không cho thử lại, không thay `--permission-mode`) — worker ngoài phiên cần đặt tường minh; `--max-budget-usd` là ước tính phía client và có thể vượt.
 7. **Scheduled task tối thiểu 1 giờ**, còn ở research preview (header beta); không thay được worker cần phản hồi dưới giờ.
 
 ## 9. Chưa xác minh
@@ -136,8 +145,8 @@ Chỉ để ADR đi từ đó; ADR cân bằng tiêu chí chất lượng cuối
 
 | Quyết định | Ứng viên | Điều kiện đổi |
 |---|---|---|
-| Runtime bản dev | Docker Engine + plugin Compose (Apache-2.0, ghim digest) · Podman rootless (cần `/etc/subuid`; `podman compose` chỉ là wrapper) | Môi trường đích không có Docker; cần rootless |
+| Runtime bản dev | Docker Engine + plugin Compose (Apache-2.0; mặc định `docker compose`; tách riêng khỏi Docker Desktop thương mại) · Podman rootless (Apache-2.0; rootless cần `/etc/subuid`; `podman compose` chỉ là wrapper gọi `docker-compose` hoặc `podman-compose` GPL-2.0-only) | Môi trường đích không có Docker; cần rootless |
 | Ảnh nền | `node:24-bookworm-slim` và `postgres:17-bookworm`/`17-trixie`, ghim `@sha256` · bản Alpine | Hub giới hạn pull → cần kho/cache thay thế đã kiểm |
 | Nơi chạy | Runner hosted `ubuntu-24.04` (ghi phiên bản Docker thực vào receipt) · container cục bộ của máy dev · self-hosted runner/ARC | Giới hạn thời gian/đồng thời; repo private tốn hạn mức |
 | Receipt | `buildx --metadata-file` (digest, descriptor) + ghi smoke vào JSON của khung; chứng thực `actions/attest` làm lớp thêm khi có đủ quyền | Driver `docker` thiếu containerd image store → không có attestation |
-| Bot cần quyền ghi | GitHub App (manifest, token 1 giờ, ruleset bypass) · fine-grained PAT (không Checks API, ≤ 50 token, hết hạn tối đa 366 ngày) | Chủ không muốn tạo App |
+| Bot cần quyền ghi | GitHub App (manifest, token 1 giờ, ruleset bypass) · fine-grained PAT (không Checks API, ≤ 50 token, hết hạn 1–366 ngày hoặc `none` nếu chính sách org cho phép) | Chủ không muốn tạo App |
