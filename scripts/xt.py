@@ -1379,6 +1379,8 @@ def _state_lock(base: Path) -> Iterator[None]:
     if fc is None:
         raise OSError("không có fcntl — không ghi state; dùng môi trường hỗ trợ flock (ADR-0054)")
     d = state_dir(base)
+    if d.is_symlink():  # O_NOFOLLOW chỉ che thành phần cuối: thư mục là liên kết thì khoá/ghi xuyên ra ngoài dự án
+        raise OSError(f"{d.name} là symlink — không khoá/ghi state xuyên liên kết ra ngoài dự án (AUD-SEC-651)")
     d.mkdir(parents=True, exist_ok=True)
     fd = os.open(d / STATE_LOCK_FILE, os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0), 0o600)
     try:
@@ -11967,7 +11969,11 @@ def _stage_git_seen(base: Path) -> str:
 
 
 def update_stage(base: Path, fn: Callable[[Optional[Dict[str, Any]]], Dict[str, Any]]) -> Dict[str, Any]:
-    """Đọc–sửa–ghi sổ trong khoá `state.lock` (cùng khoá với state.json, ADR-0052 §2); sổ mới phải hợp lệ mới ghi."""
+    """Đọc–sửa–ghi sổ trong khoá `state.lock` (cùng khoá với state.json, ADR-0052 §2); sổ mới phải hợp lệ mới ghi.
+    Thư mục cha của sổ là symlink → từ chối trước khi khoá/ghi (AUD-SEC-651); chỉ xét từ `base` xuống."""
+    links = [q.as_posix() for q in Path(STAGE_LEDGER).parents if q != Path(".") and (base / q).is_symlink()]
+    if links:
+        raise StageError(f"{links[-1]} là symlink — không ghi sổ giai đoạn xuyên liên kết ra ngoài dự án (AUD-SEC-651)")
     with _state_lock(base):
         new = fn(read_stage(base))
         why = stage_problem(new)

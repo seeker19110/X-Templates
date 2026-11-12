@@ -520,6 +520,57 @@ class StageCliTest(TmpRepoCase):
         self.assertIsNone(xt._stage_dispatch(args, self.repo))
 
 
+class StageSymlinkTest(TmpRepoCase):
+    """AUD-SEC-651: thư mục cha của sổ (`docs`, `docs/autopilot`) hay `.autopilot` (khoá `state.lock`) là symlink →
+    `stage init` từ chối (exit 2, nói rõ đường nào), không ghi/khoá gì ra ngoài; `O_NOFOLLOW` chỉ che thành phần cuối."""
+
+    def setUp(self):
+        super().setUp()
+        self.init_repo()
+        self.outside = self.tmp / "out"
+        self.outside.mkdir()
+        self.enterContext(human_env(CLAUDE_PROJECT_DIR=str(self.repo)))
+
+    def link(self, rel, dest=None):
+        p = self.repo / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.symlink_to(dest or os.path.relpath(self.outside, p.parent))
+
+    def test_init_refuses_symlinked_parent_and_writes_nothing_outside(self):
+        for n, rel in enumerate((".autopilot", "docs", "docs/autopilot")):
+            with self.subTest(rel=rel):
+                # repo + thư mục ngoài riêng mỗi ca: ca đỏ không kéo ca sau đỏ theo (AUD-TEST-102)
+                self.repo, self.outside = self.tmp / f"repo-{n}", self.tmp / f"out-{n}"
+                self.repo.mkdir()
+                self.outside.mkdir()
+                self.git("init", "-q")
+                self.link(rel)
+                with human_env(CLAUDE_PROJECT_DIR=str(self.repo)):
+                    rc, _, err = run_main("stage", "init")
+                    self.assertEqual(rc, 2)
+                    self.assertIn(f"{rel} là symlink", err)
+                    self.assertIn("AUD-SEC-651", err)
+                    self.assertEqual(list(self.outside.rglob("*")), [])
+                    (self.repo / rel).unlink()
+                    self.assertEqual(run_main("stage", "init")[0], 0)  # gỡ liên kết: chạy bình thường
+                self.assertTrue((self.repo / xt.STAGE_LEDGER).is_file())
+
+    def test_dangling_autopilot_link_refused_by_lock(self):
+        self.link(".autopilot", self.tmp / "chua-co")
+        with self.assertRaisesRegex(OSError, r"\.autopilot là symlink"):
+            with xt._state_lock(self.repo):
+                self.fail("không được vào khoá")
+        self.assertFalse((self.tmp / "chua-co").exists())
+
+    def test_root_under_symlink_still_writes(self):
+        """Gốc dự án nằm dưới symlink (macOS `/var → /private/var`): chỉ xét từ gốc xuống, không coi tổ tiên là liên kết."""
+        via = self.tmp / "via"
+        via.symlink_to(self.repo)
+        self.assertEqual(xt.update_stage(via, lambda led: ledger())["cycle"], "C-001")
+        self.assertTrue((self.repo / xt.STAGE_LEDGER).is_file())
+        self.assertTrue((self.repo / ".autopilot" / xt.STATE_LOCK_FILE).is_file())
+
+
 class StageLockTest(TmpRepoCase):
     """Giai đoạn sau khoá ở lối vào vòng (`loop init/next/record`; verdict không đọc khoá — D-241) và ở `release-check`."""
 

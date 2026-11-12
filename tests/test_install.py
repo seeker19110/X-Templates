@@ -2608,6 +2608,118 @@ class InstallStageTest(unittest.TestCase):
         self.assertFalse(set(hook) & set(run.call_args.kwargs["env"]))
 
 
+class SymlinkEscapeCase(unittest.TestCase):
+    """Dự án tạm `proj/` + thư mục ngoài `out/` trong một thư mục tạm RIÊNG mỗi ca (AUD-TEST-102: dọn bằng
+    `enterContext` kể cả khi đỏ); git không đi ngược lên thư mục cha, không nhặt cấu hình máy."""
+
+    def fresh(self, link: str = "") -> tuple[Path, Path]:
+        tmp = Path(self.enterContext(tempfile.TemporaryDirectory())).resolve()
+        target, outside = tmp / "proj", tmp / "out"
+        target.mkdir()
+        outside.mkdir()
+        self.env = {k: v for k, v in os.environ.items() if k not in ("CLAUDECODE", "CLAUDE_PROJECT_DIR")}
+        self.env.update(GIT_CONFIG_NOSYSTEM="1", HOME=str(tmp), GIT_CEILING_DIRECTORIES=str(tmp))
+        if link:  # `<link> → ../out` (đường tương đối như người dựng tay)
+            (target / link).parent.mkdir(parents=True, exist_ok=True)
+            (target / link).symlink_to(os.path.relpath(outside, (target / link).parent))
+        return target, outside
+
+    def git(self, target: Path, *args: str) -> None:
+        subprocess.run(["git", "-C", str(target), *args], check=True, capture_output=True, env=self.env, timeout=60)
+
+    def main(self, target: Path, *argv: str) -> tuple[int, str, str]:
+        out, err = io.StringIO(), io.StringIO()
+        with redirect_stdout(out), redirect_stderr(err), mock.patch.dict(os.environ, self.env, clear=True):
+            rc = install.main([str(target), "--label", "t", *argv])
+        return rc, out.getvalue(), err.getvalue()
+
+    def assertNothingOutside(self, outside: Path) -> None:
+        self.assertEqual(sorted(p.relative_to(outside).as_posix() for p in outside.rglob("*")), [])
+
+
+@unittest.skipIf(shutil.which("git") is None, "cần git")
+class HooksPathSymlinkTest(SymlinkEscapeCase):
+    """AUD-SEC-650: `core.hooksPath` trỏ vào thư mục của dự án là symlink ra ngoài (`.githooks → ../out`, `.husky →
+    ../out` với `.husky/_`) → không ghi hook (cũng không `mkdir` `out/_`), `--plan` báo `skipped-symlink` như cài thật."""
+
+    def test_hooks_dir_through_symlink_not_written(self):
+        for link, hooks_path in ((".githooks", ".githooks"), (".husky", ".husky/_")):
+            with self.subTest(hooks_path=hooks_path):
+                target, outside = self.fresh(link)
+                self.git(target, "init", "-q")
+                self.git(target, "config", "core.hooksPath", hooks_path)
+                rc, out, err = self.main(target, "--plan")
+                self.assertEqual(rc, 0, err)
+                plan = json.loads(out)["git_hooks"]
+                self.assertEqual({h["action"] for h in plan["hooks"]}, {"skipped-symlink"})
+                rc, _, err = self.main(target)
+                self.assertEqual(rc, 0, err)
+                self.assertNothingOutside(outside)
+                self.assertIn("⚠ git hook: bỏ qua symlink", err)
+                self.assertTrue((target / link).is_symlink())
+                doc = json.loads((target / install.MANIFEST_V2).read_text(encoding="utf-8"))
+                self.assertEqual(doc["git_hooks"], [])
+
+    def test_dotdot_after_symlink_not_written(self):
+        """Review T-3747 🔴: `normpath` xoá thành phần symlink đứng trước `..` — `.githooks → ../out` với
+        `core.hooksPath=.githooks/../x` ghi ba hook ra `x` ngoài dự án; `sub → out/deep` với `sub/../hk` ghi `out/hk`."""
+        for link, hooks_path, landing in ((".githooks", ".githooks/../x", "x"), ("sub", "sub/../hk", "hk")):
+            with self.subTest(hooks_path=hooks_path):
+                target, outside = self.fresh()
+                if link == "sub":
+                    (outside / "deep").mkdir()
+                    (target / link).symlink_to(os.path.relpath(outside / "deep", target))
+                    landing_dir = outside / landing
+                else:
+                    (target / link).symlink_to(os.path.relpath(outside, target))
+                    landing_dir = target.parent / landing
+                self.git(target, "init", "-q")
+                self.git(target, "config", "core.hooksPath", hooks_path)
+                rc, out, err = self.main(target, "--plan")
+                self.assertEqual(rc, 0, err)
+                self.assertEqual({h["action"] for h in json.loads(out)["git_hooks"]["hooks"]}, {"skipped-symlink"})
+                rc, _, err = self.main(target)
+                self.assertEqual(rc, 0, err)
+                self.assertFalse(landing_dir.exists(), sorted(p.name for p in landing_dir.parent.iterdir()))
+                self.assertIn("⚠ git hook: bỏ qua symlink", err)
+
+    def test_hooks_path_outside_project_still_installs(self):
+        """Thư mục hook NGOÀI dự án (`core.hooksPath` tuyệt đối, kể cả qua symlink ngoài dự án — như git common dir của
+        worktree) là cấu hình git của người dùng: giữ hành vi cũ, vẫn cài."""
+        target, outside = self.fresh()
+        link = outside.parent / "global-hooks"
+        link.symlink_to(outside)
+        self.git(target, "init", "-q")
+        self.git(target, "config", "core.hooksPath", str(link))
+        rc, out, err = self.main(target, "--plan")
+        self.assertEqual(rc, 0, err)
+        self.assertEqual({h["action"] for h in json.loads(out)["git_hooks"]["hooks"]}, {"copied"})
+        rc, _, err = self.main(target)
+        self.assertEqual(rc, 0, err)
+        self.assertEqual(sorted(p.name for p in outside.iterdir()), sorted(install.GIT_HOOKS))
+        self.assertNotIn("bỏ qua symlink", err)
+
+
+class StageInitSymlinkTest(SymlinkEscapeCase):
+    """AUD-SEC-651: `--stage-init` với `docs → ../out` (sổ) hay `.autopilot → ../out` (khoá `state.lock`) — `xt.py stage
+    init` từ chối rõ ràng, không ghi gì ra ngoài; installer báo ⚠ và vẫn thoát 0 (fail-open như mọi lỗi `stage init`)."""
+
+    def test_stage_init_refuses_symlinked_parent(self):
+        for link, why in (
+            ("docs", "docs là symlink"),
+            ("docs/autopilot", "docs/autopilot là symlink"),
+            (".autopilot", ".autopilot là symlink"),
+        ):
+            with self.subTest(link=link):
+                target, outside = self.fresh(link)
+                rc, _, err = self.main(target, "--no-harness", "--stage-init")
+                self.assertEqual(rc, 0, err)
+                self.assertIn("⚠ --stage-init không tạo được sổ", err)
+                self.assertIn(why, err)
+                self.assertNothingOutside(outside)
+                self.assertTrue((target / link).is_symlink())
+
+
 @unittest.skipIf(shutil.which("git") is None or shutil.which("bash") is None, "cần git + bash")
 class GitHooksTest(unittest.TestCase):
     """Sàn git hook (ADR-0064 lát C, T-3645): `install.py` cài `pre-commit`/`commit-msg`/`pre-push` khi dự án chưa có hook

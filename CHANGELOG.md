@@ -158,12 +158,19 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
 - `release-check` hàng `verify` đọc sổ máy `.autopilot/` ở mọi worktree của repo: chạy từ worktree không có sổ không còn
   N/A bỏ qua `loop verify --all` của cây chính (PASS chỉ khi sổ ở worktree khác xanh khớp vân tay cây đang kiểm); sổ
   hỏng, vòng bị chặn ở worktree nào hay không liệt kê được worktree → FAIL (AUD-HAR-369).
+- `install.py` git hook (AUD-SEC-650 🔴, T-3747): `core.hooksPath` trỏ vào thư mục của dự án đi qua symlink
+  (`.githooks → ../out`, `.husky → ../out` với `.husky/_`) → không cài hook nào, không tạo thư mục ngoài, cảnh báo
+  `⚠ git hook: bỏ qua symlink`, manifest `git_hooks` rỗng; `--plan` báo `skipped-symlink` cho từng hook. Thư mục hook
+  ngoài dự án (worktree, `core.hooksPath` tuyệt đối) giữ hành vi cũ.
+- `xt.py stage` / `install.py --stage-init` (AUD-SEC-651 🔴, T-3747): `docs` hay `docs/autopilot` là symlink → `stage`
+  ghi sổ từ chối (`✗ … là symlink`, exit 2); `.autopilot` là symlink → khoá `state.lock` từ chối (OSError, exit 2) — mọi
+  lệnh ghi state qua khoá cũng vậy. Không ghi/khoá gì ngoài dự án; installer báo ⚠ và vẫn thoát 0.
 - `install.py` (AUD-SEC-619 🔴, D-425): thư mục cha là symlink trên đường ghi harness `.claude/`, `.github/` và adapter
   (`.codex/`, `.gemini/`…) → `skipped-symlink` kèm cảnh báo, không ghi/tạo gì ngoài dự án (trước đây `.claude -> ngoài`
   khiến `settings.json` ngoài bị gộp quyền). `--plan` báo cùng quyết định. Dự án đích có thư mục harness (`.claude`,
   `.claude/hooks`), `.github` hay thư mục adapter là symlink (vd dùng chung hook): nâng bản không còn cập nhật được file
-  qua liên kết đó — thay bằng thư mục thật hoặc chép tay (`doctor` báo thiếu file; file cũ còn nằm sau liên kết thì `doctor --drift` báo); còn mở: thư mục git hook và sổ giai
-  đoạn qua symlink (AUD-SEC-650/651, T-3747).
+  qua liên kết đó — thay bằng thư mục thật hoặc chép tay (`doctor` báo thiếu file; file cũ còn nằm sau liên kết thì `doctor --drift` báo); thư mục git hook và sổ giai
+  đoạn qua symlink: hai mục trên (AUD-SEC-650/651, T-3747).
 - `dev-task.sh format-file` (AUD-SEC-628 🔴, lý do chạm hàng rào: formatter PostToolUse chuẩn hoá một dòng §5 mà guard
   đã cho qua thành dòng ký hợp lệ): bỏ qua `GO-NO-GO*.md` theo tên và theo đích symlink (so chữ thường như guard) và
   chụp–khôi phục mọi `GO-NO-GO*.md` quanh formatter không theo từng file — chữ ký §5 là của người. Chỉ đóng đường hook
