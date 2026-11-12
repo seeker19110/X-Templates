@@ -1580,6 +1580,24 @@ class LoopCommandsTest(TmpDirCase):
         super().setUp()
         self.env = self.enterContext(unittest.mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(self.tmp)}))
         os.environ.pop("XT_DEBUG", None)
+        for key in xt.STAGE_AGENT_ENV:  # người chạy ở terminal của mình (chạy trong phiên agent vẫn có các biến này)
+            os.environ.pop(key, None)
+
+    def test_decide_prod_refused_in_agent_session(self):
+        """AUD-SEC-541: `loop decide-prod` là quyết định của chủ dự án (GO-NO-GO #18) — phiên agent chạy nó thì
+        `prod_switch` PASS và `release-sign` tự ký; từ chối như `stage approve` (exit 2), sổ không đổi."""
+        self.decide("--revert", "r", "--prod", "SES")  # D-001 có đề xuất
+        log = self.tmp / "docs" / "autopilot" / "DECISIONS.md"
+        before = log.read_text(encoding="utf-8")
+        for env in ({"CLAUDECODE": "1"}, {"CLAUDE_CODE_SESSION_ID": "s"}, {"AI_AGENT": "x"}, {"CLAUDECODE": ""}):
+            with self.subTest(env), unittest.mock.patch.dict(os.environ, env):
+                rc, out, err = run_main("loop", "decide-prod", "--ref", "D-001", "--choice", "giữ tự host")
+                self.assertEqual((rc, out), (2, ""))
+                self.assertIn("ngoài phiên agent", err)
+                self.assertEqual(log.read_text(encoding="utf-8"), before)
+        self.assertEqual(xt._release_prod_switch(self.tmp)["result"], "N/A")  # chưa quyết
+        rc, out, err = run_main("loop", "decide-prod", "--ref", "D-001", "--choice", "giữ tự host")  # người: qua
+        self.assertEqual((rc, err), (0, ""))
 
     def write_plan(self, text: str = "- [ ] `T-001` làm gì đó — Gate: `true`\n") -> None:
         p = self.tmp / "docs" / "autopilot" / "PLAN.md"

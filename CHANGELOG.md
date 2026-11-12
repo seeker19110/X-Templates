@@ -50,6 +50,12 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
 
 ### Changed
 
+- `xt.py loop decide-prod` + guard (lý do chạm hàng rào: 🟠 AUD-SEC-541, audit delta 2026-11-11): quyết đề xuất "Khi
+  chạy thật" là việc của chủ dự án nhưng phiên agent chạy được nó, làm hàng `prod_switch` PASS và `release-sign` (ADR-0074)
+  tự ký. Lệnh nay từ chối (exit 2, sổ không đổi) khi có biến môi trường phiên agent (như `stage approve`), và guard chặn
+  `xt.py loop decide-prod` ở các dạng viết ra chữ — kể cả `env -u`, gán biến rỗng, đường script bất kỳ, lệnh con mờ
+  (`$(…)`, backtick, biến) và lệnh con nạp từ stdin (`xargs`/`parallel … loop`) — cùng nhóm `STAGE_APPROVE`. Chưa chặn
+  (AUD-SEC-641, mở): ghi tay dòng quyết bằng Edit/Write; gọi thẳng hàm trong tiến trình (`python3 -c "import xt; …"`).
 - Guard (lý do chạm hàng rào: 🔴 AUD-SEC-614, hồi quy #488, audit delta 2026-11-11; review lát thêm 🔴 AUD-SEC-642 và 🟠
   AUD-SEC-643 có từ trước, cùng gốc): bộ đọc tuỳ chọn (`_parse_opts`, `_push_refs`) coi `--end-of-options` (git ≥ 2.24)
   như `--` — mọi token sau nó là đối số vị trí, kể cả token bắt đầu `-` (không tính khi nó là giá trị của `-o`). Nên
