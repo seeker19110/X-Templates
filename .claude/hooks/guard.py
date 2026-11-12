@@ -7440,7 +7440,10 @@ def _approves_at(n: List[str], k: int, runs: Tuple[bool, bool], feeds: bool) -> 
         return False
     if sub == "loop":  # `loop decide-prod` (AUD-SEC-541): lệnh con của `loop` mờ có thể là nó — chỉ khi script có tên
         tail = n[j + 1 :]
-        return "decide-prod" in tail or (named and _vague(next((t for t in tail if not t.startswith("-")), "")))
+        act = next((t for t in tail if not t.startswith("-")), "")
+        if not act:  # lệnh con từ stdin (`xargs … loop`) như `stage` (review #510 🟠-1)
+            return feeds and not {"-h", "--help"} & set(tail)
+        return "decide-prod" in tail or (named and _vague(act))
     if sub != "stage":
         return runs[0] and (_vague(sub) or (feeds and not sub))
     tail = n[j + 1 :]

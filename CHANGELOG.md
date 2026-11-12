@@ -40,8 +40,9 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
 - `xt.py loop decide-prod` + guard (lý do chạm hàng rào: 🟠 AUD-SEC-541, audit delta 2026-11-11): quyết đề xuất "Khi
   chạy thật" là việc của chủ dự án nhưng phiên agent chạy được nó, làm hàng `prod_switch` PASS và `release-sign` (ADR-0074)
   tự ký. Lệnh nay từ chối (exit 2, sổ không đổi) khi có biến môi trường phiên agent (như `stage approve`), và guard chặn
-  `xt.py loop decide-prod` mọi dạng — kể cả lách bằng `env -u`, gán biến rỗng, đường script bất kỳ, lệnh con mờ — cùng
-  nhóm `STAGE_APPROVE`. Việc ghi tay dòng quyết bằng Edit/Write còn mở (AUD-SEC-641).
+  `xt.py loop decide-prod` ở các dạng viết ra chữ — kể cả `env -u`, gán biến rỗng, đường script bất kỳ, lệnh con mờ
+  (`$(…)`, backtick, biến) và lệnh con nạp từ stdin (`xargs`/`parallel … loop`) — cùng nhóm `STAGE_APPROVE`. Chưa chặn
+  (AUD-SEC-641, mở): ghi tay dòng quyết bằng Edit/Write; gọi thẳng hàm trong tiến trình (`python3 -c "import xt; …"`).
 - `check-links.py` (AUD-PERF-027): `mask_code_spans`/`table_cells` nhảy tới ký tự đặc biệt bằng regex thay vì duyệt
   từng ký tự — dòng `lint` của `gate-fast` bớt khoảng nửa thời gian kiểm link (đo 1 789 → 876 ms khi máy tải); kết quả
   kiểm không đổi (so vi sai trên mọi file `.md` của repo và fuzz).
