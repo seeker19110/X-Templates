@@ -403,6 +403,83 @@ class ReleaseBlockedLoopTest(ReleaseCase):
         self.assertEqual(self.by_id(self.release()[1])["verify"]["result"], "PASS")
 
 
+class ReleaseVerifyWorktreeTest(ReleaseCase):
+    """AUD-HAR-369: `.autopilot/` riêng mỗi worktree (không theo git) — `release-check` từ worktree không có sổ không
+    được bỏ qua `loop verify --all` của cây chính (hàng N/A SHOULD); đọc sổ ở mọi worktree, fail-closed."""
+
+    def setUp(self):
+        super().setUp()
+        plan = self.repo / "docs/autopilot/PLAN.md"
+        plan.parent.mkdir(parents=True)
+        plan.write_text("- [ ] `T-001` a — Gate: `true`\n", encoding="utf-8")
+        (self.repo / ".git/info/exclude").write_text(".autopilot/\n", encoding="utf-8")
+        self.setup_xt()
+        self.assertEqual(run_main("loop", "init", "--plan", "docs/autopilot/PLAN.md")[0], 0)
+        self.wt = self.tmp / "wt"
+        self.git("worktree", "add", "-q", "--detach", str(self.wt))
+
+    def verify_from(self, root: Path) -> dict:
+        with unittest.mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(root)}):
+            rc, d = self.release()
+        row = self.by_id(d)["verify"]
+        self.assertEqual(rc, 1 if row["result"] == "FAIL" else 0, row)
+        return row
+
+    def test_main_tree_unverified_fails_from_worktree(self):
+        """Cây chính có vòng chưa `loop verify --all` → FAIL từ worktree (trước: N/A SHOULD, GO); verify ở cây chính
+        khớp vân tay cây worktree → PASS; worktree đổi mã → vân tay lệch → FAIL."""
+        row = self.verify_from(self.wt)
+        self.assertEqual((row["result"], row["level"]), ("FAIL", "BLOCKER"), row)
+        self.assertIn("worktree này không có sổ máy", row["evidence"])
+        self.assertIn(str(self.repo.resolve()), row["evidence"])
+        self.assertEqual(run_main("loop", "verify", "--all")[0], 0)
+        row = self.verify_from(self.wt)
+        self.assertEqual(row["result"], "PASS", row)
+        self.assertIn(str(self.repo.resolve()), row["evidence"])
+        (self.wt / "app.py").write_text("print(1)\n", encoding="utf-8")
+        row = self.verify_from(self.wt)
+        self.assertEqual(row["result"], "FAIL", row)
+        self.assertIn("loop verify --all", row["evidence"])
+
+    def test_blocked_or_broken_ledger_in_any_worktree_fails(self):
+        """Vòng bị chặn hay sổ hỏng ở worktree khác → FAIL, kể cả khi cây đang kiểm đã verify xanh (cùng luật
+        `release-sign`, AUD-HAR-340/377)."""
+        self.assertEqual(run_main("loop", "verify", "--all")[0], 0)
+        self.assertEqual(self.verify_from(self.repo)["result"], "PASS")
+        other = self.wt / ".autopilot/state.json"
+        other.parent.mkdir()
+        for text, msg in (
+            ('{"blocked": true, "blocked_reason": "cần quyết"}', "vòng đang bị chặn (cờ chặn — cần quyết"),
+            ("{hỏng", "không đọc được"),
+            ("[]", "không đọc được"),
+        ):
+            with self.subTest(text=text):
+                other.write_text(text, encoding="utf-8")
+                row = self.verify_from(self.repo)
+                self.assertEqual(row["result"], "FAIL", row)
+                self.assertIn(msg, row["evidence"])
+                self.assertIn(str(other.resolve()), row["evidence"])
+        other.write_text("{}", encoding="utf-8")
+        self.assertEqual(self.verify_from(self.repo)["result"], "PASS")
+
+    def test_no_ledger_anywhere_is_na_and_unlistable_fails(self):
+        """Không worktree nào có sổ → N/A SHOULD như cũ (không chạy autopilot); không liệt kê được worktree → FAIL."""
+        (self.repo / ".autopilot/state.json").unlink()
+        row = self.verify_from(self.wt)
+        self.assertEqual((row["result"], row["level"]), ("N/A", "SHOULD"), row)
+        real = xt._git
+
+        def fails(cwd, *args, **kw):
+            if args[0] == "worktree":
+                return subprocess.CompletedProcess(args, 128, "", "fatal: hỏng")
+            return real(cwd, *args, **kw)
+
+        with unittest.mock.patch.object(xt, "_git", side_effect=fails):
+            row = xt._release_verify(self.wt)
+        self.assertEqual(row["result"], "FAIL", row)
+        self.assertIn("không liệt kê được worktree", row["evidence"])
+
+
 class ReleaseArtifactTest(ReleaseCase):
     """T-3677: `release_artifacts` → hàng `artifacts` (chỉ khi khai) và `subject.digest`."""
 

@@ -155,6 +155,9 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
 
 ### Fixed
 
+- `release-check` hàng `verify` đọc sổ máy `.autopilot/` ở mọi worktree của repo: chạy từ worktree không có sổ không còn
+  N/A bỏ qua `loop verify --all` của cây chính (PASS chỉ khi sổ ở worktree khác xanh khớp vân tay cây đang kiểm); sổ
+  hỏng, vòng bị chặn ở worktree nào hay không liệt kê được worktree → FAIL (AUD-HAR-369).
 - `install.py` (AUD-SEC-619 🔴, D-425): thư mục cha là symlink trên đường ghi harness `.claude/`, `.github/` và adapter
   (`.codex/`, `.gemini/`…) → `skipped-symlink` kèm cảnh báo, không ghi/tạo gì ngoài dự án (trước đây `.claude -> ngoài`
   khiến `settings.json` ngoài bị gộp quyền). `--plan` báo cùng quyết định. Dự án đích có thư mục harness (`.claude`,
