@@ -466,6 +466,8 @@
 - Lý do (tiêu chí chất lượng cuối): Chủ dự án chốt ba trả lời; phiên chọn cách máy hoá theo tiêu chí chất lượng cuối: (1) đúng/an toàn — điều kiện song song do máy kiểm thay lời khai, khoá nới vẫn trong HARD_GATED_KEYS và người merge một lần, tiền/dữ liệu thật/pháp lý vẫn qua grant và loop defer, cơ chế bù có trước phần nới; (2) đường lùi — mỗi năng lực một khoá, mỗi lát một PR; (3) đơn giản — dựng trên xt.py, install.py, gói và registry sẵn có, không tách xt.py, một gói trong 3.x; phương án 2 không cho bản chạy và M/L luôn chờ người, phương án 3 đã loại ở ADR-0068. Thay một phần D-142 (không song song worktree), mặc định self của ADR-0061, điều kiện scale S của ADR-0074, giai đoạn 2/3 chỉ người của ADR-0058/0069 — có hiệu lực khi lát tương ứng có mã
 - Đường lùi: PR này chỉ có tài liệu: revert là về hiện trạng; khi có mã, mỗi năng lực lùi bằng khoá của nó (song song về self, release_signoff và khoá giai đoạn về human hoặc bỏ khoá)
 
+- Đính chính (2026-11-12, AUD-DOC-283/284): ADR-0075 "Thay một phần" nay nhắc ADR-0048 §Quyết định 1 (nhà của dòng 20 GO-NO-GO M/L); phần giai đoạn 2/3 là cách hiểu và đề xuất của phiên cho câu 3, chờ chủ dự án xác nhận — T-3856 không có hiệu lực trước đó.
+
 ### D-420 · 2026-11-11T17:40:19+00:00 · Duyệt PLAN-factory-e2e (ADR-0075): 24 task T-3740…T-3763 trong 8 lát — thứ tự nào?
 
 - Phương án: (1) Bản dev trước (Lát 0–2, pilot 1) → chất lượng bù (Lát 3) → song song (Lát 4) → mọi quy mô (Lát 5, sau Lát 3) → thiết lập một lần và production (Lát 6) → vòng học, kênh vào, pilot 2 (Lát 7) · (2) Song song và worker ngoài phiên trước để mọi lát sau chạy nhanh hơn, rồi mới bản dev · (3) Mở mọi quy mô trước (bỏ scale S của release-sign, giai đoạn 2/3) rồi mới nghiệm thu độc lập và bản dev

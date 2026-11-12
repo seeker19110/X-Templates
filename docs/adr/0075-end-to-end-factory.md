@@ -9,8 +9,10 @@
 - **Nghiên cứu:** [`research/2026-11-11-factory-end-to-end.md`](../../research/2026-11-11-factory-end-to-end.md) (đọc repo
   ở `e1c74e6`; dữ kiện ngoài chưa tra — việc đầu của PLAN).
 - **Thay một phần (có hiệu lực khi lát tương ứng có mã):** D-142 mục "không song song worktree" · ADR-0061 mặc định `self`
-  và điều kiện "tăng số agent chỉ khi có số" · ADR-0074 điều kiện `scale: S` cùng dòng 20 BLOCKER (M/L) của mẫu GO-NO-GO ·
-  ADR-0058/0069 giai đoạn 2/3 chỉ người.
+  và điều kiện "tăng số agent chỉ khi có số" · ADR-0074 điều kiện `scale: S` · ADR-0048 §Quyết định 1 (nhà của dòng 20
+  BLOCKER M/L "người đã dùng thử" ở mẫu GO-NO-GO) · ADR-0058/0069 giai đoạn 2/3 chỉ người. Phần giai đoạn 2/3 là **cách
+  hiểu và đề xuất của phiên** cho câu 3 "mọi quy mô" (giới hạn giai đoạn không phụ thuộc `scale`, vốn là lát S10 của lộ
+  trình cũ): chờ chủ dự án xác nhận; T-3856 không có hiệu lực trước đó.
 - **Giữ:** `HARD_GATED_KEYS` và luật bất đối xứng (máy tự siết, nới qua PR người merge một lần); nhóm máy chặn của guard;
   tiền, dữ liệu người dùng thật, pháp nhân đứng tên qua `- grant:` và `loop defer`; các mục còn lại của D-142 (không tách
   `xt.py`, không merge queue, không reviewer LLM mọi PR, không thu nhỏ guard); một gói trong 3.x (ADR-0068); trần byte

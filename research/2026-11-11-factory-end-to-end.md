@@ -51,7 +51,9 @@ tài khoản hay khoá của chủ, smoke xanh, có receipt máy đọc.
 - Luật bất đối xứng (research 2026-11-08 §1): máy tự siết được; nới chỉ qua PR đổi khoá `HARD_GATED_KEYS` do người merge
   một lần. "Mọi quy mô" là năng lực có sẵn ở mọi quy mô, không phải khoá tự bật.
 - Bảy loại "máy không thể" (cùng nguồn §3) không đổi theo quy mô: tiền, dữ liệu người dùng thật, pháp nhân đứng tên vẫn
-  qua `grant` và `loop defer`.
+  qua `grant` và `loop defer`. Đính chính 2026-11-12: nguồn 2026-11-08 xếp dòng 20 GO-NO-GO ("người đã dùng thử", M/L) vào
+  nhóm này; ADR-0075 quyết định **thay** dòng đó bằng hàng bằng chứng máy "máy mô phỏng" (ADR-0048 §Quyết định 1) — nên
+  nhóm không đổi chỉ đúng với tiền/dữ liệu thật/pháp nhân.
 - "Qua cổng của máy" chưa phải "đúng ý định" (cùng nguồn §4, số METR; chưa tra lại hôm nay). Bỏ chữ ký người ở M/L mà
   không có nghiệm thu độc lập là giảm chất lượng — nên cơ chế bù phải merge trước phần nới.
 - File mọi PR cùng chạm (`PROGRESS.md`, `CHANGELOG.md`, sổ quyết định, sổ audit) làm "không chạm cùng file" luôn sai nếu

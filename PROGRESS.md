@@ -3,7 +3,7 @@
 > Giai đoạn hiện tại: G8 Vận hành & tiến hoá (khung 3.33.0, pha `harden` — D-136) · Cập nhật: 2026-11-11 · Nhánh: claude/upbeat-ptolemy-2n2dbr
 
 ## Đang làm
-- 2026-11-11 **ADR-0075** xưởng đầu-cuối (chủ dự án: song song theo file · thiết lập sau bản dev · mọi quy mô — D-419) + [PLAN-factory-e2e](docs/autopilot/PLAN-factory-e2e.md) (D-420, T-3841…T-3866): chưa có mã; việc đầu là T-3740.
+- 2026-11-11 **ADR-0075** xưởng đầu-cuối (chủ dự án: song song theo file · thiết lập sau bản dev · mọi quy mô — D-419) + [PLAN-factory-e2e](docs/autopilot/PLAN-factory-e2e.md) (D-420, T-3841…T-3866): chưa có mã; việc đầu là T-3866 (nghiên cứu nguồn sống).
 - 2026-11-09…10 sau 3.33.0 đã merge: #474, #475, #480 (**ADR-0074** `xt.py release-sign`, D-404…D-406), rồi chuỗi trả nợ bảo mật guard #485…#490 (D-407…D-409: `REMOTE_DELETE`, khoá đọc từ mirror, cờ gộp chữ số, viết tắt một chữ, chuẩn hoá lệnh gh theo cobra ở mọi luật, bỏ chuyển hướng trong argv gh). Mỗi PR một review Fable; 🔴 sửa trong PR, 🟠/🟢 ghi nợ. Sổ: 0 🔴 mở; nợ review mở ≈ 48 dòng (`audit check --strict` đỏ tới khi trả).
 - Chờ người: §5 ký GO-NO-GO 3.30.0…3.31.1 và [3.33.0](docs/ops/GO-NO-GO-2026-11-08-v3.33.0.md) (3.32.0 đã ký #476); bật `release_signoff: agent` ở `xt.yaml` là PR chủ repo merge (HARD_GATED, D-402). T-3557 còn `[ ]`.
 - Dự án đích (`main` 2026-11-08, [registry](docs/ops/registry.json)): cả 4 ở 3.32.0; PR nâng 3.33.0 chưa mở. Còn mở: AUD-TEST-061 (CodeQL); fixture host Codex/Gemini.
