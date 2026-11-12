@@ -102,6 +102,47 @@ class PackContractTest(unittest.TestCase):
         self.assertIn('expect(await migrate(raw, "up")).toEqual([]);', slice_test)
 
 
+INDEX_RE = re.compile(
+    r"CREATE\s+(?:UNIQUE\s+)?INDEX\s+(?P<conc>CONCURRENTLY\s+)?(?:IF\s+NOT\s+EXISTS\s+)?[\w.\"]+\s+ON\s+(?:ONLY\s+)?(?P<table>[\w.\"]+)",
+    re.IGNORECASE,
+)
+TABLE_RE = re.compile(r"CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(?P<table>[\w.\"]+)", re.IGNORECASE)
+# Migration đã phát hành (DB-MIG-003: không sửa tại chỗ) có `CREATE INDEX` thường trên bảng có sẵn — kèm dòng sổ AUDIT-STATUS.
+LEGACY_PLAIN_INDEX = {"0005_sessions_expiry": "AUD-DATA-011"}
+
+
+def plain_indexes_on_existing_tables(sql: str) -> list[str]:
+    """Tên bảng có sẵn (không tạo cùng file) bị `CREATE INDEX` không CONCURRENTLY — khoá SHARE chặn ghi (DB-MIG-006)."""
+    created = {m["table"] for m in TABLE_RE.finditer(sql)}
+    return [m["table"] for m in INDEX_RE.finditer(sql) if not m["conc"] and m["table"] not in created]
+
+
+class MigrationIndexTest(unittest.TestCase):
+    """AUD-DATA-011 (DB-MIG-006): chỉ mục trên bảng có sẵn dựng CONCURRENTLY; bảng mới tạo cùng file thì không cần."""
+
+    def test_scanner(self):
+        self.assertEqual(plain_indexes_on_existing_tables("CREATE INDEX i ON sessions (a);"), ["sessions"])
+        self.assertEqual(
+            plain_indexes_on_existing_tables("create unique index if not exists i on public.t (a)"), ["public.t"]
+        )
+        self.assertEqual(plain_indexes_on_existing_tables("CREATE INDEX CONCURRENTLY i ON sessions (a);"), [])
+        self.assertEqual(plain_indexes_on_existing_tables("CREATE TABLE n (a int); CREATE INDEX i ON n (a);"), [])
+        self.assertEqual(
+            plain_indexes_on_existing_tables("CREATE TABLE n (a int); CREATE INDEX i ON other (a);"), ["other"]
+        )
+
+    def test_migrations_build_indexes_concurrently_or_are_listed(self):
+        bad: dict[str, list[str]] = {}
+        for f in sorted((PACK / "starter" / "src" / "migrations").glob("*.ts")):
+            found = plain_indexes_on_existing_tables(f.read_text(encoding="utf-8"))
+            if found:
+                bad[f.stem] = found
+        self.assertEqual(set(bad), set(LEGACY_PLAIN_INDEX), "migration mới dùng CREATE INDEX CONCURRENTLY (DB-MIG-006)")
+        ledger = (ROOT / "docs" / "ops" / "AUDIT-STATUS.md").read_text(encoding="utf-8")
+        for aud in LEGACY_PLAIN_INDEX.values():
+            self.assertIn(f"| {aud} |", ledger, "mục ngoại lệ phải có dòng sổ")
+
+
 class ReadmeIndexTest(unittest.TestCase):
     def test_pack_payload_trees_need_no_readme_but_others_do(self):
         with tempfile.TemporaryDirectory() as d:

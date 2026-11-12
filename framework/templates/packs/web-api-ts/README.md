@@ -34,6 +34,13 @@ phải làm đỏ đúng test ghi ở `expect_fail`.
 
 ## Giới hạn đã biết
 
+- Migration chạy trong transaction (runner kysely) nên không dựng được index `CONCURRENTLY` trong migration (DB-MIG-006,
+  AUD-DATA-011): `0005_sessions_expiry` dựng hai index thường trên `sessions` — bảng lớn ở môi trường thật khoá ghi trong
+  lúc dựng. Với bảng có dữ liệu: dựng index bằng bước riêng ngoài transaction (`CREATE INDEX CONCURRENTLY …` qua `psql`),
+  xoá index INVALID nếu thất bại, rồi để migration dùng `CREATE INDEX IF NOT EXISTS` cùng tên. Runner không transaction
+  cho từng migration chưa có trong gói (cách kysely cho tắt transaction: chưa xác minh với bản 0.29.6). Test
+  `MigrationIndexTest` (`tests/test_packs.py`) buộc migration mới dùng `CONCURRENTLY` trên bảng có sẵn; chỉ `0005` được miễn.
+
 - Kết nối ứng dụng dùng một vai trò có quyền `SET ROLE app_rw`; triển khai thật: vai trò đăng nhập riêng chỉ là thành viên
   `app_rw` + vai trò migration riêng (sở hữu bảng) — chưa có trong gói.
 - Contract tĩnh: ở repo khung, CI `pack-web-api.yml` (job `contract-baseline`, `tests/pack_baseline.py`) chỉ cho
