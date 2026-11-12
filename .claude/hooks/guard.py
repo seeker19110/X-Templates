@@ -3649,7 +3649,7 @@ def _raw_tokens(cmd: str, subst: bool = False) -> Optional[List[str]]:
             j = i
             while j < len(s) and s[j] in PUNCT:  # dãy dấu liền nhau là một token (như shlex `punctuation_chars`)
                 j += 1
-            out += [s[i:j]] if j > i else []
+            out += _unglue([s[i:j]]) if j > i else []  # toán tử dài nhất của bash, như `tokenize` (AUD-SEC-610)
             i = max(j, i + 1)
             continue
         j = _raw_word_part(s, i)
@@ -4662,23 +4662,21 @@ def _is_redirect(t: str) -> bool:
     return _is_punct(t) and ("<" in t or ">" in t) and "(" not in t and ("|" not in t or t == ">|")
 
 
-# Toán tử điều khiển đứng đầu một token dấu: `;;&` `;;` `;&` `;` `&&` `||` `|&` `|` `&` (chỉ khi liền `<`, vì `&>` là
-# chuyển hướng) và xuống dòng. Dài nhất trước — như bộ đọc toán tử của bash (AUD-SEC-610).
-_CTL_PREFIX_RE = re.compile(r"(?:;;&|;;|;&|;|&&|\|\||\|&|\||&(?=<)|\n)+")
+# Toán tử của bash, dài nhất trước (bộ đọc toán tử của bash cắt dãy dấu theo đúng thứ tự này); ký tự dấu nào cũng khớp
+# một toán tử một ký tự nên `findall` phủ kín token (AUD-SEC-610).
+_OPS_RE = re.compile(r";;&|&>>|<<<|;;|;&|&&|\|\||\|&|&>|>&|<&|>\||>>|<<|<>|<\(|>\(|[;&|<>()\n]")
 
 
 def _unglue(tokens: List[str]) -> List[str]:
-    """Tách toán tử điều khiển khỏi chuyển hướng liền nó: `shlex` gộp dãy dấu thành MỘT token (`;<`, `&&<`, `\\n>`), mà
-    `_is_redirect` thấy `<`/`>` là coi cả token là chuyển hướng → `split_commands` không cắt lệnh và lệnh sau nó
-    (`echo x;< /dev/null git push --force`) lọt mọi luật (AUD-SEC-610). Bash cắt `;` rồi `<`; token không có phần điều
-    khiển đứng đầu (`>`, `>>`, `&>`, `>|`, `2>&1`…) giữ nguyên."""
+    """Cắt token dấu gộp theo toán tử của bash: `shlex` (và bộ đọc thô `_raw_tokens`) gộp dãy dấu thành MỘT token
+    (`;<`, `&&<`, `)<`, `(<`, `&\\n<`, `);>>`), mà `_is_redirect` thấy `<`/`>` là coi cả token là chuyển hướng hay dấu
+    tách nuốt mất chuyển hướng → `split_commands` không cắt lệnh và lệnh sau nó (`echo x;< /dev/null git push --force`)
+    lọt mọi luật (AUD-SEC-610). Chỉ động tới token dấu có `<`/`>` mà không phải đúng một toán tử (`>`, `>>`, `&>`, `>|`,
+    `<(`, `2>&1` → `>&`…); `LitWord` (có nháy) là chữ, giữ nguyên."""
     out: List[str] = []
     for t in tokens:
-        m = _CTL_PREFIX_RE.match(t) if _is_punct(t) and ("<" in t or ">" in t) else None
-        if m and m.end() < len(t):
-            out += [t[: m.end()], t[m.end() :]]
-        else:
-            out.append(t)
+        parts = _OPS_RE.findall(t) if _is_punct(t) and ("<" in t or ">" in t) else [t]
+        out += parts if len(parts) > 1 else [t]
     return out
 
 

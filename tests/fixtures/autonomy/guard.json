@@ -23089,6 +23089,18 @@
 {"id": "aud610-ctl-semi-redirect-in", "origin": "control", "refs": ["AUD-SEC-610"], "input": {"command": "echo x;< /dev/null cat"}, "expect": {"allowed": true}},
 {"id": "aud610-ctl-fd-dup", "origin": "control", "refs": ["AUD-SEC-610"], "input": {"command": "git status 2>&1"}, "expect": {"allowed": true}},
 {"id": "aud610-ctl-amp-redirect", "origin": "control", "refs": ["AUD-SEC-610"], "input": {"command": "git status &>/dev/null"}, "expect": {"allowed": true}},
-{"id": "aud610-ctl-clobber", "origin": "control", "refs": ["AUD-SEC-610"], "input": {"command": "git status >|/dev/null"}, "expect": {"allowed": true}}
+{"id": "aud610-ctl-clobber", "origin": "control", "refs": ["AUD-SEC-610"], "input": {"command": "git status >|/dev/null"}, "expect": {"allowed": true}},
+{"id": "aud610-raw-reader-heredoc-shell", "origin": "adversarial-reviewer", "refs": ["AUD-SEC-610"], "input": {"command": "true&&< /dev/null bash 0<<EOF\ngit \\$(echo push) --force origin main\nEOF"}, "expect": {"allowed": false, "code": "BUDGET"}, "note": "review #516 🔴 R1: bộ đọc thô `_raw_tokens` (heredoc vào shell) cũng gộp `&&<` — dùng chung `_unglue`; dạng cách của ca adr65r1-392-fd0"},
+{"id": "aud610-raw-reader-patch-fence", "origin": "adversarial-reviewer", "refs": ["AUD-SEC-610"], "input": {"command": "echo x;< /dev/null patch -p0 <<'EOF'\n--- .claude/settings.json\n+++ .claude/settings.json\n@@ -1 +1 @@\n-{\n+x\nEOF"}, "expect": {"allowed": false, "code": "HOOK_BYPASS"}, "note": "review #516 🔴 R1: dạng cách của ca t3663-414-patch-fence"},
+{"id": "aud610-amp-newline-redirect", "origin": "adversarial-reviewer", "refs": ["AUD-SEC-610"], "input": {"command": "sleep 0 &\n< /dev/null git push origin feat/me --force"}, "expect": {"allowed": false, "code": "RULE_DENY"}, "note": "review #516 🔴 R2: `&` rồi xuống dòng rồi `<` là ba toán tử"},
+{"id": "aud610-close-paren-semi-redirect", "origin": "adversarial-reviewer", "refs": ["AUD-SEC-610"], "input": {"command": "(echo x);< /dev/null git push origin feat/me --force"}, "expect": {"allowed": false, "code": "RULE_DENY"}, "note": "review #516 🔴 R3: `)` dính `;<`"},
+{"id": "aud610-close-paren-and-redirect", "origin": "adversarial-reviewer", "refs": ["AUD-SEC-610"], "input": {"command": "(echo x)&&< /dev/null git push origin feat/me --force"}, "expect": {"allowed": false, "code": "RULE_DENY"}},
+{"id": "aud610-open-paren-redirect-in", "origin": "adversarial-reviewer", "refs": ["AUD-SEC-610"], "input": {"command": "(< /dev/null git push origin feat/me --force)"}, "expect": {"allowed": false, "code": "RULE_DENY"}, "note": "review #516 🔴 R4: `(<` nuốt chuyển hướng, đích thành tên lệnh"},
+{"id": "aud610-open-paren-redirect-out", "origin": "adversarial-reviewer", "refs": ["AUD-SEC-610"], "input": {"command": "echo x;(>/dev/null git push origin feat/me --force)"}, "expect": {"allowed": false, "code": "RULE_DENY"}},
+{"id": "aud610-case-clause-redirect", "origin": "adversarial-reviewer", "refs": ["AUD-SEC-610"], "input": {"command": "case x in x)< /dev/null git push origin feat/me --force;; esac"}, "expect": {"allowed": false, "code": "RULE_DENY"}, "note": "review #516 🔴 R5: `)` của mệnh đề case dính chuyển hướng"},
+{"id": "aud610-ctl-close-paren-redirect", "origin": "control", "refs": ["AUD-SEC-610"], "input": {"command": "(echo x);< /dev/null cat"}, "expect": {"allowed": true}},
+{"id": "aud610-ctl-open-paren-redirect", "origin": "control", "refs": ["AUD-SEC-610"], "input": {"command": "(< /dev/null cat)"}, "expect": {"allowed": true}},
+{"id": "aud610-ctl-case-clause-redirect", "origin": "control", "refs": ["AUD-SEC-610"], "input": {"command": "case x in x)< /dev/null cat;; esac"}, "expect": {"allowed": true}},
+{"id": "aud610-ctl-arith-shift", "origin": "control", "refs": ["AUD-SEC-610"], "input": {"command": "x=$((1<<2)); echo $x"}, "expect": {"allowed": true}}
  ]
 }

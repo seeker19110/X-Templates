@@ -7773,8 +7773,20 @@ class GuardGluedSeparatorTest(unittest.TestCase):
         "ls |&< /dev/null git push origin feat/me --force",
         "ls\n>/dev/null git push origin feat/me --force",
         "ls\n\n< /dev/null git push origin feat/me --force",
+        "sleep 0 &\n< /dev/null git push origin feat/me --force",
+        "(echo x);< /dev/null git push origin feat/me --force",
+        "(echo x)&&< /dev/null git push origin feat/me --force",
+        "(echo x)\n>/dev/null git push origin feat/me --force",
+        "(< /dev/null git push origin feat/me --force)",
+        "echo x;(>/dev/null git push origin feat/me --force)",
+        "case x in x)< /dev/null git push origin feat/me --force;; esac",
+        "bash -c 'true&&< /dev/null git push origin feat/me --force'",
     )
     ALLOW = (
+        "(echo x);< /dev/null cat",
+        "(< /dev/null cat)",
+        "case x in x)< /dev/null cat;; esac",
+        "x=$((1<<2)); echo $x",
         "echo x;< /dev/null cat",
         "git status 2>&1",
         "git status &>/dev/null",
@@ -7809,6 +7821,11 @@ class GuardGluedSeparatorTest(unittest.TestCase):
         self.assertEqual(tok("a&&< f b"), ["a", "&&", "<", "f", "b"])
         self.assertEqual(tok("a |&< f b"), ["a", "|&", "<", "f", "b"])
         self.assertEqual(tok("a\n>f b"), ["a", "\n", ">", "f", "b"])
+        self.assertEqual(tok("a &\n< f b"), ["a", "&", "\n", "<", "f", "b"])
+        self.assertEqual(tok("(a);< f b"), ["(", "a", ")", ";", "<", "f", "b"])
+        self.assertEqual(tok("(< f b)"), ["(", "<", "f", "b", ")"])
+        self.assertEqual(tok("x)< f b"), ["x", ")", "<", "f", "b"])
+        self.assertEqual(tok("a <(b)"), ["a", "<(", "b", ")"])  # thay tiến trình là MỘT toán tử, không tách
         self.assertEqual(tok("a &>f"), ["a", "&>", "f"])  # `&>` là một chuyển hướng, không phải `&` rồi `>`
         self.assertEqual(tok("a >|f"), ["a", ">|", "f"])
         self.assertEqual(tok("a 2>&1"), ["a", "2", ">&", "1"])
