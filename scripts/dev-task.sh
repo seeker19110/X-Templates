@@ -506,6 +506,29 @@ e2e_run() { # $1=I $2=N (mặc định 1 1)
 json_ok() { # $1=file → 0 nếu là JSON hợp lệ; không có python3 thì không kiểm được (coi như không hợp lệ: không giữ bản sao)
   command -v python3 >/dev/null 2>&1 && python3 -c 'import json, sys; json.load(open(sys.argv[1], encoding="utf-8"))' "$1" >/dev/null 2>&1
 }
+# AUD-SEC-628: formatter khai báo không theo từng file (`prettier --write .`) vẫn chuẩn hoá được dòng §5 → chụp mọi
+# `GO-NO-GO*.md` (tên không phân biệt hoa thường) dưới gốc dự án trước khi chạy formatter, khôi phục file nào đổi/mất.
+go_snapshot() { # $1=thư mục chụp (rỗng, đã tồn tại)
+  local i=0 f
+  ( cd "$ROOT" && find . \( -name .git -o -name node_modules -o -name .venv \) -prune -o -type f -iname 'go-no-go*.md' -print0 2>/dev/null ) >"$1/list"
+  while IFS= read -r -d '' f; do
+    i=$((i + 1)); cp -p -- "$ROOT/$f" "$1/$i" 2>/dev/null || true
+  done <"$1/list"
+}
+go_restore() { # $1=thư mục chụp
+  local i=0 f
+  while IFS= read -r -d '' f; do
+    i=$((i + 1)); [ -f "$1/$i" ] || continue
+    if ! cmp -s -- "$1/$i" "$ROOT/$f" 2>/dev/null; then
+      cp -p -- "$1/$i" "$ROOT/$f" && log "format-file: formatter đổi GO-NO-GO '$f' (chữ ký §5 là của người) → khôi phục bản trước"
+    fi
+  done <"$1/list"
+}
+real_path() { # $1=đường dẫn (tương đối theo gốc dự án như lúc formatter chạy) → đường dẫn thật; thiếu realpath thì dùng python3
+  if command -v realpath >/dev/null 2>&1; then ( cd "$ROOT" && realpath -- "$1" ) 2>/dev/null && return 0; fi
+  command -v python3 >/dev/null 2>&1 && ( cd "$ROOT" && python3 -c 'import os, sys; print(os.path.realpath(sys.argv[1]))' "$1" ) 2>/dev/null
+  return 0
+}
 declared_format_file() {
   if yaml_has format_file; then yaml_get format_file; return 0; fi
   [ -f "$DECL" ] || return 0
@@ -536,6 +559,13 @@ case "$TASK" in
     run_task "$TASK"; exit $? ;;
   format-file)
     P="${2:-}"; [ -n "$P" ] || { log "format-file: thiếu path"; exit 0; }
+    # Dòng ký §5 của `GO-NO-GO*.md` là của người (AUD-SEC-628): formatter chuẩn hoá dòng guard đã cho qua thành dòng ký
+    # hợp lệ — không chạm file này, tên hay đích symlink (so tên chữ thường như guard `GO_NO_GO_NAME`).
+    for N in "$P" "$(real_path "$P")"; do
+      case "$(basename -- "${N:-.}" | tr '[:upper:]' '[:lower:]')" in
+        go-no-go*.md) log "skip format-file: GO-NO-GO*.md do người ký, formatter không chạm ('$P')"; exit 0 ;;
+      esac
+    done
     C="$(resolve_format_file "$P")"
     [ -n "$C" ] || { log "skip format-file: không có per-file formatter cho '$P'"; exit 0; }
     log "format-file: $C  (\$1=$P)"
@@ -554,7 +584,9 @@ case "$TASK" in
     else
       log "format-file: mẫu dựng sẵn của khung — không qua guard"
     fi
+    GO_SNAP="$(mktemp -d)" && go_snapshot "$GO_SNAP"
     ( cd "$ROOT" && bash -c "$C" _ "$P" ) || true
+    [ -n "$GO_SNAP" ] && { go_restore "$GO_SNAP"; rm -rf -- "$GO_SNAP"; }
     if [ -n "$keep" ]; then
       json_ok "$F" || { cp -p -- "$keep" "$F"; log "format-file: formatter làm hỏng JSON '$P' → khôi phục bản trước"; }
       rm -f -- "$keep"

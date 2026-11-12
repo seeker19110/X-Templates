@@ -149,6 +149,11 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
 
 ### Fixed
 
+- `dev-task.sh format-file` (AUD-SEC-628 🔴, lý do chạm hàng rào: formatter PostToolUse chuẩn hoá một dòng §5 mà guard
+  đã cho qua thành dòng ký hợp lệ): bỏ qua `GO-NO-GO*.md` theo tên và theo đích symlink (so chữ thường như guard) và
+  chụp–khôi phục mọi `GO-NO-GO*.md` quanh formatter không theo từng file — chữ ký §5 là của người. Chỉ đóng đường hook
+  PostToolUse: formatter cả repo qua Bash còn mở (AUD-SEC-648, T-3746). Dự án đích có formatter Markdown kiểm
+  (`prettier --check .`): thêm `GO-NO-GO*.md` vào file ignore của formatter (AUD-SEC-649).
 - Gói `web-api-ts` (AUD-DATA-011 🟠, D-426): test `MigrationIndexTest` buộc `CREATE INDEX` trên bảng có sẵn dùng
   `CONCURRENTLY` (DB-MIG-006) — migration `0005` đã phát hành là ngoại lệ duy nhất, ghi sổ chấp nhận tới 2027-01-21; README
   gói nêu cách dựng index ngoài transaction. Không đổi mã gói; dự án đích: không phải làm gì.
