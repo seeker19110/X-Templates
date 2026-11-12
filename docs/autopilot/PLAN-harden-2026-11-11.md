@@ -65,5 +65,6 @@
 - [ ] `T-3739` 🔴 AUD-SEC-628 formatter không chạm `GO-NO-GO*.md` (hoặc guard xét output formatter) (topo: review) — Gate: `python3 -m unittest tests.test_hooks tests.test_guard_go_no_go`
 - [ ] `T-3740` 🟠 AUD-SEC-629/630/631 GO_SIGN: NUL ô Tên, khoảng trắng Unicode cuối `subject:`, BOM một chiều (topo: review) — Gate: `python3 -m unittest tests.test_guard_go_no_go`
 - [ ] `T-3741` 🔴 AUD-SEC-632…635 guard: đọc lệnh con git chắc (chuyển hướng giữa, `git-<tên>`, autocorrect, tên mờ → BUDGET) (topo: review) — Gate: `python3 -m unittest tests.test_hooks tests.test_guard_fuzz`
+- [ ] `T-3747` 🔴 AUD-SEC-650/651 install.py/xt.py: thư mục git hook (`core.hooksPath` → thư mục là symlink) và sổ giai đoạn (`--stage-init`: `docs`, `.autopilot` là symlink) không ghi ra ngoài dự án (topo: review) — Gate: `python3 -m unittest tests.test_install tests.test_stage`
 - [ ] `T-3742` 🟠 AUD-SEC-636 guard: quét lệnh git lồng (`rebase --exec`, `bisect run`, `submodule foreach`, `--receive-pack`/`--upload-pack`) (topo: review) — Gate: `python3 -m unittest tests.test_hooks`
 - [ ] `T-3729` Quét lại nhóm TEST, DOC, HAR (`chưa quét`) + sổ `đã sửa` cho các lát trên (sau: T-3724, T-3726) — Gate: `python3 scripts/xt.py audit check docs/ops/AUDIT-STATUS.md`
