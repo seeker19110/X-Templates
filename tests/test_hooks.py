@@ -8340,6 +8340,29 @@ class GuardReview487DebtTest(_GuardDebtCase):
             with self.subTest(cmd):
                 self.assertEqual(self.out(cmd)["raw"], "ask", cmd)  # qua merge-check như merge thiếu ghim
 
+    def test_pull_after_end_of_options_read_as_fetch_options(self):  # AUD-SEC-614 review R1/P2
+        """`git pull` chuyển đối số vị trí cho `git fetch` KHÔNG kèm `--`: token sau dấu hết tuỳ chọn của pull lại là tuỳ chọn
+        của fetch (đo git 2.43: `pull --end-of-options . --stdin` ghi `refs/remotes/origin/*` từ stdin) — đọc cả hai cách."""
+        for cmd in (
+            "git pull --end-of-options . --stdin",
+            "git pull -- . --stdin",
+            "git pull --end-of-options --std .",
+            "git pull --end-of-options --refmap=+refs/heads/*:refs/remotes/origin/* . main",
+            "git pull -- --refmap=+refs/heads/*:refs/remotes/origin/* . main",
+        ):
+            with self.subTest(cmd):
+                res = self.out(cmd)
+                self.assertEqual(res["decision"], "deny", (cmd, res))
+        self.assert_allowed(
+            (
+                "git pull",
+                "git pull origin main",
+                "git pull --rebase origin feat/me",
+                "git pull --end-of-options origin feat/me",
+                "git pull -- origin feat/me",
+            )
+        )
+
     def test_help_forms_allowed(self):  # AUD-HAR-353
         """Cờ trợ giúp thật: gh/git in usage rồi thoát, không chạy hành động. Giá trị của cờ khác, sau `--`, `-h=…`,
         `-test.…` (pflag bỏ qua) không phải trợ giúp — vẫn bị xét."""
@@ -8372,6 +8395,51 @@ class GuardReview487DebtTest(_GuardDebtCase):
         )
         self.assert_code(("git push --repo -h", "git push -o -h", "git push origin -- main -h"), "PUSH_MAIN", self.main)
         self.assert_code(("git push --recu -h origin main",), "PUSH_MAIN", self.main)  # viết tắt ăn giá trị
+        # AUD-SEC-614 (hồi quy #488): sau `--end-of-options` git coi `-h` là refspec, không phải trợ giúp (git 2.43:
+        # `push --dry-run --end-of-options … -h` → `src refspec -h`) — luật push vẫn áp như khi không có `-h`
+        self.assert_code(("git push --force --end-of-options origin feat/other -h",), "RULE_DENY", self.feat)
+        self.assert_code(("git push --end-of-options origin feat/other:main -h",), "PUSH_MAIN", self.feat)
+        self.assert_code(("git push --end-of-options --delete origin other -h",), "REMOTE_DELETE", self.feat)
+        # review lượt 1: token chưa giải có thể thành `--`/`--end-of-options` lúc chạy → không hưởng miễn trừ trợ giúp
+        self.assert_code(
+            (
+                "git push --force --end-of-options$X origin feat/other -h",
+                "git push --force ${X}--end-of-options origin feat/other -h",
+                "git push --force $E origin feat/other -h",
+                "git push --force --end-of-option? origin feat/other -h",
+                "git push --force --end-of-o* origin feat/other -h",
+            ),
+            "RULE_DENY",
+            self.feat,
+        )
+        self.assert_code(("git push --end-of-options$X origin feat/other:main -h",), "PUSH_MAIN", self.feat)
+        # `-o` ăn `--end-of-options` làm giá trị: không phải hết tuỳ chọn, `-h` sau nó là cờ thật (git in usage, exit 129,
+        # không đẩy gì) — như `git push -o x -h origin main`
+        self.assert_allowed(("git push -o --end-of-options -h origin main",), self.feat)
+        # cùng gốc ở bộ đọc tuỳ chọn (có từ trước, AUD-SEC-642/643): sau `--end-of-options` mọi token là đối số vị trí,
+        # kể cả token bắt đầu `-` (ref/remote tên `-o`, `-h`, `-x`) — như sau `--`
+        self.assert_code(("git push --end-of-options origin -o +HEAD:feat/other",), "RULE_DENY", self.feat)
+        self.assert_code(
+            ("git push --end-of-options origin -o :feat/other", "git push --delete --end-of-options origin -o other"),
+            "REMOTE_DELETE",
+            self.feat,
+        )
+        self.assert_code(
+            ("git push --end-of-options origin -h:main", "git push --end-of-options --repo HEAD:main"),
+            "PUSH_MAIN",
+            self.feat,
+        )
+        for cmd in (
+            "git branch --end-of-options origin/main -d",
+            "git tag --end-of-options origin/main -l",
+            "git fetch --end-of-options . --depth HEAD:refs/remotes/origin/main",
+        ):
+            with self.subTest(cmd):
+                self.assertEqual(self.out(cmd, self.feat)["decision"], "deny", cmd)
+        # `-h` trước `--end-of-options` vẫn là trợ giúp thật
+        self.assert_allowed(
+            ("git push -h --end-of-options origin feat/other", "git push --end-of-options origin feat/me"), self.feat
+        )
         self.assert_code(
             (
                 "git replace -f origin/main HEAD 2>&1",
