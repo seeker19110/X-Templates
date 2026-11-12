@@ -3649,7 +3649,7 @@ def _raw_tokens(cmd: str, subst: bool = False) -> Optional[List[str]]:
             j = i
             while j < len(s) and s[j] in PUNCT:  # dãy dấu liền nhau là một token (như shlex `punctuation_chars`)
                 j += 1
-            out += [s[i:j]] if j > i else []
+            out += _unglue([s[i:j]]) if j > i else []  # toán tử dài nhất của bash, như `tokenize` (AUD-SEC-610)
             i = max(j, i + 1)
             continue
         j = _raw_word_part(s, i)
@@ -4560,7 +4560,7 @@ def tokenize(cmd: str) -> List[str]:
     lex.whitespace_split = True
     lex.commenters = ""  # comment đã bỏ ở strip_comments; mặc định của shlex là "#" (mở comment cả giữa từ)
     try:
-        return _with_here_bodies(list(lex), joined)
+        return _with_here_bodies(_unglue(list(lex)), joined)
     except ValueError:  # nháy không đóng: tách thô để vẫn kiểm được (bảo thủ) — xuống dòng là ranh giới lệnh như bash,
         # không phải khoảng trắng (`"` lẻ trong thân heredoc của `"$(cat <<'EOF'` làm shlex lệch; review #361 lượt 3)
         raw = re.split(r"[ \t\r]+|(?=[;&|\n])|(?<=[;&|\n])", cmd)
@@ -4660,6 +4660,24 @@ def _is_punct(t: str) -> bool:
 def _is_redirect(t: str) -> bool:
     """`>`, `>>`, `<`, `&>`, `>|` (ghi đè noclobber) — `|`, `<(`, `>(` không phải chuyển hướng."""
     return _is_punct(t) and ("<" in t or ">" in t) and "(" not in t and ("|" not in t or t == ">|")
+
+
+# Toán tử của bash, dài nhất trước (bộ đọc toán tử của bash cắt dãy dấu theo đúng thứ tự này); ký tự dấu nào cũng khớp
+# một toán tử một ký tự nên `findall` phủ kín token (AUD-SEC-610).
+_OPS_RE = re.compile(r";;&|&>>|<<<|;;|;&|&&|\|\||\|&|&>|>&|<&|>\||>>|<<|<>|<\(|>\(|[;&|<>()\n]")
+
+
+def _unglue(tokens: List[str]) -> List[str]:
+    """Cắt token dấu gộp theo toán tử của bash: `shlex` (và bộ đọc thô `_raw_tokens`) gộp dãy dấu thành MỘT token
+    (`;<`, `&&<`, `)<`, `(<`, `&\\n<`, `);>>`), mà `_is_redirect` thấy `<`/`>` là coi cả token là chuyển hướng hay dấu
+    tách nuốt mất chuyển hướng → `split_commands` không cắt lệnh và lệnh sau nó (`echo x;< /dev/null git push --force`)
+    lọt mọi luật (AUD-SEC-610). Chỉ động tới token dấu có `<`/`>` mà không phải đúng một toán tử (`>`, `>>`, `&>`, `>|`,
+    `<(`, `2>&1` → `>&`…); `LitWord` (có nháy) là chữ, giữ nguyên."""
+    out: List[str] = []
+    for t in tokens:
+        parts = _OPS_RE.findall(t) if _is_punct(t) and ("<" in t or ">" in t) else [t]
+        out += parts if len(parts) > 1 else [t]
+    return out
 
 
 def split_commands(tokens: List[str]) -> List[List[str]]:

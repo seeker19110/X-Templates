@@ -7761,6 +7761,79 @@ class GuardRemoteRefTest(unittest.TestCase):
         self.assertEqual((code, decision(out)), (0, None))
 
 
+class GuardGluedSeparatorTest(unittest.TestCase):
+    """AUD-SEC-610 (T-3721): `shlex` gộp dãy dấu thành MỘT token (`;<`, `&&<`, `\\n>`); `_is_redirect` thấy `<`/`>` coi cả
+    token là chuyển hướng nên không cắt lệnh và lệnh sau nó lọt mọi luật. Bash cắt `;` rồi `<` (toán tử dài nhất)."""
+
+    DENY = (
+        "echo x;< /dev/null git push origin feat/me --force",
+        "true&&< /dev/null git push origin feat/me --force",
+        "false||< /dev/null git push origin feat/me --force",
+        "ls;>/dev/null git push origin feat/me --force",
+        "ls |&< /dev/null git push origin feat/me --force",
+        "ls\n>/dev/null git push origin feat/me --force",
+        "ls\n\n< /dev/null git push origin feat/me --force",
+        "sleep 0 &\n< /dev/null git push origin feat/me --force",
+        "(echo x);< /dev/null git push origin feat/me --force",
+        "(echo x)&&< /dev/null git push origin feat/me --force",
+        "(echo x)\n>/dev/null git push origin feat/me --force",
+        "(< /dev/null git push origin feat/me --force)",
+        "echo x;(>/dev/null git push origin feat/me --force)",
+        "case x in x)< /dev/null git push origin feat/me --force;; esac",
+        "bash -c 'true&&< /dev/null git push origin feat/me --force'",
+    )
+    ALLOW = (
+        "(echo x);< /dev/null cat",
+        "(< /dev/null cat)",
+        "case x in x)< /dev/null cat;; esac",
+        "x=$((1<<2)); echo $x",
+        "echo x;< /dev/null cat",
+        "git status 2>&1",
+        "git status &>/dev/null",
+        "git status >|/dev/null",
+        "git status >>/dev/null",
+    )
+
+    @classmethod
+    def setUpClass(cls):
+        cls.g = _guard()
+
+    def setUp(self):
+        self.enterContext(mock.patch.dict(os.environ, {"XT_GUARD_POLICY": "", "XT_GUARD_PHASE": ""}))
+
+    def decide(self, cmd: str) -> dict:
+        return self.g.apply_policy(self.g.bash_decision(cmd, str(ROOT), str(ROOT)))
+
+    def test_glued_separator_and_redirect_still_split_commands(self):
+        for cmd in self.DENY:
+            with self.subTest(cmd=cmd):
+                res = self.decide(cmd)
+                self.assertEqual((res["decision"], res.get("code")), ("deny", "RULE_DENY"), res)
+
+    def test_plain_redirects_are_not_split(self):
+        for cmd in self.ALLOW:
+            with self.subTest(cmd=cmd):
+                self.assertEqual(self.decide(cmd)["decision"], "", cmd)
+
+    def test_tokens_split_at_control_operator_only(self):
+        tok = self.g.tokenize
+        self.assertEqual(tok("echo x;< /dev/null cat"), ["echo", "x", ";", "<", "/dev/null", "cat"])
+        self.assertEqual(tok("a&&< f b"), ["a", "&&", "<", "f", "b"])
+        self.assertEqual(tok("a |&< f b"), ["a", "|&", "<", "f", "b"])
+        self.assertEqual(tok("a\n>f b"), ["a", "\n", ">", "f", "b"])
+        self.assertEqual(tok("a &\n< f b"), ["a", "&", "\n", "<", "f", "b"])
+        self.assertEqual(tok("(a);< f b"), ["(", "a", ")", ";", "<", "f", "b"])
+        self.assertEqual(tok("(< f b)"), ["(", "<", "f", "b", ")"])
+        self.assertEqual(tok("x)< f b"), ["x", ")", "<", "f", "b"])
+        self.assertEqual(tok("a <(b)"), ["a", "<(", "b", ")"])  # thay tiến trình là MỘT toán tử, không tách
+        self.assertEqual(tok("a &>f"), ["a", "&>", "f"])  # `&>` là một chuyển hướng, không phải `&` rồi `>`
+        self.assertEqual(tok("a >|f"), ["a", ">|", "f"])
+        self.assertEqual(tok("a 2>&1"), ["a", "2", ">&", "1"])
+        quoted = tok("a ';<' b")  # có nháy: chữ nguyên văn (`LitWord`), không phải toán tử
+        self.assertEqual([str(t) for t in quoted], ["a", ";<", "b"])
+        self.assertIsInstance(quoted[1], self.g.LitWord)
+
+
 class GuardRemoteDeleteTest(unittest.TestCase):
     """AUD-SEC-551 (D-407): xoá nhánh/tag remote KHÁC nhánh hiện tại của phiên và viết lại mọi ref (`filter-branch
     --all`, `filter-repo`) thuộc nhóm máy chặn (không đảo ngược, ADR-0018) — xoá được nhánh người khác và lời từ chối
