@@ -10266,5 +10266,255 @@ class GuardAppendParallelTest(unittest.TestCase):
                 self.assertNotEqual(self.verdict(cmd)[1], "UNRESOLVED_TARGET", cmd)
 
 
+class GuardGitSubcommandTest(_GuardDebtCase):
+    """AUD-SEC-632…635 (có từ trước, review trước PR #504): lệnh con git bị che làm mất mọi luật git — chuyển hướng
+    đứng giữa `git` và lệnh con, dạng dựng sẵn `git-<tên>` chạy thẳng, `help.autocorrect` chạy lệnh con gõ sai, tên
+    lệnh con có glob/mở rộng. Dạng che phải quyết định như dạng trơn (hoặc chặt hơn: BUDGET/UNRESOLVED_TARGET)."""
+
+    PLAIN = (
+        "git push --force origin main",
+        "git push origin :other",
+        "git reset --hard HEAD~3",
+        "git send-pack --all /srv/git/r.git",
+        "git clean -fdx",
+        "git branch -D main",
+    )
+    BENIGN = (
+        "git status",
+        "git --no-pager log -3",
+        "git -C . log -1",
+        "git -c core.pager=cat log -1",
+        "git --git-dir=.git status",
+        "git push origin feat/x",
+        "git push -u origin feat/me",
+        "git commit -m 'git 2>/dev/null push --force origin main'",
+        "git commit -m 'git-push --force origin main; pus? $(echo reset) $EMPTY'",
+        'git commit -m "do function x / rm -rf"',
+        "git log --grep='$(echo push)' -- 'pus?'",
+        "git add *.py",
+        "git rm --cached 'a[1].txt'",
+        "git status 2>/dev/null",
+        "git 2>/dev/null status",
+        "git >/dev/null fetch origin",
+        "git -C . 2>/dev/null log -1",
+        "git 2>&1 push origin feat/x",
+        "git-status",
+        "/usr/lib/git-core/git-log -1",
+        "git-receive-pack --help",
+        "git -c help.autocorrect=immediate status",
+        "git -c help.autocorrect=0 psuh",
+        "git -c help.autocorrect=never psuh --force origin main",
+        "git -c help.autocorrect=false psuh --force origin main",
+        "git -c help.autocorrect=off psuh --force origin main",
+        "git -c help.autocorrect=1 submodule update --init",  # `git-submodule` ở exec-path: git chạy nó, không sửa tên
+        "git -c help.autocorrect -c alias.st=status st",
+        "git config --global help.autocorrect 0",
+        "git psuh --force origin main",
+    )
+
+    def setUp(self):
+        super().setUp()
+        empty = Path(self.enterContext(tempfile.TemporaryDirectory())) / "gitconfig"
+        empty.write_text("", encoding="utf-8")  # cấu hình người dùng (có thể bật autocorrect) không lẫn vào ca
+        self.enterContext(mock.patch.dict(os.environ, {"GIT_CONFIG_GLOBAL": str(empty), "GIT_CONFIG_NOSYSTEM": "1"}))
+
+    def test_redirect_between_git_and_subcommand(self):  # AUD-SEC-632
+        """Chuyển hướng (cả số fd, `&>`, `>|`, `<`, `{fd}>`) giữa `git`/tuỳ chọn toàn cục và lệnh con: bash bỏ nó khỏi
+        argv, git thấy lệnh con như dạng trơn → cùng mã chặn. Giữa tuỳ chọn và giá trị, chữ số/`{fd}` trước chuyển
+        hướng có thể là giá trị → BUDGET (vẫn chặn)."""
+        for plain in self.PLAIN:
+            want = self.out(plain)["code"]
+            for redir in ("2>/dev/null", ">/dev/null", "2>&1", "&>/dev/null", ">| o", "</dev/null", "{fd}>o", "10>o"):
+                ambiguous = "BUDGET" if redir[0] in "1{2" else want
+                for cmd, code in (
+                    (plain.replace("git ", f"git {redir} ", 1), want),
+                    (plain.replace("git ", f"git -C . {redir} -c x=y ", 1), want),
+                    (plain.replace("git ", f"git {redir} 3>&2 ", 1), want),
+                    (plain.replace("git ", f"git -C {redir} . ", 1), ambiguous),  # giữa tuỳ chọn và giá trị
+                ):
+                    with self.subTest(cmd):
+                        res = self.out(cmd)
+                        self.assertEqual((res["decision"], res.get("code")), ("deny", code), (cmd, res))
+
+    def test_redirect_before_dir_option_moves_repo(self):  # AUD-SEC-632: `-C` sau chuyển hướng vẫn đổi repo
+        cmd = f"git 2>/dev/null -C {self.main} push origin HEAD"
+        self.assertEqual(self.out(cmd)["decision"], "deny", cmd)
+        self.assertEqual(self.out(f"git 2>/dev/null -C {self.feat} push origin HEAD", self.main)["decision"], "")
+        self.assertEqual(self.g._git_words(["git", "-C", "d", "2", ">", "x"]), ["git", "-C", "d"])  # không lệnh con
+
+    def test_dashed_builtin_reads_as_git_subcommand(self):  # AUD-SEC-633
+        """`git-<tên>` chạy thẳng (PATH, `/usr/lib/git-core/`) với `<tên>` trong GIT_BUILTINS đọc như `git <tên>`;
+        đối số sau nó là của lệnh con, không phải tuỳ chọn toàn cục (`git-commit -C HEAD`)."""
+        for plain in self.PLAIN:
+            want = self.out(plain)["code"]
+            for prefix in ("git-", "/usr/lib/git-core/git-", "env X=1 git-", "bash -c 'git-"):
+                cmd = prefix + plain[4:] + ("'" if prefix.endswith("'git-") else "")
+                with self.subTest(cmd):
+                    res = self.out(cmd)
+                    self.assertEqual((res["decision"], res.get("code")), ("deny", want), (cmd, res))
+        self.assertEqual(self.g.normalize(["git-commit", "-C", "HEAD"]), ["git", "commit", "-C", "HEAD"])
+        self.assertEqual(self.g._git_C_dirs(["git-commit", "-C", "HEAD"]), [])
+        self.assertEqual(self.g._git_unknown_global(["git-push", "--force-with-lease", "origin"]), "")
+        self.assertEqual(self.g.normalize(["git-lfs", "pull"]), ["git-lfs", "pull"])  # không dựng sẵn: giữ nguyên
+        self.assert_allowed(("git-commit -C HEAD", "git-push origin feat/me", "git-push -C origin feat/me"))
+
+    def test_autocorrect_unknown_subcommand_unresolved(self):  # AUD-SEC-634
+        """`help.autocorrect` bật (`-c`, `--config-env`, biến GIT_CONFIG_*, `git config` trước đó trong chuỗi, tệp cấu
+        hình) → lệnh con ngoài GIT_BUILTINS, không phải alias, không có `git-<tên>` → UNRESOLVED_TARGET."""
+        self.assert_code(
+            (
+                "git -c help.autocorrect=immediate psuh --force origin main",
+                "git -c HELP.AutoCorrect=1 psuh --force origin main",
+                "git -c help.autocorrect=-1 sned-pack --all /srv/git/r.git",
+                "git -c help.autocorrect=prompt psuh --force origin main",
+                "git -c help.autocorrect=true psuh --force origin main",  # git 2.53: bool đúng = chạy ngay
+                "git -c help.autocorrect psuh --force origin main",  # khoá trần = true
+                "git -c help.autocorrect=$X psuh --force origin main",
+                "git -c help.autocorrect=1 -c alias.x=psuh x --force origin main",  # alias trỏ tên gõ sai
+                "A=immediate git --config-env=help.autocorrect=A psuh --force origin main",
+                "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=help.autocorrect GIT_CONFIG_VALUE_0=immediate git psuh --force",
+                "git config help.autocorrect immediate && git psuh --force origin main",
+                "git config --global help.autocorrect 5; git psuh --force origin main",
+                "git config set help.autocorrect immediate; bash -c 'git psuh --force origin main'",
+                "git -c help.autocorrect=immediate 2>/dev/null psuh --force origin main",
+            ),
+            "UNRESOLVED_TARGET",
+        )
+        subprocess.run(["git", "-C", self.feat, "config", "help.autocorrect", "1"], check=True)
+        self.assert_code(("git psuh --force origin main",), "UNRESOLVED_TARGET")
+        self.assert_allowed(("git status", "git push origin feat/me", "git -c alias.st=status st"))
+
+    def test_autocorrect_external_command_allowed(self):  # AUD-SEC-634: đối chứng — `git-<tên>` có thật thì git chạy nó
+        bin_dir = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        tool = bin_dir / "git-xtfake"
+        tool.write_text("#!/bin/sh\n", encoding="utf-8")
+        tool.chmod(0o755)
+        cmd = "git -c help.autocorrect=immediate xtfake --force origin main"
+        self.assert_code((cmd,), "UNRESOLVED_TARGET")
+        with mock.patch.dict(os.environ, {"PATH": f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}"}):
+            self.assert_allowed((cmd,))
+
+    def test_autocorrect_exec_path_command_allowed(self):  # AUD-SEC-634: lệnh ngoài trong `git --exec-path`
+        exec_dir = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        (exec_dir / "git-xtexec").write_text("#!/bin/sh\n", encoding="utf-8")
+        (exec_dir / "git-xtexec").chmod(0o755)
+        cmd = "git -c help.autocorrect=immediate xtexec"
+        self.g._git_exec_path.cache_clear()
+        self.addCleanup(self.g._git_exec_path.cache_clear)
+        with mock.patch.dict(os.environ, {"GIT_EXEC_PATH": str(exec_dir)}):
+            self.assert_allowed((cmd,))
+        self.g._git_exec_path.cache_clear()
+        with mock.patch.object(self.g.subprocess, "run", side_effect=OSError("no git")):
+            self.assertEqual(self.g._git_exec_path(), "")
+
+    def test_dynamic_subcommand_budget(self):  # AUD-SEC-635
+        """Lệnh con có glob/thay lệnh/biến (bash bung ra tên guard không biết) → BUDGET kèm cách viết lại."""
+        self.assert_code(
+            (
+                "git pus? --force origin main",
+                "git send-pac[k] --all /srv/git/r.git",
+                "git $(echo send-pack) --all /srv/git/r.git",
+                "git $(echo reset) --hard",
+                "git push$EMPTY --force origin main",
+                "git $S --force origin main",
+                'git "$S" --force origin main',
+                "git re* --hard",
+                "git 2>/dev/null pus? --force origin main",
+                "/usr/lib/git-core/git-pus? --force origin main",
+                "git-$S --hard",
+                "bash -c 'git pus? --force origin main'",
+            ),
+            "BUDGET",
+        )
+        self.assertIn("viết lại", self.out("git pus? --force origin main")["reason"])
+        self.assert_code(("git $(echo push) --force origin main",), "RULE_DENY")  # giá trị thay lệnh tính được
+        # mảng/tham số vị trí làm lệnh con: lớp `_array_arg_why` (AUD-SEC-399/405) quyết, luật này nhường
+        self.assert_allowed(('a=(status); git "${a[*]}"', 'set -e; git "$@"', "git $1"))
+        self.assert_code(('a=(push --force); git "${a[*]}"', 'set -- reset --hard; git "$@"'), "BUDGET")
+
+    def test_fd_or_value_before_redirect_budget(self):  # AUD-SEC-632 review F1
+        """Chữ số/`{x}` trước chuyển hướng ngay sau tuỳ chọn cần giá trị: giá trị (`git -C 2 >o`, bash đưa `2` vào argv)
+        hay fd — hai cách đọc ra lệnh con khác nhau → BUDGET. Trước `&>`/`&>>` chữ số không bao giờ là fd."""
+        self.assert_code(
+            tuple(f"git --namespace 2 >/dev/null {p[4:]}" for p in (*self.PLAIN, "git stash drop"))
+            + (
+                "git --namespace 2 >/dev/null config core.hooksPath /tmp/h",
+                "mkdir -p 2 && git -C 2 >/dev/null clean -fdx",
+                "git -C '2' >/dev/null clean -fdx",
+                "git --namespace {n} >/dev/null clean -fdx",
+            ),
+            "BUDGET",
+        )
+        self.assertEqual(self.out("git -c 2 >o reset --hard")["decision"], "deny")  # `-c` lạ: UNRESOLVED_TARGET
+        self.assertIn("viết lại", self.out("git -C 2 >/dev/null clean -fdx")["reason"])
+        for cmd in (
+            "git --namespace 2 &>/dev/null clean -fdx",
+            "git --namespace 2 &>>o reset --hard",
+            "git 10>o push -f",
+        ):
+            with self.subTest(cmd):  # `&>`: `2` là giá trị, lệnh con đọc chắc · fd nhiều chữ số
+                self.assertEqual(self.out(cmd)["code"], "RULE_DENY", cmd)
+        self.assertEqual(self.g._git_words(["git", "2", "&>", "f", "clean"]), ["git", "2", "&>", "f", "clean"])
+        self.assert_allowed(("git -C . 2>/dev/null status", "git -C 2 status", "git --namespace=2 2>/dev/null log"))
+
+    def test_autocorrect_chain_cannot_disable(self):  # AUD-SEC-634 review F2
+        """`git config … help.autocorrect <tắt>` trong chuỗi không tắt được: `-c` thắng tệp, local thắng global, `-f`
+        tệp lạ git không đọc. Alias đặt trong chuỗi không che được `-c alias.…` (cả hai thứ tự ưu tiên đều quét)."""
+        self.assert_code(
+            (
+                "git config -f /tmp/zz.cfg help.autocorrect 0; git -c help.autocorrect=1 psuh --force origin main",
+                "git config -f /tmp/zz.cfg help.autocorrect 0; git -c help.autocorrect=1 rset --hard",
+                "git config help.autocorrect 1; git config --global help.autocorrect 0; git psuh --force origin main",
+                "git -c help.autocorrect=0 -c help.autocorrect=1 psuh --force origin main",  # mục sau thắng
+                "git 2>/dev/null -c help.autocorrect=1 psuh --force origin main",
+            ),
+            "UNRESOLVED_TARGET",
+        )
+        cmd = "git config -f /tmp/zz.cfg alias.x status; git -c alias.x='push --force origin main' x"
+        self.assert_code((cmd,), "RULE_DENY")
+        self.assert_allowed(
+            (
+                "git -c help.autocorrect=1 -c help.autocorrect=0 psuh --force origin main",
+                "git -c help.autocorrect=SHOW psuh",
+                "git -c help.autocorrect=No psuh",
+                "git config alias.x status; git x",
+                "git config help.autocorrect 0; git psuh",
+            )
+        )
+
+    def test_autocorrect_external_must_be_runnable(self):  # AUD-SEC-634: tệp không chạy được/tên có `/` → git sửa tên
+        bin_dir = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        (bin_dir / "git-xtnx").write_text("#!/bin/sh\n", encoding="utf-8")
+        (bin_dir / "git-xtdir").mkdir()
+        (bin_dir / "git-xtdir" / "y").write_text("#!/bin/sh\n", encoding="utf-8")
+        (bin_dir / "git-xtdir" / "y").chmod(0o755)
+        with mock.patch.dict(os.environ, {"PATH": f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}"}):
+            self.assert_code(
+                ("git -c help.autocorrect=1 xtnx --force", "git -c help.autocorrect=1 xtdir/y --force"),
+                "UNRESOLVED_TARGET",
+            )
+
+    def test_extglob_subcommand_budget(self):  # AUD-SEC-635 review F4: danh sách trắng ký tự tên lệnh con
+        self.assert_code(
+            (
+                "git @(reset) --hard",
+                "git +(push) --force origin main",
+                "git !(status) --hard",
+                "shopt -s extglob\ngit @(reset) --hard",
+                "/usr/lib/git-core/git-@(push) --force origin main",
+            ),
+            "BUDGET",
+        )
+        self.assert_allowed(("git cherry-pick abc", "git submodule--helper list", "git x_y.z"))
+
+    def test_benign_git_unchanged(self):  # AUD-SEC-632…635: đối chứng — không chặn oan lệnh git lành
+        self.assert_allowed(self.BENIGN)
+
+    def test_global_redirect_walk_linear(self):  # AUD-SEC-632: bỏ chuyển hướng ở vùng tuỳ chọn toàn cục tuyến tính
+        cpu_budget.assert_not_quadratic(
+            self, lambda n: self.g.normalize(["git", *["2", ">", "/dev/null", "-c", "a=b"] * n, "push"]), 20_000
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
