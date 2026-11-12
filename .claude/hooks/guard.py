@@ -4560,7 +4560,7 @@ def tokenize(cmd: str) -> List[str]:
     lex.whitespace_split = True
     lex.commenters = ""  # comment đã bỏ ở strip_comments; mặc định của shlex là "#" (mở comment cả giữa từ)
     try:
-        return _with_here_bodies(list(lex), joined)
+        return _with_here_bodies(_unglue(list(lex)), joined)
     except ValueError:  # nháy không đóng: tách thô để vẫn kiểm được (bảo thủ) — xuống dòng là ranh giới lệnh như bash,
         # không phải khoảng trắng (`"` lẻ trong thân heredoc của `"$(cat <<'EOF'` làm shlex lệch; review #361 lượt 3)
         raw = re.split(r"[ \t\r]+|(?=[;&|\n])|(?<=[;&|\n])", cmd)
@@ -4660,6 +4660,26 @@ def _is_punct(t: str) -> bool:
 def _is_redirect(t: str) -> bool:
     """`>`, `>>`, `<`, `&>`, `>|` (ghi đè noclobber) — `|`, `<(`, `>(` không phải chuyển hướng."""
     return _is_punct(t) and ("<" in t or ">" in t) and "(" not in t and ("|" not in t or t == ">|")
+
+
+# Toán tử điều khiển đứng đầu một token dấu: `;;&` `;;` `;&` `;` `&&` `||` `|&` `|` `&` (chỉ khi liền `<`, vì `&>` là
+# chuyển hướng) và xuống dòng. Dài nhất trước — như bộ đọc toán tử của bash (AUD-SEC-610).
+_CTL_PREFIX_RE = re.compile(r"(?:;;&|;;|;&|;|&&|\|\||\|&|\||&(?=<)|\n)+")
+
+
+def _unglue(tokens: List[str]) -> List[str]:
+    """Tách toán tử điều khiển khỏi chuyển hướng liền nó: `shlex` gộp dãy dấu thành MỘT token (`;<`, `&&<`, `\\n>`), mà
+    `_is_redirect` thấy `<`/`>` là coi cả token là chuyển hướng → `split_commands` không cắt lệnh và lệnh sau nó
+    (`echo x;< /dev/null git push --force`) lọt mọi luật (AUD-SEC-610). Bash cắt `;` rồi `<`; token không có phần điều
+    khiển đứng đầu (`>`, `>>`, `&>`, `>|`, `2>&1`…) giữ nguyên."""
+    out: List[str] = []
+    for t in tokens:
+        m = _CTL_PREFIX_RE.match(t) if _is_punct(t) and ("<" in t or ">" in t) else None
+        if m and m.end() < len(t):
+            out += [t[: m.end()], t[m.end() :]]
+        else:
+            out.append(t)
+    return out
 
 
 def split_commands(tokens: List[str]) -> List[List[str]]:

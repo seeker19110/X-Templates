@@ -23079,6 +23079,16 @@
 {"id": "aud614-pull-dashdash-stdin", "origin": "adversarial-reviewer", "refs": ["AUD-SEC-614"], "input": {"command": "git pull -- . --stdin"}, "expect": {"allowed": false, "code": "UNRESOLVED_TARGET"}, "note": "review #506 P2 (có từ trước, cùng gốc với R1): dạng viết bằng `--`"},
 {"id": "aud614-pull-dashdash-refmap", "origin": "adversarial-reviewer", "refs": ["AUD-SEC-614"], "input": {"command": "git pull -- --refmap=+refs/heads/*:refs/remotes/origin/* . main"}, "expect": {"allowed": false, "code": "REMOTE_REF_FORGE"}},
 {"id": "aud643-replace-end-of-options", "origin": "adversarial-reviewer", "refs": ["AUD-SEC-643"], "input": {"command": "git replace --end-of-options HEAD~1 -l"}, "expect": {"allowed": false, "code": "REMOTE_REF_FORGE"}},
-{"id": "aud614-ctl-pull-end-of-options-plain", "origin": "control", "refs": ["AUD-SEC-614"], "input": {"command": "git pull --end-of-options origin feat/me"}, "expect": {"allowed": true}}
+{"id": "aud614-ctl-pull-end-of-options-plain", "origin": "control", "refs": ["AUD-SEC-614"], "input": {"command": "git pull --end-of-options origin feat/me"}, "expect": {"allowed": true}},
+{"id": "aud610-semi-redirect-in", "origin": "audit", "refs": ["AUD-SEC-610"], "input": {"command": "echo x;< /dev/null git push origin feat/me --force"}, "expect": {"allowed": false, "code": "RULE_DENY"}, "note": "`;<` là hai toán tử (bash tách theo toán tử dài nhất): `;` rồi `<` — shlex gộp thành một token và `_is_redirect` coi cả token là chuyển hướng nên lệnh sau không tách (D-415: bộ tách, không thêm cách đọc mới)"},
+{"id": "aud610-and-redirect-in", "origin": "audit", "refs": ["AUD-SEC-610"], "input": {"command": "true&&< /dev/null git push origin feat/me --force"}, "expect": {"allowed": false, "code": "RULE_DENY"}},
+{"id": "aud610-or-redirect-in", "origin": "audit", "refs": ["AUD-SEC-610"], "input": {"command": "false||< /dev/null git push origin feat/me --force"}, "expect": {"allowed": false, "code": "RULE_DENY"}},
+{"id": "aud610-semi-redirect-out", "origin": "audit", "refs": ["AUD-SEC-610"], "input": {"command": "ls;>/dev/null git push origin feat/me --force"}, "expect": {"allowed": false, "code": "RULE_DENY"}},
+{"id": "aud610-pipe-amp-redirect", "origin": "audit", "refs": ["AUD-SEC-610"], "input": {"command": "ls |&< /dev/null git push origin feat/me --force"}, "expect": {"allowed": false, "code": "RULE_DENY"}},
+{"id": "aud610-newline-redirect", "origin": "audit", "refs": ["AUD-SEC-610"], "input": {"command": "ls\n>/dev/null git push origin feat/me --force"}, "expect": {"allowed": false, "code": "RULE_DENY"}, "note": "xuống dòng là ranh giới lệnh; `\\n>` bị shlex gộp thành một token"},
+{"id": "aud610-ctl-semi-redirect-in", "origin": "control", "refs": ["AUD-SEC-610"], "input": {"command": "echo x;< /dev/null cat"}, "expect": {"allowed": true}},
+{"id": "aud610-ctl-fd-dup", "origin": "control", "refs": ["AUD-SEC-610"], "input": {"command": "git status 2>&1"}, "expect": {"allowed": true}},
+{"id": "aud610-ctl-amp-redirect", "origin": "control", "refs": ["AUD-SEC-610"], "input": {"command": "git status &>/dev/null"}, "expect": {"allowed": true}},
+{"id": "aud610-ctl-clobber", "origin": "control", "refs": ["AUD-SEC-610"], "input": {"command": "git status >|/dev/null"}, "expect": {"allowed": true}}
  ]
 }
