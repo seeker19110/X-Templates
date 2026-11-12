@@ -283,6 +283,19 @@ class SupplyChainArtifactsTest(unittest.TestCase):
         self.assertRegex(body[sbom:], r"actions/upload-artifact@[0-9a-f]{40}[^\n]*\n(?:.*\n)*?\s+path: sbom\.cdx\.json")
         self.assertIn("if-no-files-found: error", body[sbom:])
 
+    def test_dep_audit_scans_pack_lockfile_without_swallowing_errors(self):
+        """AUD-DEP-021 (T-3720, D-427): `pnpm audit` quét lockfile của gói, đỏ khi có advisory mức vừa trở lên và khi
+        registry lỗi — không `--ignore-registry-errors`, không `|| true`, không `continue-on-error`."""
+        body = (WORKFLOWS / "dep-audit.yml").read_text(encoding="utf-8")
+        job = body[body.index("  pack-npm-audit:") :]
+        self.assertRegex(
+            job,
+            r"working-directory: framework/templates/packs/web-api-ts/starter\n\s+run: pnpm audit --audit-level moderate\n",
+        )
+        for forbidden in ("--ignore-registry-errors", "|| true", "continue-on-error", "--audit-level low\n"):
+            self.assertNotIn(forbidden, job)
+        self.assertEqual(len(re.findall(r"uses: pnpm/action-setup@[0-9a-f]{40} ", job)), 1)
+
     def test_release_tag_attests_archive_before_push(self):
         body = (WORKFLOWS / "release-tag.yml").read_text(encoding="utf-8")
         for perm in ("id-token: write", "attestations: write"):

@@ -1,6 +1,6 @@
 name: Dependency audit
 
-# Quét lỗ hổng phụ thuộc Python (BASE-DEP-004): mỗi PR, push main, hằng tuần và chạy tay.
+# Quét lỗ hổng phụ thuộc (BASE-DEP-004): Python (job `dep-audit`) và lockfile pnpm của gói web-api-ts (job `pack-npm-audit`) — mỗi PR, push main, hằng tuần và chạy tay.
 # Khung chỉ dùng thư viện chuẩn lúc chạy; các gói ở đây là công cụ cổng (requirements-dev.txt) và chính pip-audit. Gói E2E (requirements-e2e.txt, D-133) chỉ chạy ở job `app-e2e`.
 on:
   pull_request:
@@ -43,3 +43,24 @@ jobs:
       # chỉ đỏ khi có finding mức high; ngoại lệ đã có lý do ngay tại workflow (`# zizmor: ignore[...]`).
       - name: Lint workflow bằng zizmor (đỏ khi có finding high)
         run: zizmor --offline --persona regular --min-severity high .github/workflows
+
+  # Lockfile npm của gói web-api-ts (AUD-DEP-021, D-427): chép sang mọi dự án đích nên quét như phụ thuộc Python (BASE-DEP-004).
+  # `pnpm audit` gọi endpoint advisory của registry npm (cùng registry mà `pnpm install` đã dùng); pnpm ghim cùng bản với
+  # pack-web-api.yml. Chỉ đọc lockfile: không cài gói, không chạy mã của gói.
+  pack-npm-audit:
+    name: pack-npm-audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false # job không push (AUD-CI-028)
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+        with:
+          version: 12.16.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+      - name: Quét lockfile của gói (đỏ khi có advisory mức vừa trở lên)
+        working-directory: framework/templates/packs/web-api-ts/starter
+        run: pnpm audit --audit-level moderate

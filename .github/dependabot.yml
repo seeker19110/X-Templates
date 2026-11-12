@@ -13,6 +13,18 @@ updates:
     groups:
       actions:
         patterns: ["*"]
+  # Lockfile pnpm của gói web-api-ts (AUD-DEP-021): gom một PR mỗi tuần; dự án đích thêm khối npm cho manifest của mình.
+  - package-ecosystem: npm
+    directory: /framework/templates/packs/web-api-ts/starter
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 2
+    cooldown:
+      default-days: 3
+    groups:
+      pack-npm:
+        patterns: ["*"]
   # Ba file khoá có hash (requirements-dev/audit/e2e.txt: công cụ cổng, audit, E2E) — gom một PR mỗi tuần.
   - package-ecosystem: pip
     directory: /
