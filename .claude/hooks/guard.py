@@ -7374,7 +7374,8 @@ STAGE_APPROVE_WHY = (
     # vế lệnh-con-từ-biến đứng đầu: lý do bị cắt ở trần độ dài khi có lý do chặn khác (AUD-HAR-313)
     "duyệt giai đoạn sản phẩm (`xt.py stage approve`/`init --adopt`; lệnh con lấy từ biến `xt.py $c` cũng tính — viết"
     " rõ từng lệnh, AUD-HAR-307) — chỉ người, ngoài phiên agent (ADR-0058); `stage approve` dạng chữ rõ được khi"
-    " xt.yaml ở cây VÀ bản đã commit ở nhánh chính khai `stage_approval: agent` (ADR-0069)"
+    " xt.yaml ở cây VÀ bản đã commit ở nhánh chính khai `stage_approval: agent` (ADR-0069); cũng `loop decide-prod`"
+    " (AUD-SEC-541)"
 )
 
 
@@ -7454,8 +7455,14 @@ def _approves_at(n: List[str], k: int, runs: Tuple[bool, bool], feeds: bool) -> 
     if not named and not (runs[1] and _vague(n[k])):
         return False
     j, sub = _xt_sub(n, k + 1)
-    if not named and sub != "stage":
+    if not named and sub not in ("stage", "loop"):
         return False
+    if sub == "loop":  # `loop decide-prod` (AUD-SEC-541): lệnh con của `loop` mờ có thể là nó — chỉ khi script có tên
+        tail = n[j + 1 :]
+        act = next((t for t in tail if not t.startswith("-")), "")
+        if not act:  # lệnh con từ stdin (`xargs … loop`) như `stage` (review #510 🟠-1)
+            return feeds and not {"-h", "--help"} & set(tail)
+        return "decide-prod" in tail or (named and _vague(act))
     if sub != "stage":
         return runs[0] and (_vague(sub) or (feeds and not sub))
     tail = n[j + 1 :]
@@ -7586,6 +7593,8 @@ def _approves_literal(n: List[str]) -> bool:
     """Luật chữ: `xt.py … stage … approve` hay `… stage … init … --adopt` sau `xt.py` đầu tiên."""
     at = next((k for k, t in enumerate(n) if posixpath.basename(t) == "xt.py"), len(n))
     rest = n[at + 1 :]
+    if "decide-prod" in rest:  # `loop decide-prod`: quyết đề xuất "Khi chạy thật" chỉ người (AUD-SEC-541)
+        return True
     if "stage" not in rest:
         return False
     tail = rest[rest.index("stage") + 1 :]

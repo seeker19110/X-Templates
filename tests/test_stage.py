@@ -829,6 +829,47 @@ class StageGuardTest(unittest.TestCase):
             with self.subTest(cmd=cmd):
                 self.assertEqual(self.decide(cmd), "deny")
 
+    def test_decide_prod_denied_in_every_form(self):
+        """AUD-SEC-541: `loop decide-prod` là quyết định của chủ dự án — agent chạy nó thì `prod_switch` PASS và
+        `release-sign` tự ký. Cùng nhóm chặn với duyệt giai đoạn: lách biến môi trường (`env -u`, gán rỗng), đường
+        script bất kỳ, lệnh con mờ đều bị chặn."""
+        for cmd in (
+            "python3 scripts/xt.py loop decide-prod --ref D-126 --choice 'giữ tự host'",
+            "env -u CLAUDECODE -u CLAUDE_CODE_SESSION_ID -u AI_AGENT python3 scripts/xt.py loop decide-prod --ref D-1 --choice x",
+            "CLAUDECODE= CLAUDE_CODE_SESSION_ID= AI_AGENT= python3 scripts/xt.py loop decide-prod --ref D-1 --choice x",
+            "python3 .xtemplates/scripts/xt.py loop decide-prod --ref D-1 --choice x",
+            "python3 scripts/xt.py --framework fw loop decide-prod --ref D-1 --choice x",
+            "python3 scripts/xt.py loop --help decide-prod",
+            'python3 scripts/xt.py loop "$(echo decide-prod)" --ref D-1 --choice x',
+            "python3 scripts/xt.py loop `echo decide-prod` --ref D-1 --choice x",
+            'python3 "$XT" loop decide-prod --ref D-1 --choice x',
+        ):
+            with self.subTest(cmd=cmd):
+                self.assertEqual(self.decide(cmd), "deny")
+
+    def test_decide_prod_fed_from_stdin_denied(self):
+        """Review #507 🟠-1: lệnh con `loop` nạp từ stdin (`xargs … loop`, `parallel … loop`) — như `stage` — bị chặn;
+        trước đây `echo decide-prod … | xargs env -u … xt.py loop` qua guard và qua cả env-check."""
+        unset = "env -u CLAUDECODE -u CLAUDE_CODE_SESSION_ID -u AI_AGENT"
+        for cmd in (
+            f"echo decide-prod --ref D-1 --choice x | xargs {unset} python3 scripts/xt.py loop",
+            f"echo decide-prod --ref D-1 --choice x | parallel {unset} python3 scripts/xt.py loop",
+            "echo decide-prod --ref D-1 --choice x | xargs python3 scripts/xt.py loop",
+        ):
+            with self.subTest(cmd=cmd):
+                self.assertEqual(self.decide(cmd), "deny")
+        self.assertEqual(self.decide("echo -h | xargs python3 scripts/xt.py loop --help"), "")  # help không chặn
+
+    def test_other_loop_commands_allowed(self):
+        for cmd in (
+            "python3 scripts/xt.py loop status",
+            "python3 scripts/xt.py loop record --task T-3718 -- true",
+            "python3 scripts/xt.py loop decide --question q --option a --option b --choice 1 --why w --revert r",
+            "python3 scripts/xt.py loop defer --task T-3718 --reason cho-nguoi",
+        ):
+            with self.subTest(cmd=cmd):
+                self.assertEqual(self.decide(cmd), "")
+
     def test_opaque_approve_denied(self):
         """Lệnh con/tuỳ chọn mờ (`$(…)`, backtick, biến) có thể là approve/adopt — chặn (AUD-SEC-155)."""
         for cmd in (

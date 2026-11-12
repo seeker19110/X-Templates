@@ -66,6 +66,7 @@
 - [ ] `T-3740` 🟠 AUD-SEC-629/630/631 GO_SIGN: NUL ô Tên, khoảng trắng Unicode cuối `subject:`, BOM một chiều (topo: review) — Gate: `python3 -m unittest tests.test_guard_go_no_go`
 - [ ] `T-3741` 🔴 AUD-SEC-632…635 guard: đọc lệnh con git chắc (chuyển hướng giữa, `git-<tên>`, autocorrect, tên mờ → BUDGET) (topo: review) — Gate: `python3 -m unittest tests.test_hooks tests.test_guard_fuzz`
 - [ ] `T-3747` 🔴 AUD-SEC-650/651 install.py/xt.py: thư mục git hook (`core.hooksPath` → thư mục là symlink) và sổ giai đoạn (`--stage-init`: `docs`, `.autopilot` là symlink) không ghi ra ngoài dự án (topo: review) — Gate: `python3 -m unittest tests.test_install tests.test_stage`
+- [ ] `T-3746` 🔴 AUD-SEC-648/649 guard hoặc `dev-task.sh format`: dòng §5 không ở dạng bảng chuẩn không được thành chữ ký qua formatter cả repo; mẫu `.prettierignore` cho `GO-NO-GO*.md` (topo: review) — Gate: `python3 -m unittest tests.test_hooks tests.test_guard_go_no_go`
 - [ ] `T-3743` 🔴 AUD-SEC-644 guard: biến chưa gán dính sau viết tắt không mơ hồ của cờ nguy hiểm (`git push --delet$X`, `--mirro$X`) → BUDGET (topo: review) — Gate: `python3 -m unittest tests.test_hooks tests.test_guard_fuzz`
 - [ ] `T-3744` 🔴 AUD-SEC-645 guard: CR trần ngoài nháy không tách từ như bash (`--repo x<CR>-h`) → BUDGET hoặc bỏ `\r` khỏi tập khoảng trắng (topo: review) — Gate: `python3 -m unittest tests.test_hooks tests.test_guard_fuzz`
 - [ ] `T-3745` 🟠 AUD-SEC-646/647 guard: `_discards_whole_tree` biết `--end-of-options`; `pax` giữ `--` riêng (topo: review) — Gate: `python3 -m unittest tests.test_hooks`

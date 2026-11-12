@@ -8646,7 +8646,12 @@ def _prod_ref_problem(texts: Dict[str, str], ref: str, where: str) -> Tuple[Opti
 
 def _loop_decide_prod(args: argparse.Namespace, base: Path) -> int:
     """Chủ dự án quyết một đề xuất "Khi chạy thật" (GO-NO-GO #18, D-399): THÊM mục D-NNN mới vào sổ hiện hành với dòng
-    máy đọc `- Khi chạy thật đã quyết (D-ref): <quyết định>` (`PROD_DECIDED_RE`); mục cũ giữ nguyên (`LOOP-STOP-019`)."""
+    máy đọc `- Khi chạy thật đã quyết (D-ref): <quyết định>` (`PROD_DECIDED_RE`); mục cũ giữ nguyên (`LOOP-STOP-019`).
+    Chỉ người: phiên agent chạy nó thì hàng `prod_switch` PASS và `release-sign` tự ký (AUD-SEC-541) — như `stage
+    approve`, từ chối khi có biến môi trường của phiên agent (lớp chặn nhầm, không phải ranh giới cách ly — D-015)."""
+    if agent_session():
+        print(f"✗ `loop decide-prod`: {STAGE_HUMAN_ONLY}", file=sys.stderr)
+        return 2
     ref, choice = _one_line(args.ref), _one_line(args.choice)
     if not choice:
         print("✗ --choice không được rỗng — ghi quyết định của chủ dự án", file=sys.stderr)
