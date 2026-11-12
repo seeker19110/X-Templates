@@ -128,8 +128,10 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
 ### Fixed
 
 - `dev-task.sh format-file` (AUD-SEC-628 🔴, lý do chạm hàng rào: formatter PostToolUse chuẩn hoá một dòng §5 mà guard
-  đã cho qua thành dòng ký hợp lệ): bỏ qua `GO-NO-GO*.md` theo tên và theo đích symlink (so chữ thường như guard) — chữ
-  ký §5 là của người. Dự án đích: không phải làm gì (chỉ có hiệu lực khi có formatter Markdown).
+  đã cho qua thành dòng ký hợp lệ): bỏ qua `GO-NO-GO*.md` theo tên và theo đích symlink (so chữ thường như guard) và
+  chụp–khôi phục mọi `GO-NO-GO*.md` quanh formatter không theo từng file — chữ ký §5 là của người. Chỉ đóng đường hook
+  PostToolUse: formatter cả repo qua Bash còn mở (AUD-SEC-648, T-3746). Dự án đích có formatter Markdown kiểm
+  (`prettier --check .`): thêm `GO-NO-GO*.md` vào file ignore của formatter (AUD-SEC-649).
 - Guard (lý do chạm hàng rào: AUD-SEC-621 🔴 — xoá/ghi đè ref remote lọt mọi luật push): plumbing đẩy `git send-pack`,
   `git http-push` và remote helper `git remote-<x>`/`git-remote-*` bị chặn (`REMOTE_DELETE`) ở mọi dạng — alias,
   `git-<tên>` chạy thẳng, tên khác hoa thường. Các lệnh này không qua luật `git push` và không chạy hook pre-push. Chỉ

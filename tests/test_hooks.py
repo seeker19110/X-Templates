@@ -2075,12 +2075,12 @@ class DevTaskTest(unittest.TestCase):
         (self.tmp / "scripts").mkdir()
         shutil.copy(ROOT / "scripts" / "dev-task.sh", self.tmp / "scripts" / "dev-task.sh")
 
-    def run_task(self, *args):
+    def run_task(self, *args, cwd=None):
         return subprocess.run(
             ["bash", str(self.tmp / "scripts" / "dev-task.sh"), *args],
             capture_output=True,
             text=True,
-            cwd=self.tmp,
+            cwd=cwd or self.tmp,
             env=dict(os.environ, CLAUDE_PROJECT_DIR=str(self.tmp)),
         )
 
@@ -2123,6 +2123,32 @@ class DevTaskTest(unittest.TestCase):
         real.write_text("x\n", encoding="utf-8")  # control: file .md khác (kể cả qua symlink) vẫn được format
         self.run_task("format-file", str(link))
         self.assertEqual(real.read_text(encoding="utf-8"), "FORMATTED")
+
+    def test_format_file_restores_go_no_go_written_by_formatter(self):
+        """AUD-SEC-628 review F1: formatter khai báo không theo từng file (`prettier --write .`) ghi `GO-NO-GO*.md` khi
+        file khác được format — dev-task.sh chụp và khôi phục file đó; F2: đường dẫn symlink tương đối theo gốc dự án
+        giải đúng dù cwd khác gốc."""
+        row = "  | người | An | GO | 2026-11-11 |\n"
+        docs = self.tmp / "docs" / "ops"
+        docs.mkdir(parents=True)
+        go = docs / "GO-NO-GO-2026-11-11-v1.md"
+        go.write_text(row, encoding="utf-8")
+        other = self.tmp / "notes.md"
+        other.write_text("x\n", encoding="utf-8")
+        script = "for f in notes.md docs/ops/GO-NO-GO-2026-11-11-v1.md; do printf FORMATTED > $f; done"
+        (self.tmp / "xt.yaml").write_text(f"format_file: {script}\n", encoding="utf-8")
+        r = self.run_task("format-file", "notes.md")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(other.read_text(encoding="utf-8"), "FORMATTED")  # file được format vẫn đổi
+        self.assertEqual(go.read_text(encoding="utf-8"), row)
+        self.assertIn("khôi phục", r.stderr)
+        # F2: symlink tương đối theo gốc dự án, hook chạy với cwd khác
+        (self.tmp / "sub").mkdir()
+        (self.tmp / "innocent.md").symlink_to(go)
+        (self.tmp / "xt.yaml").write_text("format_file: printf FORMATTED > {}\n", encoding="utf-8")
+        r = self.run_task("format-file", "innocent.md", cwd=self.tmp / "sub")
+        self.assertEqual(go.read_text(encoding="utf-8"), row)
+        self.assertIn("GO-NO-GO", r.stderr)
 
     def test_format_file_never_breaks_json(self):
         """AUD-HAR-037: formatter khai báo cho Python (`ruff format {}`) từng biến settings.json thành JSON hỏng (dấu phẩy
