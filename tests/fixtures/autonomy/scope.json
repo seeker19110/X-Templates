@@ -555,6 +555,12 @@
    "ids": [
     "AUD-HAR-380"
    ]
+  },
+  {
+   "reason": "Lỗi nằm ở `dev-task.sh format-file` (formatter PostToolUse chuẩn hoá dòng §5 sau khi guard đã cho qua) — không phải quyết định của guard/PR/CI mà bench mô phỏng. Khoá bằng tests.test_hooks.DevTaskTest.test_format_file_skips_go_no_go.",
+   "ids": [
+    "AUD-SEC-628"
+   ]
   }
  ]
 }

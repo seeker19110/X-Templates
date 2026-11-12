@@ -2101,6 +2101,29 @@ class DevTaskTest(unittest.TestCase):
             self.assertFalse((self.tmp / "INJECTED").exists(), tmpl)
             self.assertNotIn("unexpected EOF", r.stderr, tmpl)
 
+    def test_format_file_skips_go_no_go(self):
+        """AUD-SEC-628: formatter không chạm `GO-NO-GO*.md` (kể cả đích symlink) — nó chuẩn hoá dòng §5 mà guard đã cho qua
+        thành dòng ký hợp lệ; chữ ký là của người."""
+        row = "  | người | An | GO | 2026-11-11 |\n"
+        (self.tmp / "xt.yaml").write_text("format_file: printf 'FORMATTED' > {}\n", encoding="utf-8")
+        real = self.tmp / "notes.md"
+        link = self.tmp / "ok.md"
+        link.symlink_to(real)
+        real_go = self.tmp / "go-no-go-1.md"
+        link_go = self.tmp / "innocent.md"
+        link_go.symlink_to(real_go)
+        for name, target in (("GO-NO-GO.md", None), ("go-no-go-2026-11-11-v1.MD", None), ("innocent.md", real_go)):
+            with self.subTest(name):
+                f = real_go if target else self.tmp / name
+                f.write_text(row, encoding="utf-8")
+                r = self.run_task("format-file", str(self.tmp / name))
+                self.assertEqual(r.returncode, 0, r.stderr)
+                self.assertEqual(f.read_text(encoding="utf-8"), row)
+                self.assertIn("GO-NO-GO", r.stderr)
+        real.write_text("x\n", encoding="utf-8")  # control: file .md khác (kể cả qua symlink) vẫn được format
+        self.run_task("format-file", str(link))
+        self.assertEqual(real.read_text(encoding="utf-8"), "FORMATTED")
+
     def test_format_file_never_breaks_json(self):
         """AUD-HAR-037: formatter khai báo cho Python (`ruff format {}`) từng biến settings.json thành JSON hỏng (dấu phẩy
         thừa) — format-file khôi phục file JSON nếu trước hợp lệ mà sau không còn hợp lệ."""

@@ -536,6 +536,13 @@ case "$TASK" in
     run_task "$TASK"; exit $? ;;
   format-file)
     P="${2:-}"; [ -n "$P" ] || { log "format-file: thiếu path"; exit 0; }
+    # Dòng ký §5 của `GO-NO-GO*.md` là của người (AUD-SEC-628): formatter chuẩn hoá dòng guard đã cho qua thành dòng ký
+    # hợp lệ — không chạm file này, tên hay đích symlink (so tên chữ thường như guard `GO_NO_GO_NAME`).
+    for N in "$P" "$(realpath -- "$P" 2>/dev/null || true)"; do
+      case "$(basename -- "${N:-.}" | tr '[:upper:]' '[:lower:]')" in
+        go-no-go*.md) log "skip format-file: GO-NO-GO*.md do người ký, formatter không chạm ('$P')"; exit 0 ;;
+      esac
+    done
     C="$(resolve_format_file "$P")"
     [ -n "$C" ] || { log "skip format-file: không có per-file formatter cho '$P'"; exit 0; }
     log "format-file: $C  (\$1=$P)"
