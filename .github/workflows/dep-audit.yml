@@ -1,6 +1,6 @@
 name: Dependency audit
 
-# Quét lỗ hổng phụ thuộc Python (BASE-DEP-004): mỗi PR, push main, hằng tuần và chạy tay.
+# Quét lỗ hổng phụ thuộc (BASE-DEP-004): Python (job `dep-audit`) và lockfile pnpm của gói web-api-ts (job `pack-npm-audit`) — mỗi PR, push main, hằng tuần và chạy tay.
 # Khung chỉ dùng thư viện chuẩn lúc chạy; các gói ở đây là công cụ cổng (requirements-dev.txt) và chính pip-audit. Gói E2E (requirements-e2e.txt, D-133) chỉ chạy ở job `app-e2e`.
 on:
   pull_request:
