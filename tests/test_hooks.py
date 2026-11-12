@@ -7925,6 +7925,35 @@ class GuardFunctionKeywordTest(unittest.TestCase):
         self.assertEqual(fn(["select", "x", "do", "ls"]), ["select", "x", ";", "do", "ls"])
         self.assertEqual(fn(["for", "x", "in", "a", ";", "do"]), ["for", "x", "in", "a", ";", "do"])  # có `in`: giữ
         self.assertEqual(fn([">", "f", "function", "g"]), [">", "f", "function", "g"])  # đích chuyển hướng
+        # review #517 🔴: từ khoá làm ĐỐI SỐ không mở đầu lệnh mới — `function x` sau `do`/`!`/`then` không bị viết lại
+        for kw in ("do", "!", "if", "then", "else", "while", "{"):
+            with self.subTest(kw=kw):
+                argv = ["rm", "-rf", kw, "function", "x", "/"]
+                self.assertEqual(fn(argv), argv)
+        self.assertEqual(fn(["rm", "-rf", "do", "for", "x", "do", "/"]), ["rm", "-rf", "do", "for", "x", "do", "/"])
+        self.assertEqual(
+            fn(["if", "!", "function", "g", "{"]), ["if", "!", "g", "()", "{"]
+        )  # chuỗi từ khoá ở đầu lệnh: giữ
+
+    # (lệnh, mã): từ khoá ở vị trí đối số không được cắt argv của lệnh có luật (review #517 🔴, đo trên head 1a5c1e42)
+    KEYWORD_ARGUMENT = (
+        ("rm -rf do function x /", "RULE_DENY"),
+        ("rm -rf ! function x /", "RULE_DENY"),
+        ("rm -rf then function x /", "RULE_DENY"),
+        ("rm -rf do for x do /", "RULE_DENY"),
+        ("git push origin do function feat/other --force", "RULE_DENY"),
+        ("git clean -e do function . -fdx", "RULE_DENY"),
+        ("bash -c 'rm -rf do function x /'", "RULE_DENY"),
+        ("rm -f do function x .claude/settings.json", "HOOK_BYPASS"),
+        ("echo hi | tee do function x .claude/settings.json", "HOOK_BYPASS"),
+        ("chmod 000 do function x .claude/hooks/guard.py", "HOOK_BYPASS"),
+    )
+
+    def test_keyword_as_argument_does_not_split_argv(self):
+        for cmd, code in self.KEYWORD_ARGUMENT:
+            with self.subTest(cmd=cmd):
+                res = self.decide(cmd)
+                self.assertEqual((res["decision"], res.get("code")), ("deny", code), res)
 
     def test_harmless_function_bodies_still_pass(self):
         for cmd in self.ALLOW:

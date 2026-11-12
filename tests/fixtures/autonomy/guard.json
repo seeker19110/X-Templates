@@ -23125,6 +23125,9 @@
 {"id": "aud611-fn-commit-after-write", "origin": "adversarial-reviewer", "refs": ["AUD-SEC-611"], "input": {"command": "function g { git commit -qam 'fix: x'; }; echo x >> README.md; g"}, "expect": {"allowed": false, "code": "RULE_DENY"}, "note": "review #517 🟠 F3: commit trong thân hàm sau khi ghi file — dạng `g() {` đã bị chặn nhờ token `g`"},
 {"id": "aud611-ctl-for-do-no-in", "origin": "control", "refs": ["AUD-SEC-611"], "input": {"command": "set -- 1; for x do echo $x; done"}, "expect": {"allowed": true}},
 {"id": "aud611-ctl-fn-assign-harmless", "origin": "control", "refs": ["AUD-SEC-611"], "input": {"command": "function g { d=tmp; echo $d; }; g"}, "expect": {"allowed": true}},
-{"id": "aud611-ctl-fn-push-var-branch", "origin": "control", "refs": ["AUD-SEC-611"], "input": {"command": "function g { B=feat/x; git push -u origin \"$B\"; }; g"}, "expect": {"allowed": true}, "note": "chặn oan UNRESOLVED_TARGET của dạng `function` (review #517) — nay cùng quyết định với `g() {`"}
+{"id": "aud611-ctl-fn-push-var-branch", "origin": "control", "refs": ["AUD-SEC-611"], "input": {"command": "function g { B=feat/x; git push -u origin \"$B\"; }; g"}, "expect": {"allowed": true}, "note": "chặn oan UNRESOLVED_TARGET của dạng `function` (review #517) — nay cùng quyết định với `g() {`"},
+{"id": "aud611-kw-arg-rm", "origin": "audit", "refs": ["AUD-SEC-611"], "input": {"command": "rm -rf do function x /"}, "expect": {"allowed": false, "code": "RULE_DENY"}, "note": "review #517 🔴: `do` là ĐỐI SỐ của rm, không mở đầu lệnh — `function x` không được viết lại thành `x ()` cắt argv (head vòng 2 cho qua)"},
+{"id": "aud611-kw-arg-settings", "origin": "audit", "refs": ["AUD-SEC-611"], "input": {"command": "rm -f do function x .claude/settings.json"}, "expect": {"allowed": false, "code": "HOOK_BYPASS"}, "note": "review #517 🔴: cùng lớp, đích là file bảo vệ"},
+{"id": "aud611-ctl-kw-chain-head", "origin": "control", "refs": ["AUD-SEC-611"], "input": {"command": "if ! function g { git status; }; then g; fi"}, "expect": {"allowed": true}, "note": "chuỗi từ khoá Ở ĐẦU lệnh (`if !`) vẫn đọc `function g` như khai hàm — không chặn oan"}
  ]
 }

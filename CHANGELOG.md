@@ -160,14 +160,26 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
   `_unglue` cắt dãy dấu theo toán tử dài nhất của bash ở cả `tokenize` lẫn `_raw_tokens`; (AUD-SEC-611, #517) thân hàm
   khai bằng `function TÊN { … }` và `for|select TÊN do …` (không `in`) được đọc như `TÊN () { … }` / `for TÊN ; do` ở tầng
   token (`_fn_forms`) nên mọi bộ đọc thấy thân (trước đó `function g { rm -rf /; }; g`, `function g { d=/; rm -rf $d;
-  }; g`, `for x do git push --force; done` lọt; dạng `g() {` đã chặn). Còn mở: AUD-SEC-656/657/659/660/661 (T-3748…T-3752).
+  }; g`, `for x do git push --force; done` lọt; dạng `g() {` đã chặn); từ khoá làm ĐỐI SỐ (`rm -rf do function x /`) không mở
+  đầu lệnh nên không bị viết lại cắt argv (review #517 🔴). Còn mở: AUD-SEC-656/657/659/660/661 (T-3748…T-3752),
+  AUD-SEC-663…666 (T-3753…T-3756: `time`, `coproc`, `${ …; }`, extglob — có từ trước).
   Dự án đích: nâng bản để nhận `.claude/hooks/guard.py` mới.
+- `release-check` hàng `verify` đọc sổ máy `.autopilot/` ở mọi worktree của repo: chạy từ worktree không có sổ không còn
+  N/A bỏ qua `loop verify --all` của cây chính (PASS chỉ khi sổ ở worktree khác xanh khớp vân tay cây đang kiểm); sổ
+  hỏng, vòng bị chặn ở worktree nào hay không liệt kê được worktree → FAIL (AUD-HAR-369).
+- `install.py` git hook (AUD-SEC-650 🔴, T-3747): `core.hooksPath` trỏ vào thư mục của dự án đi qua symlink
+  (`.githooks → ../out`, `.husky → ../out` với `.husky/_`) → không cài hook nào, không tạo thư mục ngoài, cảnh báo
+  `⚠ git hook: bỏ qua symlink`, manifest `git_hooks` rỗng; `--plan` báo `skipped-symlink` cho từng hook. Thư mục hook
+  ngoài dự án (worktree, `core.hooksPath` tuyệt đối) giữ hành vi cũ.
+- `xt.py stage` / `install.py --stage-init` (AUD-SEC-651 🔴, T-3747): `docs` hay `docs/autopilot` là symlink → `stage`
+  ghi sổ từ chối (`✗ … là symlink`, exit 2); `.autopilot` là symlink → khoá `state.lock` từ chối (OSError, exit 2) — mọi
+  lệnh ghi state qua khoá cũng vậy. Không ghi/khoá gì ngoài dự án; installer báo ⚠ và vẫn thoát 0.
 - `install.py` (AUD-SEC-619 🔴, D-425): thư mục cha là symlink trên đường ghi harness `.claude/`, `.github/` và adapter
   (`.codex/`, `.gemini/`…) → `skipped-symlink` kèm cảnh báo, không ghi/tạo gì ngoài dự án (trước đây `.claude -> ngoài`
   khiến `settings.json` ngoài bị gộp quyền). `--plan` báo cùng quyết định. Dự án đích có thư mục harness (`.claude`,
   `.claude/hooks`), `.github` hay thư mục adapter là symlink (vd dùng chung hook): nâng bản không còn cập nhật được file
-  qua liên kết đó — thay bằng thư mục thật hoặc chép tay (`doctor` báo thiếu file; file cũ còn nằm sau liên kết thì `doctor --drift` báo); còn mở: thư mục git hook và sổ giai
-  đoạn qua symlink (AUD-SEC-650/651, T-3747).
+  qua liên kết đó — thay bằng thư mục thật hoặc chép tay (`doctor` báo thiếu file; file cũ còn nằm sau liên kết thì `doctor --drift` báo); thư mục git hook và sổ giai
+  đoạn qua symlink: hai mục trên (AUD-SEC-650/651, T-3747).
 - `dev-task.sh format-file` (AUD-SEC-628 🔴, lý do chạm hàng rào: formatter PostToolUse chuẩn hoá một dòng §5 mà guard
   đã cho qua thành dòng ký hợp lệ): bỏ qua `GO-NO-GO*.md` theo tên và theo đích symlink (so chữ thường như guard) và
   chụp–khôi phục mọi `GO-NO-GO*.md` quanh formatter không theo từng file — chữ ký §5 là của người. Chỉ đóng đường hook

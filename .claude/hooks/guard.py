@@ -4701,7 +4701,9 @@ def _fn_forms(tokens: List[str]) -> List[str]:
             out.append(t)
             i += 1
         last = out[-1]
-        start = (_is_punct(last) and not _is_redirect(last)) or last in SHELL_KEYWORDS
+        # từ khoá chỉ giữ vị trí đầu lệnh khi chính nó đứng ở đầu lệnh: `do`/`!`/`then` làm ĐỐI SỐ (`rm -rf do function x /`)
+        # không được mở đầu lệnh mới, kẻo `function x` bị viết lại thành `x ()` và cắt argv (review #517 🔴)
+        start = (_is_punct(last) and not _is_redirect(last)) or (start and last in SHELL_KEYWORDS)
     return out
 
 

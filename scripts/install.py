@@ -1074,6 +1074,16 @@ def git_hooks_dir(target: Path) -> Path | None:
     return Path(out) if Path(out).is_absolute() else target / out
 
 
+def hooks_symlink(target: Path, hooks: Path) -> bool:
+    """Thư mục hook nằm trong dự án mà đi qua symlink (`.githooks → ../out`, `.husky → ../out` với `.husky/_`) → ghi
+    hook xuyên ra ngoài dự án (AUD-SEC-650, cùng lớp AUD-SEC-619). Thư mục hook ngoài dự án (git common dir của
+    worktree, `core.hooksPath` tuyệt đối) là cấu hình git của người dùng — không xét. `target` đã `resolve()`."""
+    # "trong dự án" xét trên đường đã chuẩn hoá; symlink xét trên đường THÔ — `normpath` xoá thành phần symlink đứng trước
+    # `..` (`.githooks/../x` với `.githooks → ../out` ghi ra `x` ngoài dự án; review T-3747 🔴)
+    inside = Path(os.path.normpath(hooks)).is_relative_to(target)
+    return inside and parent_symlink(hooks / GIT_HOOKS[0])
+
+
 def git_hook_action(dst: Path) -> str:
     """Quyết định (không ghi) cho một git hook: 'copied' (chưa có) | 'updated' (hook khung, khác bản mới) | 'kept' (hook
     khung, giống bản mới) | 'kept-own' (hook không mang dấu khung — của dự án, husky, pre-commit… — hay symlink)."""
@@ -1126,8 +1136,13 @@ def git_hooks_plan(target: Path, no_harness: bool, no_git_hooks: bool) -> dict[s
     if hooks is None:
         return {"action": "skipped", "reason": reason or "không phải repo git"}
     where = shown_path(target, hooks, hooks)
+    linked = hooks_symlink(target, hooks)  # cùng quyết định với `install_git_hooks` (AUD-SEC-650)
     rows = [
-        {"name": n, "path": shown_path(target, hooks / n, hooks), "action": git_hook_action(hooks / n)}
+        {
+            "name": n,
+            "path": shown_path(target, hooks / n, hooks),
+            "action": "skipped-symlink" if linked else git_hook_action(hooks / n),
+        }
         for n in GIT_HOOKS
     ]
     full = hooks.resolve()
@@ -1143,6 +1158,10 @@ def install_git_hooks(target: Path) -> None:
     hooks = git_hooks_dir(target)
     if hooks is None:
         log("  git hook: không phải repo git — bỏ qua (chạy lại install.py sau `git init`)")
+        return
+    if hooks_symlink(target, hooks):  # kiểm trước `mkdir`: `.husky/_` sẽ thành `out/_` (AUD-SEC-650)
+        log(f"  ⚠ git hook: bỏ qua symlink {hooks} — thư mục hook đi qua liên kết ra ngoài dự án; không cài hook nào")
+        record_manifest_paths(target, "git_hooks", [])
         return
     hooks.mkdir(parents=True, exist_ok=True)
     ours: list[str] = []
