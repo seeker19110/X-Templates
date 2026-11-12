@@ -5,6 +5,7 @@
   production → quan sát dữ liệu thật → /optimize dựa trên số liệu production → lại qua release-check và ký"; chốt phương án B
   — D-180; phiên chính tự duyệt thiết kế theo tiêu chí chất lượng cuối, ADR-0008)
 - **Mở rộng bởi:** ADR-0058 (D-248) — ở giai đoạn sản phẩm 3 `/optimize` nhận thêm mục tiêu cải tiến chưa đỏ có số + baseline (`LOOP-OPT-017`); dự án không có sổ giữ nguyên luật "chỉ ngân sách đỏ"; có sổ ở giai đoạn 1/2 thì không chạy `/optimize` (D-246) — ngân sách đỏ vào PLAN của giai đoạn đó.
+- **Thay một phần bởi:** [ADR-0075](0075-end-to-end-factory.md) (2026-11-11, D-419; đặc tả `docs/specs/SPEC-factory-scale.md`) — dòng 20 GO-NO-GO ở M/L: khi khoá trần `release_signoff_scale` cho phép và người chưa ghi gì vào dòng đó, agent ghi `MÁY MÔ PHỎNG` thay cho việc người dùng thử; có hiệu lực khi lát "mọi quy mô" của ADR-0075 có mã, tới lúc đó §Quyết định 1 còn nguyên.
 - **Trạng thái triển khai:** Đã triển khai — PLAN-3.25 (`docs/autopilot/PLAN-3.25-optimize.md`), bản 3.25.0: skill
   `.claude/skills/optimize/SKILL.md`, `DOCTOR_SKILLS`, `LOOP-OPT-016`, `LOOP-OPT-005` MUST@M / `LOOP-OPT-004` MUST@L (D-181), mẫu
   GO-NO-GO dòng 20 + §2c, `lifecycle.md`, `/complete`, README gốc; test `tests/test_docs_budget.py`, `test_doctor.py`, `test_install.py`.
