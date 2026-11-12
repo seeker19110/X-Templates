@@ -30,7 +30,7 @@
 ## Task
 
 ### Lát 1 — 🔴 mới
-- [ ] `T-3714` 🔴 AUD-SEC-614 guard: `--end-of-options` không còn làm `-h` thành miễn trừ trợ giúp của `git push` (topo: review) — Gate: `python3 -m unittest tests.test_hooks`
+- [x] `T-3714` 🔴 AUD-SEC-614 guard: `--end-of-options` không còn làm `-h` thành miễn trừ trợ giúp của `git push` (topo: review) — Gate: `python3 -m unittest tests.test_hooks`
 - [x] `T-3715` 🔴 AUD-SEC-615 + AUD-TEST-100 guard: dòng ký GO_SIGN guard thấy ⊇ xt thấy (chú thích HTML, khối rào) (topo: review) — Gate: `python3 -m unittest tests.test_guard_go_no_go`
 - [x] `T-3716` 🔴 AUD-SEC-616 install.py: `.xtemplates-new` là symlink → `skipped-symlink` (topo: review) — Gate: `python3 -m unittest tests.test_install_pack`
 
@@ -66,5 +66,8 @@
 - [ ] `T-3740` 🟠 AUD-SEC-629/630/631 GO_SIGN: NUL ô Tên, khoảng trắng Unicode cuối `subject:`, BOM một chiều (topo: review) — Gate: `python3 -m unittest tests.test_guard_go_no_go`
 - [ ] `T-3741` 🔴 AUD-SEC-632…635 guard: đọc lệnh con git chắc (chuyển hướng giữa, `git-<tên>`, autocorrect, tên mờ → BUDGET) (topo: review) — Gate: `python3 -m unittest tests.test_hooks tests.test_guard_fuzz`
 - [ ] `T-3747` 🔴 AUD-SEC-650/651 install.py/xt.py: thư mục git hook (`core.hooksPath` → thư mục là symlink) và sổ giai đoạn (`--stage-init`: `docs`, `.autopilot` là symlink) không ghi ra ngoài dự án (topo: review) — Gate: `python3 -m unittest tests.test_install tests.test_stage`
+- [ ] `T-3743` 🔴 AUD-SEC-644 guard: biến chưa gán dính sau viết tắt không mơ hồ của cờ nguy hiểm (`git push --delet$X`, `--mirro$X`) → BUDGET (topo: review) — Gate: `python3 -m unittest tests.test_hooks tests.test_guard_fuzz`
+- [ ] `T-3744` 🔴 AUD-SEC-645 guard: CR trần ngoài nháy không tách từ như bash (`--repo x<CR>-h`) → BUDGET hoặc bỏ `\r` khỏi tập khoảng trắng (topo: review) — Gate: `python3 -m unittest tests.test_hooks tests.test_guard_fuzz`
+- [ ] `T-3745` 🟠 AUD-SEC-646/647 guard: `_discards_whole_tree` biết `--end-of-options`; `pax` giữ `--` riêng (topo: review) — Gate: `python3 -m unittest tests.test_hooks`
 - [ ] `T-3742` 🟠 AUD-SEC-636 guard: quét lệnh git lồng (`rebase --exec`, `bisect run`, `submodule foreach`, `--receive-pack`/`--upload-pack`) (topo: review) — Gate: `python3 -m unittest tests.test_hooks`
 - [ ] `T-3729` Quét lại nhóm TEST, DOC, HAR (`chưa quét`) + sổ `đã sửa` cho các lát trên (sau: T-3724, T-3726) — Gate: `python3 scripts/xt.py audit check docs/ops/AUDIT-STATUS.md`
