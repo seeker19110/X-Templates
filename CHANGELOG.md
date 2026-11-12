@@ -164,6 +164,22 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
   đầu lệnh nên không bị viết lại cắt argv (review #517 🔴). Còn mở: AUD-SEC-656/657/659/660/661 (T-3748…T-3752),
   AUD-SEC-663…666 (T-3753…T-3756: `time`, `coproc`, `${ …; }`, extglob — có từ trước).
   Dự án đích: nâng bản để nhận `.claude/hooks/guard.py` mới.
+- Guard (lý do chạm hàng rào: hai 🔴 có từ trước, review lát AUD-SEC-614 và #506/#517; D-415, D-429 — không đọc chắc
+  thì chặn BUDGET, không thêm cách đọc mới): (AUD-SEC-644, #523) tên cờ dài của `git push|reset|clean|checkout|switch|
+  restore|stash|branch|config|remote|tag|…` có mở rộng/glob mà phần chữ trước nó còn là viết tắt có thể của cờ nguy hiểm
+  (`git push --delet$X`, `--mirro$X`, `--dele*`, `git reset --har$X`) → BUDGET (trước đó X chưa gán thành `--delet` =
+  `--delete` và lọt); luật cũ chặn trên argv đầy đủ (`--force$X`) hay trên phần còn lại thì giữ deny và mã của luật đó;
+  giá trị/đối số có mở rộng (`origin "$B"`, `--repo="$R"`), cờ không phải viết tắt cờ nguy hiểm (`--set-upstream$X`),
+  `fetch`/`pull` không đổi. Còn mở cùng gốc: cụm cờ ngắn/tên lệnh con có mở rộng, mở rộng dính trước cờ, cờ dài ngoài
+  bảng nguy hiểm (AUD-SEC-690/710/711, T-3759). (AUD-SEC-645, #523) CR trần ngoài nháy (cả trong `${…}`, `$(…)` và
+  script của shell lồng `bash -c "…"`/`eval`) → BUDGET: bash coi CR là ký tự của từ còn guard tách từ ở CR (`git push
+  --force --repo x<CR>-h` từng được miễn trừ như `-h`; `git tag origin/main -m ${X:-x<CR>-l<CR>}`, `function g<CR>x`,
+  `exec -a a<CR>b`, `env -u a<CR>b`, `>a<CR>b` cũng lọt). CR trong nháy, `\<CR>`, `$'\r'`, thân heredoc vẫn là chữ như
+  trước. Chọn BUDGET thay vì bỏ `\r` khỏi tập khoảng trắng của tokenizer vì nhiều tầng khác (`shlex.split`, `str.split`,
+  regex `\s`) vẫn tách ở CR — chặn ở tập con chuẩn đóng mọi tầng một lần. Lệnh gửi kèm CR trần (dán CRLF) giờ bị chặn
+  với lý do "bỏ ký tự CR khỏi dòng lệnh" — bash vốn đọc sai chúng (`git status<CR>` → lệnh con `status^M`); chặn oan hẹp
+  còn ghi ở AUD-SEC-712.
+  Dự án đích: nâng bản để nhận `.claude/hooks/guard.py` mới.
 - `release-check` hàng `verify` đọc sổ máy `.autopilot/` ở mọi worktree của repo: chạy từ worktree không có sổ không còn
   N/A bỏ qua `loop verify --all` của cây chính (PASS chỉ khi sổ ở worktree khác xanh khớp vân tay cây đang kiểm); sổ
   hỏng, vòng bị chặn ở worktree nào hay không liệt kê được worktree → FAIL (AUD-HAR-369).

@@ -9408,6 +9408,145 @@ class GuardGhDynNameTest(_GuardDebtCase):
         self.assertFalse(has("-1Ra", "a", "R"))  # `a` là giá trị dính của `-R`
 
 
+class GuardGitDynFlagTest(_GuardDebtCase):
+    """AUD-SEC-644 (T-3743): git nhận viết tắt của tuỳ chọn dài — `--delet$X` với X chưa gán là `--delet` = `--delete`;
+    `_git_long` chỉ mở viết tắt đúng chữ nên cho qua. Tên cờ dài có mở rộng/glob mà phần chữ trước nó còn có thể là
+    viết tắt của tuỳ chọn nguy hiểm, ở lệnh con git có luật → BUDGET (D-415: không đọc chắc thì chặn, không đoán X)."""
+
+    DYN = (
+        "git push --delet$X origin feat/other",
+        "git push --mirro$X origin",
+        "git push --delet${X} origin feat/other",
+        'git push "--delet$X" origin feat/other',
+        'git push --delet"$X" origin feat/other',
+        "git push --delet$(true) origin feat/other",
+        "git push --d$X origin feat/other",
+        "git push --$X origin feat/other",
+        "git push --al$X origin",
+        "git push --tag$X origin",
+        "git push --prun$X origin",
+        "git push --dele* origin feat/other",
+        "git push origin feat/other --delet$X",
+        "git reset --har$X",
+        "git clean --forc$X -d",
+        "git switch --discard$X main",
+        "git branch --delet$X feat/other",
+        "sh -c 'git push --delet$X origin feat/other'",
+        "echo ok; git push --mirro$X origin",
+    )
+    VALUES = (
+        "git push origin feat/me --verbose$X",
+        "git push --set-upstream$X origin feat/me",
+        'git push -u origin feat/me -o "ci.skip$X"',
+        "git reset --soft$X HEAD~1",
+        "git branch --list$X",
+        "git fetch --all$X",
+        "git log --al$X --oneline",
+        'git commit -m "--delet$X"',
+        'git switch -c "feat/$X"',
+        'git push --repo="$R" origin feat/me',
+        'git reset "$REV"',
+        "git pull --prun$X",
+    )
+
+    def test_abbreviated_danger_flag_with_expansion_denied(self):  # AUD-SEC-644
+        """Viết tắt cờ nguy hiểm có mở rộng/glob dính sau → BUDGET kèm cách viết lại."""
+        self.assert_code(self.DYN, "BUDGET")
+        self.assertIn("viết lại", self.out("git push --delet$X origin feat/other")["reason"])
+
+    def test_flags_and_values_with_expansion_still_allowed(self):  # AUD-SEC-644: không chặn oan
+        """Cờ không phải viết tắt của cờ nguy hiểm, giá trị có mở rộng, lệnh con không có luật cờ: như trước."""
+        self.assert_allowed(self.VALUES)
+
+    def test_literal_danger_flags_keep_their_code(self):  # cờ nguyên văn giữ mã luật cũ, không thành BUDGET
+        self.assert_code(("git push --delete origin feat/other", "git push --delet origin feat/other"), "REMOTE_DELETE")
+        self.assert_code(("git reset --hard", "git push --mirror origin"), "RULE_DENY")
+        # phần còn lại đã bị luật khác chặn → giữ mã luật đó (deny thắng câu hỏi BUDGET)
+        self.assert_code(("git push --force --delet$X origin feat/other", "git clean -f --forc$X"), "RULE_DENY")
+
+    # review #523 D1: chính token có mở rộng đã bị luật cũ chặn (`--force$X` — luật push đọc tiền tố `--force`)
+    RULE_ON_DYN = (
+        "git push --force$X origin feat/other",
+        "git push --force* origin feat/other",
+        'git push --force"$X" origin feat/other',
+        "git push origin feat/other --force$X",
+    )
+
+    def test_rule_deny_on_dynamic_token_not_downgraded(self):  # review #523 D1 (🟠)
+        """Luật cũ trên argv đầy đủ chặn trước: deny cứng giữ nguyên (strict không hạ thành hỏi người)."""
+        self.assert_code(self.RULE_ON_DYN, "RULE_DENY")
+        with mock.patch.dict(os.environ, {"XT_GUARD_POLICY": "strict"}):
+            for cmd in self.RULE_ON_DYN:
+                with self.subTest(cmd):
+                    self.assertEqual(self.g.bash_decision(cmd, self.feat, self.feat)["decision"], "deny")
+
+    def test_ref_writing_subcommands_and_main_branch(self):  # review #523 D2: giết hai đột biến sống
+        """Lệnh con chỉ có luật ghi ref (`tag`, `update-ref`, `symbolic-ref`, `worktree`) cũng xét cờ dài có mở rộng;
+        trên nhánh chính (`git push` trần hỏi) câu hỏi BUDGET thắng câu hỏi thường."""
+        dyn = ("git tag --forc$X v1", "git update-ref --d$X refs/heads/x HEAD", "git symbolic-ref --delet$X HEAD")
+        self.assert_code((*dyn, "git worktree add --forc$X ../w"), "BUDGET")
+        self.assert_allowed(("git tag v1", "git update-ref refs/heads/x HEAD", "git worktree add ../w"))
+        self.assert_code(("git push --mirro$X origin",), "BUDGET", self.main)
+
+
+class GuardBareCrTest(_GuardDebtCase):
+    """AUD-SEC-645 (T-3744): bash không tách từ ở CR (`printf "[%s]\\n" a<CR>b c` → `[a^Mb]` `[c]`), guard thì có
+    (`lex.whitespace = " \\t\\r"`) — `--repo x<CR>-h` guard thấy `-h` (miễn trừ trợ giúp) còn git đẩy ép. CR trần ngoài
+    nháy (cả trong `$(…)` và script của shell lồng) → BUDGET; CR trong nháy/thân heredoc/`$'\\r'` là chữ như trước."""
+
+    DENY = (
+        "git push --force --repo x\r-h origin feat/other",
+        "git tag origin/main -m x\r-l",
+        "gh pr close 12 -d -c x\r--help",
+        "function g\rx { git push origin feat/me --force; }; g\rx",
+        ">a\rb git push --force origin feat/other",
+        "exec -a a\rb git push --force origin feat/other",
+        "env -u a\rb git push --force origin feat/other",
+        'bash -c "git push --force --repo x\r-h origin feat/other"',
+        'eval "git push --force --repo x\r-h origin feat/other"',
+        'echo "$(git push --force --repo x\r-h origin feat/other)"',
+        "git status\r",
+        # review #523 P1: CR trần trong `${…}` không nháy (bash 5.3 + git thật tạo `refs/tags/origin/main`)
+        "git tag origin/main -m ${X:-x\r-l\r}",
+        "git update-ref -m ${X:-x\r-h\r} refs/remotes/origin/main HEAD",
+    )
+    ALLOW = (
+        'git commit -m "fix: x\r\n\r\nbody\r\n"',
+        "git commit -m 'fix: x\r\n\r\nbody'",
+        'echo "a\rb"',
+        "printf 'a\\r\\n'",
+        "echo $'a\\rb'",
+        "cat <<'EOF'\nline1\r\nline2\r\nEOF",
+        "cat <<EOF\nline1\r\nEOF",
+        "git commit -F - <<'EOF'\nfix: x\r\n\r\nbody\r\nEOF",
+        "echo 'a\rb' | tr -d '\\r'",
+        "grep -c $'\\r' README.md",
+        "git push -u origin feat/me",
+    )
+
+    def test_bare_cr_outside_quotes_denied(self):  # AUD-SEC-645
+        self.assert_code(self.DENY, "BUDGET")
+        self.assertIn("viết lại", self.out("git push --force --repo x\r-h origin feat/other")["reason"])
+
+    def test_cr_inside_quotes_or_heredoc_unchanged(self):  # AUD-SEC-645: không chặn oan
+        self.assert_allowed(self.ALLOW)
+
+    def test_quoted_cr_keeps_rule_code(self):  # dạng có nháy đã chặn đúng theo luật push — giữ mã cũ
+        cmds = (
+            'git push --force --repo "x\r-h" origin feat/other',
+            "git push --force --repo $'x\\r-h' origin feat/other",
+            "git push --force --repo x\\\r-h origin feat/other",  # `\<CR>`: CR thoát là chữ — guard, bash cùng đọc
+        )
+        self.assert_code(cmds, "RULE_DENY")
+
+    def test_bare_cr_check_is_linear(self):  # hiệu năng: quét CR theo chuỗi, không bậc hai (cả CR trần lẫn có nháy)
+        for wrap in ("{}", '"{}"'):
+            with self.subTest(wrap):
+                cpu_budget.assert_not_quadratic(
+                    self, lambda n: self.g.bash_decision("echo " + wrap.format("a\rb " * n), self.feat), 1000
+                )
+
+
 class GuardGhRestSplitDebtTest(_GuardDebtCase):
     """Nợ 🟠 #485/#491: đường REST của lệnh gh xoá đã DESTROY (AUD-SEC-583); `gh api` ghi ref với `force` = force-push
     (AUD-SEC-555); token bash tách/bung thành cờ ở lệnh gh có luật cờ và glob ở tên lệnh → BUDGET (AUD-SEC-590)."""
