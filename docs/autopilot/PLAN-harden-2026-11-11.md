@@ -41,7 +41,7 @@
 - [x] `T-3720` 🟠 AUD-DEP-021 CI: quét lockfile npm của gói theo PR + lịch, khối npm ở dependabot — Gate: `python3 scripts/xt.py ci-check`
 
 ### Lát 3 — 🔴 guard có từ trước
-- [ ] `T-3721` 🔴 AUD-SEC-610 guard: dấu tách dính dấu chuyển hướng vẫn tách lệnh (topo: review) — Gate: `python3 -m unittest tests.test_hooks tests.test_guard_fuzz`
+- [x] `T-3721` 🔴 AUD-SEC-610 guard: dấu tách dính dấu chuyển hướng vẫn tách lệnh (topo: review) — Gate: `python3 -m unittest tests.test_hooks tests.test_guard_fuzz`
 - [ ] `T-3722` 🔴 AUD-SEC-611 guard: quét thân hàm shell (topo: review) — Gate: `python3 -m unittest tests.test_hooks tests.test_guard_fuzz`
 - [ ] `T-3723` 🔴 AUD-SEC-606 guard: bỏ thoát kiểu bash trong nháy kép trước khi quét chuỗi lồng (sau: T-3721, T-3722; topo: review) — Gate: `python3 -m unittest tests.test_hooks tests.test_guard_fuzz`
 - [ ] `T-3724` 🔴 AUD-SEC-609 guard: lệnh có luật mà đối số chứa thay lệnh/thay tiến trình không đọc chắc → BUDGET (sau: T-3723; topo: review) — Gate: `python3 -m unittest tests.test_hooks tests.test_guard_fuzz`
