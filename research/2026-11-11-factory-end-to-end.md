@@ -25,10 +25,10 @@ khung ghi nhận; mốc xét lại của ADR-0068 ("lát A xong mà chưa dự �
 |---|---|---|---|
 | 1 Nhận ý tưởng | `/autopilot "<mô tả>"`, tự duyệt quyết định (ADR-0008) | Người tạo repo, chạy `install.py`, mở phiên, chọn chế độ quyền; không có kênh vào ngoài phiên | `.claude/skills/autopilot/SKILL.md` bước 0; `install.py` không có cờ tạo dự án mới |
 | 2 Dựng nền | `install.py --pack`, một gói API | Không UI, không ảnh container, không đích chạy | `framework/templates/packs/web-api-ts/README.md` ("không UI; không staging/deploy thật") |
-| 3 Xây | Vòng lặp có bằng chứng; `topo: parallel` khi `files:` không giao, đợt ≤ 4 | Mặc định `self`; `files:` là lời khai (bằng chứng chỉ lưu danh sách + digest, không so diff thật); worker ngoài phiên chưa có | `xt.py` `evidence_meta`; `orchestration-and-subagents.md` bảng topology; T-3555 còn `[ ]` |
-| 4 Kiểm | Gate, CI, review theo làn, audit, mutant của gói | Người viết mã cũng viết kiểm thử nghiệm thu; không có bộ nghiệm thu khoá với người viết | tìm trong `framework/11-autonomous-loop`, `14-testing-quality`: không có cơ chế |
+| 3 Xây | Vòng lặp có bằng chứng; `topo: parallel` khi `files:` không giao, đợt ≤ 4; `loop run` — vòng ngoài gọi agent headless từng task (ADR-0064) | Mặc định `self`; `files:` là lời khai (bằng chứng chỉ lưu danh sách + digest, không so diff thật); chưa có nơi khởi động và phân việc cho worker khi không ai mở phiên | `xt.py` `evidence_meta`, `_loop_run`; `orchestration-and-subagents.md` bảng topology; T-3555 còn `[ ]` |
+| 4 Kiểm | Gate, CI, review theo làn, audit, mutant của gói; `QA-STRAT-023` (test chấp nhận viết từ SPEC bởi ngữ cảnh khác người viết); khoá `acceptance`/`acceptance_report` | Yêu cầu có trên giấy nhưng không máy nào giữ: bộ nghiệm thu không bị khoá, người viết mã sửa được | `framework/14-testing-quality/test-strategy.md` (`QA-STRAT-023`); `framework/templates/xt.yaml` |
 | 5 Phát hành | `release-check`, `subject.digest`, `release-sign` | Agent chỉ ký ở `scale: S`; chữ ký không chặn tag hay phân phối | ADR-0074 §Quyết định; research 2026-11-08 §8 luận điểm 1 |
-| 6 Triển khai | Mục `OPS-DEPLOY-*`, khoá `preview`/`rollback` | Không khoá `deploy`, không receipt, không smoke sau triển khai, không tự quay lui | `framework/templates/xt.yaml`; `docs/ops/registry.json`: 4/4 dự án `environments: []`, `release: null`, `pack: null` |
+| 6 Triển khai | Mục `OPS-DEPLOY-*`, khoá `preview`/`preview_smoke` (bản trình giai đoạn), `rollback` (diễn tập) | Không khoá `deploy`, không receipt, không smoke sau triển khai, không tự quay lui | `framework/templates/xt.yaml`; `docs/ops/registry.json`: 4/4 dự án `environments: []`, `release: null`, `pack: null` |
 | 7 Vận hành, học | `/optimize`, `/incident`, `feedback aggregate` | Số field do người xuất; Routine tuần không đẩy được; 10 nhóm phản hồi chờ phân loại | `LOOP-OPT-016`; `PROGRESS.md` §Bàn giao |
 
 Số đo dòng giao hàng gần nhất (`pr stats --days 7`, 2026-11-05, ở `PROGRESS.md`): 112 PR merge, lead time trung vị 0,7
@@ -43,15 +43,17 @@ sau merge, chi phí mỗi lát.
 | Khi nào làm các việc chỉ chủ làm được (App/token, đích + khoá, trần chi phí, bật khoá)? | "thiết lập sau khi lên bản dev" | Đường tới bản dev không được cần việc người nào; gom việc người thành một checklist in ra khi bản dev xanh |
 | Tự động tới quy mô nào? | "ở mọi quy mô" | Bỏ giới hạn `scale: S` của `release-sign`, mở giai đoạn 2/3, đối chiếu các MUST buộc người ở M/L |
 
-Cách hiểu "bản dev" của phiên (ghi để chủ sửa nếu lệch): bản ứng viên có digest, chạy ở môi trường tự host không cần
-tài khoản hay khoá của chủ, smoke xanh, có receipt máy đọc.
+"Bản dev" được định nghĩa ở một nơi: ADR-0075 §Quyết định 2 và `docs/specs/SPEC-factory-deploy.md` §2.6 — là cách hiểu
+của phiên, chủ dự án sửa ở đó nếu lệch. Tương tự, mở **giai đoạn 2/3** cho agent là cách phiên hiểu rộng câu "ở mọi quy
+mô" (giới hạn giai đoạn 1 không phụ thuộc quy mô), không phải nguyên văn.
 
 ## 4. Điểm phải giữ khi làm
 
 - Luật bất đối xứng (research 2026-11-08 §1): máy tự siết được; nới chỉ qua PR đổi khoá `HARD_GATED_KEYS` do người merge
   một lần. "Mọi quy mô" là năng lực có sẵn ở mọi quy mô, không phải khoá tự bật.
 - Bảy loại "máy không thể" (cùng nguồn §3) không đổi theo quy mô: tiền, dữ liệu người dùng thật, pháp nhân đứng tên vẫn
-  qua `grant` và `loop defer`.
+  qua `grant` và `loop defer`. Một ngoại lệ có chủ ý: mục C4 của nguồn đó ("người dùng thật đã dùng thử", dòng 20
+  GO-NO-GO, nhà là ADR-0048) bị ADR-0075 thay ở M/L bằng hàng bằng chứng máy ghi rõ "máy mô phỏng".
 - "Qua cổng của máy" chưa phải "đúng ý định" (cùng nguồn §4, số METR; chưa tra lại hôm nay). Bỏ chữ ký người ở M/L mà
   không có nghiệm thu độc lập là giảm chất lượng — nên cơ chế bù phải merge trước phần nới.
 - File mọi PR cùng chạm (`PROGRESS.md`, `CHANGELOG.md`, sổ quyết định, sổ audit) làm "không chạm cùng file" luôn sai nếu
@@ -69,7 +71,7 @@ scheduled task của Claude Code, GitHub App manifest: chưa tra nguồn sống 
 | Mục | Lệnh | Kết quả |
 |---|---|---|
 | Registry không có bản triển khai | đọc `docs/ops/registry.json` | 4 sản phẩm, `environments: []`, `release: null`, `pack: null` |
-| Mẫu không có khoá deploy | `grep -n "deploy" framework/templates/xt.yaml` | chỉ chú thích; có `preview`, `rollback`, `release_artifacts` |
+| Mẫu không có khoá deploy | `grep -n "deploy" framework/templates/xt.yaml` | không dòng nào (exit 1); mẫu có `preview`, `preview_smoke`, `rollback`, `release_artifacts` |
 | Gói không triển khai | `grep -n deploy framework/templates/packs/web-api-ts/README.md` | dòng 45 |
 | `files:` không so diff thật | đọc `evidence_meta`, `evidence_stale` trong `scripts/xt.py` | `scope` = danh sách đã khai + digest |
 | Song song đã có ở mức task | `xt.py plan waves --help`; bảng topology | `--max` mặc định 4; thiếu `files:` → đứng riêng |

@@ -8,6 +8,19 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
 
 ### Added
 
+- Bảy đặc tả của xưởng đầu-cuối (D-422, chủ dự án 2026-11-11 "viết nốt đặc tả trước"; sửa theo hai lượt review độc lập —
+  D-423, D-424): `docs/specs/SPEC-factory-deploy.md` (lệnh triển khai, receipt, sổ `DEPLOYS.json`, `digest_<env>`,
+  bản dev của gói, production), `-intake` (dự án mới một lệnh, skill một bước, kênh issue), `-acceptance` (bộ nghiệm thu
+  khoá bằng digest, kiểm theo sổ; cổng giao diện), `-parallel` (phạm vi file do máy kiểm, mảnh `changelog.d/`, worker
+  ngoài phiên nhận việc bằng API tạo ref, trần chi phí ở nhánh chính, số đo), `-scale` (khoá trần
+  `release_signoff_scale`, `stage_approval_max`; lớp của mục MUST buộc người; attestation của workflow phát hành chặn phân phối,
+  kiểm bằng `release-verify`), `-setup` (`admin-plan` chỉ đọc), `-learning` (số field, Routine tuần, nâng dự án đích theo
+  mô hình kéo); kèm [dữ kiện sống tra 2026-11-11](research/2026-11-11-factory-e2e-facts.md). Phần còn **Draft** (có câu
+  hỏi chặn, task tương ứng quyết trước khi viết mã): song song + worker (F-131/F-133), khoá nghiệm thu (F-121), kênh
+  issue (F-113), giai đoạn 2/3 (F-142). PLAN-factory-e2e trỏ đặc tả theo lát và sửa `sau:`; ADR-0075 thêm mục đính
+  chính; `T-3555` thu về việc bỏ `pull_request_target`; test `tests/test_spec_factory_facts.py` khoá ba dữ kiện 🔴 của
+  review #505. Trả nợ review #502 (AUD-DOC-282…287, AUD-HAR-381…383). Chỉ tài liệu và test: khoá, lệnh và sổ nêu trong
+  đặc tả **chưa có** trong mã; dự án đích chưa phải làm gì.
 - **ADR-0075** (chủ dự án 2026-11-11, D-419) và [PLAN-factory-e2e](docs/autopilot/PLAN-factory-e2e.md) (D-420,
   T-3841…T-3866): định hướng xưởng đầu-cuối — ý tưởng tới bản dev có receipt không hỏi người, song song khi `files:`
   không giao, agent ký/duyệt ở mọi quy mô qua khoá chỉ người bật, việc người gom một checklist sau bản dev; kèm
@@ -141,6 +154,9 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
   chụp–khôi phục mọi `GO-NO-GO*.md` quanh formatter không theo từng file — chữ ký §5 là của người. Chỉ đóng đường hook
   PostToolUse: formatter cả repo qua Bash còn mở (AUD-SEC-648, T-3746). Dự án đích có formatter Markdown kiểm
   (`prettier --check .`): thêm `GO-NO-GO*.md` vào file ignore của formatter (AUD-SEC-649).
+- Gói `web-api-ts` (AUD-DATA-011 🟠, D-426): test `MigrationIndexTest` buộc `CREATE INDEX` trên bảng có sẵn dùng
+  `CONCURRENTLY` (DB-MIG-006) — migration `0005` đã phát hành là ngoại lệ duy nhất, ghi sổ chấp nhận tới 2027-01-21; README
+  gói nêu cách dựng index ngoài transaction. Không đổi mã gói; dự án đích: không phải làm gì.
 - Guard (lý do chạm hàng rào: AUD-SEC-621 🔴 — xoá/ghi đè ref remote lọt mọi luật push): plumbing đẩy `git send-pack`,
   `git http-push` và remote helper `git remote-<x>`/`git-remote-*` bị chặn (`REMOTE_DELETE`) ở mọi dạng — alias,
   `git-<tên>` chạy thẳng, tên khác hoa thường. Các lệnh này không qua luật `git push` và không chạy hook pre-push. Chỉ
