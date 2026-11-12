@@ -23,7 +23,8 @@
   [acceptance](../specs/SPEC-factory-acceptance.md) · Lát 4 → [parallel](../specs/SPEC-factory-parallel.md) · Lát 5 →
   [scale](../specs/SPEC-factory-scale.md) · T-3859 → [setup](../specs/SPEC-factory-setup.md) · T-3861, T-3864, T-3865 →
   [learning](../specs/SPEC-factory-learning.md).
-- Dữ kiện sống của T-3866 đã có ở [`research/2026-11-11-factory-e2e-facts.md`](../../research/2026-11-11-factory-e2e-facts.md);
+- Dữ kiện sống của T-3866 có ở [`research/2026-11-11-factory-e2e-facts.md`](../../research/2026-11-11-factory-e2e-facts.md) và lượt tra
+  thứ hai [`research/2026-11-12-dev-self-host-live-sources.md`](../../research/2026-11-12-dev-self-host-live-sources.md) (nêu ba chỗ lệch);
   công cụ container của gói đã chọn ở đặc tả deploy §10; ADR của T-3841 và T-3850 ghi quyết định kiến trúc và liên kết
   về đặc tả, không chép lại.
 - Phần đặc tả còn **Draft** (có câu hỏi [chặn] sau hai lượt review — D-424): F-131/F-133 song song và worker (T-3850 thử
@@ -48,7 +49,7 @@
 ## Task
 
 ### Lát 0 — Dữ kiện sống và hợp đồng
-- [ ] `T-3866` `/research` nguồn sống có ngày: ảnh container + compose cho bản dev tự host, runner CI, worktree và phiên headless, scheduled task, GitHub App manifest — Gate: `git grep --untracked -qE '^title: .*bản dev tự host' -- research`
+- [x] `T-3866` `/research` nguồn sống có ngày: ảnh container + compose cho bản dev tự host, runner CI, worktree và phiên headless, scheduled task, GitHub App manifest — Gate: `git grep --untracked -qE '^title: .*bản dev tự host' -- research`
 - [ ] `T-3841` ADR hợp đồng triển khai: khoá `xt.yaml` theo môi trường, schema receipt, hàng `release-check`, đích dev mặc định (sau: T-3866) — Gate: `git grep --untracked -qiE '^# ADR-[0-9]+: .*receipt' -- docs/adr`
 
 ### Lát 1 — Bản dev có receipt
