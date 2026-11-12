@@ -149,6 +149,9 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
 
 ### Fixed
 
+- Gói `web-api-ts` (AUD-DATA-011 🟠, D-426): test `MigrationIndexTest` buộc `CREATE INDEX` trên bảng có sẵn dùng
+  `CONCURRENTLY` (DB-MIG-006) — migration `0005` đã phát hành là ngoại lệ duy nhất, ghi sổ chấp nhận tới 2027-01-21; README
+  gói nêu cách dựng index ngoài transaction. Không đổi mã gói; dự án đích: không phải làm gì.
 - Guard (lý do chạm hàng rào: AUD-SEC-621 🔴 — xoá/ghi đè ref remote lọt mọi luật push): plumbing đẩy `git send-pack`,
   `git http-push` và remote helper `git remote-<x>`/`git-remote-*` bị chặn (`REMOTE_DELETE`) ở mọi dạng — alias,
   `git-<tên>` chạy thẳng, tên khác hoa thường. Các lệnh này không qua luật `git push` và không chạy hook pre-push. Chỉ
