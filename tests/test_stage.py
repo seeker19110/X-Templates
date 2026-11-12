@@ -848,7 +848,7 @@ class StageGuardTest(unittest.TestCase):
                 self.assertEqual(self.decide(cmd), "deny")
 
     def test_decide_prod_fed_from_stdin_denied(self):
-        """Review #510 🟠-1: lệnh con `loop` nạp từ stdin (`xargs … loop`, `parallel … loop`) — như `stage` — bị chặn;
+        """Review #507 🟠-1: lệnh con `loop` nạp từ stdin (`xargs … loop`, `parallel … loop`) — như `stage` — bị chặn;
         trước đây `echo decide-prod … | xargs env -u … xt.py loop` qua guard và qua cả env-check."""
         unset = "env -u CLAUDECODE -u CLAUDE_CODE_SESSION_ID -u AI_AGENT"
         for cmd in (
