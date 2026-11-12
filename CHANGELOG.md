@@ -192,6 +192,14 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
   `git http-push` và remote helper `git remote-<x>`/`git-remote-*` bị chặn (`REMOTE_DELETE`) ở mọi dạng — alias,
   `git-<tên>` chạy thẳng, tên khác hoa thường. Các lệnh này không qua luật `git push` và không chạy hook pre-push. Chỉ
   in cách dùng (`-h` đứng một mình, `send-pack --help`) được qua.
+- Guard (lý do chạm hàng rào: AUD-SEC-632…635 🔴 — lệnh con git bị che làm mất mọi luật git): chuyển hướng giữa `git`
+  và lệnh con (`git 2>/dev/null push --force origin main`, cả giữa tuỳ chọn và giá trị) được bỏ như bash bỏ; chữ số/`{x}`
+  trước chuyển hướng ngay sau tuỳ chọn cần giá trị (`git -C 2 >o …`: thư mục hay fd) → `BUDGET`; `git-<tên>` dựng sẵn
+  chạy thẳng (`/usr/lib/git-core/git-reset --hard`) đọc như `git <tên>`; `help.autocorrect` bật (`-c`, `--config-env`,
+  `GIT_CONFIG_*`, `git config` trước đó — lệnh tắt trong chuỗi không tính, tệp cấu hình) mà lệnh con lạ không phải alias
+  hay `git-<tên>` có thật → `UNRESOLVED_TARGET`; alias đặt trong chuỗi không che `-c alias.…`; lệnh con ngoài danh sách
+  trắng ký tự (glob, extglob, thay lệnh, biến: `git pus? …`, `git @(reset) …`) → `BUDGET`. Dự án đích: nâng bản và chạy
+  lại `install.py`; viết tên lệnh con git nguyên văn, chuyển hướng đặt cuối lệnh.
 - Guard (lý do chạm hàng rào: AUD-SEC-615 🔴, AUD-TEST-100; D-417, D-418): luật `GO_SIGN` không còn bị lách bằng mồi
   Markdown (chú thích HTML, khối rào, `\r` trần, BOM). **Dự án đích: agent sửa `GO-NO-GO*.md` bằng Write cả file** — mọi
   Edit/MultiEdit/NotebookEdit lên file đó bị chặn; agent ký qua `xt.py release-sign` (ADR-0074). Write/MCP so dòng ký §5

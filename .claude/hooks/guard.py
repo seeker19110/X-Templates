@@ -4874,10 +4874,54 @@ def _push_spread_opt(opt: str, nxt: str) -> bool:
     return opt.startswith("-c") and len(opt) > 2 and bool(PUSH_SPREAD_RE.fullmatch(opt[2:]))
 
 
+# Tên lệnh con guard đọc chắc (danh sách trắng): ký tự khác — glob, extglob `@(`/`+(`/`!(`, mở rộng — thì bash có thể
+# bung ra lệnh con khác (AUD-SEC-635).
+GIT_SUB_RE = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_.-]*")
+# Lệnh con là nguyên một mảng/tham số vị trí (`"${a[*]}"`, `"$@"`): lớp `_array_arg_why` (AUD-SEC-399/405) đã giải mảng
+# chữ nguyên văn và chặn BUDGET khi không giải được — không chặn thêm ở đây
+GIT_SUB_ARRAY_RE = re.compile(r"\$\{!?[A-Za-z_]\w*\[[^]]*\]\}|\$(?:[@*1-9]|\{[@*1-9]\})")
+# Chữ số/`{x}` trước chuyển hướng ngay sau tuỳ chọn cần giá trị: giá trị (`git -C 2 >o …`) hay fd (`-C 2>o`) — tokenize
+# không phân biệt, hai cách đọc ra lệnh con khác nhau → lệnh con không đọc chắc (D-415). `$` để thư mục `-C` là không biết.
+GIT_AMBIG_WORD = "$xt-fd-or-value"
+REDIRECT_NO_FD = ("&>", "&>>")  # toán tử không nhận số fd đứng trước: chữ số trước nó là một từ của argv
+
+
+def _git_dashed_builtin(base: str) -> str:
+    """`git-<tên>` chạy thẳng mà git chạy như `git <tên>` (AUD-SEC-633): `<tên>` dựng sẵn (GIT_BUILTINS) hay tên bash
+    còn bung (`/usr/lib/git-core/git-pus?`, `git-@(push)`) → `<tên>`; khác → ''."""
+    sub = base[4:]
+    return sub if base[:4] == "git-" and (sub in GIT_BUILTINS or not GIT_SUB_RE.fullmatch(sub)) else ""
+
+
+def _git_words(a: List[str]) -> List[str]:
+    """Lệnh git `a` (đã bỏ tiền tố) như git thấy: `git-<tên> …` dựng sẵn → `git <tên> …` (đối số sau nó là của lệnh
+    con, AUD-SEC-633); chuyển hướng (kèm số fd/`{fd}` đứng trước) giữa `git` và lệnh con bỏ đi — bash không đưa nó vào
+    argv, kể cả giữa tuỳ chọn và giá trị (`git -C 2>/dev/null x push`, AUD-SEC-632). Lệnh khác giữ nguyên."""
+    base = posixpath.basename(a[0]) if a else ""
+    sub = _git_dashed_builtin(base)
+    if sub or base != "git":
+        return ["git", sub, *a[1:]] if sub else a
+    out, i, value = a[:1], 1, False
+    while i < len(a):
+        t, nxt = a[i], a[i + 1] if i + 1 < len(a) else ""
+        fd = (t.isdigit() or bool(FD_VAR_RE.fullmatch(t))) and _is_redirect(nxt) and nxt not in REDIRECT_NO_FD
+        if fd and value:  # giá trị của tuỳ chọn hay fd: lệnh con là dấu không đọc chắc (GIT_AMBIG_WORD)
+            return [*out, GIT_AMBIG_WORD, GIT_AMBIG_WORD, *a[i:]]
+        if _is_redirect(t) or fd:
+            i += 1 if fd else 2  # số fd · toán tử + đích
+            continue
+        if not value and not t.startswith("-"):
+            break
+        out.append(t)
+        value = not value and t in GIT_OPTS_WITH_VALUE
+        i += 1
+    return out + a[i:]
+
+
 def _strip_git_global_opts(a: List[str]) -> List[str]:
     """`git -C p -c k=v --no-pager sub …` → `git sub …` (tuỳ chọn có giá trị ăn thêm một token); `-c` cấu hình push →
-    `git sub --xt-push-config …`."""
-    rest = a[1:]
+    `git sub --xt-push-config …`. Dạng như git thấy trước (`_git_words`)."""
+    rest = _git_words(a)[1:]
     i = 0
     push_cfg = False
     while i < len(rest) and rest[i].startswith("-"):
@@ -4890,7 +4934,7 @@ def _strip_git_global_opts(a: List[str]) -> List[str]:
 
 def _git_C_dirs(argv: List[str]) -> List[str]:
     """Giá trị các `-C <dir>` (tuỳ chọn toàn cục của git, theo thứ tự) — commit rơi vào repo ở đó, không phải cwd."""
-    a = _strip_prefixes(argv)
+    a = _git_words(_strip_prefixes(argv))
     rest, dirs, i = a[1:], [], 0
     while i < len(rest) and rest[i].startswith("-"):
         if rest[i] == "-C" and i + 1 < len(rest):  # gọi cho mọi lệnh git (`_ledger_asks`): `git -C` có thể đứng cuối
@@ -5321,7 +5365,7 @@ def normalize(argv: List[str]) -> List[str]:
     if not a:
         return a
     a[0] = posixpath.basename(a[0])
-    return _strip_git_global_opts(a) if a[0] == "git" else a
+    return _strip_git_global_opts(a) if a[0] == "git" or _git_dashed_builtin(a[0]) else a
 
 
 SHORT_CLUSTER_RE = re.compile(r"-[A-Za-z0-9]+")  # cụm cờ ngắn: chữ số là cờ (`-4`/`-6` của push, `-2`/`-3` checkout)
@@ -6244,6 +6288,9 @@ ALIAS_ENV_RE = re.compile(
     r"GIT_CONFIG_(?:COUNT|PARAMETERS|GLOBAL|SYSTEM|NOSYSTEM|KEY_\d+|VALUE_\d+)|HOME|XDG_CONFIG_HOME|GIT_DIR"
 )
 ALIAS_TABLE_KEY_RE = re.compile(r"(?:alias|include|includeif)\..*", re.I | re.S)  # khoá mà giá trị đổi bảng alias
+AUTOCORRECT_KEY = "\0help.autocorrect"  # mục `help.autocorrect` trong AliasTable (tên alias không chứa NUL)
+# Giá trị chỉ gợi ý, không chạy lệnh (đo git 2.53); giá trị còn mở rộng (`$X`) không khớp → tính là bật (chặt)
+AUTOCORRECT_OFF_RE = re.compile(r"never|show|false|no|off|[+-]?0+", re.I)
 UNRESOLVED_ALIAS_MARK = "alias git guard không giải được"  # dấu của UNRESOLVED_TARGET
 UNKNOWN_GIT_OPT_MARK = "tuỳ chọn toàn cục git guard không biết"  # dấu của UNRESOLVED_TARGET (D-216)
 SHELL_EXPANDS = set("$`")  # giá trị còn biến/thay lệnh: guard không biết giá trị thật
@@ -6254,7 +6301,7 @@ AliasRead = Tuple[List[str], Dict[str, str]]  # (tuỳ chọn toàn cục cho `g
 def _git_globals(s: List[str]) -> List[Tuple[str, str]]:
     """Tuỳ chọn toàn cục của lệnh git `s` (đã bỏ tiền tố) dạng (tên, giá trị): `-c k=v`, `-ck=v`, `--opt v`, `--opt=v`."""
     out: List[Tuple[str, str]] = []
-    i = 1
+    s, i = _git_words(s), 1
     while i < len(s) and s[i].startswith("-"):
         a = s[i]
         i += 1
@@ -6270,7 +6317,7 @@ def _git_unknown_global(s: List[str]) -> str:
     """Tuỳ chọn toàn cục `--…` đầu tiên của lệnh git `s` (đã bỏ tiền tố) mà guard không biết (ngoài GIT_LONG_FLAGS,
     GIT_OPTS_WITH_VALUE, dạng `=` của GIT_LONG_OPTS_EQ); rỗng nếu không. Không biết nó có ăn token kế không thì cũng
     không biết lệnh con là gì (D-216)."""
-    i = 1
+    s, i = _git_words(s), 1
     while i < len(s) and s[i].startswith("-"):
         a = s[i]
         known = (
@@ -6337,13 +6384,38 @@ def _existing_dir(d: str) -> str:
 
 
 def _alias_entries(raw: bytes) -> AliasTable:
-    """Mục `alias.*` của `git config --list -z` (`khoá<LF>giá trị<NUL>`; không giá trị: `khoá<NUL>`), theo thứ tự."""
+    """Mục `alias.*` của `git config --list -z` (`khoá<LF>giá trị<NUL>`; không giá trị: `khoá<NUL>`), theo thứ tự;
+    `help.autocorrect` thành mục AUTOCORRECT_KEY."""
     out: AliasTable = []
     for item in raw.decode("utf-8", "surrogateescape").split("\0"):
         key, nl, val = item.partition("\n")
-        if key[:6].lower() == "alias.":
-            out.append((key[6:], val if nl else None))
+        name = key[6:] if key[:6].lower() == "alias." else AUTOCORRECT_KEY if key.lower() == "help.autocorrect" else ""
+        out += [(name, val if nl else None)] if name else []
     return out
+
+
+def _autocorrect_on(table: AliasTable) -> bool:
+    """`help.autocorrect` (mục sau thắng) làm git CHẠY lệnh con đoán từ tên gõ sai: số khác 0, `immediate`, `prompt`,
+    giá trị lạ (chặt); chưa đặt, `0`/`never`/`show`/sai → chỉ gợi ý."""
+    vals = [v for k, v in table if k == AUTOCORRECT_KEY]
+    return bool(vals) and not AUTOCORRECT_OFF_RE.fullmatch(vals[-1] or "")
+
+
+@functools.lru_cache(maxsize=1)
+def _git_exec_path() -> str:
+    """`git --exec-path` (thư mục `git-<tên>` đi kèm git); lỗi → '' (chặt: lệnh ngoài ở đó không thấy)."""
+    try:
+        r = subprocess.run(["git", "--exec-path"], capture_output=True, text=True, timeout=5, check=False)
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    return r.stdout.strip() if r.returncode == 0 else ""
+
+
+def _git_external(sub: str) -> bool:
+    """`git-<sub>` chạy được ở exec-path hay PATH — git chạy nó thay vì sửa tên (`git lfs`, `git submodule`)."""
+    dirs = [os.environ.get("GIT_EXEC_PATH") or _git_exec_path(), *os.environ.get("PATH", "").split(os.pathsep)]
+    paths = [os.path.join(d, "git-" + sub) for d in dirs if d and "/" not in sub]
+    return any(os.path.isfile(p) and os.access(p, os.X_OK) for p in paths)
 
 
 def _git_alias_table(
@@ -6422,6 +6494,13 @@ def _alias_def_rule(n: List[str], cwd: Optional[str]) -> Tuple[str, str]:
     return _remote_ref_rule(sub, args, cwd) if sub in REMOTE_REF_NAMES else ("", "")
 
 
+GIT_DYN_NAME_MARK = "lệnh con git không đọc chắc"  # dấu của mã BUDGET
+GIT_DYN_NAME_WHY = (
+    f"{GIT_DYN_NAME_MARK}: tên có mở rộng/glob/extglob (`git pus? …`, `git $(echo reset) …`, `git push$X …`,"
+    " `git @(reset) …`) hay chữ số/`{x}` trước chuyển hướng ngay sau tuỳ chọn cần giá trị (`git -C 2 >o …`: thư mục"
+    " hay fd) — guard không biết git chạy lệnh con nào (AUD-SEC-632/635, D-415); viết lại: tên lệnh con nguyên văn,"
+    " mở rộng chỉ ở đối số, chuyển hướng đặt cuối lệnh"
+)
 GIT_RULES: Dict[str, GitRule] = {
     "reset": _git_reset,
     "clean": _git_clean,
@@ -6460,6 +6539,8 @@ def git_rules(n: List[str], cwd: Optional[str] = None) -> Tuple[str, str]:
     của repo. Lệnh con là alias được mở ở `_git_alias_sources` (bản viết lại quét như lệnh thật)."""
     if len(n) < 2:
         return "", ""
+    if not n[1].startswith("-") and not GIT_SUB_RE.fullmatch(n[1]) and not GIT_SUB_ARRAY_RE.fullmatch(n[1]):  # D-415
+        return "ask", GIT_DYN_NAME_WHY
     args = [_git_long(a) for a in n[2:]]
     forged = _remote_ref_rule(n[1], args, cwd) if n[1] in REMOTE_REF_NAMES else _alias_def_rule(n, cwd)
     if forged[0]:
@@ -14281,19 +14362,24 @@ def _alias_resolve(
     env: Dict[str, str],
     budget: Optional["ScanBudget"],
     defined: Optional[AliasTable] = None,
-) -> Tuple[str, List[str]]:
-    """Mở alias của lệnh git `n` (`g` = argv chưa chuẩn hoá, `env` = biến của lệnh) bằng bảng git dựng ở `gdir` nối
-    thêm alias đặt ở lệnh trước trong cùng chuỗi (`defined`, AUD-SEC-464 — mục sau thắng): như `_git_alias_expand`,
-    lệnh con không phải alias → ("", n); lệnh con là file `find -exec {}` tìm thấy (`find update-ref -exec git {} …`)
-    hay không đọc được cấu hình → ("unresolved", [lý do])."""
+) -> List[Tuple[str, List[str]]]:
+    """Mọi cách mở alias của lệnh git `n` (`g` = argv chưa chuẩn hoá, `env` = biến của lệnh) bằng bảng git dựng ở
+    `gdir` và alias đặt ở lệnh trước trong cùng chuỗi (`defined`, AUD-SEC-464): như `_git_alias_expand`, lệnh con
+    không phải alias → ("", n); lệnh con là file `find -exec {}` tìm thấy (`find update-ref -exec git {} …`), không đọc
+    được cấu hình hay autocorrect bật → [("unresolved", [lý do])]."""
     if FIND_FOUND in n[1]:
-        return "unresolved", ["lệnh con là file `find` tìm thấy"]
+        return [("unresolved", ["lệnh con là file `find` tìm thấy"])]
     read = _alias_read_args(g, env)
     table = _git_alias_table(gdir, *read, budget) if read else None
     if table is None:
-        return "unresolved", ["không đọc được cấu hình alias của lệnh (biến, lỗi, quá hạn)"]
-    kind, out = _git_alias_expand(n, [*table, *(defined or [])])
-    return (kind, out) if kind else ("", n)
+        return [("unresolved", ["không đọc được cấu hình alias của lệnh (biến, lỗi, quá hạn)"])]
+    # Mục đặt trong chuỗi (`defined`) có thể thua bảng git dựng (`-c` thắng tệp, local thắng global, `-f` tệp khác không
+    # được đọc) hay thắng nó: xét cả hai thứ tự, mọi cách đọc khác nhau đều quét (AUD-SEC-634 review)
+    orders = [[*table, *(defined or [])], [*(defined or []), *table]]
+    found = list(dict.fromkeys((k, tuple(o)) for k, o in (_git_alias_expand(n, t) for t in orders)))
+    if any(not k for k, _ in found) and any(map(_autocorrect_on, orders)) and not _git_external(n[1]):
+        return [("unresolved", [f"help.autocorrect bật: git chạy lệnh con đoán từ `{n[1]}`"])]
+    return [(k, list(o)) if k else ("", n) for k, o in found]
 
 
 def _git_alias_sources(
@@ -14316,10 +14402,15 @@ def _git_alias_sources(
         g, wrapped, fed = _stdin_fed(c, s)
         n = normalize(g)
         pos = _git_config_write(n)
-        if len(pos) > 1 and pos[0][:6].lower() == "alias.":  # mọi phạm vi/tệp (`--global`, `-f`): chiều chặt
-            defined.append((pos[0][6:], pos[1]))
-            if budget is not None and defined[-1] not in budget.aliases:
-                budget.aliases.append(defined[-1])
+        key = pos[0].lower() if len(pos) > 1 else ""
+        if key[:6] == "alias." or key == "help.autocorrect":  # mọi phạm vi/tệp (`--global`, `-f`): chiều chặt
+            # autocorrect đặt trong chuỗi chỉ được BẬT: thứ tự trong chuỗi không phải ưu tiên phạm vi (local thắng
+            # global, `-f` tệp lạ git không đọc) nên lệnh tắt không chắc tắt (AUD-SEC-634 review)
+            entry = (pos[0][6:] if key[:6] == "alias." else AUTOCORRECT_KEY, pos[1])
+            keep = key[:6] == "alias." or _autocorrect_on([entry])
+            defined += [entry] if keep else []
+            if budget is not None and keep and entry not in budget.aliases:
+                budget.aliases.append(entry)
             continue
         sub = n[1] if n[:1] == ["git"] and len(n) > 1 else ""
         aliased = bool(sub) and not sub.startswith("-") and sub not in GIT_BUILTINS
@@ -14327,15 +14418,15 @@ def _git_alias_sources(
             continue
         gdir = _git_dir(g, here) or root
         env = {**exported, **_assign_values(c[: len(c) - len(s)])}
-        kind, out = _alias_resolve(n, g, gdir, env, budget, defined) if aliased else ("", n)
-        why = "" if not wrapped or kind == "unresolved" else _fed_ref_why(out, fed, kind == "shell")
-        asks += [f"{why}: {' '.join(c)[:200]}"] if why else []
-        if kind == "git":
-            rewritten.append((_join_tokens([*g[: len(g) - len(n) + 1], *out[1:]]), here))
-        elif kind == "shell":
-            nested.append((" ".join([out[0], _join_tokens(out[1:])]), gdir))
-        elif kind:
-            asks.append(f"{UNRESOLVED_ALIAS_MARK} ({out[0]}): {' '.join(c)[:200]}")
+        for kind, out in _alias_resolve(n, g, gdir, env, budget, defined) if aliased else [("", n)]:
+            why = "" if not wrapped or kind == "unresolved" else _fed_ref_why(out, fed, kind == "shell")
+            asks += [f"{why}: {' '.join(c)[:200]}"] if why else []
+            if kind == "git":
+                rewritten.append((_join_tokens([*g[: len(g) - len(n) + 1], *out[1:]]), here))
+            elif kind == "shell":
+                nested.append((" ".join([out[0], _join_tokens(out[1:])]), gdir))
+            elif kind:
+                asks.append(f"{UNRESOLVED_ALIAS_MARK} ({out[0]}): {' '.join(c)[:200]}")
     return rewritten, nested, asks
 
 
@@ -16162,6 +16253,7 @@ REASON_CODES: Tuple[Tuple[str, str], ...] = (
     (PERM_NO_TARGET_WHY, UNRESOLVED_TARGET),  # `… | xargs chmod 000` (T-3532)
     ("vượt ngân sách quét", BUDGET),
     (GH_DYN_NAME_MARK, BUDGET),  # `gh pr merge$Z`: tên lệnh/cờ gh guard không biết (AUD-SEC-587, ADR-0065 lớp A)
+    (GIT_DYN_NAME_MARK, BUDGET),  # `git pus? …`: lệnh con git guard không biết (AUD-SEC-635)
     ("brace expansion quá nhiều", BRACE_OVERFLOW),
 )
 # Giữ tên cũ cho mã/ test đọc danh sách dấu nguy hiểm.
