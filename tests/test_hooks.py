@@ -7834,6 +7834,139 @@ class GuardGluedSeparatorTest(unittest.TestCase):
         self.assertIsInstance(quoted[1], self.g.LitWord)
 
 
+class GuardFunctionKeywordTest(unittest.TestCase):
+    """AUD-SEC-611 (T-3722): `function TÊN { … }` — `_strip_prefixes` bỏ `{`/`}` nhưng không bỏ `function TÊN`, nên argv của
+    lệnh đầu thân hàm bắt đầu bằng `function` và mọi luật theo tên lệnh bỏ qua nó (`function g { rm -rf /; }; g`). Dạng
+    `g() { … }` đã được chặn vì `()` tách lệnh."""
+
+    DENY = (
+        "function g { git push origin feat/me --force; }; g",
+        "function g { git push origin feat/me --force; }",
+        "function  g   {   git push origin feat/me --force ; } ; g",
+        "function g { rm -rf /; }; g",
+        "function g { git reset --hard; }; g",
+        "function g { function h { git push origin feat/me --force; }; h; }; g",
+        "echo a; function g { git push origin feat/me --force; }; g",
+        "g() { git push origin feat/me --force; }; g",
+        # review #517 F1: lệnh đầu thân là gán biến/`HOME=`/`for` — bộ đọc theo từ khoá mới thấy được nếu `function TÊN` đọc như `TÊN ()`
+        "function g { d=/; rm -rf $d; }; g",
+        "function g { c=push; git $c origin feat/me --force; }; g",
+        "function g { local d=/; rm -rf $d; }; g",
+        "function g if d=/; then rm -rf $d; fi; g",
+        "function g { function h { d=/; rm -rf $d; }; h; }; g",
+        # F2: `for|select TÊN do LỆNH` (không `in`, không `;`)
+        "set -- 1; for x do git push origin feat/me --force; done",
+        "set -- a; select x do git push origin feat/me --force; break; done",
+        "function g { for x do git push origin feat/me --force; done; }; g 1",
+        "bash -c 'for x do git push origin feat/me --force; done' _ 1",
+        # F3: commit trong thân hàm sau khi ghi file
+        "function g { git commit -qam 'fix: x'; }; echo x >> README.md; g",
+    )
+    # (lệnh, mã) — HOME/gán vào file được bảo vệ chặn bằng HOOK_BYPASS như dạng `g() { … }`
+    PROTECTED = (
+        "function g { t=.claude/settings.json; cp /tmp/x $t; }; g",
+        "function g { HOME=.claude; rm -f ~/settings.json; }; g",
+        "function g { declare -x HOME=.claude; rm -f ~/settings.json; }; g",
+        "function g for d in .claude; do echo x > $d/settings.json; done; g",
+    )
+    ALLOW = (
+        "function g { echo x; }; g",
+        "function g { git status; }; g",
+        "function ; git status",
+        "function",
+        "set -- 1; for x do echo $x; done",
+        "function g { d=tmp; echo $d; }; g",
+        'function g { B=feat/x; git push -u origin "$B"; }; g',
+        "echo function g",
+        "grep function README.md",
+    )
+
+    @classmethod
+    def setUpClass(cls):
+        cls.g = _guard()
+
+    def setUp(self):
+        self.enterContext(mock.patch.dict(os.environ, {"XT_GUARD_POLICY": "", "XT_GUARD_PHASE": ""}))
+
+    def decide(self, cmd: str) -> dict:
+        return self.g.apply_policy(self.g.bash_decision(cmd, str(ROOT), str(ROOT)))
+
+    def test_function_keyword_body_is_scanned_like_a_plain_command(self):
+        for cmd in self.DENY:
+            with self.subTest(cmd=cmd):
+                res = self.decide(cmd)
+                self.assertEqual((res["decision"], res.get("code")), ("deny", "RULE_DENY"), res)
+
+    def test_function_keyword_reads_like_name_parens_for_protected_files(self):
+        for cmd in self.PROTECTED:
+            with self.subTest(cmd=cmd):
+                res = self.decide(cmd)
+                self.assertEqual((res["decision"], res.get("code")), ("deny", "HOOK_BYPASS"), res)
+
+    def test_function_and_name_parens_forms_decide_the_same(self):
+        for cmd in (*self.DENY, *self.PROTECTED, *self.ALLOW):
+            if not cmd.startswith("function g {"):
+                continue
+            twin = "g() {" + cmd[len("function g {") :]
+            with self.subTest(cmd=cmd):
+                a, b = self.decide(cmd), self.decide(twin)
+                self.assertEqual((a["decision"], a.get("code")), (b["decision"], b.get("code")), (cmd, a, b))
+
+    def test_fn_forms_rewrites_keyword_forms_at_command_start_only(self):
+        fn = self.g._fn_forms
+        self.assertEqual(fn(["function", "g", "{", "ls", "}"]), ["g", "()", "{", "ls", "}"])
+        self.assertEqual(fn(["function", "g", "()", "{", "ls"]), ["g", "()", "{", "ls"])  # đã có ngoặc: không thêm
+        self.assertEqual(fn(["function", "g", "(", ")", "{"]), ["g", "(", ")", "{"])
+        self.assertEqual(fn(["ls", ";", "function", "g", "{"]), ["ls", ";", "g", "()", "{"])
+        self.assertEqual(fn(["echo", "function", "g"]), ["echo", "function", "g"])  # đối số, không phải đầu lệnh
+        self.assertEqual(fn(["function"]), ["function"])
+        self.assertEqual(fn(["function", ";", "ls"]), ["function", ";", "ls"])
+        self.assertEqual(fn(["for", "x", "do", "ls", ";", "done"]), ["for", "x", ";", "do", "ls", ";", "done"])
+        self.assertEqual(fn(["select", "x", "do", "ls"]), ["select", "x", ";", "do", "ls"])
+        self.assertEqual(fn(["for", "x", "in", "a", ";", "do"]), ["for", "x", "in", "a", ";", "do"])  # có `in`: giữ
+        self.assertEqual(fn([">", "f", "function", "g"]), [">", "f", "function", "g"])  # đích chuyển hướng
+        # review #517 🔴: từ khoá làm ĐỐI SỐ không mở đầu lệnh mới — `function x` sau `do`/`!`/`then` không bị viết lại
+        for kw in ("do", "!", "if", "then", "else", "while", "{"):
+            with self.subTest(kw=kw):
+                argv = ["rm", "-rf", kw, "function", "x", "/"]
+                self.assertEqual(fn(argv), argv)
+        self.assertEqual(fn(["rm", "-rf", "do", "for", "x", "do", "/"]), ["rm", "-rf", "do", "for", "x", "do", "/"])
+        self.assertEqual(
+            fn(["if", "!", "function", "g", "{"]), ["if", "!", "g", "()", "{"]
+        )  # chuỗi từ khoá ở đầu lệnh: giữ
+
+    # (lệnh, mã): từ khoá ở vị trí đối số không được cắt argv của lệnh có luật (review #517 🔴, đo trên head 1a5c1e42)
+    KEYWORD_ARGUMENT = (
+        ("rm -rf do function x /", "RULE_DENY"),
+        ("rm -rf ! function x /", "RULE_DENY"),
+        ("rm -rf then function x /", "RULE_DENY"),
+        ("rm -rf do for x do /", "RULE_DENY"),
+        ("git push origin do function feat/other --force", "RULE_DENY"),
+        ("git clean -e do function . -fdx", "RULE_DENY"),
+        ("bash -c 'rm -rf do function x /'", "RULE_DENY"),
+        ("rm -f do function x .claude/settings.json", "HOOK_BYPASS"),
+        ("echo hi | tee do function x .claude/settings.json", "HOOK_BYPASS"),
+        ("chmod 000 do function x .claude/hooks/guard.py", "HOOK_BYPASS"),
+    )
+
+    def test_keyword_as_argument_does_not_split_argv(self):
+        for cmd, code in self.KEYWORD_ARGUMENT:
+            with self.subTest(cmd=cmd):
+                res = self.decide(cmd)
+                self.assertEqual((res["decision"], res.get("code")), ("deny", code), res)
+
+    def test_harmless_function_bodies_still_pass(self):
+        for cmd in self.ALLOW:
+            with self.subTest(cmd=cmd):
+                self.assertEqual(self.decide(cmd)["decision"], "", cmd)
+
+    def test_strip_prefixes_drops_function_keyword_and_name(self):
+        strip = self.g._strip_prefixes
+        self.assertEqual(strip(["function", "g", "{", "git", "status"]), ["git", "status"])
+        self.assertEqual(strip(["function", "a", "function", "b", "{", "ls"]), ["ls"])
+        self.assertEqual(strip(["function"]), ["function"])  # một mình: không có tên để bỏ
+
+
 class GuardRemoteDeleteTest(unittest.TestCase):
     """AUD-SEC-551 (D-407): xoá nhánh/tag remote KHÁC nhánh hiện tại của phiên và viết lại mọi ref (`filter-branch
     --all`, `filter-repo`) thuộc nhóm máy chặn (không đảo ngược, ADR-0018) — xoá được nhánh người khác và lời từ chối

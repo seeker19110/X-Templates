@@ -155,6 +155,15 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
 
 ### Fixed
 
+- Guard (lý do chạm hàng rào: hai 🔴 có từ trước của Lát 3 harden, review độc lập từng lát): (AUD-SEC-610, #516) `;<`,
+  `&&<`, `||>>`, `|&<`, `)<`, `(<`, `&` + xuống dòng + `<`… không còn gộp thành một token chuyển hướng nuốt lệnh sau nó —
+  `_unglue` cắt dãy dấu theo toán tử dài nhất của bash ở cả `tokenize` lẫn `_raw_tokens`; (AUD-SEC-611, #517) thân hàm
+  khai bằng `function TÊN { … }` và `for|select TÊN do …` (không `in`) được đọc như `TÊN () { … }` / `for TÊN ; do` ở tầng
+  token (`_fn_forms`) nên mọi bộ đọc thấy thân (trước đó `function g { rm -rf /; }; g`, `function g { d=/; rm -rf $d;
+  }; g`, `for x do git push --force; done` lọt; dạng `g() {` đã chặn); từ khoá làm ĐỐI SỐ (`rm -rf do function x /`) không mở
+  đầu lệnh nên không bị viết lại cắt argv (review #517 🔴). Còn mở: AUD-SEC-656/657/659/660/661 (T-3748…T-3752),
+  AUD-SEC-663…666 (T-3753…T-3756: `time`, `coproc`, `${ …; }`, extglob — có từ trước).
+  Dự án đích: nâng bản để nhận `.claude/hooks/guard.py` mới.
 - `release-check` hàng `verify` đọc sổ máy `.autopilot/` ở mọi worktree của repo: chạy từ worktree không có sổ không còn
   N/A bỏ qua `loop verify --all` của cây chính (PASS chỉ khi sổ ở worktree khác xanh khớp vân tay cây đang kiểm); sổ
   hỏng, vòng bị chặn ở worktree nào hay không liệt kê được worktree → FAIL (AUD-HAR-369).

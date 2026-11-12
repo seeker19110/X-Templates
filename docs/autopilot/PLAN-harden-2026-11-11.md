@@ -42,9 +42,14 @@
 
 ### Lát 3 — 🔴 guard có từ trước
 - [x] `T-3721` 🔴 AUD-SEC-610 guard: dấu tách dính dấu chuyển hướng vẫn tách lệnh (topo: review) — Gate: `python3 -m unittest tests.test_hooks tests.test_guard_fuzz`
-- [ ] `T-3722` 🔴 AUD-SEC-611 guard: quét thân hàm shell (topo: review) — Gate: `python3 -m unittest tests.test_hooks tests.test_guard_fuzz`
+- [x] `T-3722` 🔴 AUD-SEC-611 guard: quét thân hàm shell (topo: review) — Gate: `python3 -m unittest tests.test_hooks tests.test_guard_fuzz`
 - [ ] `T-3723` 🔴 AUD-SEC-606 guard: bỏ thoát kiểu bash trong nháy kép trước khi quét chuỗi lồng (sau: T-3721, T-3722; topo: review) — Gate: `python3 -m unittest tests.test_hooks tests.test_guard_fuzz`
 - [ ] `T-3724` 🔴 AUD-SEC-609 guard: lệnh có luật mà đối số chứa thay lệnh/thay tiến trình không đọc chắc → BUDGET (sau: T-3723; topo: review) — Gate: `python3 -m unittest tests.test_hooks tests.test_guard_fuzz`
+- [ ] `T-3748` 🔴 AUD-SEC-656 guard: nhánh `except ValueError` của `tokenize` (nháy không đóng, `\` lẻ cuối) tách `(`, `)`, `<`, `>` như `_unglue` hoặc BUDGET (sau: T-3721; topo: review) — Gate: `python3 -m unittest tests.test_hooks tests.test_guard_fuzz`
+- [ ] `T-3749` 🔴 AUD-SEC-657 guard: chuyển hướng fd có tên `{fd}>file CMD` đứng đầu lệnh không làm `{fd}` thành tên lệnh (sau: T-3721; topo: review) — Gate: `python3 -m unittest tests.test_hooks tests.test_guard_fuzz`
+- [ ] `T-3750` 🔴 AUD-SEC-659 guard: `exec -la x CMD`/`exec -ca x CMD` — cờ gộp của `exec` có `a` ăn đối số (sau: T-3721; topo: review) — Gate: `python3 -m unittest tests.test_hooks tests.test_guard_fuzz`
+- [ ] `T-3751` 🔴 AUD-SEC-660 guard: gán biến sau định nghĩa hàm, trước lời gọi → thân dùng biến không biết giá trị thì BUDGET (sau: T-3722; topo: review) — Gate: `python3 -m unittest tests.test_hooks tests.test_guard_fuzz`
+- [ ] `T-3752` 🔴 AUD-SEC-661 guard: shell trong nhóm/thân hàm đọc stdin của nhóm/lời gọi → BUDGET (sau: T-3722; topo: review) — Gate: `python3 -m unittest tests.test_hooks tests.test_guard_fuzz`
 
 ### Lát 4 — tối ưu có số
 - [x] `T-3725` AUD-PERF-027 `check-links.py`: `mask_code_spans`/`table_cells` nhảy bằng regex, output y hệt — Gate: `python3 -m unittest tests.test_check_links`
@@ -65,10 +70,14 @@
 - [x] `T-3739` 🔴 AUD-SEC-628 formatter không chạm `GO-NO-GO*.md` (hoặc guard xét output formatter) (topo: review) — Gate: `python3 -m unittest tests.test_hooks tests.test_guard_go_no_go`
 - [ ] `T-3740` 🟠 AUD-SEC-629/630/631 GO_SIGN: NUL ô Tên, khoảng trắng Unicode cuối `subject:`, BOM một chiều (topo: review) — Gate: `python3 -m unittest tests.test_guard_go_no_go`
 - [ ] `T-3741` 🔴 AUD-SEC-632…635 guard: đọc lệnh con git chắc (chuyển hướng giữa, `git-<tên>`, autocorrect, tên mờ → BUDGET) (topo: review) — Gate: `python3 -m unittest tests.test_hooks tests.test_guard_fuzz`
-- [ ] `T-3747` 🔴 AUD-SEC-650/651 install.py/xt.py: thư mục git hook (`core.hooksPath` → thư mục là symlink) và sổ giai đoạn (`--stage-init`: `docs`, `.autopilot` là symlink) không ghi ra ngoài dự án (topo: review) — Gate: `python3 -m unittest tests.test_install tests.test_stage`
+- [x] `T-3747` 🔴 AUD-SEC-650/651 install.py/xt.py: thư mục git hook (`core.hooksPath` → thư mục là symlink) và sổ giai đoạn (`--stage-init`: `docs`, `.autopilot` là symlink) không ghi ra ngoài dự án (topo: review) — Gate: `python3 -m unittest tests.test_install tests.test_stage`
 - [ ] `T-3746` 🔴 AUD-SEC-648/649 guard hoặc `dev-task.sh format`: dòng §5 không ở dạng bảng chuẩn không được thành chữ ký qua formatter cả repo; mẫu `.prettierignore` cho `GO-NO-GO*.md` (topo: review) — Gate: `python3 -m unittest tests.test_hooks tests.test_guard_go_no_go`
 - [ ] `T-3743` 🔴 AUD-SEC-644 guard: biến chưa gán dính sau viết tắt không mơ hồ của cờ nguy hiểm (`git push --delet$X`, `--mirro$X`) → BUDGET (topo: review) — Gate: `python3 -m unittest tests.test_hooks tests.test_guard_fuzz`
 - [ ] `T-3744` 🔴 AUD-SEC-645 guard: CR trần ngoài nháy không tách từ như bash (`--repo x<CR>-h`) → BUDGET hoặc bỏ `\r` khỏi tập khoảng trắng (topo: review) — Gate: `python3 -m unittest tests.test_hooks tests.test_guard_fuzz`
 - [ ] `T-3745` 🟠 AUD-SEC-646/647 guard: `_discards_whole_tree` biết `--end-of-options`; `pax` giữ `--` riêng (topo: review) — Gate: `python3 -m unittest tests.test_hooks`
 - [ ] `T-3742` 🟠 AUD-SEC-636 guard: quét lệnh git lồng (`rebase --exec`, `bisect run`, `submodule foreach`, `--receive-pack`/`--upload-pack`) (topo: review) — Gate: `python3 -m unittest tests.test_hooks`
+- [ ] `T-3753` 🔴 AUD-SEC-663 guard: từ khoá `time` (`time d=/; rm -rf $d`, `time for/{/if/function …`) không làm mất phép gán và thân cấu trúc (topo: review) — Gate: `python3 -m unittest tests.test_hooks tests.test_guard_fuzz`
+- [ ] `T-3754` 🔴 AUD-SEC-664 guard: thân `coproc [TÊN] { … }` quét như lệnh thường (topo: review) — Gate: `python3 -m unittest tests.test_hooks tests.test_guard_fuzz`
+- [ ] `T-3755` 🔴 AUD-SEC-665 guard: thay lệnh `${ …; }`/`${| …; }` của bash 5.3 được quét hoặc BUDGET (topo: review) — Gate: `python3 -m unittest tests.test_hooks tests.test_guard_fuzz`
+- [ ] `T-3756` 🔴 AUD-SEC-666 guard: extglob `!(…)`/`?(…)`/`*(…)`/`+(…)`/`@(…)` ở lệnh có luật → BUDGET (D-415) (topo: review) — Gate: `python3 -m unittest tests.test_hooks tests.test_guard_fuzz`
 - [ ] `T-3729` Quét lại nhóm TEST, DOC, HAR (`chưa quét`) + sổ `đã sửa` cho các lát trên (sau: T-3724, T-3726) — Gate: `python3 scripts/xt.py audit check docs/ops/AUDIT-STATUS.md`

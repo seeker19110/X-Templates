@@ -3657,7 +3657,7 @@ def _raw_tokens(cmd: str, subst: bool = False) -> Optional[List[str]]:
             return None
         word.append(s[i:j])
         i = j
-    return out + (["".join(word)] if word else [])
+    return _fn_forms(out + (["".join(word)] if word else []))
 
 
 def _raw_word_part(s: str, i: int) -> int:
@@ -4560,7 +4560,7 @@ def tokenize(cmd: str) -> List[str]:
     lex.whitespace_split = True
     lex.commenters = ""  # comment đã bỏ ở strip_comments; mặc định của shlex là "#" (mở comment cả giữa từ)
     try:
-        return _with_here_bodies(_unglue(list(lex)), joined)
+        return _with_here_bodies(_fn_forms(_unglue(list(lex))), joined)
     except ValueError:  # nháy không đóng: tách thô để vẫn kiểm được (bảo thủ) — xuống dòng là ranh giới lệnh như bash,
         # không phải khoảng trắng (`"` lẻ trong thân heredoc của `"$(cat <<'EOF'` làm shlex lệch; review #361 lượt 3)
         raw = re.split(r"[ \t\r]+|(?=[;&|\n])|(?<=[;&|\n])", cmd)
@@ -4677,6 +4677,33 @@ def _unglue(tokens: List[str]) -> List[str]:
     for t in tokens:
         parts = _OPS_RE.findall(t) if _is_punct(t) and ("<" in t or ">" in t) else [t]
         out += parts if len(parts) > 1 else [t]
+    return out
+
+
+def _fn_forms(tokens: List[str]) -> List[str]:
+    """Đọc từ khoá khai thân như dạng đã được mọi bộ đọc xử lý đúng (AUD-SEC-611): `function TÊN …` thành `TÊN () …` (như
+    `TÊN() …`, nơi `()` tách lệnh nên thân là lệnh thường — gán biến, `HOME=`, `for`, `cd` đầu thân đều được các bộ đọc
+    thấy), `for|select TÊN do …` (không `in`) thành `… TÊN ; do …`. Chỉ ở đầu lệnh (sau dấu tách, `{`, `!`, `if`, `do`…);
+    token có nháy (`'function'`, `\\function`) ở bộ đọc thô còn nháy nên không khớp. `function` một mình/theo dấu tách giữ
+    nguyên; `function TÊN ()` đã có ngoặc thì không thêm."""
+    out: List[str] = []
+    start, i, n = True, 0, len(tokens)
+    while i < n:
+        t = tokens[i]
+        nxt = tokens[i + 1] if i + 1 < n else ""
+        if start and t == "function" and nxt and not _is_punct(nxt):
+            out += [nxt] + ([] if tokens[i + 2 : i + 3] == ["()"] or tokens[i + 2 : i + 4] == ["(", ")"] else ["()"])
+            i += 2
+        elif start and t in ("for", "select") and nxt and not _is_punct(nxt) and tokens[i + 2 : i + 3] == ["do"]:
+            out += [t, nxt, ";"]
+            i += 2
+        else:
+            out.append(t)
+            i += 1
+        last = out[-1]
+        # từ khoá chỉ giữ vị trí đầu lệnh khi chính nó đứng ở đầu lệnh: `do`/`!`/`then` làm ĐỐI SỐ (`rm -rf do function x /`)
+        # không được mở đầu lệnh mới, kẻo `function x` bị viết lại thành `x ()` và cắt argv (review #517 🔴)
+        start = (_is_punct(last) and not _is_redirect(last)) or (start and last in SHELL_KEYWORDS)
     return out
 
 
@@ -4811,6 +4838,8 @@ def _strip_prefixes(argv: List[str], dirs: Optional[List[str]] = None) -> List[s
             del a[:2]  # toán tử + đích
         elif head.isdigit() and len(a) > 1 and _is_redirect(a[1]):
             a.pop(0)  # số fd (`2>`)
+        elif head == "function" and len(a) > 1:
+            del a[:2]  # `function TÊN`: từ khoá khai báo hàm + tên — thân hàm là lệnh thường (AUD-SEC-611)
         elif head in SHELL_KEYWORDS:
             a.pop(0)
         elif ENV_ASSIGN_RE.fullmatch(head):
