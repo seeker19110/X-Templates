@@ -109,6 +109,7 @@
     "AUD-XFEAT-020",
     "AUD-CFG-003",
     "AUD-SEC-616",
+    "AUD-SEC-619",
     "AUD-CODE-025",
     "AUD-SEC-130",
     "AUD-HAR-125",
@@ -554,6 +555,37 @@
    "reason": "Thứ tự `sau:` trong PLAN-factory-e2e (cơ chế bù đóng trước phần nới, ADR-0075 §Quyết định 6; review #502) — nội dung một file PLAN, không phải quyết định cho/chặn của guard, PR, rollup hay CI mà bench mô phỏng. Khoá bằng tests.test_plan_factory_order (có ca tái hiện thứ tự cũ).",
    "ids": [
     "AUD-HAR-380"
+   ]
+  },
+  {
+   "reason": "Lỗi nằm ở `dev-task.sh format-file` (formatter PostToolUse chuẩn hoá dòng §5 sau khi guard đã cho qua) — không phải quyết định của guard/PR/CI mà bench mô phỏng. Khoá bằng tests.test_hooks.DevTaskTest.test_format_file_skips_go_no_go.",
+   "ids": [
+    "AUD-SEC-628"
+   ]
+  },
+  {
+   "reason": "Nợ review #502 trả ở #505 — lời văn và phụ thuộc `sau:` của ADR-0075, PLAN-factory-e2e, T-3555 ở PLAN-harden-2026-10-27-loops, research 2026-11-11 và PROGRESS: tài liệu/PLAN, không phải quyết định cho/chặn của guard, PR, rollup hay CI mà bench mô phỏng. Đỡ bằng `validate`, `check-links`, `progress-check`, tests.test_plan_files (PLAN máy đọc được) và `plan waves` (không chu trình); thứ tự `sau:` của AUD-HAR-383 không có test riêng.",
+   "ids": [
+    "AUD-DOC-282",
+    "AUD-DOC-283",
+    "AUD-DOC-284",
+    "AUD-DOC-285",
+    "AUD-DOC-286",
+    "AUD-HAR-381",
+    "AUD-HAR-382",
+    "AUD-HAR-383"
+   ]
+  },
+  {
+   "reason": "Lời văn của bảy đặc tả xưởng đầu-cuối `docs/specs/SPEC-factory-*.md` (review #505) — đặc tả cho khoá, lệnh và sổ CHƯA có mã, nên không có hành vi của guard, PR, rollup hay CI để bench mô phỏng. Ba 🔴 (AUD-HAR-386, AUD-SEC-638, AUD-HAR-387) khoá bằng tests.test_spec_factory_facts; bốn 🟠 (AUD-SEC-639, AUD-DOC-289, AUD-HAR-389, AUD-HAR-390) là lời văn đã sửa, kiểm bằng scenario của đặc tả khi task tương ứng có mã.",
+   "ids": [
+    "AUD-HAR-386",
+    "AUD-HAR-387",
+    "AUD-HAR-389",
+    "AUD-HAR-390",
+    "AUD-SEC-638",
+    "AUD-SEC-639",
+    "AUD-DOC-289"
    ]
   }
  ]

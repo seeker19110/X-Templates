@@ -538,6 +538,97 @@ class InstallAuditFixTest(unittest.TestCase):
         self.assertEqual(list((self.outside / "xt").iterdir()), [])
 
 
+class ParentSymlinkTest(unittest.TestCase):
+    """AUD-SEC-619: thư mục cha trên đường ghi harness/.github/adapter là symlink → không ghi ra ngoài dự án."""
+
+    def setUp(self):
+        self.tmp = Path(self.enterContext(tempfile.TemporaryDirectory())).resolve()
+        self.outside = self.tmp / "outside"
+        self.outside.mkdir()
+        self.target = self.tmp / "proj"
+        self.target.mkdir()
+
+    def run_install(self, *argv: str) -> tuple[int, str]:
+        err = io.StringIO()
+        with redirect_stderr(err), redirect_stdout(io.StringIO()):
+            rc = install.main([str(self.target), "--label", "t", *argv])
+        return rc, err.getvalue()
+
+    def assertOutsideEmpty(self):
+        self.assertEqual(list(self.outside.rglob("*")), [])
+
+    def test_symlinked_parent_dirs_not_followed(self):
+        cases = (
+            (".claude", ()),
+            (".claude/hooks", ()),
+            (".github", ("--with-github",)),
+            (".gemini", ("--harness", "gemini")),
+            (".codex", ("--harness", "codex")),
+        )
+        for rel, extra in cases:
+            with self.subTest(rel=rel):
+                for old in self.outside.iterdir():
+                    shutil.rmtree(old) if old.is_dir() else old.unlink()
+                link = self.target / rel
+                link.parent.mkdir(parents=True, exist_ok=True)
+                link.symlink_to(self.outside)
+                for flags in (("--plan", *extra), extra):
+                    rc, err = self.run_install(*flags)
+                    self.assertEqual(rc, 0, err)
+                    self.assertOutsideEmpty()
+                self.assertTrue(link.is_symlink())
+                link.unlink()
+                shutil.rmtree(self.target / ".claude", ignore_errors=True)
+
+    def test_existing_outside_settings_untouched_and_plan_matches(self):
+        """Review #508 🟠-1: `settings.json` có sẵn ở thư mục ngoài (merge quyền/hook), `--force-harness`, `.gemini` ngoài có
+        sẵn `settings.json` — byte không đổi, `--plan` báo `skipped-symlink` như cài thật, phần còn lại vẫn được cài."""
+        (self.outside / "settings.json").write_text("{}\n", encoding="utf-8")
+        (self.target / ".claude").symlink_to(self.outside)
+        for extra in ((), ("--force-harness",)):
+            with self.subTest(extra=extra):
+                rc, err = self.run_install(*extra)
+                self.assertEqual(rc, 0, err)
+                self.assertEqual((self.outside / "settings.json").read_text(encoding="utf-8"), "{}\n")
+                self.assertEqual([p.name for p in self.outside.iterdir()], ["settings.json"])
+                self.assertIn("bỏ qua symlink", err)
+        self.assertTrue((self.target / "AGENTS.md").is_file())  # phần không qua symlink vẫn cài
+        out = io.StringIO()
+        with redirect_stderr(io.StringIO()), redirect_stdout(out):
+            self.assertEqual(install.main([str(self.target), "--label", "t", "--plan"]), 0)
+        self.assertIn("skipped-symlink", out.getvalue())
+        (self.target / ".claude").unlink()
+        (self.target / ".gemini").symlink_to(self.outside)
+        gem = '{"keep": 1}\n'
+        (self.outside / "settings.json").write_text(gem, encoding="utf-8")
+        for flags in (("--plan",), ()):
+            rc, err = self.run_install("--harness", "gemini", *flags)
+            self.assertEqual(rc, 0, err)
+            self.assertEqual((self.outside / "settings.json").read_text(encoding="utf-8"), gem)
+
+    def test_project_root_under_symlink_still_installs(self):
+        """Review #508 🟠-2: gốc dự án nằm dưới symlink (macOS `/var → /private/var`) — `install` resolve gốc nên không
+        coi tổ tiên của gốc là symlink thư mục cha."""
+        link = self.tmp / "link"
+        link.symlink_to(self.target)
+        err = io.StringIO()
+        with redirect_stderr(err), redirect_stdout(io.StringIO()):
+            rc = install.main([str(link), "--label", "t"])
+        self.assertEqual(rc, 0, err.getvalue())
+        self.assertTrue((self.target / ".claude" / "hooks" / "guard.py").is_file())
+        self.assertNotIn("bỏ qua symlink", err.getvalue())
+
+    def test_parent_symlink_helper(self):
+        (self.target / "a").symlink_to(self.outside)
+        self.assertTrue(install.parent_symlink(self.target / "a" / "b" / "c.txt"))
+        self.assertFalse(install.parent_symlink(self.target / "x" / "c.txt"))
+        gemini = self.target / ".gemini"
+        gemini.symlink_to(self.outside)
+        self.assertEqual(
+            install.merge_gemini_settings(gemini / "settings.json", install.adapter_src("gemini")), "skipped-symlink"
+        )
+
+
 class LegacyMigrationTest(unittest.TestCase):
     """ADR-0007: dự án cài bản ≤ 2.x (`.xstored/`, `xs.yaml`) chạy lại install là sang tên mới."""
 

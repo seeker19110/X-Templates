@@ -9,14 +9,31 @@
 - **Nghiên cứu:** [`research/2026-11-11-factory-end-to-end.md`](../../research/2026-11-11-factory-end-to-end.md) (đọc repo
   ở `e1c74e6`; dữ kiện ngoài chưa tra — việc đầu của PLAN).
 - **Thay một phần (có hiệu lực khi lát tương ứng có mã):** D-142 mục "không song song worktree" · ADR-0061 mặc định `self`
-  và điều kiện "tăng số agent chỉ khi có số" · ADR-0074 điều kiện `scale: S` · ADR-0048 §Quyết định 1 (nhà của dòng 20
-  BLOCKER M/L "người đã dùng thử" ở mẫu GO-NO-GO) · ADR-0058/0069 giai đoạn 2/3 chỉ người. Phần giai đoạn 2/3 là **cách
-  hiểu và đề xuất của phiên** cho câu 3 "mọi quy mô" (giới hạn giai đoạn không phụ thuộc `scale`, vốn là lát S10 của lộ
-  trình cũ): chờ chủ dự án xác nhận; T-3856 không có hiệu lực trước đó.
+  và điều kiện "tăng số agent chỉ khi có số" · ADR-0074 điều kiện `scale: S` cùng dòng 20 BLOCKER (M/L) của mẫu GO-NO-GO ·
+  ADR-0058/0069 giai đoạn 2/3 chỉ người.
 - **Giữ:** `HARD_GATED_KEYS` và luật bất đối xứng (máy tự siết, nới qua PR người merge một lần); nhóm máy chặn của guard;
   tiền, dữ liệu người dùng thật, pháp nhân đứng tên qua `- grant:` và `loop defer`; các mục còn lại của D-142 (không tách
   `xt.py`, không merge queue, không reviewer LLM mọi PR, không thu nhỏ guard); một gói trong 3.x (ADR-0068); trần byte
   (ADR-0043/0050); `LOOP-ORCH-008` (trần cứng 5 mỗi đợt).
+- **Đặc tả:** `docs/specs/SPEC-factory-*.md` (bảy file, D-422…D-424) — nhà của giao ước khoá, lệnh, sổ và scenario; ADR
+  này chỉ giữ quyết định.
+- **Đính chính 2026-11-11 (review #502 và review đặc tả; thân ADR bên dưới giữ nguyên văn đã chấp nhận):**
+  - "Thay một phần" còn thiếu **ADR-0048 §Quyết định 1** — nhà của dòng 20 GO-NO-GO (M/L: người dùng thử, "không thay
+    được bằng E2E"). ADR này thay đúng điểm đó ở M/L; mục C4 của research 2026-11-08 ("M/L giữ BLOCKER") vì vậy cũng
+    đổi. Dòng trạng thái ADR-0048 đã ghi.
+  - §Quyết định 4 viết "duyệt giai đoạn ở S/M/L": chủ dự án chỉ nói "ở mọi quy mô". Mở **giai đoạn 2/3** cho agent là
+    cách phiên hiểu rộng (nối lát S10 của research 2026-11-08), không phải nguyên văn — giới hạn giai đoạn 1 không phụ
+    thuộc quy mô. Chủ dự án không muốn thì bỏ F-142 của đặc tả scale.
+  - Ký ở M/L dùng **khoá trần riêng** `release_signoff_scale` (mặc định S), không tái dùng `release_signoff: agent` —
+    dự án đã bật quyền ở S không bị nới khi nâng khung.
+  - §Hệ quả "còn ≈ 456 KB dưới trần" là so với trần cứng; cổng "2× mốc gần nhất" (ADR-0072) chỉ còn ≈ 119 KB.
+  - §Các phương án "ADR-0068 lát C–E": lát B–E đã có mã (PLAN-factory-BE); phần còn lại của lộ trình cũ là fixture host
+    thật và PR nâng dự án đích.
+  - §Bối cảnh bỏ sót cơ chế đã có mà đặc tả dựng lên trên: `loop run` (vòng ngoài headless), `QA-STRAT-023` (test chấp
+    nhận viết từ SPEC bởi ngữ cảnh khác người viết), khoá `acceptance`/`acceptance_report`, `preview_smoke`.
+  - §Quyết định 6 "chữ ký chưa có thì không tag, không phân phối": đặc tả cài bằng tag do workflow có cổng tạo và ghi
+    nguồn cài vào manifest, không chặn `install.py` theo `promotion` (trạng thái tức thời, sẽ làm đỏ mọi lần cài từ
+    nhánh chính và CI).
 
 ## Bối cảnh
 

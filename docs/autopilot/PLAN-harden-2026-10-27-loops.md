@@ -67,4 +67,4 @@
 - [x] `T-3553` Cắt 3.30.0 + PROGRESS (`release-check` ở G7 sau vòng; 3.29.0 cắt sớm — D-258) (sau: T-3557) — Gate: `python3 scripts/xt.py changelog-check && grep -qx '3.30.0' VERSION && python3 scripts/xt.py progress-check && python3 scripts/xt.py blueprint-status BLUEPRINT.md --strict --run`
 ### Lát 4–5 — cần người (defer)
 - [ ] `T-3554` Lát 4: pilot `next-step` chế độ gợi ý trên repo khung + ≥ 2 dự án đích, so `action` với quyết định thật; rồi cho Stop hook đọc (sau: T-3550) — Gate: `test -s docs/ops/PILOT-next-step.md`
-- [ ] `T-3555` Lát 5: field trigger (SLO 7 ngày), bot nâng bản, worker ngoài phiên (ADR mới), event policy `pull_request_target` cho `pr-review.yml` (sau: T-3553) — Gate: `git grep --untracked -qiE '^# ADR-[0-9]+: .*(worker ngoài phiên|field trigger)' -- docs/adr`
+- [ ] `T-3555` Lát 5 (thu hẹp 2026-11-11, AUD-HAR-382: field trigger, bot nâng bản, worker ngoài phiên dời sang PLAN-factory-e2e T-3861, T-3865, T-3850/T-3853): bỏ `pull_request_target` khỏi `pr-review.yml` trước hạn GitHub 2026-12-02 (sau: T-3553) — Gate: `! grep -rq pull_request_target .github/workflows/`
