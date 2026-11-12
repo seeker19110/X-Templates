@@ -43,7 +43,9 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
   `git push --force --end-of-options origin feat/other -h` (`-h` là refspec, đo git 2.43: `src refspec -h`),
   `git push --end-of-options origin -o +HEAD:feat/other`, `git branch|tag|fetch --end-of-options …` bị chặn như khi viết
   với `--`; token chưa giải (`--end-of-options$X`, `$E`, glob) không hưởng miễn trừ trợ giúp; `-h` đứng trước
-  `--end-of-options` vẫn là trợ giúp thật. Còn mở: biến dính sau viết tắt cờ nguy hiểm (`--delet$X`, AUD-SEC-644, T-3743).
+  `--end-of-options` vẫn là trợ giúp thật. `git pull` đọc cả hai cách (token sau dấu hết tuỳ chọn là tuỳ chọn của `git
+  fetch`): `pull --end-of-options . --stdin` và dạng `--` có từ trước không còn lọt. Còn mở: biến dính sau viết tắt cờ
+  nguy hiểm (`--delet$X`, AUD-SEC-644, T-3743), CR trần (AUD-SEC-645, T-3744), `restore --end-of-options` (AUD-SEC-646).
 - `check-links.py` (AUD-PERF-027): `mask_code_spans`/`table_cells` nhảy tới ký tự đặc biệt bằng regex thay vì duyệt
   từng ký tự — dòng `lint` của `gate-fast` bớt khoảng nửa thời gian kiểm link (đo 1 789 → 876 ms khi máy tải); kết quả
   kiểm không đổi (so vi sai trên mọi file `.md` của repo và fuzz).

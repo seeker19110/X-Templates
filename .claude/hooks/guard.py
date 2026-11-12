@@ -6023,6 +6023,14 @@ def _fetch_names(args: List[str], cwd: Optional[str]) -> RefNames:
     return [s.split(":", 1)[1] for s in specs if not _canonical_fetch(repo, s, remotes)]
 
 
+def _pull_names(args: List[str], cwd: Optional[str]) -> RefNames:
+    """pull chuyển đối số vị trí cho `git fetch` KHÔNG kèm `--`: token sau dấu hết tuỳ chọn của pull lại là tuỳ chọn của
+    fetch (`pull --end-of-options . --stdin`, `pull -- --refmap=… . main`; đo git 2.43) — xét cả hai cách đọc."""
+    first = _fetch_names(args, cwd)
+    second = _fetch_names([a for a in args if a not in OPTS_END], cwd)
+    return None if first is None or second is None else first + second
+
+
 def _configured_remotes(cwd: Optional[str]) -> FrozenSet[str]:
     """Remote đã cấu hình ở repo `cwd` (`git remote`); lỗi/quá hạn/không phải repo → rỗng."""
     try:
@@ -6067,7 +6075,7 @@ REMOTE_REF_NAMES: Dict[str, Callable[[List[str], Optional[str]], RefNames]] = {
     "worktree": _new_branch_names("worktree"),
     "stash": _stash_names,
     "fetch": _fetch_names,
-    "pull": _fetch_names,
+    "pull": _pull_names,
     "push": _push_names,
     "remote": _remote_names,
 }

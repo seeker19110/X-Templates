@@ -8291,6 +8291,29 @@ class GuardReview487DebtTest(_GuardDebtCase):
             with self.subTest(cmd):
                 self.assertEqual(self.out(cmd)["raw"], "ask", cmd)  # qua merge-check như merge thiếu ghim
 
+    def test_pull_after_end_of_options_read_as_fetch_options(self):  # AUD-SEC-614 review R1/P2
+        """`git pull` chuyển đối số vị trí cho `git fetch` KHÔNG kèm `--`: token sau dấu hết tuỳ chọn của pull lại là tuỳ chọn
+        của fetch (đo git 2.43: `pull --end-of-options . --stdin` ghi `refs/remotes/origin/*` từ stdin) — đọc cả hai cách."""
+        for cmd in (
+            "git pull --end-of-options . --stdin",
+            "git pull -- . --stdin",
+            "git pull --end-of-options --std .",
+            "git pull --end-of-options --refmap=+refs/heads/*:refs/remotes/origin/* . main",
+            "git pull -- --refmap=+refs/heads/*:refs/remotes/origin/* . main",
+        ):
+            with self.subTest(cmd):
+                res = self.out(cmd)
+                self.assertEqual(res["decision"], "deny", (cmd, res))
+        self.assert_allowed(
+            (
+                "git pull",
+                "git pull origin main",
+                "git pull --rebase origin feat/me",
+                "git pull --end-of-options origin feat/me",
+                "git pull -- origin feat/me",
+            )
+        )
+
     def test_help_forms_allowed(self):  # AUD-HAR-353
         """Cờ trợ giúp thật: gh/git in usage rồi thoát, không chạy hành động. Giá trị của cờ khác, sau `--`, `-h=…`,
         `-test.…` (pflag bỏ qua) không phải trợ giúp — vẫn bị xét."""
