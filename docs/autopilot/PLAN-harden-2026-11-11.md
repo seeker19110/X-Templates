@@ -41,10 +41,12 @@
 - [x] `T-3720` 🟠 AUD-DEP-021 CI: quét lockfile npm của gói theo PR + lịch, khối npm ở dependabot — Gate: `python3 scripts/xt.py ci-check`
 
 ### Lát 3 — 🔴 guard có từ trước
-- [ ] `T-3721` 🔴 AUD-SEC-610 guard: dấu tách dính dấu chuyển hướng vẫn tách lệnh (topo: review) — Gate: `python3 -m unittest tests.test_hooks tests.test_guard_fuzz`
+- [x] `T-3721` 🔴 AUD-SEC-610 guard: dấu tách dính dấu chuyển hướng vẫn tách lệnh (topo: review) — Gate: `python3 -m unittest tests.test_hooks tests.test_guard_fuzz`
 - [ ] `T-3722` 🔴 AUD-SEC-611 guard: quét thân hàm shell (topo: review) — Gate: `python3 -m unittest tests.test_hooks tests.test_guard_fuzz`
 - [ ] `T-3723` 🔴 AUD-SEC-606 guard: bỏ thoát kiểu bash trong nháy kép trước khi quét chuỗi lồng (sau: T-3721, T-3722; topo: review) — Gate: `python3 -m unittest tests.test_hooks tests.test_guard_fuzz`
 - [ ] `T-3724` 🔴 AUD-SEC-609 guard: lệnh có luật mà đối số chứa thay lệnh/thay tiến trình không đọc chắc → BUDGET (sau: T-3723; topo: review) — Gate: `python3 -m unittest tests.test_hooks tests.test_guard_fuzz`
+- [ ] `T-3748` 🔴 AUD-SEC-656 guard: nhánh `except ValueError` của `tokenize` (nháy không đóng, `\` lẻ cuối) tách `(`, `)`, `<`, `>` như `_unglue` hoặc BUDGET (sau: T-3721; topo: review) — Gate: `python3 -m unittest tests.test_hooks tests.test_guard_fuzz`
+- [ ] `T-3749` 🔴 AUD-SEC-657 guard: chuyển hướng fd có tên `{fd}>file CMD` đứng đầu lệnh không làm `{fd}` thành tên lệnh (sau: T-3721; topo: review) — Gate: `python3 -m unittest tests.test_hooks tests.test_guard_fuzz`
 
 ### Lát 4 — tối ưu có số
 - [x] `T-3725` AUD-PERF-027 `check-links.py`: `mask_code_spans`/`table_cells` nhảy bằng regex, output y hệt — Gate: `python3 -m unittest tests.test_check_links`
