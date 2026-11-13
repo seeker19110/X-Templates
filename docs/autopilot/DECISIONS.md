@@ -582,3 +582,24 @@
 - Chọn: Dời AUDIT-REPORT-2026-11-04-delta.md và AUDIT-REPORT-2026-11-05-delta.md (14,5 KB) sang docs/archive/ops theo ADR-0070
 - Lý do (tiêu chí chất lượng cuối): (1) đúng quy tắc ADR-0043/ADR-0070: cắt chỗ khác, không nới trần; giữ báo cáo đầy đủ gần nhất (2026-11-02-full) và delta gần nhất (2026-11-11); không công cụ nào đọc hai báo cáo theo đường dẫn (grep scripts/, tests/, .github/, .claude/, framework/), PROGRESS không nhắc; chỉ AUDIT-STATUS có hai liên kết, viết lại cùng liên kết trong hai báo cáo, check-links xanh. (2) bị loại: GO-NO-GO 3.30.0…3.31.1 còn chờ người ký (PROGRESS) và guard chặn dời GO-NO-GO*.md bằng Bash.
 - Đường lùi: git mv ngược về docs/ops và hoàn lại liên kết
+
+### D-437 · 2026-11-13T07:40:47+00:00 · Lát 2: P2 (không tra GIT_DANGER_LONG) buộc đổi expect của ca từng là đối chứng cho qua (--set-upstream$X, --verbose$X, --soft$X, curl -G -sSd$TOKEN…). Chấp nhận hay thu hẹp P2 bằng bảng cờ nguy hiểm theo lệnh con?
+
+- Phương án: (1) A: đổi expect các ca đó sang BUDGET và ghi D (theo đúng ADR-0076, chặn oan đo được 0,005 %) · (2) B: thu hẹp P2 bằng bảng cờ nguy hiểm theo từng lệnh con (quay lại cách liệt kê mà ADR đã loại; 711 còn lọt dạng mới)
+- Chọn: A: đổi expect các ca đó sang BUDGET và ghi D (theo đúng ADR-0076, chặn oan đo được 0,005 %)
+- Lý do (tiêu chí chất lượng cuối): (1) đúng và an toàn: bảng cờ theo lệnh con chính là danh sách cấm đã gây 16 🔴 cùng họ (D-430); (4) trải nghiệm: đo trên 19.026 lệnh Bash thật chỉ 1 lệnh (0,005 %, dưới ngưỡng 0,2 % của D-431) đổi từ cho qua sang chặn — một vòng lặp git log -S"$id" có giá trị dính liền cờ ngắn. Cách viết lại có sẵn: tên cờ nguyên văn, mở rộng chỉ ở giá trị sau dấu = hoặc ở đối số kế.
+- Đường lùi: Thu hẹp P2 bằng bảng cờ theo lệnh con (phương án B) nếu đo cho thấy chặn oan thường xuyên; khôi phục expect cũ của các ca control
+
+### D-438 · 2026-11-13T07:40:48+00:00 · Lát 2: cổng _ruled_word_why ghi đè câu hỏi BUDGET đã có của luật cũ (gh … $(echo)-d ở strict đổi ask → deny; dấu GIT_DYN_FLAG_MARK không còn lệnh thật sinh ra). Chấp nhận hay cổng nhường khi luật cũ đã hỏi BUDGET?
+
+- Phương án: (1) A: chấp nhận (BUDGET là deny ở mọi chính sách), đổi quyết định thô sang deny và thay ví dụ của dấu · (2) B: cổng nhường khi luật cũ đã hỏi BUDGET (sửa _argv_shell_check)
+- Chọn: A: chấp nhận (BUDGET là deny ở mọi chính sách), đổi quyết định thô sang deny và thay ví dụ của dấu
+- Lý do (tiêu chí chất lượng cuối): (1) an toàn: D-431 đặt BUDGET deny ở mọi chính sách và ADR-0018/0019 cấm guard hỏi người, nên 'ask' mang mã BUDGET vốn đã thành deny — quyết định CUỐI không đổi; phương án B thêm một nhánh ngoại lệ vào _argv_shell_check (thêm cách đọc mới, ngược D-415). Đây là siết (ask → deny), không phải hạ mã như lỗi review #523.
+- Đường lùi: Thêm nhánh nhường BUDGET vào _argv_shell_check và khôi phục 5 dòng AS_MAIN raw ask
+
+### D-439 · 2026-11-13T07:40:49+00:00 · printf ở GATE_PASSIVE dù printf -v ghi biến; pytest/tox/nox ở GATE_NAMES trong khi ADR-0076 ghi pytest không qua cổng. Xếp thế nào?
+
+- Phương án: (1) printf → GATE_NAMES; pytest/tox/nox giữ GATE_NAMES (siết, chặn oan thêm đo được 0 ở cả hai), ADR dòng 56 được D này đính chính · (2) printf giữ PASSIVE; pytest/tox/nox → GATE_PASSIVE theo câu chữ ADR
+- Chọn: printf → GATE_NAMES; pytest/tox/nox giữ GATE_NAMES (siết, chặn oan thêm đo được 0 ở cả hai), ADR dòng 56 được D này đính chính
+- Lý do (tiêu chí chất lượng cuối): (1) an toàn: đo trên 19.026 lệnh Bash thật cả hai phương án chênh 0 lệnh; khi chi phí bằng nhau chọn bên chặt (printf -v ghi biến như read/let; pytest chạy mã từ conftest/-p). ADR-0076 không sửa (đã Accepted): câu 'pytest không qua cổng' bị D này thay — cổng chỉ chặn dạng cờ/lệnh con có mở rộng nên rất hiếm chạm pytest.
+- Đường lùi: Chuyển printf về GATE_PASSIVE hoặc pytest/tox/nox sang GATE_PASSIVE (sửa PASSIVE_PIN và test ghim)

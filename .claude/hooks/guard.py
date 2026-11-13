@@ -2193,7 +2193,106 @@ def _allowlist_why(cmd: str, root: str = "", cwd: Optional[str] = None) -> str:
     why = _dyn_head_why(cmd) or _reread_why(cmd) or _split_why(cmd) or _here_shell_why(cmd)
     why = why or _array_arg_why(cmd) or _script_run_why(cmd) or _reuse_why(cmd) or _fd_script_why(cmd)
     why = why or _home_dyn_why(cmd) or _run_named_why(cmd) or _implicit_load_why(cmd) or _patch_file_why(cmd)
-    return why or _git_cfg_env_why(cmd, root, cwd)
+    return why or _git_cfg_env_why(cmd, root, cwd) or _ruled_word_why(cmd)
+
+
+# ADR-0076 lát 2 (D-430/D-431): cổng tập con dương — mắt xích cuối của `_allowlist_why` nên chạy sau luật cũ:
+# luật cũ đã chặn trên CÙNG cách đọc giữ mã cũ (`_argv_shell_check`). Quyết định cuối không nhẹ đi, nhưng mã/lý do
+# có thể thành BUDGET khi luật cũ chặn ở cách đọc khác hay chỉ hỏi (review #529 F2, AUD-SEC-749): hai cách đọc
+# `LitWord` (`_stricter_reading` lấy cách đọc mới khi chặt ngang), bản bung brace, câu hỏi nhường của
+# `_go_patch_asks`, câu hỏi BUDGET của luật git/gh (D-438) — nói chung mọi BUDGET của lần quét lồng (`$(…)`,
+# `sh -c`: trả trước luật cũ ở tầng ngoài) và mọi câu hỏi gom sau tập con (`xt_inproc_asks`) có thể đổi mã.
+# Lệnh đơn mà tên (sau gán/từ khoá/trình bọc) thuộc `GATE_NAMES`: mỗi từ quy về khung (`_gate_skeleton`) — P2 phần
+# chữ trước mở rộng/glob đầu tiên là tên cờ (`-d$X`, `--creat$X`, `-f*`; sau `=` là giá trị: `--repo="$R"`), P3 từ
+# mở đầu bằng mở rộng mà liền sau là `-` (`$X--delete`, `"$X"-f`); P1 lệnh con cấp hai của git (`stash drop$X`;
+# cấp một ở `git_rules`). Trình thông dịch (`GATE_PASSIVE`, D-435): P2/P3 chỉ ở vùng cờ.
+RULED_WORD_WHY = (
+    "từ dạng cờ/lệnh con có mở rộng hay glob ở lệnh có luật (`{}`) — bash có thể dựng ra cờ/lệnh con guard không thấy"
+    " (`git push -d$X`, `$X--delete`, `git stash drop$X`, `python3 -$X`; ADR-0076, AUD-SEC-690/710/711/726); viết lại:"
+    ' tên cờ và lệnh con nguyên văn, mở rộng chỉ ở giá trị (`--repo="$R"`, `-m "$M"`, `-j "$(nproc)"`)'
+)
+GATE_DYN, GATE_GLOB = "\0", "\1"
+GATE_FLAG_DYN_RE = re.compile("-[\\w-]*[\0\1]|[\0\1]+-")  # P2 | P3 trên khung của từ
+# nhóm 1: `$?`/`$#`/`$$` luôn ra số; `$!` RỖNG khi chưa có job nền (bash: `-d$!` → `-d`), `$-`/`$_`/`$0`/`$@` rỗng được
+GATE_VAR_RE = re.compile(r"\$(?:([?#$])|[A-Za-z_]\w*|[0-9@*!-])")
+GIT_SUB2 = frozenset({"stash", "remote", "worktree", "reflog"})
+
+
+def _ruled_word_why(cmd: str) -> str:
+    """Lý do (rỗng = qua) của cổng P1 cấp hai/P2/P3 trên mọi lệnh đơn — cùng bộ đọc với `_command_heads`."""
+    raw = _raw_tokens(cmd, True)
+    argvs = None if raw is None else _plain_argvs(raw)
+    for seg in (s for argv in argvs or [] for s in _brace_segments(argv)):
+        rest = _ifs_prefix(seg)[1]
+        bad = _gate_bad_word(rest[len(rest) - len(_strip_prefixes([_dequote(t) for t in rest])) :])
+        if bad:
+            return RULED_WORD_WHY.format(clean_text(bad)[:80])
+    return ""
+
+
+def _gate_bad_word(words: List[str]) -> str:
+    """Từ đầu tiên ngoài ngữ pháp cổng của lệnh đơn `words` (từ lệnh đứng đầu); rỗng = qua."""
+    name = posixpath.basename(_dequote(words[0])) if words else ""
+    interp = name not in GATE_NAMES and bool(INTERP_RE.fullmatch(name))
+    if name not in GATE_NAMES and not interp:
+        return ""
+    skels = [_gate_skeleton(w) for w in words[1:]]
+    bad = _gate_flag_zone(words[1:], skels, interp)
+    return bad or _git_sub2(words[1:], skels) if name == "git" else bad
+
+
+def _gate_skeleton(word: str) -> str:
+    """Khung của từ còn nháy: chữ đã bỏ nháy/thoát; mở rộng (`$x`, `${…}`, `$(…)`) → `GATE_DYN`, glob không nháy →
+    `GATE_GLOB`, `$?`/`$#`/`$$` → `0`. Ngữ cảnh nháy theo `_CodeView.kind`; một lượt, tuyến tính. Backtick: `_CodeView`
+    dừng ở đó (phần sau là chữ) — tập con chuẩn đã chặn backtick (ADR-0063)."""
+    kind, out, i = _CodeView(word).kind, [], 0
+    while i < len(word):
+        piece, i = _gate_piece(word, i, kind[i])
+        out.append(piece)
+    return "".join(out)
+
+
+def _gate_piece(word: str, i: int, kind: str) -> Tuple[str, int]:
+    """(mảnh khung, vị trí kế) tại `word[i]`; `kind` `q` (nháy đơn, `\\x`) là chữ — bỏ dấu nháy đơn và `\\` thoát."""
+    c = word[i]
+    if kind == "q":
+        return ("", i + 1) if c == "'" else (word[i + 1 : i + 2], i + 2) if c == "\\" else (c, i + 1)
+    if word.startswith(("$(", "${"), i):
+        j = _raw_group_end(word, i + 2, word[i + 1])
+        return GATE_DYN, j if j > i else len(word)
+    m = GATE_VAR_RE.match(word, i)
+    if m:
+        return "0" if m[1] else GATE_DYN, m.end()
+    glob = kind == "c" and c in "*?["
+    return GATE_GLOB if glob else "" if c == '"' else c, i + 1
+
+
+def _git_sub2(args: List[str], skels: List[str]) -> str:
+    """P1 cấp hai: từ đầu tiên không phải cờ sau `git [tuỳ chọn toàn cục] stash|remote|worktree|reflog` có mở
+    rộng/glob."""
+    plain = [_dequote(a) for a in args]
+    i = 0
+    while i < len(plain) and plain[i].startswith("-"):
+        i += 1 + (plain[i] in GIT_OPTS_WITH_VALUE)
+    if i >= len(plain) or plain[i] not in GIT_SUB2:
+        return ""
+    k = next((k for k in range(i + 1, len(plain)) if not plain[k].startswith("-")), i)
+    return args[k] if k > i and (GATE_DYN in skels[k] or GATE_GLOB in skels[k]) else ""
+
+
+def _gate_flag_zone(args: List[str], skels: List[str], interp: bool) -> str:
+    """P2/P3 trên vùng cờ: tới `--` nguyên văn mà từ trước không phải cờ nguyên văn (cờ trước có thể ăn `--` làm giá
+    trị: `-m --`); trình thông dịch (D-435, AUD-SEC-726) dừng thêm ở từ nguyên văn không phải cờ mà từ trước không
+    phải cờ (script; giá trị của `-m mod`/`-c '…'` thì sang từ kế) — đối số sau đó là của script."""
+    value = False
+    for a, s in zip(args, skels):
+        if GATE_FLAG_DYN_RE.match(s):
+            return a
+        lit = GATE_DYN not in s and GATE_GLOB not in s
+        if lit and not value and (s == "--" or interp and s[:1] != "-"):
+            return ""
+        value = lit and s[:1] == "-"
+    return ""
 
 
 def _reread_why(cmd: str) -> str:
@@ -15840,8 +15939,8 @@ COPY_VALUE_OPTS = {
 }
 CLOUD_URL_RE = re.compile(r"(?:s3|gs|az|r2|b2)://")
 CLOUD_COPIERS = ("aws", "gsutil", "rclone", "gcloud", "azcopy")
-# ADR-0076 lát 0 (CHƯA dùng trong quyết định): tên lệnh có luật — lệnh đơn mà basename từ đầu thuộc tập này sẽ qua cổng
-# tập con dương (`_ruled_word_why`, lát 2). Gom từ bảng có sẵn: git/gh, shell, eval/source, trình bọc và mọi tên luật của
+# ADR-0076 lát 0: tên lệnh có luật — lệnh đơn mà basename từ đầu thuộc tập này qua cổng tập con dương
+# (`_ruled_word_why`, lát 2). Gom từ bảng có sẵn: git/gh, shell, eval/source, trình bọc và mọi tên luật của
 # `_scan_command` (bắc cầu, cả phương thức lớp) rẽ nhánh; `GuardGateNamesTest` đọc mã và khẳng định các tập khớp nhau —
 # tên rẽ nhánh mà bộ đọc không thấy (biến vòng lặp/comprehension, kết quả hàm phụ) khai ở `GATE_UNREAD` của test kèm lý
 # do và lệnh mẫu. Rẽ nhánh theo tiền tố hay biểu thức chính quy (`mkfs*`, `git-<lệnh con>`, `INTERP_RE`: `python3.12`,
@@ -15849,12 +15948,12 @@ CLOUD_COPIERS = ("aws", "gsutil", "rclone", "gcloud", "azcopy")
 # D-434: tên luật có rẽ nhánh nhưng KHÔNG kích hoạt cổng — trình thông dịch không phải shell (ADR-0076: `python3
 # scripts/xt.py …` không qua cổng) và lệnh chỉ đọc/in (bảng thụ động của D-432): không thuộc bảng ghi tệp, chạy lệnh từ
 # đối số, ra mạng hay ghi biến theo tên nào của guard (`GuardGateNamesTest.ACTIVE_TABLES`). Ngoại lệ đã biết, có từ trước
-# ADR-0076 (guard cho qua, không thuộc bảng ghi/chạy nào): `rg --pre CMD` chạy lệnh, `less -o FILE` ghi tệp; `printf -v VAR` ghi
-# biến (luật riêng `HOME_VAR_FLAG_HEADS`, `_special_var_why`). Lệnh đọc mà có dạng ghi (`sort -o`, `uniq in out`, `touch`,
-# `tee`, trình soạn thảo, formatter) ở lại `GATE_NAMES`.
+# ADR-0076 (guard cho qua, không thuộc bảng ghi/chạy nào): `rg --pre CMD` chạy lệnh, `less -o FILE` ghi tệp. Lệnh đọc mà có
+# dạng ghi (`sort -o`, `uniq in out`, `touch`, `tee`, trình soạn thảo, formatter) ở lại `GATE_NAMES`; `printf` cũng vậy
+# (D-439: `printf -v VAR` ghi biến như `read`/`let`).
 GATE_PASSIVE: FrozenSet[str] = frozenset(
     "python python3 node perl ruby php cat tac head tail wc grep egrep fgrep zgrep ugrep rg ag ack diff cmp jq echo"
-    " printf date true false nproc pwd ls whoami hostname uname id test [ [[ basename dirname readlink realpath stat file"
+    " date true false nproc pwd ls whoami hostname uname id test [ [[ basename dirname readlink realpath stat file"
     " du md5sum sha1sum sha224sum sha256sum sha384sum sha512sum b2sum cksum less more bat ps pgrep cut type which"
     " printenv tr :".split()
 )
@@ -15864,8 +15963,10 @@ GATE_PASSIVE: FrozenSet[str] = frozenset(
 _GATE_BRANCHED: FrozenSet[str] = frozenset(
     "git gh eval source . { function trap pushd env sudo doas xt.py claude codex gemini coverage nix-shell ar cpio jar"
     " lzip link rev openssl patch gpatch nerdctl docker-compose podman-compose composer.phar printenv".split()
-    # Review #526: `m4` (`_is_m4`), `mkfs` (`GLOB_COMMANDS` định nghĩa sau), `for` (`_argv_split_trigger`)
-    + "m4 mkfs for".split()
+    # Review #526: `m4` (`_is_m4`), `mkfs` (`GLOB_COMMANDS` định nghĩa sau), `for` (`_argv_split_trigger`), `alias`
+    # (`_alias_rule` khớp mẫu `_may_be_alias`). Từ khoá shell (`SHELL_KEYWORDS`: `if then else elif while until do !`)
+    # không thuộc tập: `_strip_prefixes` bỏ chúng trước khi lấy tên nên cổng không bao giờ gặp chúng làm tên lệnh.
+    + "m4 mkfs for alias".split()
 ).union(
     IMPLICIT_TOOL_HEADS,  # công cụ nạp tệp ngầm: `just`, `pytest`, `mvn`… (`_implicit_tools`)
     HEREDOC_RUN_SAFE - {""},  # `:`, `tr` (`_heredoc_runner`)
