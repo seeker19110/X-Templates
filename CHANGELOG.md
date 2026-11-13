@@ -179,6 +179,22 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
 
 ### Fixed
 
+- Guard — ADR-0076 lát 2 (T-3762; lý do chạm hàng rào: bốn 🔴 có từ trước cùng gốc AUD-SEC-644, D-430/D-431/D-435 — chỉ
+  thêm chặn, mã `BUDGET`, luật cũ đã chặn giữ mã cũ): mắt xích `_ruled_word_why` cuối `_allowlist_why` — lệnh có luật
+  (`GATE_NAMES`, sau gán/từ khoá/trình bọc) mà từ dạng cờ có mở rộng/glob trước `=` (P2, cờ ngắn lẫn dài, không tra
+  `GIT_DANGER_LONG`: `git push -d$X`, `git clean -fd$X`, `-f*`, `git switch --creat$X`, `git config --edi$X`, `git commit
+  --no-verif$X` — AUD-SEC-690/711), từ mở đầu bằng mở rộng liền `-` (P3: `git push $X--delete`, `"$X"--delete`,
+  `$(true)--delete`, `git reset $X--hard` — AUD-SEC-710), lệnh con cấp hai của `git stash|remote|worktree|reflog` có mở
+  rộng/glob (P1: `git stash drop$X`) → BUDGET kèm dòng `viết lại:`. Trình thông dịch (`python3`/`node`/`perl`/`ruby`/`php`,
+  cả `python3.12`) chỉ xét vùng cờ (D-435, AUD-SEC-726: `python3 "$X"-c '…'`, `python3 -$X`, `node -$X`); đối số sau
+  script hay sau mã của `-c` không tính (`python3 scripts/xt.py … $N`, `python3 -c "$CODE"`). Vùng cờ dừng ở `--` mà từ
+  trước không phải cờ (`gh pr diff 5 -- -$P` qua; `-o -- $X--delete` vẫn chặn). Giữ nguyên: giá trị (`--repo="$R"`,
+  `-m "$M"`, `origin "$B"`), glob ở đối số không phải cờ (`rm -f *.tmp`), `"$A".."$B"`, `$?`. Đổi có chủ ý (D-437): cờ
+  dài có mở rộng không phải viết tắt cờ nguy hiểm (`--set-upstream$X`, `git fetch --all$X` — trước đây cho qua ở #523),
+  `curl -sSd$TOKEN` giờ chặn; câu hỏi BUDGET của luật cũ (`gh pr close 5 $(echo)-d`) thành deny ở cả strict (D-438).
+  `alias` và `printf` (D-439: `printf -v` ghi biến) vào `GATE_NAMES`; ca corpus `aud690/710/711/726-*` và `aud721/722/724/725-*` (gỡ bốn ID khỏi `scope.json`). Đo
+  trên 19.026 lệnh Bash thật: thêm chặn 1 (0,005 %, `git log -S"$id"`). Dự án đích: nâng bản để nhận
+  `.claude/hooks/guard.py` mới; lệnh bị chặn đọc dòng `viết lại:` của lý do.
 - Guard (lý do chạm hàng rào: hai 🔴 có từ trước của Lát 3 harden, review độc lập từng lát): (AUD-SEC-610, #516) `;<`,
   `&&<`, `||>>`, `|&<`, `)<`, `(<`, `&` + xuống dòng + `<`… không còn gộp thành một token chuyển hướng nuốt lệnh sau nó —
   `_unglue` cắt dãy dấu theo toán tử dài nhất của bash ở cả `tokenize` lẫn `_raw_tokens`; (AUD-SEC-611, #517) thân hàm
