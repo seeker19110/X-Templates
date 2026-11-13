@@ -1,7 +1,7 @@
 # PLAN-3.14-app.md — Khung X-Templates · ứng dụng cục bộ `xt.py app` và chia việc bằng máy
 
 > Lập ngày 2026-10-21. Chủ repo hỏi: "biến dự án này thành app và phân chia công việc được không?". Phiên chính tự duyệt
-> hướng và PLAN (D-126, ADR-0008). Kiến trúc và bảo mật: [ADR-0038](../adr/0038-local-app-on-xt.md).
+> hướng và PLAN (D-126, ADR-0008). Kiến trúc và bảo mật: [ADR-0038](../../adr/0038-local-app-on-xt.md).
 >
 > **Cú pháp bắt buộc cho máy:** mỗi task một dòng `- [ ] \`T-NNNN\` <việc> — Gate: \`<lệnh>\``.
 
