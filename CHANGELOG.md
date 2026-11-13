@@ -182,16 +182,22 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
 - Guard — ADR-0076 lát 1, cú pháp toàn lệnh P6 (lý do chạm hàng rào: ba 🔴 có từ trước, review #516/#517; D-415, D-430,
   D-431 — không đọc chắc thì chặn BUDGET, lý do có dòng `viết lại:`): (AUD-SEC-665, #528) thay lệnh `${ …; }`/`${| …; }`
   của bash 5.3 — chạy lệnh trong shell hiện tại, cả trong nháy kép và thân heredoc không nháy — → BUDGET (trước đó
-  `echo ${ git push origin feat/me --force; }`, `echo ${ rm -rf /; }` lọt); (AUD-SEC-666) extglob trần `?(`/`*(`/`+(`/
-  `@(`/`!(` ở mã ngoài nháy và ngoài số học `((…))`/`$((…))` → BUDGET (`shopt -s extglob`↵`rm -rf !(a) /` lọt) — `$(`
-  trong số học vẫn là lệnh, `((a) )` là subshell như bash; (AUD-SEC-656) `\` lẻ cuối lệnh → BUDGET (`shlex` lỗi, tokenizer
-  rơi về tách thô không tách `(`/`<` khỏi từ: `(git push origin feat/me --force); echo \` lọt; nháy không đóng ở lệnh
-  gốc đã là BUDGET từ AUD-SEC-214). Giữ nguyên: chữ trong nháy và thân heredoc có nháy, `(( !(a) ))`, `$((2*(3+4)))`,
-  `[[ ! (…) ]]`, `if ! (lệnh)`, `\\` chẵn cuối, nối dòng. Chặn mới cả `if !(lệnh)` (bật extglob thì bash bung `!(lệnh)`
-  thành tên tệp rồi chạy — viết `! (lệnh)`), extglob trong `[[ … == @(a|b) ]]` và mẫu `case`. P6 vẫn dùng bảng cấm
+  `echo ${ git push origin feat/me --force; }`, `echo ${ rm -rf /; }` lọt), kể cả sau `#` trong số học `((…))`/`$((…))`/
+  `$[…]`/chỉ số mảng — bash không có comment ở đó mà guard đọc là comment (`(( 1 #${ git push …; }`↵`))` lọt; review
+  #528); (AUD-SEC-666) extglob trần `?(`/`*(`/`+(`/`@(`/`!(` ở mã ngoài nháy và ngoài số học → BUDGET (`shopt -s
+  extglob`↵`rm -rf !(a) /` lọt) — `$(` trong số học vẫn là lệnh, `((a) )` là subshell như bash; (AUD-SEC-656) `\` lẻ cuối
+  lệnh → BUDGET; lệnh chặt (lệnh gốc, script lồng nguyên văn) mà `shlex` thấy nháy không đóng vẫn quét luật cũ trên token
+  thô (deny giữ mã của luật) nhưng không còn được cho qua — BUDGET (`(git push origin feat/me --force); echo \`,
+  `(rm -rf /); echo "$(echo "it's")"` lọt — bash đọc nháy lồng trong `"$(…)"` cân bằng, `shlex` thì không; review #528);
+  ca lành `echo "$(echo "'")"; ls {a,b}` của AUD-SEC-072 nay cũng BUDGET. Giữ nguyên: chữ trong nháy và thân
+  heredoc có nháy, `(( !(a) ))`, `$((2*(3+4)))`, `(( x = 16#ff ))`, `[[ ! (…) ]]`, `if ! (lệnh)`, comment thật sau lệnh
+  và trong `x=( … )`, `\\` chẵn cuối, nối dòng. Chặn mới cả `if !(lệnh)` (bật extglob thì bash bung `!(lệnh)` thành tên
+  tệp rồi chạy — viết `! (lệnh)`), extglob trong `[[ … == @(a|b) ]]`, mẫu `case`, regex `[[ $x =~ ^v?([0-9]+)$ ]]` (gán
+  regex vào biến rồi `[[ $x =~ $re ]]`), `$[2*(3)]`/`a[2*(3)]=x` (viết `$((…))`). P6 vẫn dùng bảng cấm
   `STRICT_LIVE`/`_strict_why` thay vì cổng dương của các lát sau vì cú pháp toàn lệnh không gắn với tên lệnh nào.
-  Đo trên 18.741 lệnh Bash thật khác nhau của transcript phiên: 4 (0,02 %, ngưỡng D-431 0,2 %) đổi từ cho qua sang chặn,
-  cả 4 là lệnh thử chính cú pháp này khi review guard; corpus guard base = head ở mọi ca cũ.
+  Đo trên 19.197 lệnh Bash thật khác nhau của transcript phiên: 4 (0,02 %, ngưỡng D-431 0,2 %) đổi từ cho qua sang chặn,
+  cả 4 là lệnh thử chính cú pháp này khi review guard; corpus guard base = head ở mọi ca cũ. Còn mở cùng họ:
+  AUD-SEC-730 (ngoặc trong `${…}` không nháy, T-3769).
   Dự án đích: nâng bản để nhận `.claude/hooks/guard.py` mới.
 - Guard (lý do chạm hàng rào: hai 🔴 có từ trước của Lát 3 harden, review độc lập từng lát): (AUD-SEC-610, #516) `;<`,
   `&&<`, `||>>`, `|&<`, `)<`, `(<`, `&` + xuống dòng + `<`… không còn gộp thành một token chuyển hướng nuốt lệnh sau nó —
