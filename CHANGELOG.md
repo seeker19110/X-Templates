@@ -8,6 +8,15 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
 
 ### Added
 
+- ADR-0076 lát 0 (T-3760; lý do chạm hàng rào: dựng lưới đối chứng cho các lát cổng tập con dương — chỉ thêm ca và hằng,
+  không đổi quyết định nào của guard): 150 ca `control` `adr76-ctl-*` trong `tests/fixtures/autonomy/guard.json` lấy từ
+  lệnh agent chạy theo quy trình (`xt.py`, `dev-task.sh`, Gate, git/gh đọc-ghi lành, commit/PR bằng heredoc, `rm -rf
+  "$TMP"/x`, `git tag -a v1 -m "$M"`, `gh pr merge` ghim head) — mọi ca guard hiện cho qua; bốn ca mà ADR-0076 §Hệ quả
+  dự kiến chặn ở lát 3–6 ghi `note` để lát đó đổi `expect` có chủ ý. Hằng `GATE_NAMES` (tên lệnh có luật, kích hoạt
+  cổng) và `GATE_PASSIVE` (trình thông dịch không phải shell, lệnh chỉ đọc/in — D-434) trong `guard.py`, chưa dùng trong
+  quyết định, gom từ bảng có sẵn; `GuardGateNamesTest` đọc mã các hàm `_scan_command` gọi tới và khẳng định mọi tên luật
+  rẽ nhánh thuộc đúng một trong hai tập, không tập nào có tên ngoài các nhánh. PLAN-harden-2026-11-11 thêm
+  T-3760…T-3767; 13 task guard cũ đã thuộc một lát chuyển `[~]` "gộp vào T-376x". Dự án đích: không đổi.
 - Bảy đặc tả của xưởng đầu-cuối (D-422, chủ dự án 2026-11-11 "viết nốt đặc tả trước"; sửa theo hai lượt review độc lập —
   D-423, D-424): `docs/specs/SPEC-factory-deploy.md` (lệnh triển khai, receipt, sổ `DEPLOYS.json`, `digest_<env>`,
   bản dev của gói, production), `-intake` (dự án mới một lệnh, skill một bước, kênh issue), `-acceptance` (bộ nghiệm thu

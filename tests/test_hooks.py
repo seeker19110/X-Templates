@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import concurrent.futures
 import contextlib
 import fnmatch
@@ -10653,6 +10654,119 @@ class GuardGitSubcommandTest(_GuardDebtCase):
         cpu_budget.assert_not_quadratic(
             self, lambda n: self.g.normalize(["git", *["2", ">", "/dev/null", "-c", "a=b"] * n, "push"]), 20_000
         )
+
+
+# ADR-0076 lát 0: tên lệnh mà luật guard rẽ nhánh, đọc từ mã (không liệt kê tay). "Tên lệnh" theo quy ước của guard: vế
+# trái phép so sánh là `n[0]`/`n[:1]`/`n[:2]` (n = argv đã `normalize`), `posixpath.basename(…)`, hay `name` ở hàm nhận
+# `(name, args, …)` hoặc gán `name, args = n[0], n[1:]`; vế phải là chuỗi, bộ chuỗi, hay bảng cấp module (dict → khoá).
+GATE_HEAD_LEFTS = ("n[0]", "n[:1]", "n[:2]")
+
+
+def _scan_reachable(tree: ast.Module) -> list[ast.FunctionDef]:
+    """Hàm cấp module của guard mà `_scan_command` gọi tới (bắc cầu, kể cả hàm truyền như giá trị: bảng luật)."""
+    funcs = {f.name: f for f in tree.body if isinstance(f, ast.FunctionDef)}
+    seen: dict[str, ast.FunctionDef] = {}
+    todo = ["_scan_command"]
+    while todo:
+        name = todo.pop()
+        if name not in seen:
+            seen[name] = funcs[name]
+            todo += [x.id for x in ast.walk(funcs[name]) if isinstance(x, ast.Name) and x.id in funcs]
+    return list(seen.values())
+
+
+def _head_left(fn: ast.FunctionDef, left: str) -> bool:
+    params = [a.arg for a in fn.args.args]
+    split = any(isinstance(x, ast.Assign) and ast.unparse(x) == "name, args = (n[0], n[1:])" for x in ast.walk(fn))
+    named = left == "name" and (params[:2] == ["name", "args"] or split)
+    return left in GATE_HEAD_LEFTS or left.startswith("posixpath.basename(") or named
+
+
+def _value_heads(value: object, sliced: bool) -> set[str]:
+    """Chuỗi trong giá trị bảng; so với `n[:k]` thì phần tử là bộ và lấy từ đầu."""
+    if isinstance(value, str):
+        return {value}
+    items = list(value) if isinstance(value, (set, frozenset, dict, tuple, list)) else []
+    return {x for x in items if isinstance(x, str)} | {
+        x[0] for x in items if sliced and isinstance(x, (tuple, list)) and x and isinstance(x[0], str)
+    }
+
+
+def _node_heads(g: object, node: ast.expr, sliced: bool, tables: set[str]) -> set[str]:
+    """Tên lệnh ở vế phải phép so sánh; bảng cấp module dùng tới ghi vào `tables`; biến cục bộ → rỗng."""
+    if isinstance(node, ast.Constant):
+        return {node.value} if isinstance(node.value, str) else set()
+    if isinstance(node, ast.List) and sliced:
+        return _node_heads(g, node.elts[0], False, tables) if node.elts else set()
+    if isinstance(node, ast.Name) and isinstance(getattr(g, node.id, None), (set, frozenset, dict, tuple, list)):
+        tables.add(node.id)
+        return _value_heads(getattr(g, node.id), sliced)
+    parts = {
+        ast.Tuple: lambda: node.elts,
+        ast.List: lambda: node.elts,
+        ast.Set: lambda: node.elts,
+        ast.Starred: lambda: [node.value],
+        ast.Subscript: lambda: [node.value],  # `PERM_CMDS[3:]` → cả bảng (chiều rộng)
+        ast.BinOp: lambda: [node.left, node.right],
+    }.get(type(node), lambda: [])()
+    return set().union(*(_node_heads(g, p, sliced, tables) for p in parts))
+
+
+def _branched_heads(g: object, tree: ast.Module) -> tuple[set[str], set[str]]:
+    """(tên lệnh mà luật rẽ nhánh, tên bảng cấp module chứa chúng) trên các hàm `_scan_command` gọi tới."""
+    names: set[str] = set()
+    tables: set[str] = set()
+    for fn in _scan_reachable(tree):
+        for node in ast.walk(fn):
+            if isinstance(node, ast.Compare) and _head_left(fn, ast.unparse(node.left)):
+                sliced = ast.unparse(node.left).startswith("n[:")
+                for op, comp in zip(node.ops, node.comparators):
+                    if isinstance(op, (ast.Eq, ast.NotEq, ast.In, ast.NotIn)):
+                        names |= _node_heads(g, comp, sliced, tables)
+    return names, tables
+
+
+class GuardGateNamesTest(unittest.TestCase):
+    """ADR-0076 lát 0, D-434: mọi tên lệnh mà luật của `_scan_command` (bắc cầu) rẽ nhánh thuộc đúng MỘT trong hai tập
+    `GATE_NAMES` (kích hoạt cổng) và `GATE_PASSIVE` (trình thông dịch không phải shell, lệnh chỉ đọc/in) — thêm nhánh theo
+    tên mới mà quên xếp loại thì đỏ; tên tự thêm tay ngoài các nhánh đó cũng đỏ."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.g = _guard()
+        names, cls.tables = _branched_heads(cls.g, ast.parse((HOOKS / "guard.py").read_text(encoding="utf-8")))
+        # So bằng basename của ĐƯỜNG DẪN (tệp sổ, `.git`) hay tên hàm thư viện khi đọc mã trình thông dịch
+        # (`_exec_argv`): không phải tên lệnh
+        cls.not_heads = {".git", "create_subprocess_exec", *cls.g.NODE_FILE_EXEC, *cls.g.EVIDENCE_NAMES}
+        cls.not_heads |= set(cls.g.LEDGER_DIR_PARTS)
+        cls.names = names - cls.not_heads
+        cls.base = {"git", "gh", "eval", "source"} | cls.g.SHELLS | cls.g.WRAPPERS
+
+    def test_extractor_sees_known_branches(self):  # bộ đọc mã còn thấy nhánh đã biết (không âm thầm trả rỗng)
+        known = {"rm", "chmod", "chown", "cp", "mv", "tee", "sed", "find", "dd", "ln", "xargs", "git", "gh", "eval"}
+        self.assertLessEqual(known | {"source", "sudo", "psql", "curl", "python3", "echo", "cat"}, self.names)
+        self.assertLessEqual({"SHELLS", "WRAPPERS", "DB_CLIENTS", "PERM_CMDS", "COPY_OPT_TABLES"}, self.tables)
+
+    def test_every_branched_name_classified(self):
+        missing = sorted(self.names - self.g.GATE_NAMES - self.g.GATE_PASSIVE)
+        self.assertEqual(missing, [], "tên luật rẽ nhánh chưa thuộc GATE_NAMES hay GATE_PASSIVE (guard.py)")
+
+    def test_gate_and_passive_disjoint(self):
+        self.assertEqual(sorted(self.g.GATE_NAMES & self.g.GATE_PASSIVE), [], "tên ở cả GATE_NAMES lẫn GATE_PASSIVE")
+
+    def test_no_unbranched_name(self):
+        extra = sorted((self.g.GATE_NAMES | self.g.GATE_PASSIVE) - self.names - self.base)
+        self.assertEqual(extra, [], "GATE_NAMES/GATE_PASSIVE có tên không luật nào rẽ nhánh")
+        self.assertFalse((self.g.GATE_NAMES | self.g.GATE_PASSIVE) & self.not_heads)
+
+    def test_gate_keeps_ruled_core(self):  # git/gh, shell, eval/source, trình bọc luôn kích hoạt cổng
+        self.assertLessEqual(self.base, self.g.GATE_NAMES)
+        self.assertLessEqual({"python3", "node", "echo", "cat", "ls", "grep"}, self.g.GATE_PASSIVE)  # ADR-0076, D-432
+
+    def test_sets_frozen(self):
+        for s in (self.g.GATE_NAMES, self.g.GATE_PASSIVE):
+            self.assertIsInstance(s, frozenset)
+            self.assertTrue(all(isinstance(x, str) and x for x in s))
 
 
 if __name__ == "__main__":

@@ -62,6 +62,7 @@ SHELLS = {"sh", "bash", "zsh", "dash", "ksh", "fish", "mksh", "ash"}  # mksh kh�
 # Ubuntu), `osh`/`ysh` (Oils) — review lượt 2.
 SHELLS |= {"hush", "yash", "posh", "oksh", "loksh", "lksh", "pdksh", "csh", "tcsh", "rbash", "osh", "ysh"}
 INTERPRETERS = SHELLS | {"python", "python3", "node", "perl", "ruby", "php", "deno", "bun", "pwsh"}
+# `GATE_NAMES` (ADR-0076, tên lệnh có luật) gom các bảng tên lệnh này và bảng sau; định nghĩa sau bảng cuối.
 FETCHERS = {"curl", "wget"}
 MAIN_BRANCHES = {"main", "master"}
 # Tuỳ chọn toàn cục của git theo `handle_options` (git.c, đối chiếu v2.43.0 và master ngày 2026-10-28 — D-216). Ăn
@@ -15745,6 +15746,74 @@ COPY_VALUE_OPTS = {
 }
 CLOUD_URL_RE = re.compile(r"(?:s3|gs|az|r2|b2)://")
 CLOUD_COPIERS = ("aws", "gsutil", "rclone", "gcloud", "azcopy")
+# ADR-0076 lát 0 (CHƯA dùng trong quyết định): tên lệnh có luật — lệnh đơn mà basename từ đầu thuộc tập này sẽ qua cổng
+# tập con dương (`_ruled_word_why`, lát 2). Gom từ bảng có sẵn: git/gh, shell, eval/source, trình bọc và mọi tên luật của
+# `_scan_command` (bắc cầu) rẽ nhánh; `GuardGateNamesTest` đọc mã và khẳng định hai tập khớp nhau. Rẽ nhánh theo tiền tố
+# (`mkfs*`, `git-<lệnh con>`) không nằm ở đây — tập hợp không biểu diễn được tiền tố.
+# D-434: tên luật có rẽ nhánh nhưng KHÔNG kích hoạt cổng — trình thông dịch không phải shell (ADR-0076: `python3
+# scripts/xt.py …` không qua cổng) và lệnh chỉ đọc/in (bảng thụ động của D-432), không ghi tệp, không chạy lệnh từ đối số,
+# không ra mạng. Lệnh đọc mà có dạng ghi (`sort -o`, `uniq in out`, `touch`, `tee`, trình soạn thảo, formatter) ở lại
+# `GATE_NAMES`. Mọi tên rẽ nhánh thuộc đúng một trong hai tập (`GuardGateNamesTest`).
+GATE_PASSIVE: FrozenSet[str] = frozenset(
+    "python python3 node perl ruby php cat tac head tail wc grep egrep fgrep zgrep ugrep rg ag ack diff cmp jq echo"
+    " printf date true false nproc pwd ls whoami hostname uname id test [ basename dirname readlink realpath stat file"
+    " du md5sum sha1sum sha256sum sha512sum b2sum cksum less more bat ps pgrep".split()
+)
+# Mọi tên luật rẽ nhánh, trước khi tách `GATE_PASSIVE`
+_GATE_BRANCHED: FrozenSet[str] = frozenset(
+    "git gh eval source . { function trap pushd env sudo doas xt.py claude codex gemini coverage nix-shell ar cpio jar"
+    " lzip link rev openssl patch gpatch nerdctl docker-compose podman-compose composer.phar".split()
+).union(
+    SHELLS,
+    WRAPPERS,
+    INTERPRETERS,
+    FETCHERS,
+    DB_CLIENTS,
+    DECLARE_CMDS,
+    PERM_CMDS,
+    GO_DELETERS,
+    REUSE_DELETERS,
+    REUSE_O_NOT_FILE,
+    ASK_CMDS,
+    AWK_NAMES,
+    SED_NAMES,
+    TAR_NAMES,
+    SEVEN_ZIP,
+    UNPACK_HEADS,
+    DECOMPRESSORS,
+    DECOMPRESS_FLAGS,
+    DECODE_FLAGS,
+    BASH_ENV_DATA_CMDS,
+    CLOUD_COPIERS,
+    COPY_OPT_TABLES,
+    COPY_VALUE_OPTS,
+    REMOTE_COPY,
+    REMOTE_SHELLS,
+    STREAM_SENDERS,
+    GIT_DIR_COPIERS,
+    FEED_SAFE,
+    NO_FILE_READ,
+    NO_STDIN_READ,
+    STDIN_READERS,
+    STDIN_FEEDERS,
+    SCRIPT_FIRST,
+    RECURSIVE_READERS,
+    RECURSIVE_FLAG_READERS,
+    RUN_F_FLAG_HEADS,
+    FIND_READONLY_EXEC,
+    GH_READERS,
+    GH_LITERALS,
+    PENDING_BARE_PLAIN_HEADS,
+    PIPE_FILTERS,
+    PKG_ADD,
+    PKG_WRAPPERS,
+    RUNNERS,
+    SHELL_JOIN_RUNNERS,
+    STAGE_READERS,
+    XARGS_WRITERS,
+    XARGS_FILE_EDITORS,
+)
+GATE_NAMES: FrozenSet[str] = _GATE_BRANCHED - GATE_PASSIVE
 
 
 def _copy_files(n: List[str]) -> Optional[List[str]]:
