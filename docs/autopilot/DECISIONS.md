@@ -526,3 +526,38 @@
 - Lý do (tiêu chí chất lượng cuối): (1) đúng/an toàn: mọi diff ngoài tài liệu từ 7ca87a6 (#497…#510, #512) đã qua review độc lập sạch ở head (ADR-0057), nên quét lại ngay trùng việc; Lát 3 là các 🔴 đã biết từ audit 11-11 — hoãn không che lỗi chưa biết trong khoảng này vì review từng PR đã rà delta. (2) đường lùi: audit delta vẫn chạy trước release-check (hàng audit và review_debt chặn GO), nên không bỏ qua, chỉ gộp một lần. (3) tiết kiệm: một lượt audit nhiều nhóm thay vì hai. Điều kiện đảo: nếu Lát 3 phát sinh 🔴 mới ngoài PLAN thì audit delta ngay.
 - Đường lùi: Chạy audit delta ngay ở giữa Lát 3 bằng /audit delta; thêm 🔴/🟠 mới vào PLAN-harden-2026-11-11
 - Đính chính (2026-11-12, review #512 🟠-1): lời "#512 … đã qua review độc lập sạch ở head" ở trên được viết trước khi #512 có review; review sạch của #512 ghi sau, ở head chứa chính D-428. Phạm vi lập luận: #497…#510 (đã có dấu review sạch trên PR). Chưa kiểm hàng `audit`/`review_debt` của `release-check` có đòi một lượt audit delta đã chạy hay chỉ đếm 🔴/🟠 mở và file đổi sau SHA quét (hàng `review_debt` đang báo 2 file của #512) — kỷ luật chạy audit delta trước release-check là của phiên chính.
+
+### D-429 · 2026-11-12T15:13:01+00:00 · AUD-SEC-645: CR trần ngoài nháy xử lý thế nào ở guard?
+
+- Phương án: (1) Bỏ \r khỏi lex.whitespace của tokenizer · (2) Luật STRICT_BARE: CR trần ngoài nháy → BUDGET (chặn ở mọi chính sách)
+- Chọn: Luật STRICT_BARE: CR trần ngoài nháy → BUDGET (chặn ở mọi chính sách)
+- Lý do (tiêu chí chất lượng cuối): (1) đúng và an toàn: shlex.split, str.split và regex \s ở các tầng khác vẫn tách từ ở CR nên sửa tokenizer không đóng được mọi tầng; BUDGET ở tập con chuẩn đóng cùng lúc, theo D-415 (không đọc chắc → chặn, không thêm cách đọc mới). Chi phí: dòng lệnh CRLF dán vào có CR trần bị chặn — bash vốn đọc sai các lệnh đó.
+- Đường lùi: Xoá luật CR khỏi STRICT_BARE và ca corpus aud645-*, rồi chọn phương án 1 nếu đo được CRLF dán vào gây chặn oan thường xuyên
+
+### D-430 · 2026-11-13T00:49:09+00:00 · Mở rộng tập con guard đọc chắc bằng cách nào để họ lỗi cú pháp shell hội tụ?
+
+- Phương án: (1) Thêm từng cú pháp vào bảng cấm STRICT_* · (2) Ngữ pháp dương: lệnh có luật chỉ qua khi mọi từ thuộc dạng được phép (cổng _ruled_word_why trong _allowlist_why), cú pháp bash mới mặc định ngoài tập con · (3) Parser bash thật (bashlex/tree-sitter)
+- Chọn: Ngữ pháp dương: lệnh có luật chỉ qua khi mọi từ thuộc dạng được phép (cổng _ruled_word_why trong _allowlist_why), cú pháp bash mới mặc định ngoài tập con
+- Lý do (tiêu chí chất lượng cuối): (1) đúng và an toàn: bảng cấm cho qua mọi cú pháp chưa liệt kê nên 16 🔴 cùng họ vẫn mở sau 12 ngày (ADR-0063 đã hứa 'ngoài tập con → chặn'); ngữ pháp dương làm lệch của bộ đọc nghiêng về chặn. (3) stdlib-only loại phương án 3. Đo trên 18.274 lệnh thật: cổng hẹp chặn thêm 13 lệnh (0,07 %), dưới ngưỡng 0,2 %. Chủ repo đã chọn hướng 'khoá tập con đọc chắc'.
+- Đường lùi: Revert từng lát (độc lập nhau); quay về bảng cấm STRICT_* của ADR-0063/0065
+
+### D-431 · 2026-11-13T00:49:23+00:00 · Cổng tập con: mã lý do, độ rộng và ngưỡng dừng
+
+- Phương án: (1) Mã BUDGET deny mọi chính sách, cổng hẹp (P0–P8), lớp giá trị biến không biết chấp nhận có hạn 2027-01-21 theo ADR-0067, ngưỡng dừng 0,2 % lệnh thật mỗi lát · (2) Mã mới tách ask/deny, biến thể chặt cấm mọi từ mở đầu bằng mở rộng (chặn thêm 0,41 %)
+- Chọn: Mã BUDGET deny mọi chính sách, cổng hẹp (P0–P8), lớp giá trị biến không biết chấp nhận có hạn 2027-01-21 theo ADR-0067, ngưỡng dừng 0,2 % lệnh thật mỗi lát
+- Lý do (tiêu chí chất lượng cuối): (1) an toàn: BUDGET đã thuộc UNSURE_CODES nên chặn ở mọi chính sách, ADR-0018/0019 cấm guard hỏi người nên không tách ask/deny; (4) trải nghiệm: cổng hẹp chặn 0,07 % so với 0,41 % của biến thể chặt, và 2,0 % nếu cấm mọi mở rộng trần; lớp 'giá trị biến không biết' (git reset "$X") cần phạm vi chấp nhận của ADR-0067 hoặc sandbox, không đóng được ở cú pháp. Mỗi lát có ca corpus chặn + ca đối chứng allow, lát nào làm hơn 0,2 % lệnh thật đổi từ cho qua sang chặn thì không merge và mở D mới.
+- Đường lùi: Đổi mã BUDGET sang mã khác hoặc nới ngưỡng bằng D mới; revert từng lát
+
+### D-432 · 2026-11-13T00:49:24+00:00 · Hai 🔴 ngoài lớp cú pháp: 691 (ssh-agent) và 648 (formatter chạm dòng ký GO-NO-GO)
+
+- Phương án: (1) 691 bằng đọc lại hậu tố (lệnh lạ có tên có luật trong 3 đối số đầu thì quét hậu tố như một lệnh), không bảng trình bọc; 648 xử lý phía Write/Edit (dòng §5 có ô tên/ngày mà không ở dạng bảng chuẩn thì chặn lúc ghi), ngoài cổng · (2) Bảng trình bọc lệnh mở rộng mãi cho 691; 648 chặn formatter ở Bash
+- Chọn: 691 bằng đọc lại hậu tố (lệnh lạ có tên có luật trong 3 đối số đầu thì quét hậu tố như một lệnh), không bảng trình bọc; 648 xử lý phía Write/Edit (dòng §5 có ô tên/ngày mà không ở dạng bảng chuẩn thì chặn lúc ghi), ngoài cổng
+- Lý do (tiêu chí chất lượng cuối): (2) giữ đường lùi và (3) đơn giản, test được: bảng trình bọc lại là danh sách cấm phải vá mãi (cùng lỗi cốt lõi); đọc lại hậu tố chỉ thêm chặn, gitleaks git --no-banner vẫn qua. 648 là lỗi ghi file, không phải đọc lệnh Bash nên không thuộc cổng.
+- Đường lùi: Bỏ lát 6 và luật Write/Edit của 648; quay về bảng trình bọc hoặc ghi chấp nhận có hạn
+
+### D-433 · 2026-11-13T00:51:31+00:00 · Cắt chỗ nào để docs/autopilot về dưới trần byte khi thêm D-429…D-432?
+
+- Phương án: (1) Dời PLAN-3.14-app.md (đã đóng, 0 task mở, 20 KB) sang docs/archive/autopilot theo ADR-0070 · (2) Nới trần byte của docs/autopilot
+- Chọn: Dời PLAN-3.14-app.md (đã đóng, 0 task mở, 20 KB) sang docs/archive/autopilot theo ADR-0070
+- Lý do (tiêu chí chất lượng cuối): (1) đúng quy tắc ADR-0043: cắt chỗ khác, không nới trần; PLAN không còn task mở, PROGRESS không nhắc, chỉ SPEC-app, ADR-0038, CHANGELOG-ARCHIVE trỏ tới nên viết lại ba liên kết là đủ; test_plan_waves nhúng cứng nên không phụ thuộc đường dẫn.
+- Đường lùi: git mv ngược về docs/autopilot và hoàn lại ba liên kết
