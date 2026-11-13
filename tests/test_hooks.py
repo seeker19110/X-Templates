@@ -9720,6 +9720,218 @@ class GuardBareCrTest(_GuardDebtCase):
                 )
 
 
+class GuardPrefixGateTest(_GuardDebtCase):
+    """ADR-0076 lát 4 (T-3764, P0 tiền tố). Đọc lại để luật cũ thấy đúng lệnh (cùng mã dạng trơn): `{tên}>` đứng đầu như số
+    fd (AUD-SEC-657/700 — bash 5.3 chạy lệnh với fd=10), cụm cờ `exec -la x` như getopt (AUD-SEC-659). Chặn `BUDGET`:
+    `time` từ khoá rồi gán/từ khoá/builtin (AUD-SEC-663 — bash giữ phép gán: `time d=X; echo $d` → `X`), `coproc` ở vị
+    trí lệnh (AUD-SEC-664), cờ/giá trị trần/thời lượng của trình bọc có mở rộng hay glob."""
+
+    SAME_AS_PLAIN = (  # (dạng tiền tố, dạng trơn): cùng quyết định deny và cùng mã
+        ("{fd}>o git reset --hard HEAD~3", "git reset --hard HEAD~3"),
+        ("{fd}>o rm -rf ~", "rm -rf ~"),
+        ("{fd}>o sudo id", "sudo id"),
+        ("{fd}>o bash -c 'git reset --hard'", "bash -c 'git reset --hard'"),
+        ("{fd}>/dev/null git push origin feat/me --force", "git push origin feat/me --force"),
+        ("{fd}<&0 git reset --hard", "git reset --hard"),
+        ("{a[1]}>o git reset --hard", "git reset --hard"),  # bash 5.3 nhận phần tử mảng làm tên fd
+        ("{fd}>a {fd2}>b git reset --hard", "git reset --hard"),
+        ("x=1 {fd}>o git reset --hard", "git reset --hard"),
+        ("command {fd}>o git reset --hard", "git reset --hard"),
+        ("time {fd}>o git reset --hard", "git reset --hard"),
+        ("echo x; {fd}>o git reset --hard", "git reset --hard"),
+        ("exec -la x git push origin feat/me --force", "git push origin feat/me --force"),
+        ("exec -ca x git push origin feat/me --force", "git push origin feat/me --force"),
+        ("exec -cla x git push origin feat/me --force", "git push origin feat/me --force"),
+        ("exec -l -a x git push origin feat/me --force", "git push origin feat/me --force"),
+        ("exec -al git push origin feat/me --force", "git push origin feat/me --force"),  # `-a l`: giá trị dính
+        ("command exec -la x git push origin feat/me --force", "git push origin feat/me --force"),
+        ("builtin exec -la x rm -rf ~", "rm -rf ~"),
+        ("f() { exec -la x git push origin feat/me --force; }; f", "git push origin feat/me --force"),
+    )
+    TIME = (  # AUD-SEC-663
+        "time d=/; rm -rf $d",
+        "time for d in /; do rm -rf $d; done",
+        "time { d=/; rm -rf $d; }",
+        "time if d=/; then rm -rf $d; fi",
+        "time function g { d=/; rm -rf $d; }; g",
+        "set -- 1; time for x do git push origin feat/me --force; done",
+        "time select x do git push origin feat/me --force; done",
+        "time while d=/; false; do :; done; rm -rf $d",
+        "time d=X; echo RAN $d",
+        "time -p d=/; rm -rf $d",
+        "time -p -- d=/; rm -rf $d",
+        "time time d=/; rm -rf $d",
+        "time ! d=/; rm -rf $d",
+        "! time d=/; rm -rf $d",
+        "if time d=/; then rm -rf $d; fi",
+        "{ time d=/; rm -rf $d; }",
+        "echo x && time d=/; rm -rf $d",
+        "echo x | time d=/; rm -rf $d",
+        "(time d=/; rm -rf $d)",
+        "time >o d=/; rm -rf $d",
+        "time {fd}>o d=/; rm -rf $d",
+        "time a[0]=/; rm -rf ${a[0]}",
+        "time \\\nd=/; rm -rf $d",
+        "time\td=/; rm -rf $d",
+        "time export d=/; rm -rf $d",  # builtin chạy trong shell này: dạng trơn RULE_DENY
+        "time 'export' d=/; rm -rf $d",  # nháy không làm builtin thành lệnh ngoài
+        "time declare d=/; rm -rf $d",
+        "time read d <<< /; rm -rf $d",
+        "time eval d=/",
+        "time source x.sh",
+        "time PATH=venv/bin:$PATH scripts/dev-task.sh test",  # ADR-0076 §Hệ quả: chặn có chủ ý (ca adr76-ctl)
+        'echo "$(time d=/; rm -rf $d)"',
+        "bash -c 'time d=/; rm -rf $d'",
+        "f() { time d=/; rm -rf $d; }; f",
+        "trap 'time d=/; rm -rf $d' EXIT",
+        "case x in x) time d=/;; esac; rm -rf $d",
+        "for i in 1; do time d=/; done; rm -rf $d",
+    )
+    COPROC = (  # AUD-SEC-664
+        "coproc x { d=/; rm -rf $d; }",
+        "coproc git status",
+        "{ coproc x { :; }; }",
+        "if true; then coproc x { d=/; rm -rf $d; }; fi",
+        "time coproc { git status; }",
+        "echo $(coproc x { d=/; rm -rf $d; })",
+        "bash -c 'coproc x { d=/; rm -rf $d; }'",
+    )
+    WRAPPER = (  # ADR-0076 P0: cờ/giá trị trần/thời lượng trình bọc có mở rộng hay glob
+        "timeout $X 5 git push origin feat/me --force",  # X rỗng: `5` là thời lượng
+        'timeout "$T" git status',  # chỗ thời lượng: giá trị có thể là cờ (`--foreground`)
+        "timeout 5* git status",
+        "timeout -k $K 10 git status",  # giá trị trần: tách từ dời vị trí tên lệnh
+        "stdbuf -o$M git status",
+        "nice -n $N git status",
+        'xargs -P"$(nproc)" -n1 echo',
+        "exec -l$X git status",
+        "exec -$X x git push origin feat/me --force",
+        "env -C $D git status",
+        "env -u$!x git status",
+        'nice -n "$N"x git status',  # không phải đúng một cặp nháy kép
+        'nice -n "$(echo "5")" git status',
+        'timeout -s nice -n "$N" 5 make',  # `nice` là giá trị của `-s`, không đổi trình bọc: `"$N"` ở chỗ thời lượng
+    )
+    ALLOWED = (  # đối chứng: chữ trong nháy/đối số/heredoc, idiom stack khác, cách viết lại
+        "echo time",
+        "echo coproc",
+        "echo '{fd}>x'",
+        "grep -r time .",
+        "grep -rn coproc docs/",
+        "echo time d=/",
+        "echo coproc x { y; }",
+        "git log --grep time",
+        "git commit -m 'time d=/'",
+        "echo exec -la x",
+        'echo "time d=/"',
+        "case $x in time) echo t;; esac",
+        "[[ $x == time ]] && echo y",
+        "cat <<'EOF'\ntime d=/\ncoproc x { y; }\nEOF",
+        "git commit -F - <<'EOF'\nfix: time d=/ coproc\nEOF",
+        "\\time d=/",  # nháy: không phải từ khoá — /usr/bin/time chạy chương trình tên `d=/`
+        "X=1 time make",
+        "x=1 coproc y",
+        "'coproc' x",
+        'time make -j "$(nproc)"',
+        "time cargo build",
+        "time npm test",
+        "time docker build .",
+        "time -p make",
+        "time -- git status",
+        "time git status",
+        "time python3 -m unittest tests.test_hooks",
+        "time env PATH=venv/bin:$PATH scripts/dev-task.sh test",  # cách viết lại của ADR-0076
+        "time (cd x && make)",
+        "time ((i++))",
+        "time [[ -f x ]]",
+        'for f in *.py; do time python3 "$f"; done',
+        "{ time make; } 2>&1 | tail -3",
+        "exec node server.js",
+        "exec 3>file",
+        "exec >log 2>&1",
+        "exec {fd}>o",
+        'exec {fd}<file; read -r l <&"$fd"; exec {fd}<&-',
+        "exec -a myname make",
+        'exec -a "$N" make',
+        "exec -al bash -c true",
+        "{fd}>o git status",
+        "timeout 30 cmd",
+        "timeout 30 npm test",
+        "timeout -k 2 10 npm test",
+        'timeout -k "$K" 10 npm test',
+        "nice -n 10 cmd",
+        'nice -n "$N" make',
+        'xargs -r -P "$(nproc 2>/dev/null || echo 2)" -n 1 echo',
+        "xargs -I{} echo {}",
+        "stdbuf -oL make",
+        "env FOO=1 cmd",
+        "env FOO=$BAR npm test",
+        'env -C "$D" make',
+        "PATH=venv/bin:$PATH python3 -m unittest",
+        'command -v "$x"',
+    )
+
+    def test_fd_name_and_exec_cluster_read_like_plain(self):  # AUD-SEC-657/700/659: cùng mã dạng trơn
+        for cmd, plain in self.SAME_AS_PLAIN:
+            with self.subTest(cmd):
+                got, want = self.out(cmd), self.out(plain)
+                self.assertEqual(want["decision"], "deny", plain)
+                self.assertEqual((got["decision"], got.get("code")), (want["decision"], want.get("code")), cmd)
+
+    def test_time_coproc_wrapper_budget(self):  # AUD-SEC-663/664, ADR-0076 P0
+        self.assert_code((*self.TIME, *self.COPROC, *self.WRAPPER), "BUDGET")
+        reason = self.out("time d=/; rm -rf $d")["reason"]
+        self.assertIn("viết lại", reason)
+        self.assertIn("`d=/`", reason)
+
+    def test_controls_allowed(self):  # bài học #517: từ khoá làm đối số/trong nháy giữ qua; idiom stack khác
+        self.assert_allowed(self.ALLOWED)
+
+    def test_old_rule_code_kept(self):  # luật cũ chặn trước giữ mã cũ (bài học review #523), cả strict
+        cmds = (
+            "nice -n$X git push origin feat/me --force",
+            "env -u$X git push origin feat/me --force",
+            "time git push origin feat/me --force",
+            "time exec -la x git push origin feat/me --force",
+            "coproc rm -rf ~",
+            "time cd /; rm -rf *",
+        )
+        self.assert_code(cmds, "RULE_DENY")
+        with mock.patch.dict(os.environ, {"XT_GUARD_POLICY": "strict"}):
+            self.assert_code(cmds, "RULE_DENY")
+            self.assert_code(("time d=/; rm -rf $d", "coproc git status", "timeout $X 5 git status"), "BUDGET")
+
+    def test_readers(self):  # đơn vị: bộ đọc tiền tố
+        g = self.g
+        self.assertEqual(g._strip_prefixes(["{fd}", ">", "o", "{a[1]}", "<&", "0", "git", "status"]), ["git", "status"])
+        self.assertEqual(g._strip_prefixes(["{fd}", "git"]), ["{fd}", "git"])  # không có chuyển hướng: tên lệnh
+        self.assertEqual(g._strip_prefixes(["exec", "-la", "x", "git"]), ["git"])
+        self.assertEqual(g._strip_prefixes(["exec", "-al", "git"]), ["git"])
+        self.assertTrue(g._wrapper_opt_takes_next("exec", "-cla"))
+        self.assertFalse(g._wrapper_opt_takes_next("exec", "-al"))
+        self.assertFalse(g._wrapper_opt_takes_next("nice", "-la"))
+        self.assertEqual(g._lead_word_bad(["time", "-p", "--", ">", "o", "{fd}", ">", "p", "d=/"]), "d=/")
+        self.assertEqual(g._lead_word_bad(["time"]), "")
+        self.assertEqual(g._lead_word_bad(["{", "time", "make"]), "")
+        self.assertEqual(g._lead_word_bad(["x=1", "coproc"]), "")
+        self.assertEqual(g._lead_word_bad(["!", "coproc", "x"]), "coproc")
+        self.assertFalse(g._wrapper_value("env", "-S"))
+        self.assertTrue(g._wrapper_value("env", "-iC"))
+        self.assertEqual(g._prefix_why("time 'unclosed"), "")
+
+    def test_parallel_same_result(self):  # hàm thuần: gọi song song cho cùng kết quả
+        cmds = [*self.TIME, *self.WRAPPER, *self.ALLOWED] * 3
+        with concurrent.futures.ThreadPoolExecutor(8) as pool:
+            got = list(pool.map(self.g._prefix_why, cmds))
+        self.assertEqual(got, [self.g._prefix_why(c) for c in cmds])
+
+    def test_linear(self):  # một lượt, tuyến tính theo độ dài lệnh
+        why = self.g._prefix_why
+        cpu_budget.assert_not_quadratic(self, lambda n: why("time " + "! " * n + "make"), 4_000)
+        cpu_budget.assert_not_quadratic(self, lambda n: why("{fd}>o " * n + "git status"), 4_000)
+        cpu_budget.assert_not_quadratic(self, lambda n: why("nice -n 1 " * n + "make"), 4_000)
+
+
 class GuardWholeCommandSyntaxTest(_GuardDebtCase):
     """ADR-0076 P6 (lát 1, T-3761): cú pháp toàn lệnh bash chạy mà guard không đọc → BUDGET (D-415). Thay lệnh `${ …; }`/
     `${| …; }` của bash 5.3 chạy trong shell hiện tại (AUD-SEC-665, cả trong nháy kép và thân heredoc không nháy); extglob

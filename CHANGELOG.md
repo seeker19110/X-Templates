@@ -179,6 +179,26 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
 
 ### Fixed
 
+- Guard — ADR-0076 lát 4, tiền tố P0 (T-3764; lý do chạm hàng rào: năm 🔴 có từ trước AUD-SEC-657/659/663/664/700,
+  D-415/D-430/D-431 — chỉ thêm chặn). Đọc lại để luật cũ thấy đúng lệnh, giữ mã dạng trơn: `{tên}>`/`{tên}<` (cả
+  `{a[1]}>`) đứng đầu lệnh đọc như số fd (`{fd}>o git reset --hard`, `{fd}>o rm -rf ~`, `{fd}>o sudo id` → RULE_DENY như
+  dạng trơn); cụm cờ `exec` đọc như getopt (`exec -la x git push … --force`, `-ca x` → RULE_DENY; `exec -al bash` vẫn là
+  `-a l` như #433). Mắt xích mới `_prefix_why` của `_allowlist_why` → `BUDGET` kèm `viết lại:`: `time` là từ khoá (không
+  nháy, ở vị trí lệnh) rồi tới gán, từ khoá mở thân (`{`, `if`, `for`, `select`, `while`, `case`, `function`, `coproc`)
+  hay builtin bash (`time d=/; rm -rf $d`, `time for …`, `time { …; }`, `time export d=/`, `time read d <<< /`); `coproc`
+  ở vị trí lệnh; cờ, giá trị trần hay thời lượng của trình bọc có mở rộng/glob (`timeout $X 5 CMD`, `timeout "$T" CMD`,
+  `nice -n $N`, `stdbuf -o$M`) — giá trị trong đúng một cặp nháy kép sau cờ nhận giá trị vẫn qua (`nice -n "$N"`,
+  `xargs -P "$(nproc)"`). Đổi có chủ ý: ca `adr76-ctl-time-path-assign` (`time PATH=…:$PATH cmd`) → BUDGET, viết lại
+  `time env PATH=… cmd`. Đường đổi mã: không ca corpus nào (2.440 ca, chính sách mặc định và `XT_GUARD_POLICY=strict`)
+  đổi mã ngoài ca có chủ ý trên; mã có thể thành `BUDGET` ở đường đã ghi của lát 2 (quét lồng, câu hỏi gom sau tập con).
+  Đo trên 19.729 lệnh Bash thật khác nhau của repo này (30.281 lượt): 3 lệnh (0,015 %, 6 lượt) đổi từ cho qua sang
+  chặn — cả ba là `time VAR=… cmd`; 0 lệnh nhẹ đi, 0 lệnh đổi mã. Số đo chỉ đại diện repo Python này; idiom stack khác
+  bị chặn thêm: `time { make; }`, `time cd …`/`time source …` (builtin), `timeout "$T" cmd`, `nice -n $N cmd` — viết lại:
+  bỏ `time` trước builtin/cấu trúc, giá trị nguyên văn hay trong nháy kép sau cờ; vẫn qua: `time make -j "$(nproc)"`,
+  `time cargo build`, `time npm test`, `exec node server.js`, `exec 3>file`, `exec >log 2>&1`, `timeout 30 cmd`,
+  `nice -n 10 cmd`, `env FOO=1 cmd`. Còn lọt (AUD-SEC-780, T-3790): lệnh chỉ có gán + chuyển hướng (`>o d=/; rm -rf $d`,
+  `{fd}>o d=/`). ADR-0076: lát 0, 1, 2, 4 xong. Dự án đích: nâng bản để nhận `.claude/hooks/guard.py` mới; lệnh bị
+  chặn đọc dòng `viết lại:` của lý do.
 - Guard — ADR-0076 lát 2 (T-3762; lý do chạm hàng rào: bốn 🔴 có từ trước cùng gốc AUD-SEC-644, D-430/D-431/D-435 — chỉ
   thêm chặn, mã `BUDGET`; quyết định cuối không nhẹ đi — luật cũ chặn trên cùng cách đọc giữ mã cũ, còn mã/lý do có thể
   thành `BUDGET` ở hai cách đọc `LitWord`, bản bung brace, câu hỏi nhường của `_go_patch_asks`, câu hỏi BUDGET của luật

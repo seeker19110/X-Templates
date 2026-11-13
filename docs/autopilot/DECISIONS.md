@@ -603,3 +603,17 @@
 - Chọn: printf → GATE_NAMES; pytest/tox/nox giữ GATE_NAMES (siết, chặn oan thêm đo được 0 ở cả hai), ADR dòng 56 được D này đính chính
 - Lý do (tiêu chí chất lượng cuối): (1) an toàn: đo trên 19.026 lệnh Bash thật cả hai phương án chênh 0 lệnh; khi chi phí bằng nhau chọn bên chặt (printf -v ghi biến như read/let; pytest chạy mã từ conftest/-p). ADR-0076 không sửa (đã Accepted): câu 'pytest không qua cổng' bị D này thay — cổng chỉ chặn dạng cờ/lệnh con có mở rộng nên rất hiếm chạm pytest.
 - Đường lùi: Chuyển printf về GATE_PASSIVE hoặc pytest/tox/nox sang GATE_PASSIVE (sửa PASSIVE_PIN và test ghim)
+
+### D-440 · 2026-11-13T10:26:25+00:00 · Lát 4: cờ exec ngoài -a TÊN (AUD-SEC-659) và {fd}> đứng đầu lệnh (AUD-SEC-657/700) — BUDGET như bảng P0 của ADR-0076 hay đọc lại như bash?
+
+- Phương án: (1) BUDGET mọi lệnh có luật mà exec có cờ ngoài -a TÊN hoặc có {fd}> ở đầu (đúng chữ ADR; phải đổi ca đối chứng d432-ctl-432-exec-al (exec -al bash -c true, #433)) · (2) Đọc lại như bash: cụm cờ exec theo getopt (_wrapper_opt_takes_next, như _exec_login) và {tên} coi như số fd trong _strip_prefixes — dạng nguy hiểm ra cùng mã dạng trơn, dạng lành vẫn qua
+- Chọn: Đọc lại như bash: cụm cờ exec theo getopt (_wrapper_opt_takes_next, như _exec_login) và {tên} coi như số fd trong _strip_prefixes — dạng nguy hiểm ra cùng mã dạng trơn, dạng lành vẫn qua
+- Lý do (tiêu chí chất lượng cuối): (1) đúng và an toàn: đọc lại cho đúng mã luật cũ của dạng trơn (exec -la x git push --force → RULE_DENY như dạng không cờ; {fd}>o git reset --hard → RULE_DENY) — đóng đúng lỗ 657/659/700 mà KHÔNG làm đổi mã luật; (3) bền/đơn giản: dùng lại cơ chế getopt đã có của _exec_login thay vì liệt kê; (4) trải nghiệm: không đụng ca #433 (exec -al bash -c true) và đo thêm 0 lệnh thật bị chặn nếu chọn BUDGET cho {fd}> nên không cần siết thêm. Ngoại lệ ADR chỉ là lựa chọn cách đóng, không nới luật.
+- Đường lùi: Chuyển sang BUDGET đúng chữ ADR (exec cờ lạ, {fd}> đầu lệnh có luật), đổi ca d432-ctl-432-exec-al sang BUDGET và ghi lý do
+
+### D-441 · 2026-11-13T10:27:22+00:00 · docs/autopilot vượt trần byte 318 B sau D-440 và T-3790: cắt chỗ nào?
+
+- Phương án: (1) Dời PLAN-harden-2026-11-05.md (đã đóng, 0 task mở, 3,5 KB) sang docs/archive/autopilot theo ADR-0070 · (2) Nới trần byte của docs/autopilot
+- Chọn: Dời PLAN-harden-2026-11-05.md (đã đóng, 0 task mở, 3,5 KB) sang docs/archive/autopilot theo ADR-0070
+- Lý do (tiêu chí chất lượng cuối): (1) đúng quy tắc ADR-0043: cắt chỗ khác, không nới trần; PLAN không còn task mở, PROGRESS không nhắc, các chỗ nhắc (ADR-0069, DECISIONS, CHANGELOG, guard.py) chỉ là văn xuôi nên không có liên kết nào hỏng; xt.py vẫn quét docs/archive/autopilot khi cấp số task nên T-NNNN không tái sử dụng.
+- Đường lùi: git mv ngược PLAN-harden-2026-11-05.md về docs/autopilot
