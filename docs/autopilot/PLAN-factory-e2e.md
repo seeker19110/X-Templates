@@ -58,7 +58,7 @@
 - [ ] `T-3844` Gói `web-api-ts`: ảnh + compose dev (app + Postgres), khoá triển khai dev ở `pack.json`; workflow gói: repo sạch → bản dev → receipt → quay lui, ca sai cố ý đỏ (sau: T-3842) — Gate: `python3 -m unittest tests.test_pack_dev_deploy`
 
 ### Lát 2 — Ý tưởng tới repo đang chạy
-- [ ] `T-3845` `install.py`: một lệnh từ thư mục trống ra dự án mới (git, khung + gói, `PROJECT.md` 4 dòng Khung với giả định ghi "(mặc định khung — chưa chủ xác nhận)", blueprint, `doctor` sạch) (topo: review) — Gate: `python3 -m unittest tests.test_install_new`
+- [x] `T-3845` `install.py`: một lệnh từ thư mục trống ra dự án mới (git, khung + gói, `PROJECT.md` 4 dòng Khung với giả định ghi "(mặc định khung — chưa chủ xác nhận)", blueprint, `doctor` sạch) (topo: review) — Gate: `python3 -m unittest tests.test_install_new`
 - [ ] `T-3846` Skill một bước ý tưởng → bản dev (T-3845 → `/autopilot` → giai đoạn 1 → triển khai dev → báo cáo); repo sản phẩm là repo riêng hoặc bundle (sau: T-3844, T-3845, T-3848) — Gate: `python3 -m unittest tests.test_skill_factory`
 - [ ] `T-3847` Pilot 1: một ý tưởng mẫu → bản dev có receipt trên repo sạch; ghi thời gian, chi phí, số lần phải hỏi người (sau: T-3846) — Gate: `test -s docs/ops/FACTORY-PILOT-1.md`
 
