@@ -1455,9 +1455,14 @@ STRICT_PLAIN = {
 }
 STRICT_WORD_BREAK = " \t\n;&|()<>"
 STRICT_BRACE_RE = re.compile(r"\{[^{}\s]*(?:,|\.\.)[^{}\s]*\}")
+# ADR-0076 P6 (lát 1): cú pháp toàn lệnh không gắn tên lệnh nên vẫn là bảng cấm như ADR-0063 — cổng dương của các lát sau
+# chỉ xét lệnh có tên có luật. `${ …; }`/`${| …; }` (bash 5.3) chạy lệnh cả trong nháy kép và thân heredoc không nháy.
+FUNSUB_RE = re.compile(r"\$\{[\s|]")
+FUNSUB_WHY = "thay lệnh `${ …; }`/`${| …; }` của bash 5.3 — guard không quét lệnh bên trong (AUD-SEC-665); dùng `$(…)`"
 STRICT_LIVE = (
     (re.compile(r"\$\$\("), "`$$(` (AUD-SEC-243)"),
     (re.compile(r"\$\{?[!#]?IFS\b"), "mở rộng `IFS` (AUD-SEC-232/238/239)"),
+    (FUNSUB_RE, FUNSUB_WHY),
 )
 # Chữ thô (cả trong nháy): chuỗi nháy gán vào biến có thể được đánh giá lại khi số học.
 STRICT_RAW = ((re.compile(r"\w\[[^\]\n]*\$\((?!\()"), "thay lệnh trong chỉ số mảng (AUD-SEC-249)"),)
@@ -1504,10 +1509,81 @@ STRICT_BARE = (
 # bash không tách từ ở CR (ký tự thường: `a<CR>-h` là MỘT từ), tokenizer và các tầng đọc theo `\s` thì tách (AUD-SEC-645,
 # D-429): CR ở mã ngoài nháy hay trong `${…}` (`-m ${X:-x<CR>-l}`) → chặn; CR trong nháy/thân heredoc là chữ, không tính.
 BARE_CR_WHY = "CR (`\\r`) trần ngoài nháy — bash coi CR là ký tự của từ (AUD-SEC-645); bỏ ký tự CR khỏi dòng lệnh"
+# `\` lẻ cuối lệnh: `shlex` lỗi và `tokenize` rơi về tách thô, không tách `(`/`<` khỏi từ (AUD-SEC-656).
+TAIL_BACKSLASH_WHY = "`\\` lẻ cuối lệnh — guard tách thô khác bash (AUD-SEC-656); bỏ `\\` cuối hoặc đặt trong nháy"
+EXTGLOB_WHY = (
+    "extglob trần `?(`/`*(`/`+(`/`@(`/`!(` ngoài `((…))` — bật `extglob` thì bash bung thành tên tệp (AUD-SEC-666);"
+    " liệt kê tệp nguyên văn, `! (lệnh)` có dấu cách, mẫu glob/grep đặt trong nháy; regex của `[[ $x =~ … ]]` gán vào"
+    " biến trước (`re='^v?([0-9]+)$'; [[ $x =~ $re ]]` — nháy trong `[[` làm regex thành chữ); số học viết `$((…))`"
+)
 
 
 def _bare_cr_why(v: "_CodeView") -> str:
     return BARE_CR_WHY if "\r" in v.s and any(c == "\r" and k in "cp" for c, k in zip(v.s, v.kind)) else ""
+
+
+def _code_paren_pairs(v: "_CodeView") -> Dict[int, int]:
+    """Cặp ngoặc cấu trúc (mã ngoài nháy, hay `(` của `$(` trong nháy kép/`${…}`): vị trí mở → vị trí đóng. Khác
+    `_paren_pairs` (đếm thô cả trong nháy): ngoặc trong chữ nháy không ghép nhầm thành `((…))`."""
+    s, kind, opens, pairs = v.s, v.kind, [], {}
+    for i, c in enumerate(s):
+        if c == "(" and (kind[i] == "c" or (i and s[i - 1] == "$" and kind[i - 1] == kind[i] != "q")):
+            opens.append(i)
+        elif c == ")" and kind[i] == "c" and opens:
+            pairs[opens.pop()] = i
+    return pairs
+
+
+def _extglob_why(v: "_CodeView") -> str:
+    """AUD-SEC-666: `X(` (X ∈ `?*+@!`) ở mã ngoài nháy, không trong số học `((…))`/`$((…))` (bash: cặp đóng của `((`
+    liền nhau; `((a) )` là subshell). `$(` trong số học mở lại ngữ cảnh lệnh. Một lượt trên cặp ngoặc, tuyến tính."""
+    s, kind = v.s, v.kind
+    pairs, arith = _code_paren_pairs(v), [False]
+    for i, c in enumerate(s):
+        if i in pairs:
+            prev = s[i - 1] if i else ""
+            if prev and prev in "?*+@!" and kind[i - 1] == kind[i] == "c" and not arith[-1]:
+                return EXTGLOB_WHY
+            inner = pairs.get(i + 1, -2)
+            arith.append(inner + 1 == pairs[i] or (arith[-1] and prev != "$"))
+        elif c == ")" and kind[i] == "c" and len(arith) > 1:
+            arith.pop()
+    return ""
+
+
+# review #528: bash không có comment trong số học (`((…))`, `$((…))`, `$[…]`, chỉ số mảng `tên[…]`) — `1 #${ cmd; }` là
+# chữ số học, mở rộng (chạy `cmd`) rồi mới báo lỗi; guard đọc `#…` là comment (kind `q`) nên không thấy gì sau nó.
+ARITH_HASH_WHY = (
+    "`#` sau khoảng trắng trong số học `((…))`/`$((…))`/`$[…]`/chỉ số mảng — bash không coi là comment, guard thì có"
+    " (AUD-SEC-665); bỏ `#` hoặc đưa chú thích ra sau lệnh"
+)
+
+
+def _arith_hash_why(v: "_CodeView") -> str:
+    """`#` mở comment (theo `_CodeView`) mà đang trong ngoặc có thể là số học hay `[` chưa đóng. Ngoặc có thể
+    là số học: `((` liền nhau (không đợi cặp đóng — bash đọc số học trước, lùi về subshell sau: `(( 1 #… ))`↵`) )` vẫn
+    chạy dòng 1), hay nằm trong số học mà không phải `$(` (thay lệnh)."""
+    if not v.comments:
+        return ""
+    s, kind, starts = v.s, v.kind, {a for a, _ in v.comments}
+    parens: List[bool] = [False]
+    brackets: List[
+        int
+    ] = []  # độ sâu ngoặc lúc mở mỗi `[` chưa đóng — `]` trong `$(…)` không đóng `[` ngoài (review #528)
+    for i, c in enumerate(s):
+        if i in starts and (parens[-1] or brackets):
+            return ARITH_HASH_WHY
+        if c == "(" and (kind[i] == "c" or (i and s[i - 1] == "$" and kind[i - 1] == kind[i] != "q")):
+            parens.append(s.startswith("((", i) or (parens[-1] and s[i - 1 : i] != "$"))
+        elif kind[i] != "c":
+            continue
+        elif c == ")" and len(parens) > 1:
+            parens.pop()
+        elif c == "[":  # mọi `[` ở mã: `$[`, `tên[`, cả `[k …]=v` trong `x=( … )` (comment chỉ hợp lệ khi đã đóng)
+            brackets.append(len(parens))
+        elif c == "]" and brackets and brackets[-1] == len(parens):
+            brackets.pop()
+    return ""
 
 
 class _CodeView:
@@ -1630,8 +1706,13 @@ def _strict_why(cmd: str, cwd: Optional[str] = None) -> str:
             return "backtick trong thân heredoc không nháy — dùng `$(…)` (AUD-SEC-181/231/245)"
         if "'" in body and "$(" in body:
             return "thân heredoc không nháy có `'` cùng thay lệnh (AUD-SEC-196)"
+        if FUNSUB_RE.search(body):  # cả `\${ ` (chặt hơn: không đếm `\` thoát)
+            return FUNSUB_WHY
         lines[a:b] = [" " * len(x) for x in lines[a:b]]  # chữ (thay lệnh trong thân: `_heredoc_feed` của luật cũ)
-    v = _CodeView(_fold_heredocs("\n".join(lines), True))
+    joined = "\n".join(lines)
+    if (len(joined) - len(joined.rstrip("\\"))) % 2:
+        return TAIL_BACKSLASH_WHY
+    v = _CodeView(_fold_heredocs(joined, True))
     if v.why:
         return v.why
     live, bare = _code_views(v)
@@ -1639,7 +1720,7 @@ def _strict_why(cmd: str, cwd: Optional[str] = None) -> str:
     why = next((why for rules, text in checks for rx, why in rules if rx.search(text)), "")
     if not why and STRICT_IFS_RE.search(v.s) and STRICT_SHELL_RE.search(v.s):
         why = "`$IFS` trong script của shell lồng (AUD-SEC-239)"
-    why = why or _bare_cr_why(v) or _ifs_split_why(cmd, live, bare)
+    why = why or _bare_cr_why(v) or _extglob_why(v) or _arith_hash_why(v) or _ifs_split_why(cmd, live, bare)
     return why or _dyn_text_why(v, live, bare) or _gh_strict_why(v.s, live, cwd)
 
 
@@ -4555,7 +4636,18 @@ PWD_SUBST_RE = re.compile(
 )  # `$(pwd)`/`` `pwd` `` = `$PWD` (review #187: không nháy bị tách token)
 
 
-def tokenize(cmd: str) -> List[str]:
+SHLEX_UNCLOSED_WHY = (
+    'ngoài tập con guard đọc chắc — bộ tách từ thấy nháy không đóng (`\'` trong `"…"` lồng trong `"$(…)"`) mà bash'
+    " thì không, guard chỉ tách thô (AUD-SEC-656, D-415); đưa chuỗi có nháy lồng vào biến hoặc tệp (ADR-0063)"
+)
+# Lần đọc hiện tại (`_bash_reading`) đã tách thô lệnh chặt: luật cũ vẫn chạy trên token thô (deny giữ mã của luật),
+# còn kết quả không chặn thì đổi thành BUDGET (`_rough_budget`).
+ROUGH_SPLIT: contextvars.ContextVar[bool] = contextvars.ContextVar("ROUGH_SPLIT", default=False)
+
+
+def tokenize(cmd: str, strict: bool = False) -> List[str]:
+    """Tách token như bash (gần đúng). `strict` (lệnh gốc/script lồng nguyên văn, ADR-0063): `shlex` lỗi → đánh dấu
+    `ROUGH_SPLIT` để lần đọc không cho qua; chữ lỏng (`budget.loose`) chỉ tách thô để quét bảo thủ."""
     joined = join_continuations(cmd)
     cmd = expand_ansi_c(_fold_heredocs(joined, False, True))
     strip_comments(cmd, True)  # `)#` chặn TRƯỚC khi `$IFS`/`$(pwd)` bị viết lại (`$(pwd)#` thành `$PWD#`, AUD-SEC-195)
@@ -4572,6 +4664,8 @@ def tokenize(cmd: str) -> List[str]:
         return _with_here_bodies(_fn_forms(_unglue(list(lex))), joined)
     except ValueError:  # nháy không đóng: tách thô để vẫn kiểm được (bảo thủ) — xuống dòng là ranh giới lệnh như bash,
         # không phải khoảng trắng (`"` lẻ trong thân heredoc của `"$(cat <<'EOF'` làm shlex lệch; review #361 lượt 3)
+        if strict:
+            ROUGH_SPLIT.set(True)
         raw = re.split(r"[ \t\r]+|(?=[;&|\n])|(?<=[;&|\n])", cmd)
         return [t if _is_punct(t) else re.sub(r"[\\'\"]", "", t) for t in raw]  # bỏ nháy/`\\`: `\\rm`, `'r'm` (D-276)
 
@@ -16109,24 +16203,34 @@ def _bash_reading(
     """Một lần đọc của `bash_decision` (theo `READING`)."""
     token = FD_DIRS.set(tuple(dict.fromkeys((*FD_DIRS.get(), *_fd_open_dirs(cmd)))))
     split = GH_SPLIT_WORDS.set(GH_SPLIT_WORDS.get())
+    rough = ROUGH_SPLIT.set(False)
     try:
         GH_SPLIT_WORDS.set(GH_SPLIT_WORDS.get() | _gh_split_words(cmd))  # lệnh lồng cộng dồn (AUD-SEC-590)
-        return _bash_decision(cmd, root, cwd, depth, budget, rewrites)
+        res = _bash_decision(cmd, root, cwd, depth, budget, rewrites)
+        return _rough_budget(res, cmd) if ROUGH_SPLIT.get() else res
     except ScanTooComplex as e:
-        reason = f"Lệnh quá phức tạp để guard quét hết ({e}): {clean_text(cmd)[:200]}{BUDGET_REWRITE}"
-        out: Dict[str, object] = {
-            "decision": "deny",
-            "reason": reason,
-            "commit": False,
-            "no_verify": False,
-            "commit_dir": "",
-            "code": BUDGET,
-        }
+        out = _budget_result(cmd, str(e))
         out.update(getattr(e, "flags", {}))  # review #433 R1: giữ cờ bỏ hook (`no_verify`/`push_no_verify`) cho adapter
         return out
     finally:
+        ROUGH_SPLIT.reset(rough)
         GH_SPLIT_WORDS.reset(split)
         FD_DIRS.reset(token)
+
+
+def _budget_result(cmd: str, why: str) -> Dict[str, object]:
+    reason = f"Lệnh quá phức tạp để guard quét hết ({why}): {clean_text(cmd)[:200]}{BUDGET_REWRITE}"
+    return {"decision": "deny", "reason": reason, "commit": False, "no_verify": False, "commit_dir": "", "code": BUDGET}
+
+
+def _rough_budget(res: Dict[str, object], cmd: str) -> Dict[str, object]:
+    """AUD-SEC-656 (review #528): lệnh chặt mà `shlex` phải tách thô — lần đọc này đã chặn (sau chính sách) thì giữ mã đó,
+    không thì BUDGET (D-415): token thô không tách `(`/`<`/hàm như bash nên "không thấy gì" không phải bằng chứng.
+    Quyết định cuối không nhẹ đi; lệnh cần hai lần đọc (`LitWord`) mà chỉ lần đọc cũ chặn thì mã có thể thành BUDGET
+    (`_stricter_reading` hoà lấy lần đọc mới)."""
+    if policy_action(decide(res)) == "deny":
+        return res
+    return {**res, "decision": "deny", "reason": _budget_result(cmd, SHLEX_UNCLOSED_WHY)["reason"], "code": BUDGET}
 
 
 def _clean_strict(cmd: str, budget: ScanBudget) -> Tuple[str, bool]:
@@ -16245,7 +16349,7 @@ def _bash_decision(
         return res
     _shell_precheck(cmd, strict, cwd)
     _heredoc_precheck(cmd, whole)
-    tokens = tokenize(cmd)
+    tokens = tokenize(cmd, strict)
     rx = remote_exec(cmd, tokens)
     if rx:
         res.update(

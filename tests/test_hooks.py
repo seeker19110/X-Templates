@@ -6450,7 +6450,6 @@ class GuardFalseGreenBenchTest(unittest.TestCase):
             "",
             (
                 "echo $'it\\'s'; ls {a,b}",
-                'echo "$(echo "\'")"; ls {a,b}',
                 "echo '{main,}'; git push origin feat",
                 'echo "{main,x}"; git status',
             ),
@@ -9547,6 +9546,194 @@ class GuardBareCrTest(_GuardDebtCase):
             with self.subTest(wrap):
                 cpu_budget.assert_not_quadratic(
                     self, lambda n: self.g.bash_decision("echo " + wrap.format("a\rb " * n), self.feat), 1000
+                )
+
+
+class GuardWholeCommandSyntaxTest(_GuardDebtCase):
+    """ADR-0076 P6 (lát 1, T-3761): cú pháp toàn lệnh bash chạy mà guard không đọc → BUDGET (D-415). Thay lệnh `${ …; }`/
+    `${| …; }` của bash 5.3 chạy trong shell hiện tại (AUD-SEC-665, cả trong nháy kép và thân heredoc không nháy); extglob
+    trần `?(`/`*(`/`+(`/`@(`/`!(` ngoài `((…))` — bật `extglob` thì bash bung thành tên tệp (AUD-SEC-666); `\\` lẻ cuối
+    lệnh làm `shlex` lỗi và tokenizer rơi về tách thô (AUD-SEC-656). Chữ trong nháy, thân heredoc có nháy, số học giữ nguyên."""
+
+    FUNSUB = (
+        "echo ${ git push origin feat/me --force; }",
+        "echo ${ rm -rf /; }",
+        'echo "${ git push origin feat/me --force; }"',
+        "echo ${|git push origin feat/me --force; }",
+        "echo ${\tgit push origin feat/me --force; }",
+        "echo $(echo ${ rm -rf /; })",
+        "cat <<EOF\n${ git push origin feat/me --force; }\nEOF",
+        "bash -c 'echo ${ rm -rf /; }'",
+    )
+    EXTGLOB = (
+        "shopt -s extglob\nrm -rf !(a) /",
+        "rm -rf !(a) /",
+        "(rm -rf !(a) /)",
+        "rm -rf @(a|b) /",
+        "git add ?(a)",
+        "git add +(a)",
+        "echo $(rm -rf !(a) /)",
+        'echo "$(rm -rf !(a) /)"',
+        "if !(git diff --quiet); then echo d; fi",
+        "echo $(( $(rm -rf !(a) /) ))",  # `$(` trong số học là thay lệnh, không phải số học
+        "(( 1 )) && rm -rf !(a) /",
+        "eval 'rm -rf !(a) /'",
+    )
+    TAIL = (
+        "(git push origin feat/me --force); echo \\",
+        "</dev/null git push origin feat/me --force; echo \\",
+        "g() { git push origin feat/me --force; }; g; echo \\",
+        "function g { d=/; rm -rf $d; }; g; echo \\",
+        "echo \\\\\\",
+        "echo \\",
+    )
+    # review #528: bash không có comment trong số học — `#` sau khoảng trắng trong `((…))`/`$((…))`/`$[…]`/chỉ số mảng
+    # vẫn là chữ số học, `${ …; }` sau nó chạy (bash 5.3.9 in RAN rồi mới báo lỗi số học); guard đọc là comment.
+    ARITH_HASH = (
+        "(( 1 #${ git push origin feat/me --force; }\n))",
+        "(( 1 #${|git push origin feat/me --force; }\n))",
+        "echo $(( 1 #${ git push origin feat/me --force; }\n))",
+        'echo "$(( 1 #${ git push origin feat/me --force; }\n))"',
+        "if (( 1 #${ git push origin feat/me --force; }\n)); then :; fi",
+        "while (( 1 #${ rm -rf /; }\n)); do :; done",
+        "(( 1 #${ rm -rf /; } ))\n) )",  # bash chạy dòng 1 rồi mới báo lỗi cú pháp ở dòng 2
+        "echo $[ 1 #${ git push origin feat/me --force; } ]",
+        "a[1 #${ git push origin feat/me --force; }]=x",
+        "a[1\t#${ rm -rf /; }]=x",
+        "a_[1 #${ rm -rf /; }]=x",
+        "x=( [1 #${ git push origin feat/me --force; }\n]=v )",  # chỉ số trong gán mảng phức hợp (bash 5.3.9 chạy)
+        "(( (1 #${ rm -rf /; }\n) ))",  # ngoặc thường trong số học vẫn là số học
+        # review #528 vòng 3: `]` trong `$(…)` không đóng `[` của chỉ số ở tầng ngoài
+        "x=( [$(echo ]) #${ git push origin feat/me --force; }\n]=v )",
+        'x=( ["$(echo ])" #${ rm -rf /; }\n]=v )',
+        "declare -a y=( [$(echo ]) #${ rm -rf /; }\n]=v )",
+        "readonly -a y=( [$(echo ]) #${ rm -rf /; }\n]=v )",
+        "x+=( [$(echo ]) #${ rm -rf /; }\n]=v )",
+        "x=( [$(echo ]) #${|git push origin feat/me --force; }\n]=v )",
+        "x=( [1+$(echo 0]) #${ rm -rf /; }\n]=v )",
+        "f() { local -a y=( [$(echo ]) #${ rm -rf /; }\n]=v ); }; f",
+    )
+    # review #528: `shlex` thấy nháy không đóng mà bash thì không (`'` trong `"…"` lồng trong `"$(…)"`) → tách thô
+    UNCLOSED = (
+        '(rm -rf /); echo "$(echo "it\'s")"',
+        '</dev/null rm -rf /; echo "$(echo "it\'s")"',
+        'function g { d=/; rm -rf $d; }; g; echo "$(echo "it\'s")"',
+        'bash -c $\'(rm -rf /); echo "$(echo "it\\\\\'s")"\'',  # script lồng nguyên văn cũng chặt
+        'echo "$(echo "\'")"; ls {a,b}',  # lành nhưng không đọc chắc (D-415; trước review #528 là ca cho qua)
+    )
+    ALLOW = (
+        "(( x = 16#ff ))",
+        "echo $(( 2#101 + 1 ))",
+        "x=( a b # chú thích\n)",
+        "arr[0]=1 # chú thích",
+        "echo $(( 1 + 2 )) # chú thích",
+        "[[ -n x ]] # chú thích",
+        "echo \\!(a)",
+        "a=$(echo x # chú thích\n)",
+        'echo "$(echo "its")"',
+        'echo "it\'s"',
+        'git commit -m "$(printf \'%s\' "fix: x")"',
+        "echo '${ x }'",
+        "git commit -m 'fix ${ x }'",
+        "echo \\${ x }",
+        'echo ${x} ${#x} ${x:-a} "${x}"',
+        "cat <<'EOF'\n${ x; } !(a) *(b)\nEOF",
+        "cat <<EOF\n!(a) *(b) @(c)\nEOF",
+        "(( !(a) ))",
+        "echo $((2*(3+4)))",
+        'echo "$((2*(3+4)))"',
+        'for ((i=0; i<2*(3); i++)); do echo "$i"; done',
+        "[[ ! (a == b) ]] && echo y",
+        "[[ ! -f x ]] && echo y",
+        "if ! (git diff --quiet); then echo d; fi",
+        'case "$x" in *) echo y;; esac',
+        "echo '!(a)'",
+        'echo "!(a) *(b)"',
+        "grep -E '!(a|b)' f",
+        "arr+=(x y)",
+        "f() { echo hi; }; f",
+        "echo a\\\\",
+        'echo "a\\\\"',
+        "printf '%s\\n' \"$x\"",
+        "git log --oneline -3 \\\n  --stat",
+        "git commit -m \"$(cat <<'EOF'\nfix: don't break\nEOF\n)\"",
+        "echo ${x/?(a)/b}",
+    )
+
+    def test_funsub_denied(self):  # AUD-SEC-665
+        self.assert_code(self.FUNSUB, "BUDGET")
+
+    def test_bare_extglob_denied(self):  # AUD-SEC-666
+        self.assert_code(self.EXTGLOB, "BUDGET")
+
+    def test_tail_backslash_denied(self):  # AUD-SEC-656
+        self.assert_code(self.TAIL, "BUDGET")
+
+    def test_hash_in_arith_denied(self):  # AUD-SEC-665, review #528
+        self.assert_code(self.ARITH_HASH, "BUDGET")
+
+    def test_unclosed_for_shlex_denied(self):  # AUD-SEC-656, review #528: nhánh tách thô chỉ còn cho chữ lỏng
+        self.assert_code(self.UNCLOSED, "BUDGET")
+        self.assertIn("AUD-SEC-656", self.out(self.UNCLOSED[0])["reason"])
+        # luật cũ đã chặn trên token thô → giữ mã của luật (chỉ đổi kết quả không chặn)
+        self.assert_code(('(git push origin feat/me --force); echo "$(echo "it\'s")"',), "RULE_DENY")
+        # thô `ask` mà chính sách chặn (mã nguy hiểm) cũng giữ mã
+        self.assert_code(('echo x > .claude/settings.json; echo "$(echo "it\'s")"',), "HOOK_BYPASS")
+        # hai lần đọc (`LitWord`): lần đọc mới không chặn → BUDGET, lần đọc cũ RULE_DENY, hoà lấy lần mới — vẫn deny
+        cmd = 'watch echo 1 2 3 4 5 6 7 8 9 10 11 \';\' git push --force; echo "$(echo "it\'s")"'
+        self.assert_code((cmd,), "BUDGET")
+
+    def test_mutation_guards(self):  # review #528: đột biến còn sống của lát 1
+        self.assert_code(
+            (
+                "git add *(a)",  # `*` trong tập ký tự extglob
+                "cat <<EOF\n\\\\${ git push origin feat/me --force; }\nEOF",  # `\\\\` là chữ `\\`, `${ …; }` vẫn chạy
+            ),
+            "BUDGET",
+        )
+
+    def test_reason_names_rewrite(self):  # D-415: lý do chỉ đường viết lại
+        for cmd, part in (
+            (self.FUNSUB[0], "AUD-SEC-665"),
+            (self.EXTGLOB[1], "AUD-SEC-666"),
+            (self.TAIL[0], "AUD-SEC-656"),
+        ):
+            with self.subTest(cmd):
+                reason = self.out(cmd)["reason"]
+                self.assertIn(part, reason)
+                self.assertIn("viết lại", reason)
+
+    def test_quoted_arith_and_heredoc_unchanged(self):  # không chặn oan
+        self.assert_allowed(self.ALLOW)
+
+    def test_extglob_arith_regions(self):  # `$(` trong số học mở lại ngữ cảnh lệnh; `((a) )` là subshell (như bash)
+        def why(s: str) -> str:
+            return self.g._extglob_why(self.g._CodeView(s))
+
+        for s in ("(( $(rm !(a)) ))", "echo $(( 1 + $(git add !(a)) ))", "((rm !(a)) )", "( (a) ) !(b)"):
+            self.assertEqual(why(s), self.g.EXTGLOB_WHY, s)
+        for s in ("(( !(a) ))", "(( (a)*(b) ))", 'echo "$((2*(3)))"', "echo \"((\" ')' (a)", "x) !y"):
+            self.assertEqual(why(s), "", s)
+
+    def test_arith_hash_regions(self):  # `$(` trong số học: comment thật của thay lệnh (lớp `IFS` đã chặn cả lệnh)
+        def why(s: str) -> str:
+            return self.g._arith_hash_why(self.g._CodeView(s))
+
+        for s in ("(( (1 # c\n) ))", "echo $[ 1 # c\n]", "x_[1 # c\n]=1", "x=( [1 # c\n]=v )"):
+            self.assertEqual(why(s), self.g.ARITH_HASH_WHY, s)
+        for s in ("(( $(echo 1 # c\n) ))", "echo $(( 1 )) # c", "a[0]=1 # c", "[[ -n x ]] # c", "echo x # c", "echo x"):
+            self.assertEqual(why(s), "", s)
+        # `]` chỉ đóng `[` mở ở cùng độ sâu ngoặc; `)` không bỏ `[` đang mở
+        for s in ("x=( [$(echo ]) # c\n]=v )", "x=( [(1) # c\n]=v )", "a[$(echo [) # c\n]=v", "(a[1) # c\n]=v)"):
+            self.assertEqual(why(s), self.g.ARITH_HASH_WHY, s)
+        for s in ("x=( [$(echo 0)]=v ) # c", "a[$(echo [x])]=1 # c", 'x=( ["$(echo ])"]=v ) # c'):
+            self.assertEqual(why(s), "", s)
+
+    def test_extglob_scan_is_linear(self):  # hiệu năng: ghép ngoặc một lượt, không bậc hai theo độ sâu lồng
+        for unit in ("(( a*(b) )) ", "$(echo (a)) ", "((((("):
+            with self.subTest(unit):
+                cpu_budget.assert_not_quadratic(
+                    self, lambda n: self.g.bash_decision("echo " + unit * n, self.feat), 500
                 )
 
 
