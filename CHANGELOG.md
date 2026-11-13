@@ -180,21 +180,55 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
 ### Fixed
 
 - Guard — ADR-0076 lát 2 (T-3762; lý do chạm hàng rào: bốn 🔴 có từ trước cùng gốc AUD-SEC-644, D-430/D-431/D-435 — chỉ
-  thêm chặn, mã `BUDGET`, luật cũ đã chặn giữ mã cũ): mắt xích `_ruled_word_why` cuối `_allowlist_why` — lệnh có luật
-  (`GATE_NAMES`, sau gán/từ khoá/trình bọc) mà từ dạng cờ có mở rộng/glob trước `=` (P2, cờ ngắn lẫn dài, không tra
-  `GIT_DANGER_LONG`: `git push -d$X`, `git clean -fd$X`, `-f*`, `git switch --creat$X`, `git config --edi$X`, `git commit
-  --no-verif$X` — AUD-SEC-690/711), từ mở đầu bằng mở rộng liền `-` (P3: `git push $X--delete`, `"$X"--delete`,
-  `$(true)--delete`, `git reset $X--hard` — AUD-SEC-710), lệnh con cấp hai của `git stash|remote|worktree|reflog` có mở
-  rộng/glob (P1: `git stash drop$X`) → BUDGET kèm dòng `viết lại:`. Trình thông dịch (`python3`/`node`/`perl`/`ruby`/`php`,
+  thêm chặn, mã `BUDGET`; quyết định cuối không nhẹ đi — luật cũ chặn trên cùng cách đọc giữ mã cũ, còn mã/lý do có thể
+  thành `BUDGET` ở hai cách đọc `LitWord`, bản bung brace, câu hỏi nhường của `_go_patch_asks`, câu hỏi BUDGET của luật
+  git/gh, mọi BUDGET của lần quét lồng (`$(…)`, `sh -c`) và mọi câu hỏi gom sau tập con (`xt_inproc_asks`) — review #529
+  F2, AUD-SEC-749): mắt xích `_ruled_word_why` cuối `_allowlist_why` — lệnh có luật (`GATE_NAMES`, sau gán/từ
+  khoá/trình bọc) mà từ dạng cờ có mở rộng/glob trước `=` (P2, cờ ngắn lẫn dài, không tra `GIT_DANGER_LONG`:
+  `git push -d$X`, `git clean -fd$X`, `-f*`, `git switch --creat$X`, `git config --edi$X`, `git commit --no-verif$X` —
+  AUD-SEC-690/711), từ mở đầu bằng mở rộng liền `-` (P3: `git push $X--delete`, `"$X"--delete`, `$(true)--delete`,
+  `git reset $X--hard` — AUD-SEC-710), lệnh con cấp hai của `git stash|remote|worktree|reflog` có mở rộng/glob (P1:
+  `git stash drop$X`) → BUDGET kèm dòng `viết lại:`. Trình thông dịch (`python3`/`node`/`perl`/`ruby`/`php`,
   cả `python3.12`) chỉ xét vùng cờ (D-435, AUD-SEC-726: `python3 "$X"-c '…'`, `python3 -$X`, `node -$X`); đối số sau
   script hay sau mã của `-c` không tính (`python3 scripts/xt.py … $N`, `python3 -c "$CODE"`). Vùng cờ dừng ở `--` mà từ
   trước không phải cờ (`gh pr diff 5 -- -$P` qua; `-o -- $X--delete` vẫn chặn). Giữ nguyên: giá trị (`--repo="$R"`,
-  `-m "$M"`, `origin "$B"`), glob ở đối số không phải cờ (`rm -f *.tmp`), `"$A".."$B"`, `$?`. Đổi có chủ ý (D-437): cờ
-  dài có mở rộng không phải viết tắt cờ nguy hiểm (`--set-upstream$X`, `git fetch --all$X` — trước đây cho qua ở #523),
-  `curl -sSd$TOKEN` giờ chặn; câu hỏi BUDGET của luật cũ (`gh pr close 5 $(echo)-d`) thành deny ở cả strict (D-438).
-  `alias` và `printf` (D-439: `printf -v` ghi biến) vào `GATE_NAMES`; ca corpus `aud690/710/711/726-*` và `aud721/722/724/725-*` (gỡ bốn ID khỏi `scope.json`). Đo
-  trên 19.026 lệnh Bash thật: thêm chặn 1 (0,005 %, `git log -S"$id"`). Dự án đích: nâng bản để nhận
-  `.claude/hooks/guard.py` mới; lệnh bị chặn đọc dòng `viết lại:` của lý do.
+  `-m "$M"`), glob ở đối số không phải cờ (`rm -f *.tmp`), `"$A".."$B"`, `$?`/`$#`/`$$` (`$!` rỗng được nên tính là
+  mở rộng — review #529 F1, AUD-SEC-748). Đổi có chủ ý (D-437): cờ dài có mở rộng không phải viết tắt cờ nguy hiểm
+  (`--set-upstream$X`, `git fetch --all$X` — trước đây cho qua ở #523), `curl -sSd$TOKEN` giờ chặn; câu hỏi BUDGET của
+  luật cũ (`gh pr close 5 $(echo)-d`) thành deny ở cả strict (D-438). `alias` và `printf` (D-439: `printf -v` ghi
+  biến) vào `GATE_NAMES`; ca corpus `aud690/710/711/726-*`, `aud721/722/724/725-*` (gỡ bốn ID khỏi `scope.json`),
+  `aud740-*`. Đo trên 19.468 lệnh Bash thật khác nhau của repo này (29.772 lượt): 4 lệnh đổi từ cho qua sang chặn
+  (0,021 %: một `git log -S"$id"` và ba lệnh dò `-d$!` của phiên review), 0 lệnh nhẹ đi ở cả strict. Chặn oan đã biết
+  ở idiom của dự án đích khác stack (AUD-SEC-740, D-437) — cách viết lại: giá trị tách thành đối số kế hay sau `=`:
+  `make -j "$(nproc)"`, `cmake --build build -j "$(nproc)"`, `cargo build -j "$(nproc)"`, `pytest -n "$(nproc)"`,
+  `pytest -k "$K"`, `docker run -v "$PWD":/w`, `kubectl -n "$NS"`, `ssh -p "$PORT"`, `curl -o "$F"`, `tar -C "$D"`,
+  `git log -n "$N"` (thay `-$N`), `git diff -U "$N"`, `git commit -m "$MSG"`, `git reflog show "$B"`,
+  `printf -- "-$X\n"`. Lát 2 không quyết luật push cũ: `git push -u origin "$B"` vẫn UNRESOLVED_TARGET (AUD-SEC-720).
+  ADR-0076: lát 0, 1 (#528) và 2 xong, lát 3–6 chưa làm. Dự án đích: nâng bản để nhận `.claude/hooks/guard.py` mới;
+  lệnh bị chặn đọc dòng `viết lại:` của lý do.
+- Guard — ADR-0076 lát 1, cú pháp toàn lệnh P6 (lý do chạm hàng rào: ba 🔴 có từ trước, review #516/#517; D-415, D-430,
+  D-431 — không đọc chắc thì chặn BUDGET, lý do có dòng `viết lại:`): (AUD-SEC-665, #528) thay lệnh `${ …; }`/`${| …; }`
+  của bash 5.3 — chạy lệnh trong shell hiện tại, cả trong nháy kép và thân heredoc không nháy — → BUDGET (trước đó
+  `echo ${ git push origin feat/me --force; }`, `echo ${ rm -rf /; }` lọt), kể cả sau `#` trong số học `((…))`/`$((…))`/
+  `$[…]`/chỉ số mảng, cả chỉ số trong gán mảng phức hợp (`]` trong `$(…)` không đóng `[` ngoài) — bash không có comment
+  ở đó mà guard đọc là comment (`(( 1 #${ git push …; }`↵`))`, `x=( [$(echo ]) #${ …; }`↵`]=v )` lọt; review #528);
+  (AUD-SEC-666) extglob trần `?(`/`*(`/`+(`/`@(`/`!(` ở mã ngoài nháy và ngoài số học → BUDGET (`shopt -s
+  extglob`↵`rm -rf !(a) /` lọt) — `$(` trong số học vẫn là lệnh, `((a) )` là subshell như bash; (AUD-SEC-656) `\` lẻ cuối
+  lệnh → BUDGET; lệnh chặt (lệnh gốc, script lồng nguyên văn) mà `shlex` thấy nháy không đóng vẫn quét luật cũ trên token
+  thô nhưng không còn được cho qua — BUDGET (`(git push origin feat/me --force); echo \`, `(rm -rf /); echo "$(echo
+  "it's")"` lọt — bash đọc nháy lồng trong `"$(…)"` cân bằng, `shlex` thì không; review #528). Quyết định cuối không nhẹ
+  đi; mã của luật giữ khi lần đọc đó đã chặn, ở lệnh cần hai lần đọc (`LitWord`) mã có thể thành BUDGET. Ca lành
+  `echo "$(echo "'")"; ls {a,b}` của AUD-SEC-072 nay cũng BUDGET. Số `'` chẵn trong nháy lồng (`shlex` không lỗi, lệnh
+  giữa bị nuốt) là họ riêng có từ trước, còn mở: AUD-SEC-750 (T-3772). Giữ nguyên: chữ trong nháy và thân
+  heredoc có nháy, `(( !(a) ))`, `$((2*(3+4)))`, `(( x = 16#ff ))`, `[[ ! (…) ]]`, `if ! (lệnh)`, comment thật sau lệnh
+  và trong `x=( … )`, `\\` chẵn cuối, nối dòng. Chặn mới cả `if !(lệnh)` (bật extglob thì bash bung `!(lệnh)` thành tên
+  tệp rồi chạy — viết `! (lệnh)`), extglob trong `[[ … == @(a|b) ]]`, mẫu `case`, regex `[[ $x =~ ^v?([0-9]+)$ ]]` (gán
+  regex vào biến rồi `[[ $x =~ $re ]]`), `$[2*(3)]`/`a[2*(3)]=x` (viết `$((…))`). P6 vẫn dùng bảng cấm
+  `STRICT_LIVE`/`_strict_why` thay vì cổng dương của các lát sau vì cú pháp toàn lệnh không gắn với tên lệnh nào.
+  Đo trên 19.197 lệnh Bash thật khác nhau của transcript phiên: 4 (0,02 %, ngưỡng D-431 0,2 %) đổi từ cho qua sang chặn,
+  cả 4 là lệnh thử chính cú pháp này khi review guard; corpus guard base = head ở mọi ca cũ. Còn mở cùng họ:
+  AUD-SEC-730 (ngoặc trong `${…}` không nháy, T-3769).
+  Dự án đích: nâng bản để nhận `.claude/hooks/guard.py` mới.
 - Guard (lý do chạm hàng rào: hai 🔴 có từ trước của Lát 3 harden, review độc lập từng lát): (AUD-SEC-610, #516) `;<`,
   `&&<`, `||>>`, `|&<`, `)<`, `(<`, `&` + xuống dòng + `<`… không còn gộp thành một token chuyển hướng nuốt lệnh sau nó —
   `_unglue` cắt dãy dấu theo toán tử dài nhất của bash ở cả `tokenize` lẫn `_raw_tokens`; (AUD-SEC-611, #517) thân hàm

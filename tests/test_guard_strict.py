@@ -1441,10 +1441,9 @@ class ReasonCodeLockTest(unittest.TestCase):
         ("BUDGET", "echo " + "a" * guard.CMD_MAX_CHARS),  # vượt ngân sách quét (mẫu ở EXAMPLES là lớp tập con)
         ("BUDGET", "gh pr merge$Z 5"),  # tên lệnh/tên cờ gh có mở rộng (AUD-SEC-587)
         ("BUDGET", "git pus? --force origin main"),  # lệnh con git không đọc chắc (AUD-SEC-635)
-        # viết tắt cờ dài git nguy hiểm có mở rộng/glob (AUD-SEC-644). D-438: dạng mở rộng thật (`--delet$X`) nay cổng
-        # ADR-0076 chặn trước với lý do của nó; glob trong nháy (chữ với bash, `_git_dyn_flag` đọc trên từ đã bỏ nháy)
-        # vẫn sinh dấu này ở tầng ngoài
-        ("BUDGET", 'git push "--dele*" origin feat/x'),
+        # viết tắt cờ dài git nguy hiểm có mở rộng (AUD-SEC-644). D-438: ở `git push …` cổng ADR-0076 chặn trước với lý do
+        # của nó; `git-push` chạy thẳng (tên ngoài `GATE_NAMES` — AUD-SEC-741) vẫn sinh dấu này ở tầng ngoài
+        ("BUDGET", "/usr/lib/git-core/git-push --delet$X origin feat/other"),
     )
 
     def test_every_marker_blocks_a_real_command(self):
