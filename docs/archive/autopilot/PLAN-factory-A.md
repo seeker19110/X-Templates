@@ -2,8 +2,8 @@
 
 > Lập 2026-11-05 trên nhánh `claude/amazing-brahmagupta-9jqbg1` (chủ dự án: "hoàn thiện cho xong hết", không mở PR, không
 > merge). Duyệt: D-355 (phạm vi: chỉ hợp đồng phát hành; evidence v2 của `loop record` giữ nguyên). Nguồn:
-> [ADR-0068](../adr/0068-software-factory-direction.md) §Quyết định A + §Xác nhận A; research
-> [`2026-11-04-software-factory-direction.md`](../../research/2026-11-04-software-factory-direction.md) §6–§7.
+> [ADR-0068](../../adr/0068-software-factory-direction.md) §Quyết định A + §Xác nhận A; research
+> [`2026-11-04-software-factory-direction.md`](../../../research/2026-11-04-software-factory-direction.md) §6–§7.
 > Không chen mốc 3.30.0 của `main` (research §7): lát làm trên nhánh, chưa merge.
 >
 > **Cú pháp bắt buộc cho máy:** mỗi task một dòng `- [ ] \`T-NNNN\` <việc> — Gate: \`<lệnh>\``.
