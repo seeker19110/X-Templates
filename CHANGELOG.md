@@ -16,7 +16,14 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
   cổng) và `GATE_PASSIVE` (trình thông dịch không phải shell, lệnh chỉ đọc/in — D-434) trong `guard.py`, chưa dùng trong
   quyết định, gom từ bảng có sẵn; `GuardGateNamesTest` đọc mã các hàm `_scan_command` gọi tới và khẳng định mọi tên luật
   rẽ nhánh thuộc đúng một trong hai tập, không tập nào có tên ngoài các nhánh. PLAN-harden-2026-11-11 thêm
-  T-3760…T-3767; 13 task guard cũ đã thuộc một lát chuyển `[~]` "gộp vào T-376x". Dự án đích: không đổi.
+  T-3760…T-3767; 13 task guard cũ đã thuộc một lát chuyển `[~]` "gộp vào T-376x". Sửa sau review #525 (AUD-SEC-721,
+  AUD-SEC-722, #526; vẫn không đổi quyết định nào của guard): bộ đọc mã lan "tên lệnh" qua phép gán theo từng phần tử bộ
+  và hai vế điều kiện, qua lời gọi hàm, và đọc cả tra bảng theo tên — thấy thêm 31 tên có luật (`pax`/`split`/`csplit`,
+  `prettier`/`markdownlint*`, `aider`/`copilot`/…, `read`/`mapfile`/`let`/`wait`, `printenv`…): 24 vào `GATE_NAMES`, 7
+  vào `GATE_PASSIVE`; `_GATE_BRANCHED` (tên có luật gồm cả thụ động — tập lát 6 dùng) phải đúng bằng tập đọc được, chia
+  đôi thành hai tập; `GATE_PASSIVE` không được thuộc bảng ghi tệp/chạy lệnh/ra mạng/ghi biến nào (trừ trình thông dịch
+  không phải shell); comment ghi ngoại lệ đã biết `rg --pre`, `less -o`, `printf -v`. T-3741/T-3743/T-3744 chuyển `[~]`
+  (đã sửa ở #522/#523). Dự án đích: không đổi.
 - Bảy đặc tả của xưởng đầu-cuối (D-422, chủ dự án 2026-11-11 "viết nốt đặc tả trước"; sửa theo hai lượt review độc lập —
   D-423, D-424): `docs/specs/SPEC-factory-deploy.md` (lệnh triển khai, receipt, sổ `DEPLOYS.json`, `digest_<env>`,
   bản dev của gói, production), `-intake` (dự án mới một lệnh, skill một bước, kênh issue), `-acceptance` (bộ nghiệm thu
