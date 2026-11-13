@@ -179,6 +179,10 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
 
 ### Fixed
 
+- Guard (T-3769; lý do chạm hàng rào: đóng đường bỏ sót argv hoặc cho qua khi parser không đọc được): Precheck AUD-SEC-730: ngoặc trong tham số không nháy trả BUDGET; giữ literal, nháy kép và ngoặc thoát. Lỗi recursion đọc sớm được sửa ở lát riêng T-3867.
+  Bằng chứng chặn oan: [mẫu 505 lượt lệnh thật](research/evidence/2026-11-13-guard-parameter.json), 464 thân lệnh,
+  0 lượt đổi quyết định trên mẫu; không suy rộng thành bảo đảm cho toàn lịch sử. Gate gốc được ghi bằng `loop record`.
+
 - Guard — ADR-0076 lát 2 (T-3762; lý do chạm hàng rào: bốn 🔴 có từ trước cùng gốc AUD-SEC-644, D-430/D-431/D-435 — chỉ
   thêm chặn, mã `BUDGET`; quyết định cuối không nhẹ đi — luật cũ chặn trên cùng cách đọc giữ mã cũ, còn mã/lý do có thể
   thành `BUDGET` ở hai cách đọc `LitWord`, bản bung brace, câu hỏi nhường của `_go_patch_asks`, câu hỏi BUDGET của luật

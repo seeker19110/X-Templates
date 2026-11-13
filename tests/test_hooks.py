@@ -9828,7 +9828,7 @@ class GuardWholeCommandSyntaxTest(_GuardDebtCase):
         "printf '%s\\n' \"$x\"",
         "git log --oneline -3 \\\n  --stat",
         "git commit -m \"$(cat <<'EOF'\nfix: don't break\nEOF\n)\"",
-        "echo ${x/?(a)/b}",
+        'echo "${x/?(a)/b}"',
     )
 
     def test_funsub_denied(self):  # AUD-SEC-665
@@ -9875,6 +9875,7 @@ class GuardWholeCommandSyntaxTest(_GuardDebtCase):
                 self.assertIn("viết lại", reason)
 
     def test_quoted_arith_and_heredoc_unchanged(self):  # không chặn oan
+        self.assert_code(("echo ${x/?(a)/b}",), "BUDGET")  # D-445: ngoặc trong tham số không nháy
         self.assert_allowed(self.ALLOW)
 
     def test_extglob_arith_regions(self):  # `$(` trong số học mở lại ngữ cảnh lệnh; `((a) )` là subshell (như bash)

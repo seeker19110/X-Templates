@@ -23437,6 +23437,14 @@
 {"id": "adr76-ctl-for-adr-heads", "origin": "control", "refs": ["ADR-0076"], "input": {"command": "for f in docs/adr/*.md; do head -1 \"$f\"; done"}, "expect": {"allowed": true}},
 {"id": "adr76-ctl-echo-var", "origin": "control", "refs": ["ADR-0076"], "input": {"command": "echo \"$PR\""}, "expect": {"allowed": true}},
 {"id": "adr76-ctl-test-env-ignore", "origin": "control", "refs": ["ADR-0076"], "input": {"command": "test -f .env.example && git check-ignore -q .env"}, "expect": {"allowed": true}},
-{"id": "adr76-ctl-export-then-git", "origin": "control", "refs": ["ADR-0076"], "input": {"command": "export GIT_PAGER=cat; git log --oneline -3"}, "expect": {"allowed": true}}
+{"id": "adr76-ctl-export-then-git", "origin": "control", "refs": ["ADR-0076"], "input": {"command": "export GIT_PAGER=cat; git log --oneline -3"}, "expect": {"allowed": true}},
+{"id": "aud730-parameter-rm", "origin": "adversarial-author", "refs": ["AUD-SEC-730"], "input": {"command": "rm -rf ${x:-(a)} /"}, "expect": {"allowed": false, "code": "BUDGET"}},
+{"id": "aud730-parameter-push", "origin": "adversarial-author", "refs": ["AUD-SEC-730"], "input": {"command": "git push ${x:-(a)} origin feat/me --force"}, "expect": {"allowed": false, "code": "BUDGET"}},
+{"id": "aud730-parameter-cmdsub", "origin": "adversarial-author", "refs": ["AUD-SEC-730"], "input": {"command": "rm -rf x ${z:-$(echo)} /"}, "expect": {"allowed": false, "code": "BUDGET"}},
+{"id": "aud730-parameter-procsub", "origin": "adversarial-author", "refs": ["AUD-SEC-730"], "input": {"command": "rm -rf x ${z:-<(echo)} /"}, "expect": {"allowed": false, "code": "BUDGET"}},
+{"id": "aud730-parameter-quoted", "origin": "control", "refs": ["AUD-SEC-730"], "input": {"command": "git diff \"${x:-(a)}\" HEAD"}, "expect": {"allowed": true}},
+{"id": "aud730-parameter-literal", "origin": "control", "refs": ["AUD-SEC-730"], "input": {"command": "git diff '${x:-(a)}' HEAD"}, "expect": {"allowed": true}},
+{"id": "aud730-parameter-escaped", "origin": "control", "refs": ["AUD-SEC-730"], "input": {"command": "git diff ${x:-\\(a\\)} HEAD"}, "expect": {"allowed": true}},
+{"id": "aud730-parameter-quoted-cmdsub", "origin": "control", "refs": ["AUD-SEC-730"], "input": {"command": "git diff \"${z:-$(echo)}\" HEAD"}, "expect": {"allowed": true}}
  ]
 }
