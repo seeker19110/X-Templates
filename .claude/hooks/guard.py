@@ -1455,9 +1455,14 @@ STRICT_PLAIN = {
 }
 STRICT_WORD_BREAK = " \t\n;&|()<>"
 STRICT_BRACE_RE = re.compile(r"\{[^{}\s]*(?:,|\.\.)[^{}\s]*\}")
+# ADR-0076 P6 (lát 1): cú pháp toàn lệnh không gắn tên lệnh nên vẫn là bảng cấm như ADR-0063 — cổng dương của các lát sau
+# chỉ xét lệnh có tên có luật. `${ …; }`/`${| …; }` (bash 5.3) chạy lệnh cả trong nháy kép và thân heredoc không nháy.
+FUNSUB_RE = re.compile(r"\$\{[\s|]")
+FUNSUB_WHY = "thay lệnh `${ …; }`/`${| …; }` của bash 5.3 — guard không quét lệnh bên trong (AUD-SEC-665); dùng `$(…)`"
 STRICT_LIVE = (
     (re.compile(r"\$\$\("), "`$$(` (AUD-SEC-243)"),
     (re.compile(r"\$\{?[!#]?IFS\b"), "mở rộng `IFS` (AUD-SEC-232/238/239)"),
+    (FUNSUB_RE, FUNSUB_WHY),
 )
 # Chữ thô (cả trong nháy): chuỗi nháy gán vào biến có thể được đánh giá lại khi số học.
 STRICT_RAW = ((re.compile(r"\w\[[^\]\n]*\$\((?!\()"), "thay lệnh trong chỉ số mảng (AUD-SEC-249)"),)
@@ -1504,10 +1509,45 @@ STRICT_BARE = (
 # bash không tách từ ở CR (ký tự thường: `a<CR>-h` là MỘT từ), tokenizer và các tầng đọc theo `\s` thì tách (AUD-SEC-645,
 # D-429): CR ở mã ngoài nháy hay trong `${…}` (`-m ${X:-x<CR>-l}`) → chặn; CR trong nháy/thân heredoc là chữ, không tính.
 BARE_CR_WHY = "CR (`\\r`) trần ngoài nháy — bash coi CR là ký tự của từ (AUD-SEC-645); bỏ ký tự CR khỏi dòng lệnh"
+# `\` lẻ cuối lệnh: `shlex` lỗi và `tokenize` rơi về tách thô, không tách `(`/`<` khỏi từ (AUD-SEC-656).
+TAIL_BACKSLASH_WHY = "`\\` lẻ cuối lệnh — guard tách thô khác bash (AUD-SEC-656); bỏ `\\` cuối hoặc đặt trong nháy"
+EXTGLOB_WHY = (
+    "extglob trần `?(`/`*(`/`+(`/`@(`/`!(` ngoài `((…))` — bật `extglob` thì bash bung thành tên tệp (AUD-SEC-666);"
+    " liệt kê tệp nguyên văn, `! (lệnh)` có dấu cách, mẫu đặt trong nháy"
+)
 
 
 def _bare_cr_why(v: "_CodeView") -> str:
     return BARE_CR_WHY if "\r" in v.s and any(c == "\r" and k in "cp" for c, k in zip(v.s, v.kind)) else ""
+
+
+def _code_paren_pairs(v: "_CodeView") -> Dict[int, int]:
+    """Cặp ngoặc cấu trúc (mã ngoài nháy, hay `(` của `$(` trong nháy kép/`${…}`): vị trí mở → vị trí đóng. Khác
+    `_paren_pairs` (đếm thô cả trong nháy): ngoặc trong chữ nháy không ghép nhầm thành `((…))`."""
+    s, kind, opens, pairs = v.s, v.kind, [], {}
+    for i, c in enumerate(s):
+        if c == "(" and (kind[i] == "c" or (i and s[i - 1] == "$" and kind[i - 1] == kind[i] != "q")):
+            opens.append(i)
+        elif c == ")" and kind[i] == "c" and opens:
+            pairs[opens.pop()] = i
+    return pairs
+
+
+def _extglob_why(v: "_CodeView") -> str:
+    """AUD-SEC-666: `X(` (X ∈ `?*+@!`) ở mã ngoài nháy, không trong số học `((…))`/`$((…))` (bash: cặp đóng của `((`
+    liền nhau; `((a) )` là subshell). `$(` trong số học mở lại ngữ cảnh lệnh. Một lượt trên cặp ngoặc, tuyến tính."""
+    s, kind = v.s, v.kind
+    pairs, arith = _code_paren_pairs(v), [False]
+    for i, c in enumerate(s):
+        if i in pairs:
+            prev = s[i - 1] if i else ""
+            if prev and prev in "?*+@!" and kind[i - 1] == kind[i] == "c" and not arith[-1]:
+                return EXTGLOB_WHY
+            inner = pairs.get(i + 1, -2)
+            arith.append(inner + 1 == pairs[i] or (arith[-1] and prev != "$"))
+        elif c == ")" and kind[i] == "c" and len(arith) > 1:
+            arith.pop()
+    return ""
 
 
 class _CodeView:
@@ -1630,8 +1670,13 @@ def _strict_why(cmd: str, cwd: Optional[str] = None) -> str:
             return "backtick trong thân heredoc không nháy — dùng `$(…)` (AUD-SEC-181/231/245)"
         if "'" in body and "$(" in body:
             return "thân heredoc không nháy có `'` cùng thay lệnh (AUD-SEC-196)"
+        if FUNSUB_RE.search(body):  # cả `\${ ` (chặt hơn: không đếm `\` thoát)
+            return FUNSUB_WHY
         lines[a:b] = [" " * len(x) for x in lines[a:b]]  # chữ (thay lệnh trong thân: `_heredoc_feed` của luật cũ)
-    v = _CodeView(_fold_heredocs("\n".join(lines), True))
+    joined = "\n".join(lines)
+    if (len(joined) - len(joined.rstrip("\\"))) % 2:
+        return TAIL_BACKSLASH_WHY
+    v = _CodeView(_fold_heredocs(joined, True))
     if v.why:
         return v.why
     live, bare = _code_views(v)
@@ -1639,7 +1684,7 @@ def _strict_why(cmd: str, cwd: Optional[str] = None) -> str:
     why = next((why for rules, text in checks for rx, why in rules if rx.search(text)), "")
     if not why and STRICT_IFS_RE.search(v.s) and STRICT_SHELL_RE.search(v.s):
         why = "`$IFS` trong script của shell lồng (AUD-SEC-239)"
-    why = why or _bare_cr_why(v) or _ifs_split_why(cmd, live, bare)
+    why = why or _bare_cr_why(v) or _extglob_why(v) or _ifs_split_why(cmd, live, bare)
     return why or _dyn_text_why(v, live, bare) or _gh_strict_why(v.s, live, cwd)
 
 

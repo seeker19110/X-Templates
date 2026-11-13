@@ -171,6 +171,20 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
 
 ### Fixed
 
+- Guard — ADR-0076 lát 1, cú pháp toàn lệnh P6 (lý do chạm hàng rào: ba 🔴 có từ trước, review #516/#517; D-415, D-430,
+  D-431 — không đọc chắc thì chặn BUDGET, lý do có dòng `viết lại:`): (AUD-SEC-665, #528) thay lệnh `${ …; }`/`${| …; }`
+  của bash 5.3 — chạy lệnh trong shell hiện tại, cả trong nháy kép và thân heredoc không nháy — → BUDGET (trước đó
+  `echo ${ git push origin feat/me --force; }`, `echo ${ rm -rf /; }` lọt); (AUD-SEC-666) extglob trần `?(`/`*(`/`+(`/
+  `@(`/`!(` ở mã ngoài nháy và ngoài số học `((…))`/`$((…))` → BUDGET (`shopt -s extglob`↵`rm -rf !(a) /` lọt) — `$(`
+  trong số học vẫn là lệnh, `((a) )` là subshell như bash; (AUD-SEC-656) `\` lẻ cuối lệnh → BUDGET (`shlex` lỗi, tokenizer
+  rơi về tách thô không tách `(`/`<` khỏi từ: `(git push origin feat/me --force); echo \` lọt; nháy không đóng ở lệnh
+  gốc đã là BUDGET từ AUD-SEC-214). Giữ nguyên: chữ trong nháy và thân heredoc có nháy, `(( !(a) ))`, `$((2*(3+4)))`,
+  `[[ ! (…) ]]`, `if ! (lệnh)`, `\\` chẵn cuối, nối dòng. Chặn mới cả `if !(lệnh)` (bật extglob thì bash bung `!(lệnh)`
+  thành tên tệp rồi chạy — viết `! (lệnh)`), extglob trong `[[ … == @(a|b) ]]` và mẫu `case`. P6 vẫn dùng bảng cấm
+  `STRICT_LIVE`/`_strict_why` thay vì cổng dương của các lát sau vì cú pháp toàn lệnh không gắn với tên lệnh nào.
+  Đo trên 18.741 lệnh Bash thật khác nhau của transcript phiên: 4 (0,02 %, ngưỡng D-431 0,2 %) đổi từ cho qua sang chặn,
+  cả 4 là lệnh thử chính cú pháp này khi review guard; corpus guard base = head ở mọi ca cũ.
+  Dự án đích: nâng bản để nhận `.claude/hooks/guard.py` mới.
 - Guard (lý do chạm hàng rào: hai 🔴 có từ trước của Lát 3 harden, review độc lập từng lát): (AUD-SEC-610, #516) `;<`,
   `&&<`, `||>>`, `|&<`, `)<`, `(<`, `&` + xuống dòng + `<`… không còn gộp thành một token chuyển hướng nuốt lệnh sau nó —
   `_unglue` cắt dãy dấu theo toán tử dài nhất của bash ở cả `tokenize` lẫn `_raw_tokens`; (AUD-SEC-611, #517) thân hàm

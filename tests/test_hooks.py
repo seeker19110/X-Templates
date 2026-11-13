@@ -9549,6 +9549,112 @@ class GuardBareCrTest(_GuardDebtCase):
                 )
 
 
+class GuardWholeCommandSyntaxTest(_GuardDebtCase):
+    """ADR-0076 P6 (lát 1, T-3761): cú pháp toàn lệnh bash chạy mà guard không đọc → BUDGET (D-415). Thay lệnh `${ …; }`/
+    `${| …; }` của bash 5.3 chạy trong shell hiện tại (AUD-SEC-665, cả trong nháy kép và thân heredoc không nháy); extglob
+    trần `?(`/`*(`/`+(`/`@(`/`!(` ngoài `((…))` — bật `extglob` thì bash bung thành tên tệp (AUD-SEC-666); `\\` lẻ cuối
+    lệnh làm `shlex` lỗi và tokenizer rơi về tách thô (AUD-SEC-656). Chữ trong nháy, thân heredoc có nháy, số học giữ nguyên."""
+
+    FUNSUB = (
+        "echo ${ git push origin feat/me --force; }",
+        "echo ${ rm -rf /; }",
+        'echo "${ git push origin feat/me --force; }"',
+        "echo ${|git push origin feat/me --force; }",
+        "echo ${\tgit push origin feat/me --force; }",
+        "echo $(echo ${ rm -rf /; })",
+        "cat <<EOF\n${ git push origin feat/me --force; }\nEOF",
+        "bash -c 'echo ${ rm -rf /; }'",
+    )
+    EXTGLOB = (
+        "shopt -s extglob\nrm -rf !(a) /",
+        "rm -rf !(a) /",
+        "(rm -rf !(a) /)",
+        "rm -rf @(a|b) /",
+        "git add ?(a)",
+        "git add +(a)",
+        "echo $(rm -rf !(a) /)",
+        'echo "$(rm -rf !(a) /)"',
+        "if !(git diff --quiet); then echo d; fi",
+        "echo $(( $(rm -rf !(a) /) ))",  # `$(` trong số học là thay lệnh, không phải số học
+        "(( 1 )) && rm -rf !(a) /",
+        "eval 'rm -rf !(a) /'",
+    )
+    TAIL = (
+        "(git push origin feat/me --force); echo \\",
+        "</dev/null git push origin feat/me --force; echo \\",
+        "g() { git push origin feat/me --force; }; g; echo \\",
+        "function g { d=/; rm -rf $d; }; g; echo \\",
+        "echo \\\\\\",
+        "echo \\",
+    )
+    ALLOW = (
+        "echo '${ x }'",
+        "git commit -m 'fix ${ x }'",
+        "echo \\${ x }",
+        'echo ${x} ${#x} ${x:-a} "${x}"',
+        "cat <<'EOF'\n${ x; } !(a) *(b)\nEOF",
+        "cat <<EOF\n!(a) *(b) @(c)\nEOF",
+        "(( !(a) ))",
+        "echo $((2*(3+4)))",
+        'echo "$((2*(3+4)))"',
+        'for ((i=0; i<2*(3); i++)); do echo "$i"; done',
+        "[[ ! (a == b) ]] && echo y",
+        "[[ ! -f x ]] && echo y",
+        "if ! (git diff --quiet); then echo d; fi",
+        'case "$x" in *) echo y;; esac',
+        "echo '!(a)'",
+        'echo "!(a) *(b)"',
+        "grep -E '!(a|b)' f",
+        "arr+=(x y)",
+        "f() { echo hi; }; f",
+        "echo a\\\\",
+        'echo "a\\\\"',
+        "printf '%s\\n' \"$x\"",
+        "git log --oneline -3 \\\n  --stat",
+        "git commit -m \"$(cat <<'EOF'\nfix: don't break\nEOF\n)\"",
+        "echo ${x/?(a)/b}",
+    )
+
+    def test_funsub_denied(self):  # AUD-SEC-665
+        self.assert_code(self.FUNSUB, "BUDGET")
+
+    def test_bare_extglob_denied(self):  # AUD-SEC-666
+        self.assert_code(self.EXTGLOB, "BUDGET")
+
+    def test_tail_backslash_denied(self):  # AUD-SEC-656
+        self.assert_code(self.TAIL, "BUDGET")
+
+    def test_reason_names_rewrite(self):  # D-415: lý do chỉ đường viết lại
+        for cmd, part in (
+            (self.FUNSUB[0], "AUD-SEC-665"),
+            (self.EXTGLOB[1], "AUD-SEC-666"),
+            (self.TAIL[0], "AUD-SEC-656"),
+        ):
+            with self.subTest(cmd):
+                reason = self.out(cmd)["reason"]
+                self.assertIn(part, reason)
+                self.assertIn("viết lại", reason)
+
+    def test_quoted_arith_and_heredoc_unchanged(self):  # không chặn oan
+        self.assert_allowed(self.ALLOW)
+
+    def test_extglob_arith_regions(self):  # `$(` trong số học mở lại ngữ cảnh lệnh; `((a) )` là subshell (như bash)
+        def why(s: str) -> str:
+            return self.g._extglob_why(self.g._CodeView(s))
+
+        for s in ("(( $(rm !(a)) ))", "echo $(( 1 + $(git add !(a)) ))", "((rm !(a)) )", "( (a) ) !(b)"):
+            self.assertEqual(why(s), self.g.EXTGLOB_WHY, s)
+        for s in ("(( !(a) ))", "(( (a)*(b) ))", 'echo "$((2*(3)))"', "echo \"((\" ')' (a)", "x) !y"):
+            self.assertEqual(why(s), "", s)
+
+    def test_extglob_scan_is_linear(self):  # hiệu năng: ghép ngoặc một lượt, không bậc hai theo độ sâu lồng
+        for unit in ("(( a*(b) )) ", "$(echo (a)) ", "((((("):
+            with self.subTest(unit):
+                cpu_budget.assert_not_quadratic(
+                    self, lambda n: self.g.bash_decision("echo " + unit * n, self.feat), 500
+                )
+
+
 class GuardGhRestSplitDebtTest(_GuardDebtCase):
     """Nợ 🟠 #485/#491: đường REST của lệnh gh xoá đã DESTROY (AUD-SEC-583); `gh api` ghi ref với `force` = force-push
     (AUD-SEC-555); token bash tách/bung thành cờ ở lệnh gh có luật cờ và glob ở tên lệnh → BUDGET (AUD-SEC-590)."""
