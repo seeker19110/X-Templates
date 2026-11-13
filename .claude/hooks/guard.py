@@ -1500,6 +1500,13 @@ STRICT_BARE = (
     (re.compile(r"(?:^|[\s=:;&|(<>])~[+-]?\d"), "`~N` ngăn xếp thư mục (AUD-SEC-240)"),  # `~+`/`~-`: guard đã giải
     (re.compile(r"[{,]#|#[,}]"), "brace bung ra `#` (AUD-SEC-233)"),
 )
+# bash không tách từ ở CR (ký tự thường: `a<CR>-h` là MỘT từ), tokenizer và các tầng đọc theo `\s` thì tách (AUD-SEC-645,
+# D-429): CR ở mã ngoài nháy hay trong `${…}` (`-m ${X:-x<CR>-l}`) → chặn; CR trong nháy/thân heredoc là chữ, không tính.
+BARE_CR_WHY = "CR (`\\r`) trần ngoài nháy — bash coi CR là ký tự của từ (AUD-SEC-645); bỏ ký tự CR khỏi dòng lệnh"
+
+
+def _bare_cr_why(v: "_CodeView") -> str:
+    return BARE_CR_WHY if "\r" in v.s and any(c == "\r" and k in "cp" for c, k in zip(v.s, v.kind)) else ""
 
 
 class _CodeView:
@@ -1631,7 +1638,8 @@ def _strict_why(cmd: str, cwd: Optional[str] = None) -> str:
     why = next((why for rules, text in checks for rx, why in rules if rx.search(text)), "")
     if not why and STRICT_IFS_RE.search(v.s) and STRICT_SHELL_RE.search(v.s):
         why = "`$IFS` trong script của shell lồng (AUD-SEC-239)"
-    return why or _ifs_split_why(cmd, live, bare) or _dyn_text_why(v, live, bare) or _gh_strict_why(v.s, live, cwd)
+    why = why or _bare_cr_why(v) or _ifs_split_why(cmd, live, bare)
+    return why or _dyn_text_why(v, live, bare) or _gh_strict_why(v.s, live, cwd)
 
 
 def _code_views(v: _CodeView) -> Tuple[str, str]:
@@ -6533,14 +6541,40 @@ def _git_long(a: str) -> str:
     return full + eq + val if full else a
 
 
-def git_rules(n: List[str], cwd: Optional[str] = None) -> Tuple[str, str]:
+# AUD-SEC-644 (D-415, như ADR-0065 lớp A cho gh): tên cờ dài có mở rộng/glob mà phần chữ trước nó còn là viết tắt có thể
+# của cờ nguy hiểm (`--delet$X`: X chưa gán → `--delet` = `--delete`) — guard không biết bash mở ra cờ nào, không đoán.
+GIT_DYN_FLAG_MARK = "tên cờ dài `git` có mở rộng shell/glob"
+GIT_DYN_FLAG_WHY = (
+    f"{GIT_DYN_FLAG_MARK} có thể thành cờ nguy hiểm viết tắt (`git push --delet$X`: X chưa gán → `--delet` = `--delete`)"
+    " — guard không biết bash mở ra cờ nào (AUD-SEC-644, D-415); viết lại: tên cờ nguyên văn, mở rộng chỉ ở giá trị"
+    ' (`--repo="$R"`, `origin "$B"`)'
+)
+GIT_DYN_FLAG_RE = re.compile(r"[$`*?\[]")
+# lệnh con mà luật đọc cờ dài nguy hiểm (`fetch`/`pull`: luật chỉ xét refspec — `--all`/`--prune` ở đó lành)
+GIT_DYN_SUBS = frozenset({"push", *GIT_RULES, *REMOTE_REF_NAMES}) - {"fetch", "pull"}
+
+
+def _git_dyn_flag(a: str) -> bool:
+    key = a.split("=", 1)[0]
+    m = GIT_DYN_FLAG_RE.search(key)
+    return key.startswith("--") and m is not None and any(d.startswith(key[: m.start()]) for d in GIT_DANGER_LONG)
+
+
+def git_rules(n: List[str], cwd: Optional[str] = None, dyn: bool = True) -> Tuple[str, str]:
     """Luật theo lệnh con của git (bảng GIT_RULES; `push` riêng vì cần thư mục để biết nhánh hiện tại); không có luật → cho qua.
     Ghi ref remote/tạo ref trùng tên remote, đặt alias trỏ lệnh ghi ref (AUD-SEC-119) xét trước, `cwd` để đọc tên remote
-    của repo. Lệnh con là alias được mở ở `_git_alias_sources` (bản viết lại quét như lệnh thật)."""
+    của repo. Lệnh con là alias được mở ở `_git_alias_sources` (bản viết lại quét như lệnh thật). Cờ dài có mở rộng
+    (`_git_dyn_flag`) → hỏi mã BUDGET, trừ khi luật cũ đã chặn — trên argv đầy đủ trước (`--force$X`: luật push đọc
+    tiền tố `--force`), rồi trên phần còn lại khi bỏ token có mở rộng (giữ mã luật đó; `dyn=False`: không xét lại)."""
     if len(n) < 2:
         return "", ""
     if not n[1].startswith("-") and not GIT_SUB_RE.fullmatch(n[1]) and not GIT_SUB_ARRAY_RE.fullmatch(n[1]):  # D-415
         return "ask", GIT_DYN_NAME_WHY
+    if dyn and n[1] in GIT_DYN_SUBS and any(map(_git_dyn_flag, n[2:])):
+        verdict = git_rules(n, cwd, False)
+        if verdict[0] != "deny":
+            verdict = git_rules([*n[:2], *(a for a in n[2:] if not _git_dyn_flag(a))], cwd, False)
+        return verdict if verdict[0] == "deny" else ("ask", GIT_DYN_FLAG_WHY)
     args = [_git_long(a) for a in n[2:]]
     forged = _remote_ref_rule(n[1], args, cwd) if n[1] in REMOTE_REF_NAMES else _alias_def_rule(n, cwd)
     if forged[0]:
@@ -16254,6 +16288,7 @@ REASON_CODES: Tuple[Tuple[str, str], ...] = (
     ("vượt ngân sách quét", BUDGET),
     (GH_DYN_NAME_MARK, BUDGET),  # `gh pr merge$Z`: tên lệnh/cờ gh guard không biết (AUD-SEC-587, ADR-0065 lớp A)
     (GIT_DYN_NAME_MARK, BUDGET),  # `git pus? …`: lệnh con git guard không biết (AUD-SEC-635)
+    (GIT_DYN_FLAG_MARK, BUDGET),  # `git push --delet$X`: viết tắt cờ nguy hiểm có mở rộng (AUD-SEC-644, D-415)
     ("brace expansion quá nhiều", BRACE_OVERFLOW),
 )
 # Giữ tên cũ cho mã/ test đọc danh sách dấu nguy hiểm.
