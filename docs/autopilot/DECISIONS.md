@@ -604,9 +604,44 @@
 - Lý do (tiêu chí chất lượng cuối): (1) an toàn: đo trên 19.026 lệnh Bash thật cả hai phương án chênh 0 lệnh; khi chi phí bằng nhau chọn bên chặt (printf -v ghi biến như read/let; pytest chạy mã từ conftest/-p). ADR-0076 không sửa (đã Accepted): câu 'pytest không qua cổng' bị D này thay — cổng chỉ chặn dạng cờ/lệnh con có mở rộng nên rất hiếm chạm pytest.
 - Đường lùi: Chuyển printf về GATE_PASSIVE hoặc pytest/tox/nox sang GATE_PASSIVE (sửa PASSIVE_PIN và test ghim)
 
+### D-444 · 2026-11-13T11:12:00+00:00 · P4 xử lý thay lệnh trần có hậu tố và câu hỏi GO_SIGN cũ thế nào?
+
+- Phương án: (1) Ngoại lệ cho những câu hỏi hoặc control từng được phép · (2) Áp đúng P4; bare substitution còn chữ sau ra BUDGET, giữ các deny cũ
+- Chọn: Áp đúng P4; bare substitution còn chữ sau ra BUDGET, giữ các deny cũ
+- Lý do (tiêu chí chất lượng cuối): D-415: tập con đọc chắc. patch đổi raw ask GO_SIGN → deny BUDGET (default vẫn deny; strict siết ask), không nới ma trận build/harden. Mẫu 505 lượt không đổi quyết định, chưa đại diện lịch sử; bản nháp, AUD-SEC-609 mở.
+- Đường lùi: Hoàn lại lát P4 bằng PR riêng nếu phép đo rộng hơn vượt 0,2%; không đổi ngưỡng hay che lỗ còn lại.
+
+### D-447 · 2026-11-13T11:22:00+00:00 · P4 có giữ thay lệnh trần dính tiền tố ở từ cuối khi có thể thành đường gốc?
+
+- Phương án: (1) Giữ phạm vi chỉ hậu tố, để AUD-SEC-609 mở · (2) Chặn cả tiền tố/hậu tố, chỉ giữ thay lệnh trần là nguyên từ cuối
+- Chọn: Chặn cả tiền tố/hậu tố, chỉ giữ thay lệnh trần là nguyên từ cuối
+- Lý do (tiêu chí chất lượng cuối): Guard-only probe rm -rf /$(echo) được cho qua, còn Bash stub rm chỉ in argv xác nhận đối số cuối thành /. Đây là cùng lỗi thu hẹp argv nên chọn cách chặt theo D-415; dạng có nháy giữ nguyên. Thay thế giới hạn chỉ hậu tố của D-444; cập nhật control dính tiền tố và test viết lại có nháy. Không đổi ngưỡng D-431.
+- Đường lùi: Hoàn lại phần mở rộng P4 bằng PR riêng nếu số đo rộng hơn vượt ngưỡng, giữ ca khai thác và ghi rõ residual.
+
 ### D-457 · 2026-11-13T13:19:31+00:00 · Tạo chỗ cho các lát harden và xưởng dưới trần docs/autopilot bằng cách nào?
 
 - Phương án: (1) Dời hai PLAN factory-A và factory-BE đã đóng, không còn trong PROGRESS, vào docs/archive/autopilot theo ADR-0070 · (2) Tăng trần byte docs/autopilot
 - Chọn: Dời hai PLAN factory-A và factory-BE đã đóng, không còn trong PROGRESS, vào docs/archive/autopilot theo ADR-0070
 - Lý do (tiêu chí chất lượng cuối): Hai PLAN có 13 task đều đóng, không được PROGRESS nhắc là việc sống; dời giữ nguyên lịch sử và số ID, viết lại liên kết. Không đổi trần hoặc dời PLAN đang chạy.
 - Đường lùi: git mv ngược và hoàn lại liên kết trong PR riêng.
+
+### D-459 · 2026-11-13T13:21:24+00:00 · P4: cùng thân bash -c chứa $(pwd)/sub bị tokenizer thay bằng $PWD, làm mất chặn khi bọc. Xử lý thế nào?
+
+- Phương án: (1) Kiểm P4 trên đường thân shell literal nguyên văn đang có trước bước thay $(pwd), không thêm parser · (2) Miễn $(pwd) hoặc nới bất biến wrapper của fuzz
+- Chọn: Kiểm P4 trên đường thân shell literal nguyên văn đang có trước bước thay $(pwd), không thêm parser
+- Lý do (tiêu chí chất lượng cuối): Cùng byte thân lệnh phải giữ kết luận khi bọc bash -c. Miễn trừ hoặc bỏ invariant che một đường mất cú pháp. Dùng đường raw literal sẵn có giữ D415; phải giữ quoted/whole-final control và đo lại đúng source.
+- Đường lùi: Revert bản bổ sung trong PR riêng; giữ audit609 mở và ca fuzz đỏ làm bằng chứng.
+
+### D-475 · 2026-11-13T14:49:02+00:00 · T3763 Gate gốc có ba ALLOW process-sub argv trái P4: giữ grammar hay miễn các lệnh cat/echo/source này?
+
+- Phương án: (1) Giữ P4: đúng ba process-sub argv thành BUDGET rõ ràng, giữ đối chứng ALLOW bằng script/input file nguyên văn · (2) Thêm ngoại lệ cho nội dung process-sub được xem là lành
+- Chọn: Giữ P4: đúng ba process-sub argv thành BUDGET rõ ràng, giữ đối chứng ALLOW bằng script/input file nguyên văn
+- Lý do (tiêu chí chất lượng cuối): Gate riêng đã chạy801test891s, chỉ ba subtest bash x.sh <(cat f), bash <(echo echo-hi), source <(printf...) trái hợp đồng tất cả process-sub argv ngoài tập con (D444/ADR0076). Ngoại lệ theo nội dung lành quay lại bảng cấm. Đổi đúngbaexpect là siết theo spec, không hạ invariant hay phạm vi; hashguard/505sample0delta giữ nguyên. Fuzz đầy đủ đã qua ở lượt riêng.
+- Đường lùi: Chỉ mở process-sub qua SPEC/ADR có bộ đọc và bằng chứng tương đương; không trả expect ALLOW khi parser chưa chắc.
+
+### D-478 · 2026-11-13T16:30:30+00:00 · P4 gate-fast toàn repo còn hai ALLOW dùng thay lệnh trần/process-sub argv trái grammar: xử lý thế nào?
+
+- Phương án: (1) Đúng hai input cũ thành BUDGET, thêm quoted/literal rewrites ALLOW ở default và strict; numeric-loop giữ nguyên assertion · (2) Miễn hai dạng lành cụ thể để giữ ALLOW cũ
+- Chọn: Đúng hai input cũ thành BUDGET, thêm quoted/literal rewrites ALLOW ở default và strict; numeric-loop giữ nguyên assertion
+- Lý do (tiêu chí chất lượng cuối): Full455classsummaries chỉ có hai mâu thuẫn grammar và mộtnumeric-loop chưa rõnguyênnhân. Probe2original+2rewrites default/strict8callsđúngkếtluận; numericquietbaseline75ebd025/candidateec758 đềuallowNONE với8sunchanged, CPU1.68/1.57s, chưađủquykếtlượtđỏdotải. Khôngthêmexemption, khôngnớiSCAN_SECONDS/timeout/invariant. Chỉbổsungfailurediagnostic nếu cầnđểgiữreason/code lầnsau.
+- Đường lùi: Mở dạng ngoài grammar chỉ qua ADR có bằngchứng tươngđương; không trả ALLOW hoặc tăngbudget chỉđểcổngxanh.

@@ -180,6 +180,12 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
 
 ### Fixed
 
+- Guard (T-3763; lý do chạm hàng rào: đóng đường bỏ sót argv hoặc cho qua khi parser không đọc được): P4: chặn thay tiến trình làm đối số và thay lệnh trần dính chữ hoặc còn argv; số học chỉ miễn khi cặp ngoặc có xét nháy đóng liền. Thân shell literal được kiểm trước chuẩn hoá `$(pwd)` (D-459). AUD-SEC-609 còn mở cho P0, tham số và nháy lồng.
+  D-475: ba đối chứng `bash x.sh <(cat f)`, `bash <(echo 'echo hi')`, `source <(printf 'x=1\n')` trả BUDGET ở default/strict;
+  các đối chứng tệp `bash x.sh input.txt`, `bash literal-script.sh`, `source ./env.sh` được cho phép.
+  Bằng chứng chặn oan: [mẫu 505 lượt lệnh thật](research/evidence/2026-11-13-guard-p4.json), 464 thân lệnh,
+  0 lượt đổi quyết định trên mẫu; không suy rộng thành bảo đảm cho toàn lịch sử. Gate gốc `loop record` exit 0: 802 test (1615s) và 2621 ca bench đạt.
+
 - Guard — ADR-0076 lát 2 (T-3762; lý do chạm hàng rào: bốn 🔴 có từ trước cùng gốc AUD-SEC-644, D-430/D-431/D-435 — chỉ
   thêm chặn, mã `BUDGET`; quyết định cuối không nhẹ đi — luật cũ chặn trên cùng cách đọc giữ mã cũ, còn mã/lý do có thể
   thành `BUDGET` ở hai cách đọc `LitWord`, bản bung brace, câu hỏi nhường của `_go_patch_asks`, câu hỏi BUDGET của luật

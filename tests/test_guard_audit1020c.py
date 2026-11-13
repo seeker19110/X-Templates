@@ -219,13 +219,25 @@ class NestedCwdRunnersTest(unittest.TestCase):
             "cd tests && flock /tmp/l python3 -m unittest -q",
             "cd docs && echo $(date) > out.txt",
             "cd docs && script -qc 'echo x > out.txt' /dev/null",
-            "cd docs && bash <(echo 'echo x > settings.json')",
+            "cd docs && bash -c 'echo x > settings.json'",
             'echo "$(cd .claude && pwd)"; echo "$(echo x > settings.json)"',
             '(cd .claude && ls); echo "$(echo x > settings.json)"',
             "cd .claude && ls # $(echo x > ../docs/a.md)",
         ):
             with self.subTest(cmd=cmd):
                 self.assertNotEqual(policy(cmd)["decision"], "deny", cmd)
+
+    def test_guard_nested_process_argument_budget(self):  # D-478: process-sub argv vẫn chặn sau cd
+        for name in ("", "strict"):
+            with mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(ROOT), "XT_GUARD_POLICY": name}):
+                out = guard.apply_policy(
+                    guard.bash_decision("cd docs && bash <(echo 'echo x > settings.json')", str(ROOT))
+                )
+                self.assertEqual((out["decision"], out.get("code")), ("deny", "BUDGET"), out)
+                rewrite = guard.apply_policy(
+                    guard.bash_decision("cd docs && bash -c 'echo x > settings.json'", str(ROOT))
+                )
+                self.assertEqual(rewrite["decision"], "", rewrite)
 
     def test_guard_nested_cwd_runners_span_dirs(self):
         root = str(ROOT)

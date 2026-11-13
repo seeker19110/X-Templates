@@ -27,6 +27,7 @@ import unittest.mock as mock
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # tests/cpu_budget.py
 import cpu_budget
+from git_fixture import fixture_git, init_git_fixture, isolated_git_environment
 
 # Luật guard được test ở pha harden; pha build nới hành động cục bộ (ADR-0040) — test riêng ở BuildPhaseGuardTest.
 os.environ.setdefault("XT_GUARD_PHASE", "harden")
@@ -1675,7 +1676,9 @@ class GuardStoredScanTest(unittest.TestCase):
         self.check("ask", ["rm -rf ~/projects", "rm -r $HOME/x", "rm -r ${HOME}/x", "cd ~ && rm -rf projects"])
         self.check("ask", ["rm -rf /opt/data"])
         self.assertTrue(self.g._outside_project("../khac", "/home/u/proj", None))
-        self.check("", ["rm -rf build", "rm -rf /tmp/abc", 'rm -rf "$d"', "rm -rf $(pwd)/x", "rm ~/a.txt"])
+        self.check("", ["rm -rf build", "rm -rf /tmp/abc", 'rm -rf "$d"', 'rm -rf "$(pwd)"/x', "rm ~/a.txt"])
+        out = self.g.bash_decision("rm -rf $(pwd)/x", self.root)  # P4: hậu tố sau thay lệnh trần
+        self.assertEqual((out["decision"], out.get("code")), ("deny", "BUDGET"))
         self.check("", [f"rm -rf {tempfile.gettempdir()}/x", f"rm -rf {self.root}/dist", "cd /tmp && rm -rf x"])
         self.assertFalse(self.g._outside_project("$OTHER/x", self.root, None))
 
@@ -6253,6 +6256,7 @@ class GuardFalseGreenBenchTest(unittest.TestCase):
                 "git push origin `echo main`",
                 "git push origin $(printf '%s' main)",
                 "git push $(echo --force) origin feat",
+                "git push $(git remote | head -1) feat/x",  # ADR-0076 P4: còn đối số sau thay lệnh trần
                 "git push origin $(cat branch.txt)",  # guard không đọc được giá trị → không biết đích
                 "git push origin HEAD:$(cat b)",
                 "git push origin $(echo $(echo main))",
@@ -6268,7 +6272,7 @@ class GuardFalseGreenBenchTest(unittest.TestCase):
                 "git push origin $(echo feat/x)",
                 "git push -u origin $(git branch --show-current)",  # thư mục tạm không phải repo: không phải main
                 'git push -u origin "$(git rev-parse --abbrev-ref HEAD)"',
-                "git push $(git remote | head -1) feat/x",  # chỉ remote là thay lệnh; đích ghi rõ
+                'git push "$(git remote | head -1)" feat/x',  # remote có nháy; đích ghi rõ
                 "git push origin feat/x && echo $(date)",
                 "x=$(cat f); git push origin feat/x",
                 "git commit -q -m \"$(cat <<'EOF'\nrevert: git push origin $(echo main)\nEOF\n)\"",
@@ -9611,6 +9615,7 @@ class GuardRuledWordGateTest(_GuardDebtCase):
 
     def test_old_rule_code_kept(self):  # luật cũ chặn trước giữ mã cũ, kể cả strict (bài học review #523)
         self.assert_code(("git push --force -d$X origin feat/other", "git clean -f -d$X"), "RULE_DENY")
+        self.assert_code(("git reset --hard <(echo)", "git push --force $(echo) x"), "RULE_DENY")
         self.assert_code(('git stash drop "$X"',), "STASH_DROP")
         self.assert_code(("git push$X --force origin feat/other", "git reset$X --hard"), "BUDGET")
         with mock.patch.dict(os.environ, {"XT_GUARD_POLICY": "strict"}):
@@ -9657,9 +9662,99 @@ class GuardRuledWordGateTest(_GuardDebtCase):
             got = list(pool.map(self.g._ruled_word_why, cmds))
         self.assertEqual(got, [self.g._ruled_word_why(c) for c in cmds])
 
+    def test_substitution_cannot_hide_arguments(self):  # ADR-0076 P4, AUD-SEC-609
+        self.assert_code(
+            (
+                "git push origin x <(echo) --force",
+                "rm -rf x $(echo) /",
+                "rm -rf /$(echo)",
+                "git diff x$(echo x)",
+                "git reset -q $((echo) ) --hard",  # `$((` có thể là thay lệnh chứa subshell
+                "rm -rf x $((echo) ) /",
+                "rm -rf /$((echo) )",
+                "rm -rf x $((printf '))(('; echo) ) /",  # ngoặc nháy đánh lừa `_arith_at` đếm thô
+                "gh pr close 5 <(echo) -d",
+                "git -C $(pwd)/sub status",
+                "git reset -q $(echo)--hard",
+                "git diff --stat $(git merge-base HEAD origin/main) HEAD",
+                "git diff >(cat)",
+                "git diff <(echo)$(echo)",
+                "git diff $(echo x)$(echo y)",
+                "timeout 5 git diff $(echo x) HEAD",
+                "sh -c 'git diff $(echo x) HEAD'",
+                "git diff `echo x` HEAD",  # tập con chuẩn đã chặn backtick
+            ),
+            "BUDGET",
+        )
+        self.assertIn("viết lại", self.out("git diff $(echo) HEAD")["reason"])
+
+    def test_substitution_controls(self):
+        self.assert_allowed(
+            (
+                'git diff "$(echo x)" HEAD',
+                "git diff $(echo x)",  # thay lệnh là cả từ cuối: luật cũ vẫn quét thân
+                'git diff "x$(echo x)"',  # từ có tiền tố vẫn đọc chắc khi toàn bộ được nháy
+                "git diff $((1)) HEAD",  # số học, không phải thay lệnh
+                "git diff $((1 + (2))) HEAD",
+                'git diff "$((1))" HEAD',
+                'git diff $(( "1" + ("2") )) HEAD',
+                "git diff '$((echo) )' HEAD",
+                'git diff "$((echo) )" HEAD',
+                "git diff '$(echo x)' HEAD",
+                "git diff '<(echo)' HEAD",
+                "git diff _procsub_ HEAD",  # tên file nguyên văn không trùng placeholder nội bộ
+                "git diff < <(echo)",  # chuyển hướng, không phải đối số
+                "diff <(echo) <(echo)",  # ngoài GATE_NAMES
+                "echo $(echo x) HEAD",
+                'MB=$(git merge-base HEAD origin/main); git diff --stat "$MB" HEAD',
+            )
+        )
+
+    def test_raw_literal_shell_body_keeps_p4_syntax(self):  # D-459: tokenizer từng đổi $(pwd) trước quét lồng
+        body = "git -C $(pwd)/sub status"
+        wrapped = "bash -c " + shlex.quote(body)
+        self.assert_code((wrapped, "bash -c " + shlex.quote(wrapped), "eval " + shlex.quote(body)), "BUDGET")
+        self.assert_allowed(
+            (
+                "bash -c 'git -C \"$(pwd)\"/sub status'",
+                "bash -c 'git diff $(pwd)'",
+                "bash -c 'git diff $((1)) HEAD'",
+            )
+        )
+        nested = "git status"
+        for _ in range(self.g.MAX_NEST + 2):
+            nested = "bash -c " + shlex.quote(nested)
+        self.assertIn("vượt ngân sách", self.g._raw_heads_why(nested))
+
     def test_linear(self):  # một lượt, tuyến tính theo độ dài lệnh
         cpu_budget.assert_not_quadratic(self, lambda n: self.g._ruled_word_why("git push " + "-a b$X " * n), 4_000)
         cpu_budget.assert_not_quadratic(self, lambda n: self.g._ruled_word_why('git push "' + "$X" * n + '"'), 4_000)
+
+
+class GuardSubstitutionPolicyTest(unittest.TestCase):
+    def test_p4_patch_remains_denied_in_every_policy(self):
+        self.enterContext(isolated_git_environment())
+        g = _guard()
+        root = Path(self.enterContext(tempfile.TemporaryDirectory())).resolve()
+        go = root / "docs" / "ops"
+        go.mkdir(parents=True)
+        (go / "GO-NO-GO.md").write_text("# GO\n", encoding="utf-8")
+        (root / "xt.yaml").write_text("delivery_phase: build\n", encoding="utf-8")
+        init_git_fixture(root)
+        fixture_git(root, "add", "xt.yaml")
+        fixture_git(root, "commit", "-qm", "init")
+        fixture_git(root, "update-ref", "refs/remotes/origin/main", "HEAD")
+        self.addCleanup(g._BUILD_PHASE.clear)
+        for policy, phase in itertools.product(("", "strict"), ("build", "harden")):
+            with (
+                self.subTest(policy=policy, phase=phase),
+                mock.patch.dict(os.environ, {"XT_GUARD_POLICY": policy, "XT_GUARD_PHASE": phase}),
+            ):
+                g._BUILD_PHASE.clear()
+                self.assertEqual(g.build_phase(str(root)), policy == "" and phase == "build")
+                raw = g.bash_decision("patch -p1 -i $(echo) t.diff", str(root))
+                final = g.apply_policy(raw)
+                self.assertEqual((raw["decision"], final["decision"], final["code"]), ("deny", "deny", "BUDGET"))
 
 
 class GuardBareCrTest(_GuardDebtCase):
@@ -10364,7 +10459,8 @@ class GuardQuotedOperatorTest(_GuardDebtCase):
         ("X=$(echo) git apply x.diff", "ask", "GO_SIGN"),
         ("X=<(echo) find docs -name '*.md' | xargs -a l sed -i s/a/b/", "ask", "EVIDENCE_HANDWRITE"),
         ("git -c push.default=matching push $(echo) origin", "ask", "PUSH_ALL"),
-        ("patch -p1 -i $(echo) t.diff", "ask", "GO_SIGN"),
+        # P4: câu hỏi GO_SIGN bị cổng tập con siết thành BUDGET; deny/ask cũ ở các ca khác vẫn được ghim.
+        ("patch -p1 -i $(echo) t.diff", "deny", "BUDGET"),
     )
     # D-415 (review #495 lượt 2): cách đọc `LitWord` mở lỗ guard có từ trước mà cách đọc cũ chặn nhờ cắt ở dấu — bash
     # thật chạy phần nguy hiểm. Lệnh có `LitWord` được đọc thêm kiểu cũ, chặt hơn thắng: (lệnh, thô, sau chính sách, mã)
@@ -10417,7 +10513,7 @@ class GuardQuotedOperatorTest(_GuardDebtCase):
                 self.assertEqual(self.out(cmd)["raw"], "", self.out(cmd))
 
     def test_substitution_same_as_main(self):
-        """D-415: quyết định thô và mã y như trước AUD-SEC-605 (từng lọt ở bản mở rộng #495, review Fable)."""
+        """D-415: ghim mã cũ, trừ hai lần siết được ghi rõ của ADR-0076 P3/P4."""
         go = Path(self.feat, "docs", "ops")
         go.mkdir(parents=True)
         (go / "GO-NO-GO.md").write_text("# GO\n", encoding="utf-8")
