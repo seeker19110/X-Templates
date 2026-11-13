@@ -5,6 +5,7 @@ from __future__ import annotations
 import ast
 import concurrent.futures
 import contextlib
+import copy
 import fnmatch
 import importlib.util
 import io
@@ -10768,21 +10769,60 @@ class GuardGitSubcommandTest(_GuardDebtCase):
 # đó — gán thẳng hay theo từng phần tử bộ, cả hai vế điều kiện (`name, args = (n[0], n[1:]) if n else …`), truyền vào hàm
 # khác (`_special_var_why(c, name, args)`). Nhánh: so sánh `==`/`!=`/`in`/`not in` (vế trái mọi `posixpath.basename(…)`
 # cũng tính) với chuỗi, bộ chuỗi, bảng cấp module (dict → khoá), và tra bảng theo tên (`BẢNG[name]`, `BẢNG.get(head)`).
-# Ngoài tầm: rẽ theo tiền tố hay biểu thức chính quy (`INTERP_RE.fullmatch(n[0])`).
+# Ngoài tầm (review #526): biến vòng lặp/comprehension (`for head, args in heads`), kết quả hàm phụ (`_heredoc_head(a)`,
+# `head, args = _ifs_head(a)`), `normalize(argv)[:1]` ngoài tên `n` — tên rẽ nhánh kiểu đó khai ở `GATE_UNREAD` (lý do +
+# lệnh mẫu đổi quyết định); tiền tố hay biểu thức chính quy (`INTERP_RE.fullmatch(n[0])`, `mkfs*`) — tập không biểu diễn.
 GATE_HEAD_LEFTS = ("n[0]", "n[:1]", "n[:2]")
+# Tên có luật mà bộ đọc không thấy: (bảng của guard hay tên, cách đọc, lệnh mẫu). Mỗi mục phải còn góp tên bộ đọc không
+# thấy (bộ đọc mạnh lên thì gỡ mục); với mỗi tên đó, lệnh mẫu (`{N}` = tên, `{F}` = tệp nạp ngầm) cho quyết định guard khác
+# tên lạ `zzqx` ở cùng chỗ — phép so hành vi, độc lập với đọc mã. Dò 2026-11-13 bằng bộ đọc mở rộng thử (biến vòng lặp,
+# kết quả `_ifs_head`/`_heredoc_head`, `normalize(…)[:1]`, phương thức lớp) trên guard.py: đúng các tên dưới và `popd`.
+GATE_UNREAD = (
+    ("IMPLICIT_TOOL_HEADS", "`_implicit_tools`: biến comprehension `h for h in heads`", "echo x > {F} && {N}"),
+    (
+        "HEREDOC_RUN_SAFE",
+        "`_heredoc_runner`: kết quả `_heredoc_head(argv)`",
+        "cat > s.sh <<'E'\necho hi\nE\n{N} a b; bash s.sh",
+    ),
+    ("GLOB_COMMANDS", "`_array_arg_why`: biến vòng lặp trên cặp `_ifs_head`", '{N} "$@"'),
+    (
+        "IFS_TAINT_HEADS for",
+        "`_argv_tainted`/`_argv_split_trigger`: `head, args = _ifs_head(argv)`",
+        "{N} $X in a; do :; done",
+    ),
+    ("m4", "`_is_m4`: `normalize(argv)[:1]`", 'echo "syscmd(rm -rf .autopilot)" | {N}'),
+)
+
+
+def _unread_names(g: object, key: str) -> set[str]:
+    """Tên của một mục `GATE_UNREAD`: mỗi từ là bảng của guard (lấy chuỗi, bỏ rỗng) hoặc chính tên lệnh."""
+    out: set[str] = set()
+    for word in key.split():
+        table = getattr(g, word, None)
+        out |= {word} if table is None else {x for x in table if isinstance(x, str) and x}
+    return out
 
 
 def _scan_reachable(tree: ast.Module) -> list[ast.FunctionDef]:
-    """Hàm cấp module của guard mà `_scan_command` gọi tới (bắc cầu, kể cả hàm truyền như giá trị: bảng luật)."""
-    funcs = {f.name: f for f in tree.body if isinstance(f, ast.FunctionDef)}
-    seen: dict[str, ast.FunctionDef] = {}
+    """Hàm cấp module của guard mà `_scan_command` gọi tới (bắc cầu, kể cả hàm truyền như giá trị: bảng luật); nhắc tên
+    lớp cấp module thì kéo theo mọi phương thức của lớp (bản sao tên `Lớp.phương_thức` — `_CwdUnion` gọi `_cd_moves`)."""
+    funcs = {f.name: [f] for f in tree.body if isinstance(f, ast.FunctionDef)}
+    for c in (c for c in tree.body if isinstance(c, ast.ClassDef)):
+        funcs[c.name] = [_renamed(m, f"{c.name}.{m.name}") for m in c.body if isinstance(m, ast.FunctionDef)]
+    seen: dict[str, list[ast.FunctionDef]] = {}
     todo = ["_scan_command"]
     while todo:
         name = todo.pop()
         if name not in seen:
             seen[name] = funcs[name]
-            todo += [x.id for x in ast.walk(funcs[name]) if isinstance(x, ast.Name) and x.id in funcs]
-    return list(seen.values())
+            todo += [x.id for f in funcs[name] for x in ast.walk(f) if isinstance(x, ast.Name) and x.id in funcs]
+    return [f for fs in seen.values() for f in fs]
+
+
+def _renamed(fn: ast.FunctionDef, name: str) -> ast.FunctionDef:
+    out = copy.copy(fn)
+    out.name = name
+    return out
 
 
 def _is_head(e: ast.expr, local: set[str], compare: bool = False) -> bool:
@@ -10886,10 +10926,34 @@ def _branched_heads(g: object, tree: ast.Module) -> tuple[set[str], set[str]]:
 
 
 class GuardGateNamesTest(unittest.TestCase):
-    """ADR-0076 lát 0, D-434: `_GATE_BRANCHED` (tên lệnh có luật) đúng bằng tập tên mà luật của `_scan_command` (bắc cầu)
-    rẽ nhánh, chia đôi thành `GATE_NAMES` (kích hoạt cổng) và `GATE_PASSIVE` (trình thông dịch không phải shell, lệnh chỉ
-    đọc/in) — thêm nhánh theo tên mới mà quên ghi thì đỏ; tên tự thêm tay ngoài các nhánh đó đỏ; tên của bảng ghi tệp/chạy
-    lệnh/ra mạng/ghi biến xếp vào `GATE_PASSIVE` cũng đỏ."""
+    """ADR-0076 lát 0, D-434: `_GATE_BRANCHED` (tên lệnh có luật) đúng bằng tập tên rẽ nhánh mà bộ đọc mã thấy trên luật
+    của `_scan_command` (bắc cầu) cộng `GATE_UNREAD` (tên bộ đọc không thấy, mỗi tên có lệnh mẫu đổi quyết định guard),
+    chia đôi thành `GATE_NAMES` (kích hoạt cổng) và `GATE_PASSIVE` (ghim nguyên văn ở `PASSIVE_PIN`) — thêm nhánh theo tên
+    mới ở dạng bộ đọc thấy mà quên ghi thì đỏ; tên tự thêm tay ngoài các nhánh đó đỏ; mọi đổi `GATE_PASSIVE` đỏ tới khi
+    sửa ghim. Ngoài tầm (review #526): tên rẽ nhánh ở dạng bộ đọc không thấy mà chưa khai `GATE_UNREAD`; tên khớp tiền
+    tố/biểu thức chính quy (`python3.12`, `mkfs.ext4`, `git-push`) — lát 6 dùng `_is_ruled_name`, không dùng riêng tập.
+    Phép so hành vi chỉ chạy trên tên của `GATE_UNREAD`: đo 2026-11-13, 23 lệnh mẫu chung chỉ phân biệt 136/341 tên có
+    luật với tên lạ — tên còn lại cần lệnh mẫu riêng từng tên, nên phần đó vẫn dựa vào bộ đọc mã."""
+
+    # Ghim `GATE_PASSIVE` (review #526, AUD-SEC-725): nhóm → tên; mọi đổi tập thụ động phải hiện trong diff của test này.
+    PASSIVE_PIN = {
+        # D-434: `python3 scripts/xt.py …` không qua cổng; lỗ cờ có mở rộng (`python3 -$X '…'`) — D-435, T-3762
+        "trình thông dịch không phải shell": frozenset({"python", "python3", "node", "perl", "ruby", "php"}),
+        # đọc tệp/luồng, ghi stdout; ngoại lệ có từ trước ghi ở comment `GATE_PASSIVE` (`rg --pre`, `less -o`)
+        "đọc, lọc, so, tìm, xem": frozenset(
+            {"cat", "tac", "head", "tail", "wc", "grep", "egrep", "fgrep", "zgrep", "ugrep", "rg", "ag", "ack", "diff"}
+            | {"cmp", "jq", "cut", "tr", "less", "more", "bat"}
+        ),
+        # in chữ hay giá trị; `printf -v` ghi biến (luật riêng) — quyết ở T-3762
+        "in chữ, không ghi": frozenset({"echo", "printf", "true", "false", ":", "date"}),
+        "thông tin hệ thống, tiến trình, tên lệnh": frozenset(
+            {"nproc", "pwd", "whoami", "hostname", "uname", "id", "ps", "pgrep", "printenv", "type", "which"}
+        ),
+        "kiểm đường dẫn, siêu dữ liệu, tổng kiểm": frozenset(
+            {"ls", "test", "[", "[[", "basename", "dirname", "readlink", "realpath", "stat", "file", "du", "cksum"}
+            | {"md5sum", "sha1sum", "sha224sum", "sha256sum", "sha384sum", "sha512sum", "b2sum"}
+        ),
+    }
 
     # Bảng tên lệnh ghi tệp, xoá, chạy lệnh từ đối số, ra mạng, cài gói hay ghi biến theo tên đối số của guard: không tên
     # nào của `GATE_PASSIVE` được thuộc chúng, trừ trình thông dịch không phải shell (D-434 — `XARGS_WRITERS`,
@@ -10934,14 +10998,21 @@ class GuardGateNamesTest(unittest.TestCase):
             "    _callee(args, name)\n"  # tham số theo vị trí
             "    _star(*args, name)\n"  # sau `*args` không biết vị trí: bỏ
             "    return name == 'a1' or head in ('a2',) or b == 'x1' or GET.get(head) or SUB[name]"
-            " or posixpath.basename(p) == 'a6'\n"
+            " or posixpath.basename(p) == 'a6' or K(n)\n"
             "def _callee(c, nm):\n"
             "    return nm != 'a3'\n"
             "def _star(x, y):\n"
             "    return y == 'x2'\n"
+            "class K:\n"  # lớp được nhắc: phương thức của nó tính (review #526: `popd` ở `_CwdUnion` → `_cd_step`)
+            "    def m(self, n):\n"
+            "        return n[0] == 'a7'\n"
+            "class U:\n"  # lớp không ai nhắc: bỏ
+            "    def m(self, n):\n"
+            "        return n[0] == 'x3'\n"
         )
         g = type("G", (), {"GET": {"a4": 1}, "SUB": {"a5": 2}})
-        self.assertEqual(_branched_heads(g, ast.parse(src)), ({"a1", "a2", "a3", "a4", "a5", "a6"}, {"GET", "SUB"}))
+        want = ({"a1", "a2", "a3", "a4", "a5", "a6", "a7"}, {"GET", "SUB"})
+        self.assertEqual(_branched_heads(g, ast.parse(src)), want)
 
     def test_every_branched_name_classified(self):
         missing = sorted(self.names - self.g._GATE_BRANCHED)
@@ -10963,9 +11034,36 @@ class GuardGateNamesTest(unittest.TestCase):
         )
 
     def test_no_unbranched_name(self):
-        extra = sorted(self.g._GATE_BRANCHED - self.names - self.base)
-        self.assertEqual(extra, [], "_GATE_BRANCHED có tên không luật nào rẽ nhánh")
+        unread = set().union(*(_unread_names(self.g, key) for key, _, _ in GATE_UNREAD))
+        extra = sorted(self.g._GATE_BRANCHED - self.names - self.base - unread)
+        self.assertEqual(
+            extra, [], "_GATE_BRANCHED có tên không luật nào rẽ nhánh (nhánh bộ đọc không thấy: GATE_UNREAD)"
+        )
         self.assertFalse(self.g._GATE_BRANCHED & self.not_heads)
+
+    def test_unread_entries_live(
+        self,
+    ):  # review #526: mục `GATE_UNREAD` còn góp tên bộ đọc không thấy, đều đã phân loại
+        for key, why, _ in GATE_UNREAD:
+            names = _unread_names(self.g, key)
+            self.assertTrue(names - self.names, f"{key} ({why}): bộ đọc đã thấy hết — gỡ mục khỏi GATE_UNREAD")
+            self.assertLessEqual(names, self.g._GATE_BRANCHED, f"{key}: thiếu ở _GATE_BRANCHED")
+
+    def test_unread_names_change_decision(self):  # so hành vi: tên khai ngoài bộ đọc có luật thật (review #526)
+        for key, why, probe in GATE_UNREAD:
+            for name in sorted(_unread_names(self.g, key) - self.names):
+                loads = self.g.IMPLICIT_LOADS.get(self.g.IMPLICIT_TOOL_HEADS.get(name, ""), ())
+                f = next((x for x in loads if "*" not in x), "")
+                with self.subTest(name=name, why=why):
+                    self.assertNotEqual(
+                        guard_decision("bash", probe.format(N=name, F=f)),
+                        guard_decision("bash", probe.format(N="zzqx", F=f)),
+                    )
+
+    def test_passive_pinned(self):  # review #526 (AUD-SEC-725): `.`/`trap`/`gzip`… chuyển sang GATE_PASSIVE → đỏ
+        groups = list(self.PASSIVE_PIN.values())
+        self.assertEqual(sum(map(len, groups)), len(frozenset().union(*groups)), "tên ghim ở hai nhóm")
+        self.assertEqual(self.g.GATE_PASSIVE, frozenset().union(*groups))
 
     def test_gate_keeps_ruled_core(self):  # git/gh, shell, eval/source, trình bọc luôn kích hoạt cổng
         self.assertLessEqual(self.base, self.g.GATE_NAMES)

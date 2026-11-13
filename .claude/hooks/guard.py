@@ -15793,8 +15793,10 @@ CLOUD_URL_RE = re.compile(r"(?:s3|gs|az|r2|b2)://")
 CLOUD_COPIERS = ("aws", "gsutil", "rclone", "gcloud", "azcopy")
 # ADR-0076 lát 0 (CHƯA dùng trong quyết định): tên lệnh có luật — lệnh đơn mà basename từ đầu thuộc tập này sẽ qua cổng
 # tập con dương (`_ruled_word_why`, lát 2). Gom từ bảng có sẵn: git/gh, shell, eval/source, trình bọc và mọi tên luật của
-# `_scan_command` (bắc cầu) rẽ nhánh; `GuardGateNamesTest` đọc mã và khẳng định các tập khớp nhau. Rẽ nhánh theo tiền tố
-# hay biểu thức chính quy (`mkfs*`, `git-<lệnh con>`, `INTERP_RE`) không nằm ở đây — tập hợp không biểu diễn được.
+# `_scan_command` (bắc cầu, cả phương thức lớp) rẽ nhánh; `GuardGateNamesTest` đọc mã và khẳng định các tập khớp nhau —
+# tên rẽ nhánh mà bộ đọc không thấy (biến vòng lặp/comprehension, kết quả hàm phụ) khai ở `GATE_UNREAD` của test kèm lý
+# do và lệnh mẫu. Rẽ nhánh theo tiền tố hay biểu thức chính quy (`mkfs*`, `git-<lệnh con>`, `INTERP_RE`: `python3.12`,
+# `pypy3`, `nodejs`) không nằm ở đây — tập hợp không biểu diễn được (review #526).
 # D-434: tên luật có rẽ nhánh nhưng KHÔNG kích hoạt cổng — trình thông dịch không phải shell (ADR-0076: `python3
 # scripts/xt.py …` không qua cổng) và lệnh chỉ đọc/in (bảng thụ động của D-432): không thuộc bảng ghi tệp, chạy lệnh từ
 # đối số, ra mạng hay ghi biến theo tên nào của guard (`GuardGateNamesTest.ACTIVE_TABLES`). Ngoại lệ đã biết, có từ trước
@@ -15805,14 +15807,21 @@ GATE_PASSIVE: FrozenSet[str] = frozenset(
     "python python3 node perl ruby php cat tac head tail wc grep egrep fgrep zgrep ugrep rg ag ack diff cmp jq echo"
     " printf date true false nproc pwd ls whoami hostname uname id test [ [[ basename dirname readlink realpath stat file"
     " du md5sum sha1sum sha224sum sha256sum sha384sum sha512sum b2sum cksum less more bat ps pgrep cut type which"
-    " printenv".split()
+    " printenv tr :".split()
 )
 # Tên lệnh có luật — mọi tên luật rẽ nhánh, gồm cả `GATE_PASSIVE`: tập để hỏi "tên này có luật không" (đọc lại hậu tố của
-# lát 6, D-432), còn `GATE_NAMES` chỉ để kích hoạt cổng. Đúng bằng tập bộ đọc mã của `GuardGateNamesTest` thấy.
+# lát 6, D-432), còn `GATE_NAMES` chỉ để kích hoạt cổng. Đúng bằng tập tên rẽ nhánh mà bộ đọc mã của `GuardGateNamesTest`
+# thấy cộng `GATE_UNREAD` của test; tên khớp tiền tố/biểu thức chính quy không thuộc tập (comment trên).
 _GATE_BRANCHED: FrozenSet[str] = frozenset(
     "git gh eval source . { function trap pushd env sudo doas xt.py claude codex gemini coverage nix-shell ar cpio jar"
     " lzip link rev openssl patch gpatch nerdctl docker-compose podman-compose composer.phar printenv".split()
+    # Review #526: `m4` (`_is_m4`), `mkfs` (`GLOB_COMMANDS` định nghĩa sau), `for` (`_argv_split_trigger`)
+    + "m4 mkfs for".split()
 ).union(
+    IMPLICIT_TOOL_HEADS,  # công cụ nạp tệp ngầm: `just`, `pytest`, `mvn`… (`_implicit_tools`)
+    HEREDOC_RUN_SAFE - {""},  # `:`, `tr` (`_heredoc_runner`)
+    CD_MOVE_HEADS,  # `popd` (`_cd_step`)
+    IFS_TAINT_HEADS,  # `select` (`_argv_tainted`)
     SHELLS,
     WRAPPERS,
     INTERPRETERS,
