@@ -1566,7 +1566,10 @@ def _arith_hash_why(v: "_CodeView") -> str:
     if not v.comments:
         return ""
     s, kind, starts = v.s, v.kind, {a for a, _ in v.comments}
-    parens, brackets = [False], 0
+    parens: List[bool] = [False]
+    brackets: List[
+        int
+    ] = []  # độ sâu ngoặc lúc mở mỗi `[` chưa đóng — `]` trong `$(…)` không đóng `[` ngoài (review #528)
     for i, c in enumerate(s):
         if i in starts and (parens[-1] or brackets):
             return ARITH_HASH_WHY
@@ -1577,9 +1580,9 @@ def _arith_hash_why(v: "_CodeView") -> str:
         elif c == ")" and len(parens) > 1:
             parens.pop()
         elif c == "[":  # mọi `[` ở mã: `$[`, `tên[`, cả `[k …]=v` trong `x=( … )` (comment chỉ hợp lệ khi đã đóng)
-            brackets += 1
-        elif c == "]" and brackets:
-            brackets -= 1
+            brackets.append(len(parens))
+        elif c == "]" and brackets and brackets[-1] == len(parens):
+            brackets.pop()
     return ""
 
 
@@ -16221,8 +16224,10 @@ def _budget_result(cmd: str, why: str) -> Dict[str, object]:
 
 
 def _rough_budget(res: Dict[str, object], cmd: str) -> Dict[str, object]:
-    """AUD-SEC-656 (review #528): lệnh chặt mà `shlex` phải tách thô — luật cũ đã chặn (sau chính sách) thì giữ mã đó,
-    không thì BUDGET (D-415): token thô không tách `(`/`<`/hàm như bash nên "không thấy gì" không phải bằng chứng."""
+    """AUD-SEC-656 (review #528): lệnh chặt mà `shlex` phải tách thô — lần đọc này đã chặn (sau chính sách) thì giữ mã đó,
+    không thì BUDGET (D-415): token thô không tách `(`/`<`/hàm như bash nên "không thấy gì" không phải bằng chứng.
+    Quyết định cuối không nhẹ đi; lệnh cần hai lần đọc (`LitWord`) mà chỉ lần đọc cũ chặn thì mã có thể thành BUDGET
+    (`_stricter_reading` hoà lấy lần đọc mới)."""
     if policy_action(decide(res)) == "deny":
         return res
     return {**res, "decision": "deny", "reason": _budget_result(cmd, SHLEX_UNCLOSED_WHY)["reason"], "code": BUDGET}

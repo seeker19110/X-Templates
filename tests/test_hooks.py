@@ -9603,6 +9603,15 @@ class GuardWholeCommandSyntaxTest(_GuardDebtCase):
         "a_[1 #${ rm -rf /; }]=x",
         "x=( [1 #${ git push origin feat/me --force; }\n]=v )",  # chỉ số trong gán mảng phức hợp (bash 5.3.9 chạy)
         "(( (1 #${ rm -rf /; }\n) ))",  # ngoặc thường trong số học vẫn là số học
+        # review #528 vòng 3: `]` trong `$(…)` không đóng `[` của chỉ số ở tầng ngoài
+        "x=( [$(echo ]) #${ git push origin feat/me --force; }\n]=v )",
+        'x=( ["$(echo ])" #${ rm -rf /; }\n]=v )',
+        "declare -a y=( [$(echo ]) #${ rm -rf /; }\n]=v )",
+        "readonly -a y=( [$(echo ]) #${ rm -rf /; }\n]=v )",
+        "x+=( [$(echo ]) #${ rm -rf /; }\n]=v )",
+        "x=( [$(echo ]) #${|git push origin feat/me --force; }\n]=v )",
+        "x=( [1+$(echo 0]) #${ rm -rf /; }\n]=v )",
+        "f() { local -a y=( [$(echo ]) #${ rm -rf /; }\n]=v ); }; f",
     )
     # review #528: `shlex` thấy nháy không đóng mà bash thì không (`'` trong `"…"` lồng trong `"$(…)"`) → tách thô
     UNCLOSED = (
@@ -9668,6 +9677,11 @@ class GuardWholeCommandSyntaxTest(_GuardDebtCase):
         self.assertIn("AUD-SEC-656", self.out(self.UNCLOSED[0])["reason"])
         # luật cũ đã chặn trên token thô → giữ mã của luật (chỉ đổi kết quả không chặn)
         self.assert_code(('(git push origin feat/me --force); echo "$(echo "it\'s")"',), "RULE_DENY")
+        # thô `ask` mà chính sách chặn (mã nguy hiểm) cũng giữ mã
+        self.assert_code(('echo x > .claude/settings.json; echo "$(echo "it\'s")"',), "HOOK_BYPASS")
+        # hai lần đọc (`LitWord`): lần đọc mới không chặn → BUDGET, lần đọc cũ RULE_DENY, hoà lấy lần mới — vẫn deny
+        cmd = 'watch echo 1 2 3 4 5 6 7 8 9 10 11 \';\' git push --force; echo "$(echo "it\'s")"'
+        self.assert_code((cmd,), "BUDGET")
 
     def test_mutation_guards(self):  # review #528: đột biến còn sống của lát 1
         self.assert_code(
@@ -9708,6 +9722,11 @@ class GuardWholeCommandSyntaxTest(_GuardDebtCase):
         for s in ("(( (1 # c\n) ))", "echo $[ 1 # c\n]", "x_[1 # c\n]=1", "x=( [1 # c\n]=v )"):
             self.assertEqual(why(s), self.g.ARITH_HASH_WHY, s)
         for s in ("(( $(echo 1 # c\n) ))", "echo $(( 1 )) # c", "a[0]=1 # c", "[[ -n x ]] # c", "echo x # c", "echo x"):
+            self.assertEqual(why(s), "", s)
+        # `]` chỉ đóng `[` mở ở cùng độ sâu ngoặc; `)` không bỏ `[` đang mở
+        for s in ("x=( [$(echo ]) # c\n]=v )", "x=( [(1) # c\n]=v )", "a[$(echo [) # c\n]=v", "(a[1) # c\n]=v)"):
+            self.assertEqual(why(s), self.g.ARITH_HASH_WHY, s)
+        for s in ("x=( [$(echo 0)]=v ) # c", "a[$(echo [x])]=1 # c", 'x=( ["$(echo ])"]=v ) # c'):
             self.assertEqual(why(s), "", s)
 
     def test_extglob_scan_is_linear(self):  # hiệu năng: ghép ngoặc một lượt, không bậc hai theo độ sâu lồng

@@ -183,13 +183,16 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
   D-431 — không đọc chắc thì chặn BUDGET, lý do có dòng `viết lại:`): (AUD-SEC-665, #528) thay lệnh `${ …; }`/`${| …; }`
   của bash 5.3 — chạy lệnh trong shell hiện tại, cả trong nháy kép và thân heredoc không nháy — → BUDGET (trước đó
   `echo ${ git push origin feat/me --force; }`, `echo ${ rm -rf /; }` lọt), kể cả sau `#` trong số học `((…))`/`$((…))`/
-  `$[…]`/chỉ số mảng — bash không có comment ở đó mà guard đọc là comment (`(( 1 #${ git push …; }`↵`))` lọt; review
-  #528); (AUD-SEC-666) extglob trần `?(`/`*(`/`+(`/`@(`/`!(` ở mã ngoài nháy và ngoài số học → BUDGET (`shopt -s
+  `$[…]`/chỉ số mảng, cả chỉ số trong gán mảng phức hợp (`]` trong `$(…)` không đóng `[` ngoài) — bash không có comment
+  ở đó mà guard đọc là comment (`(( 1 #${ git push …; }`↵`))`, `x=( [$(echo ]) #${ …; }`↵`]=v )` lọt; review #528);
+  (AUD-SEC-666) extglob trần `?(`/`*(`/`+(`/`@(`/`!(` ở mã ngoài nháy và ngoài số học → BUDGET (`shopt -s
   extglob`↵`rm -rf !(a) /` lọt) — `$(` trong số học vẫn là lệnh, `((a) )` là subshell như bash; (AUD-SEC-656) `\` lẻ cuối
   lệnh → BUDGET; lệnh chặt (lệnh gốc, script lồng nguyên văn) mà `shlex` thấy nháy không đóng vẫn quét luật cũ trên token
-  thô (deny giữ mã của luật) nhưng không còn được cho qua — BUDGET (`(git push origin feat/me --force); echo \`,
-  `(rm -rf /); echo "$(echo "it's")"` lọt — bash đọc nháy lồng trong `"$(…)"` cân bằng, `shlex` thì không; review #528);
-  ca lành `echo "$(echo "'")"; ls {a,b}` của AUD-SEC-072 nay cũng BUDGET. Giữ nguyên: chữ trong nháy và thân
+  thô nhưng không còn được cho qua — BUDGET (`(git push origin feat/me --force); echo \`, `(rm -rf /); echo "$(echo
+  "it's")"` lọt — bash đọc nháy lồng trong `"$(…)"` cân bằng, `shlex` thì không; review #528). Quyết định cuối không nhẹ
+  đi; mã của luật giữ khi lần đọc đó đã chặn, ở lệnh cần hai lần đọc (`LitWord`) mã có thể thành BUDGET. Ca lành
+  `echo "$(echo "'")"; ls {a,b}` của AUD-SEC-072 nay cũng BUDGET. Số `'` chẵn trong nháy lồng (`shlex` không lỗi, lệnh
+  giữa bị nuốt) là họ riêng có từ trước, còn mở: AUD-SEC-750 (T-3772). Giữ nguyên: chữ trong nháy và thân
   heredoc có nháy, `(( !(a) ))`, `$((2*(3+4)))`, `(( x = 16#ff ))`, `[[ ! (…) ]]`, `if ! (lệnh)`, comment thật sau lệnh
   và trong `x=( … )`, `\\` chẵn cuối, nối dòng. Chặn mới cả `if !(lệnh)` (bật extglob thì bash bung `!(lệnh)` thành tên
   tệp rồi chạy — viết `! (lệnh)`), extglob trong `[[ … == @(a|b) ]]`, mẫu `case`, regex `[[ $x =~ ^v?([0-9]+)$ ]]` (gán
