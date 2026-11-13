@@ -179,6 +179,7 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
 
 ### Fixed
 
+- PR #530 (D-443): `test_fast` lấy `nproc` vào biến trước số học để qua tập con P0. Giữ nguyên ceil(N/2), fallback 2, tập test và ngưỡng; không mở ngoại lệ parser. Có test tương đương số worker và hai ca nháy lồng có thể chạy lệnh.
 - Guard — ADR-0076 lát 4, tiền tố P0 (T-3764; lý do chạm hàng rào: năm 🔴 có từ trước AUD-SEC-657/659/663/664/700,
   D-415/D-430/D-431 — chỉ thêm chặn). Đọc lại để luật cũ thấy đúng lệnh, giữ mã dạng trơn: `{tên}>`/`{tên}<` (cả
   `{a[1]}>`) đứng đầu lệnh đọc như số fd (`{fd}>o git reset --hard`, `{fd}>o rm -rf ~`, `{fd}>o sudo id` → RULE_DENY như

@@ -9810,6 +9810,12 @@ class GuardPrefixGateTest(_GuardDebtCase):
         "env -u$!x git status",
         'nice -n "$N"x git status',  # không phải đúng một cặp nháy kép
         'nice -n "$(echo "5")" git status',
+        'nice -n $(( "$(printf 5)" + 1 )) make',  # nháy lồng ngoài tập con guard đọc chắc
+        'nice -n "$(( "$(printf 5)" + 1 ))" make',
+        'xargs -r -P "$(( ("$(nproc 2>/dev/null || echo 2)" + 1) / 2 ))" -n 1 python3 -m unittest',
+        'nice -n "$((1))"$N make',
+        'nice -n "$((1))"x make',
+        'nice -n "$((1))""$N" make',  # hai phần nháy không phải toàn bộ một biểu thức số học
         'timeout -s nice -n "$N" 5 make',  # `nice` là giá trị của `-s`, không đổi trình bọc: `"$N"` ở chỗ thời lượng
     )
     ALLOWED = (  # đối chứng: chữ trong nháy/đối số/heredoc, idiom stack khác, cách viết lại
@@ -9861,6 +9867,7 @@ class GuardPrefixGateTest(_GuardDebtCase):
         'timeout -k "$K" 10 npm test',
         "nice -n 10 cmd",
         'nice -n "$N" make',
+        'xt_test_cpus="$(nproc 2>/dev/null || echo 2)" && xargs -r -P "$(( (xt_test_cpus + 1) / 2 ))" -n 1 python3 -m unittest',
         'xargs -r -P "$(nproc 2>/dev/null || echo 2)" -n 1 echo',
         "xargs -I{} echo {}",
         "stdbuf -oL make",
@@ -9895,6 +9902,7 @@ class GuardPrefixGateTest(_GuardDebtCase):
             "time exec -la x git push origin feat/me --force",
             "coproc rm -rf ~",
             "time cd /; rm -rf *",
+            'nice -n "$(( "$(rm -rf /)" + 1 ))" git status',  # phần thay lệnh vẫn do luật cũ quét
         )
         self.assert_code(cmds, "RULE_DENY")
         with mock.patch.dict(os.environ, {"XT_GUARD_POLICY": "strict"}):
@@ -9918,6 +9926,27 @@ class GuardPrefixGateTest(_GuardDebtCase):
         self.assertFalse(g._wrapper_value("env", "-S"))
         self.assertTrue(g._wrapper_value("env", "-iC"))
         self.assertEqual(g._prefix_why("time 'unclosed"), "")
+
+    def test_quoted_arithmetic_fallback_denied(self):
+        # Ngoặc trong nháy gây nhánh thay lệnh; nháy lồng trong số học thật cũng có thể giấu thay lệnh khỏi guard.
+        harmless = 'nice -n "$(( printf "))(("; printf XT_PREFIX_FALLBACK >&2) )" true'
+        nested = 'nice -n "$(( "\'$(printf XT_PREFIX_FALLBACK >&2)\'" + 1 ))" true'
+        for source in (harmless, nested):
+            proof = subprocess.run(
+                ["bash", "--noprofile", "--norc", "-c", source], capture_output=True, text=True, timeout=5
+            )
+            self.assertIn("XT_PREFIX_FALLBACK", proof.stderr)  # chỉ sentinel, không chạy payload nguy hiểm
+        cmds = (
+            harmless,
+            nested,
+            'nice -n "$(( "\'$(git push origin feat/me --force)\'" + 1 ))" make',
+            'nice -n "$(( "\'$(rm -rf /)\'" + 1 ))" make',
+            'nice -n "$(( printf "))(("; git push origin feat/me --force) )" make',
+            'nice -n "$(( printf "))(("; rm -rf /) )" make',
+        )
+        self.assert_code(cmds, "BUDGET")
+        with mock.patch.dict(os.environ, {"XT_GUARD_POLICY": "strict"}):
+            self.assert_code(cmds, "BUDGET")
 
     def test_parallel_same_result(self):  # hàm thuần: gọi song song cho cùng kết quả
         cmds = [*self.TIME, *self.WRAPPER, *self.ALLOWED] * 3

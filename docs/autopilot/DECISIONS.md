@@ -617,3 +617,10 @@
 - Chọn: Dời PLAN-harden-2026-11-05.md (đã đóng, 0 task mở, 3,5 KB) sang docs/archive/autopilot theo ADR-0070
 - Lý do (tiêu chí chất lượng cuối): (1) đúng quy tắc ADR-0043: cắt chỗ khác, không nới trần; PLAN không còn task mở, PROGRESS không nhắc, các chỗ nhắc (ADR-0069, DECISIONS, CHANGELOG, guard.py) chỉ là văn xuôi nên không có liên kết nào hỏng; xt.py vẫn quét docs/archive/autopilot khi cấp số task nên T-NNNN không tái sử dụng.
 - Đường lùi: git mv ngược PLAN-harden-2026-11-05.md về docs/autopilot
+
+### D-443 · 2026-11-13T11:11:58+00:00 · Khôi phục CI #530 khi test_fast có nháy lồng ngoài ngữ pháp P0?
+
+- Phương án: (1) Mở ngoại lệ số học có nháy lồng trong guard · (2) Giữ guard; lấy nproc vào biến rồi tính cùng ceil(N/2)
+- Chọn: Giữ guard; lấy nproc vào biến rồi tính cùng ceil(N/2)
+- Lý do (tiêu chí chất lượng cuối): Hai ngoại lệ parser thử nghiệm đều bị review độc lập tìm ra bypass thật bằng sentinel vô hại. Theo D-415, viết lại lệnh vào tập con đọc chắc; giữ fallback 2, tập test, runner, công thức và ngưỡng. Test so sánh 12 đầu vào số và ca nproc lỗi cho kết quả như cũ; hai payload phải vẫn BUDGET.
+- Đường lùi: Hoàn lại cú pháp lệnh khi có parser nháy đủ bằng chứng; không nới guard hay cổng để phục hồi CI.

@@ -1,8 +1,9 @@
 # PROGRESS.md — Khung X-Templates
 
-> Giai đoạn hiện tại: G8 Vận hành & tiến hoá (khung 3.33.0, pha `harden` — D-136) · Cập nhật: 2026-11-12 · Nhánh: seeker/vigilant-cori-tgawtg
+> Giai đoạn hiện tại: G8 Vận hành & tiến hoá (khung 3.33.0, pha `harden` — D-136) · Cập nhật: 2026-11-13 · Nhánh: feat/guard-gate-slice4
 
 ## Đang làm
+- 2026-11-13 tiếp quản #530: D-443 viết lại `test_fast` theo tập con guard, giữ số worker và tập test; bỏ ngoại lệ parser sau review đối kháng. Hai ca nháy lồng bị chặn; kiểm số worker và fallback đã qua, chờ CI head mới.
 - 2026-11-11 **ADR-0075** xưởng đầu-cuối (chủ dự án: song song theo file · thiết lập sau bản dev · mọi quy mô — D-419) + [PLAN-factory-e2e](docs/autopilot/PLAN-factory-e2e.md) (D-420, T-3841…T-3866) + 7 đặc tả `docs/specs/SPEC-factory-*.md` (D-422…D-424): chưa có mã; T-3866 xong ([research](research/2026-11-12-dev-self-host-live-sources.md)); kế T-3841.
 - 2026-11-09…10 sau 3.33.0 đã merge: #474, #475, #480 (**ADR-0074** `xt.py release-sign`, D-404…D-406), rồi chuỗi trả nợ bảo mật guard #485…#490 (D-407…D-409: `REMOTE_DELETE`, khoá đọc từ mirror, cờ gộp chữ số, viết tắt một chữ, chuẩn hoá lệnh gh theo cobra ở mọi luật, bỏ chuyển hướng trong argv gh). Mỗi PR một review Fable; 🔴 sửa trong PR, 🟠/🟢 ghi nợ. Sổ (2026-11-11): 11 🔴 mở; nợ review mở ≈ 48 dòng (`audit check --strict` đỏ tới khi trả).
 - Chờ người: §5 ký GO-NO-GO 3.30.0…3.31.1 và [3.33.0](docs/ops/GO-NO-GO-2026-11-08-v3.33.0.md) (3.32.0 đã ký #476); bật `release_signoff: agent` ở `xt.yaml` là PR chủ repo merge (HARD_GATED, D-402). T-3557 còn `[ ]`.
@@ -31,20 +32,8 @@
 - Coverage cục bộ < 100 % khi `coverage` cài ở site người dùng: hook chạy `python3 -I` nên tiến trình con không được đo — CI là cổng coverage (đo 2026-11-05).
 
 ## Bàn giao phiên
-- `main` `a09f7a7` (#479). Nhánh `claude/festive-gauss-i861qa`: nghiên cứu tự động hoá + ADR-0074 (mã ký; khoá bật ở PR sau, D-402).
+- `main` `331145c1` (#529); nhánh PR #530 sửa P0 và lệnh test nhanh. Chưa đủ điều kiện phát hành; khoá agent ký vẫn chờ PR riêng của chủ repo (D-402).
 - Chờ người (một lần, gom theo lát S8 của nghiên cứu): fixture Codex/Gemini (tài khoản trả phí); T-1834 gỡ `merge-gate` ở ruleset hai dự án đích rồi xoá stub (hạn xét: 2026-12-31); ruleset X-Templates sống còn tắt resolve thread + bật "Allow auto-merge" (RUNBOOK-PR-STEWARD §1), `XT_STEWARD_TOKEN` (một GitHub App); Dependabot security updates. Máy làm được, chưa làm (lộ trình nghiên cứu): Routine tuần `feedback aggregate` có tồn tại nhưng push 403 vì thiếu nguồn repo (S2); bỏ `pull_request_target` khỏi `pr-review.yml` trước 2026-12-02 (S3); T-1508 ghi D-NNN không bật (S1).
-- Autopilot: không chạy (phiên tương tác). `pr stats --days 7` (2026-11-05):
-
-| PR merge trong 7 ngày (từ 2026-10-29) | Giá trị |
-|---|---|
-| PR đã merge | 112 |
-| Lead time mở → merge (trung vị · P95) | 0.7 giờ · 9.12 giờ |
-| Run CI `pull_request` mỗi PR (trung vị · P95 · tổng) | 2.5 · 6 · 338 |
-| Run `failure` · `cancelled` (tỉ lệ) | 33 · 32 (19%) |
-| PR làn chuẩn (`xt-standard-lane`) | 97 |
-| PR revert | 0 |
-| Push (head SHA riêng biệt) mỗi PR (trung vị · P95 · tổng) | 2.5 · 6 · 338 |
-| PR xanh ngay lần push đầu | 86/112 (77%) |
-| Run `cancelled` cùng SHA với run khác | 0 |
+- Baseline PR lịch sử ngày 2026-11-05: 112 PR merge, lead time trung vị/P95 0.7/9.12 giờ, 86/112 xanh lần đầu; đo lại bằng `pr stats --days 7` trước khi đánh giá tốc độ hiện tại.
 
 - Container mới: `scripts/dev-task.sh setup`; trước khi đẩy `gate-fast`, CI là cổng đầy đủ. Subagent dùng thư mục scratch riêng (bài học audit 2026-11-01). Gate cục bộ: `coverage` và `pip` phải ở site-packages của `python3` (hook chạy `python3 -I`, bỏ user site → mất coverage subprocess) — dùng venv.
