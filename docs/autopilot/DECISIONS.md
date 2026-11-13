@@ -568,3 +568,17 @@
 - Chọn: Tách thêm GATE_PASSIVE (trình thông dịch không phải shell + bảng thụ động) khỏi GATE_NAMES; test buộc mỗi tên rẽ nhánh phải thuộc một trong hai tập
 - Lý do (tiêu chí chất lượng cuối): (1) đúng và nhất quán: ADR-0076 ghi python3 scripts/xt.py … không qua cổng và D-432 coi echo/grep/cat là bảng thụ động, nên cổng không được kích hoạt ở các tên đó; (4) trải nghiệm: phương án 1 kéo python3/echo vào cổng ở lát 2 và có rủi ro vượt ngưỡng chặn oan 0,2 % của D-431. Test hai tập vẫn bắt tên rẽ nhánh mới bị quên.
 - Đường lùi: Gộp GATE_PASSIVE trở lại GATE_NAMES (một dòng) nếu đo thấy lát 2 cần kích hoạt ở tên thụ động
+
+### D-435 · 2026-11-13T02:36:22+00:00 · Trình thông dịch (python3/node/perl/ruby/php) nằm ở GATE_PASSIVE (D-434) nên cổng P2/P3 không kích hoạt: python3 "$X"-c '…' (mở rộng dính vào cờ -c) vẫn lọt sau ADR-0076. Xử lý thế nào?
+
+- Phương án: (1) Kích hoạt cổng P2/P3 cho trình thông dịch (bỏ python3/node/perl/ruby/php khỏi GATE_PASSIVE) · (2) Giữ PASSIVE nhưng thêm luật hẹp: cờ của trình thông dịch có mở rộng/glob → BUDGET (cờ -c/-e/-m/--eval… nguyên văn, mở rộng chỉ ở đối số sau)
+- Chọn: Giữ PASSIVE nhưng thêm luật hẹp: cờ của trình thông dịch có mở rộng/glob → BUDGET (cờ -c/-e/-m/--eval… nguyên văn, mở rộng chỉ ở đối số sau)
+- Lý do (tiêu chí chất lượng cuối): (1) an toàn và (4) trải nghiệm: bỏ trình thông dịch khỏi PASSIVE kéo mọi lệnh 'python3 scripts/xt.py …', 'python3 -m unittest …' qua cổng (hàng nghìn lệnh lành mỗi phiên) và là rủi ro vượt ngưỡng chặn oan 0,2 % của D-431; luật hẹp chỉ chạm lệnh mà CỜ có mở rộng (hiếm) nên đóng đúng lỗ python3 "$X"-c mà không đổi D-434. Cổng vẫn ngữ pháp dương: mọi từ ở vị trí cờ của trình thông dịch phải nguyên văn.
+- Đường lùi: Bỏ luật hẹp, chuyển trình thông dịch về GATE_NAMES nếu đo cho thấy chặn oan thấp
+
+### D-436 · 2026-11-13T02:51:24+00:00 · Cắt chỗ nào để docs/ops về dưới trần byte khi ghi AUD-SEC-724…728 (còn 996 B dưới trần)?
+
+- Phương án: (1) Dời AUDIT-REPORT-2026-11-04-delta.md và AUDIT-REPORT-2026-11-05-delta.md (14,5 KB) sang docs/archive/ops theo ADR-0070 · (2) Dời GO-NO-GO của bản cũ (3.29.0…3.32.0) · (3) Nới trần byte của docs/ops
+- Chọn: Dời AUDIT-REPORT-2026-11-04-delta.md và AUDIT-REPORT-2026-11-05-delta.md (14,5 KB) sang docs/archive/ops theo ADR-0070
+- Lý do (tiêu chí chất lượng cuối): (1) đúng quy tắc ADR-0043/ADR-0070: cắt chỗ khác, không nới trần; giữ báo cáo đầy đủ gần nhất (2026-11-02-full) và delta gần nhất (2026-11-11); không công cụ nào đọc hai báo cáo theo đường dẫn (grep scripts/, tests/, .github/, .claude/, framework/), PROGRESS không nhắc; chỉ AUDIT-STATUS có hai liên kết, viết lại cùng liên kết trong hai báo cáo, check-links xanh. (2) bị loại: GO-NO-GO 3.30.0…3.31.1 còn chờ người ký (PROGRESS) và guard chặn dời GO-NO-GO*.md bằng Bash.
+- Đường lùi: git mv ngược về docs/ops và hoàn lại liên kết

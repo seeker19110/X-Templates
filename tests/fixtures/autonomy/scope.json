@@ -593,10 +593,12 @@
    ]
   },
   {
-   "reason": "Phân loại hằng `GATE_NAMES`/`GATE_PASSIVE`/`_GATE_BRANCHED` của ADR-0076 lát 0 (review #525, sửa ở #526) — hằng CHƯA dùng trong quyết định guard, lỗi nằm ở bộ đọc mã và khẳng định của test, không có quyết định cho/chặn để bench mô phỏng (mọi ca guard giữ y kết quả). Đỡ bằng Gate unittest tests.test_hooks.GuardGateNamesTest (đột biến: bỏ một bảng/tên khỏi `_GATE_BRANCHED`, `GATE_NAMES = _GATE_BRANCHED`, `tee`/`sed`/`sort` vào `GATE_PASSIVE` → đỏ); lát 2 (T-3762) dùng hằng trong quyết định thì thêm ca corpus.",
+   "reason": "Phân loại hằng `GATE_NAMES`/`GATE_PASSIVE`/`_GATE_BRANCHED` của ADR-0076 lát 0 (review #525/#526, sửa ở #526/#527) — hằng CHƯA dùng trong quyết định guard, lỗi nằm ở bộ đọc mã và khẳng định của test, không có quyết định cho/chặn để bench mô phỏng (mọi ca guard giữ y kết quả). Đỡ bằng Gate unittest tests.test_hooks.GuardGateNamesTest (đột biến: bỏ một bảng/tên khỏi `_GATE_BRANCHED` — cả `IMPLICIT_TOOL_HEADS`/`m4`/`popd`, `GATE_NAMES = _GATE_BRANCHED`, `tee`/`sed`/`sort` hay `.`/`trap`/`gzip` vào `GATE_PASSIVE` → đỏ); lát 2 (T-3762) dùng hằng trong quyết định thì thêm ca corpus.",
    "ids": [
     "AUD-SEC-721",
-    "AUD-SEC-722"
+    "AUD-SEC-722",
+    "AUD-SEC-724",
+    "AUD-SEC-725"
    ]
   }
  ]
