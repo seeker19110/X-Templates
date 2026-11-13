@@ -1,6 +1,6 @@
 # PLAN-harden-2026-11-08-artifact-pilot — tự động hóa tuần 1–2
 
-> Chủ dự án duyệt ngày 2026-11-08. Pilot xác minh artifact sau deploy trên xboss staging cô lập, dữ liệu giả, dùng đúng archive CI. Quyền duyệt production giữ ở hệ đích. Rollback và restore mở sau mốc pilot đạt.
+> Chủ dự án duyệt ngày 2026-11-08. Pilot xác minh artifact sau deploy trên xboss staging cô lập, dữ liệu giả, dùng đúng archive CI. Production dùng cổng environment `Production` nêu ở mục Điểm dừng; phải xác minh cổng và phê duyệt đúng run trước khi triển khai. Rollback và restore mở sau mốc pilot đạt.
 >
 > Mốc kiểm lúc lập PLAN gồm X-Templates `50be630` và xboss `4e365442`. Quyết định kỹ thuật D-398. Cơ sở là [ADR-0068](../adr/0068-software-factory-direction.md) và [thiết kế bằng chứng](../../research/2026-11-04-software-factory-direction.md).
 >
@@ -34,7 +34,8 @@ Mốc dài hạn là ít nhất 18/20 loại bước có tự động hóa đư�
 ## Điểm dừng
 
 - Đích cho phép là môi trường dùng một lần với dữ liệu giả. Bằng chứng của đích thiếu hoặc có thể trỏ sang production làm dừng pilot.
-- Deploy production cần bước duyệt hiện hành. Bằng chứng pilot đạt là điều kiện mở mốc rollback/restore. Restore dữ liệu thật và chuyển kết nối là hành động có quyền riêng.
+- Cổng production cụ thể (đọc lại ngày 2026-11-13): job VPS của xboss gắn `environment: Production`; environment có required reviewer `seeker19110` và `can_admins_bypass: false` ([nguồn và mốc cấu hình](../ops/ARTIFACT-PILOT-2026-11-08.md#cổng-production-xác-minh-ngày-2026-11-13)). Trước mỗi lần deploy phải kiểm lại ba điều kiện và bằng chứng chủ dự án duyệt đúng deployment/run. Thiếu cổng, không đọc được cấu hình hoặc chưa có phê duyệt thì dừng production, không dựa vào approval PR hay tự duyệt thay.
+- Cấu hình lịch sử lúc pilot có 0 required reviewer, nên khi đó chưa có cổng duyệt production; staging thành công không trao quyền production. Bằng chứng pilot đã đối chiếu và lưu bền mới là điều kiện mở mốc rollback/restore. Restore dữ liệu thật và chuyển kết nối là hành động có quyền riêng.
 
 ## Task
 
@@ -47,4 +48,4 @@ Mốc dài hạn là ít nhất 18/20 loại bước có tự động hóa đư�
 
 T-3713 đạt với hai biên nhận staging. [Báo cáo pilot và diễn tập](../ops/ARTIFACT-PILOT-2026-11-08.md)
 
-Rollback và restore đã chạy tự động trên hai run staging của #719. Rollback đối chiếu digest, Build ID và probe khi đổi tuyến về bản giữ sẵn cùng SHA nguồn. Restore xác minh dữ liệu mốc, role RLS, migration và app trên đích PostgreSQL riêng. Số đo và biên nhận nằm trong báo cáo. Phạm vi đo tiếp theo của kế hoạch gồm chuyển phiên bản có thay đổi schema và mục tiêu phục hồi của môi trường vận hành.
+Rollback và restore đã chạy tự động trên hai run staging của #719. Rollback đối chiếu digest, Build ID và probe khi đổi tuyến về bản giữ sẵn cùng SHA nguồn. Restore xác minh dữ liệu mốc, role RLS, migration và app trên đích PostgreSQL riêng. Báo cáo giữ số đo lịch sử và liên kết CI; lần rà 2026-11-13 chưa tái xác minh nội dung receipt, phép diễn tập tay thiếu log và artifact chỉ giữ 30 ngày. Trước nghiệm thu phải đối chiếu và lưu biên nhận bền theo trạng thái bằng chứng đầu báo cáo. Phạm vi đo tiếp theo của kế hoạch gồm chuyển phiên bản có thay đổi schema và mục tiêu phục hồi của môi trường vận hành.
