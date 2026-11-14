@@ -2157,8 +2157,12 @@ class ForNumericSampleTest(unittest.TestCase):
             "for i in {-50..50}; do echo $i; done",
             "for i in " + " ".join(str(k) for k in range(200)) + "; do echo $i; done",
         ):
-            with self.subTest(cmd):
-                self.assertEqual(final(cmd), "")
+            with (
+                self.subTest(cmd),
+                mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(ROOT), "XT_GUARD_POLICY": ""}),
+            ):
+                result = guard.apply_policy(guard.bash_decision(cmd, str(ROOT)))
+                self.assertEqual(str(result["decision"]), "", result)
 
     def test_numeric_loop_body_still_scanned(self):
         for cmd in (

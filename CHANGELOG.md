@@ -217,6 +217,11 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
 
 - `xt.py doctor` nạp guard của dự án một lần để kiểm cả bộ lệnh mẫu (AUD-PERF-028, phần đầu T-3726).
 
+- Guard (T-3763; lý do chạm hàng rào: đóng đường bỏ sót argv hoặc cho qua khi parser không đọc được): P4: chặn thay tiến trình làm đối số và thay lệnh trần dính chữ hoặc còn argv; số học chỉ miễn khi cặp ngoặc có xét nháy đóng liền. Thân shell literal được kiểm trước chuẩn hoá `$(pwd)` (D-459). AUD-SEC-609 còn mở cho P0, tham số và nháy lồng.
+  D-475: ba đối chứng `bash x.sh <(cat f)`, `bash <(echo 'echo hi')`, `source <(printf 'x=1\n')` trả BUDGET ở default/strict;
+  các đối chứng tệp `bash x.sh input.txt`, `bash literal-script.sh`, `source ./env.sh` được cho phép.
+  Bằng chứng chặn oan: [mẫu 505 lượt lệnh thật](research/evidence/2026-11-13-guard-p4.json), 464 thân lệnh,
+  0 lượt đổi quyết định trên mẫu; không suy rộng thành bảo đảm cho toàn lịch sử. Gate gốc `loop record` exit 0: 802 test (1615s) và 2621 ca bench đạt.
 - Guard (T-3769; lý do chạm hàng rào: đóng đường bỏ sót argv hoặc cho qua khi parser không đọc được): Precheck AUD-SEC-730: ngoặc trong tham số không nháy trả BUDGET; giữ literal, nháy kép và ngoặc thoát. Lỗi recursion đọc sớm được sửa ở lát riêng T-3867.
   Bằng chứng chặn oan: [mẫu 505 lượt lệnh thật](research/evidence/2026-11-13-guard-parameter.json), 464 thân lệnh,
   0 lượt đổi quyết định trên mẫu; không suy rộng thành bảo đảm cho toàn lịch sử. Gate gốc được ghi bằng `loop record`.

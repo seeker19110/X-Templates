@@ -1,0 +1,52 @@
+{
+  "schema": 1,
+  "baseline_commit": "331145c1ce3b5a8fafaea3609012cb591342191d",
+  "sample": {
+    "recorded_occurrences": 505,
+    "eligible_occurrences": 505,
+    "unique_command_bodies": 464,
+    "excluded": {}
+  },
+  "method": [
+    "Unwrap recorded /bin/bash -lc commands; parse bodies only, never execute historical commands.",
+    "For each candidate, recompute origin/main baseline in the same owning worktree context.",
+    "Use bash_decision followed by default apply_policy, harden phase; merge-check stubbed unavailable.",
+    "Permit guard internal read-only Git metadata probes; preserve absolute paths in historical command bodies."
+  ],
+  "comparisons": [
+    {
+      "variant": "p4",
+      "baseline_guard_sha256": "75ebd025c1f53650ef7bc0691ffbc58d1898524b882249749c2f2ff5460884c9",
+      "candidate_guard_sha256": "ec758e18250beadd7b080064cc75c1f496c83e980d3b7d069be4fdd806d4f873",
+      "configuration_sha256": {
+        "xt_yaml_sha256": "a9eb0e19a98b048675b4fdb568e930f7c08ef9c9fae8709c50be9dd4fb279e88",
+        "settings_sha256": "34d24ae1b380a23a5210556ae3404ca27b1c7bfedfd5d2f031ba485e93c22841",
+        "settings_local_sha256": null,
+        "local_config_sha256": "b424d9c8da1ecce60c1df6934c7d14aa62df210081a9bee34effe2fa2a95ea61"
+      },
+      "eligible_occurrences": 505,
+      "unique_command_bodies": 464,
+      "baseline_denied": 63,
+      "candidate_denied": 63,
+      "newly_denied_occurrences": 0,
+      "newly_denied_percent": 0.0,
+      "newly_denied_unique": 0,
+      "newly_allowed_occurrences": 0,
+      "newly_allowed_unique": 0,
+      "newly_denied_codes": {},
+      "newly_allowed_baseline_codes": {},
+      "evaluation_exception_counts": {},
+      "observed_delta_within_0_2_percent": true,
+      "candidate_hash_still_current": true,
+      "metadata_still_current": true,
+      "metadata_snapshot_sha256_before": "0a36c156e83c7959531494786a0edad2e10bc8d3ec316882b5c2b97d6974ce46",
+      "metadata_snapshot_sha256_after": "0a36c156e83c7959531494786a0edad2e10bc8d3ec316882b5c2b97d6974ce46",
+      "candidate_hash_rechecked_before_publication": true
+    }
+  ],
+  "limitations": [
+    "One historical chat sample; not the full distinct-command corpus referenced by ADR-0076.",
+    "Historical cwd remapped to each comparison worktree; repository configuration and filesystem reconstructed from current state.",
+    "Observed delta only; broader false-positive frequency and population guarantee remain inconclusive."
+  ]
+}
