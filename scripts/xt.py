@@ -13152,6 +13152,7 @@ _DECISIONS_STEM, _DECISIONS_SUFFIX = os.path.splitext(DECISIONS_LOG)
 # cùng nghĩa ở `fnmatch` và pathspec `:(glob)`; chỉ thư mục sổ chính (AUD-HAR-329).
 DECISIONS_MONTH = _DECISIONS_STEM + DECISION_MONTH_GLOB + _DECISIONS_SUFFIX
 DEPLOY_LEDGER = "docs/ops/DEPLOYS.json"
+DEPLOY_ENV_NAME = re.compile(r"[a-z][a-z0-9]{0,15}")
 
 
 def _subject_excluded(path: str, *, deploy_enabled: bool = False) -> bool:
@@ -13180,9 +13181,22 @@ SUBJECT_EXCLUDE = [  # pathspec mặc định của `_subject_excluded`; `glob`:
 DEPLOY_LEDGER_EXCLUDE = f":(exclude,glob){DEPLOY_LEDGER[:-1]}[{DEPLOY_LEDGER[-1]}]"
 
 
+def _deploy_env_names(base: Path) -> List[str]:
+    """Danh sách môi trường từ YAML phẳng; dấu null không có nháy nghĩa là chưa bật."""
+    config = base / "xt.yaml"
+    if not config.is_file():
+        return []
+    lines = config.read_text(encoding="utf-8").splitlines()
+    raw = next((m[2] for m in map(YAML_KEY_RE.match, reversed(lines)) if m and m[1] == "deploy_envs"), "")
+    if re.fullmatch(r"(?:null|Null|NULL|~)(?:[ \t]+#.*)?", raw):
+        return []
+    return yaml_scalar(raw).split()
+
+
 def _subject_fingerprint(base: Path, git: Callable[..., str]) -> str:
     try:
-        deploy_enabled = bool(_xt_keys(base).get("deploy_envs", "").split())
+        envs = _deploy_env_names(base)
+        deploy_enabled = bool(envs) and all(DEPLOY_ENV_NAME.fullmatch(name) for name in envs)
     except (OSError, ValueError):  # không đọc được cấu hình → vẫn tính sổ như nội dung dự án
         deploy_enabled = False
     tree = git("ls-tree", "-r", "-z", "HEAD", "--", ".")

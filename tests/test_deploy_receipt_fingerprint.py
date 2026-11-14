@@ -53,7 +53,16 @@ class DeployReleaseFingerprintTest(TmpRepoCase):
         path = self.repo / LEDGER
         path.parent.mkdir(parents=True)
         config = self.repo / "xt.yaml"
-        for value in (None, b"# deploy_envs: dev\n", b'deploy_envs: "" # disabled\n', b"\xff"):
+        values = (
+            None,
+            b"# deploy_envs: dev\n",
+            b'deploy_envs: "" # disabled\n',
+            b"deploy_envs: ~\n",
+            b"deploy_envs: Null # disabled\n",
+            b"deploy_envs: dev InvalidName\n",
+            b"\xff",
+        )
+        for value in values:
             with self.subTest(config=value):
                 if value is not None:
                     config.write_bytes(value)
