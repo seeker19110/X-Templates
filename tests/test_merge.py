@@ -4970,21 +4970,11 @@ class GreenMergePolicyTest(unittest.TestCase):
                     decision, _ = xt._merge_eval(pr(reviewDecision=state))
                 self.assertEqual(decision["verdict"], "merge")
 
-    def test_unknown_size_goes_last(self):
-        with unittest.mock.patch.object(xt, "_gh_one", return_value={}):
-            self.assertEqual(xt._steward_size("repos/o/r", {"number": 5}), sys.maxsize)
-
-    def test_steward_orders_by_changed_lines(self):
+    def test_steward_orders_by_pr_number(self):
         listing = [{"number": 8}, {"number": 7}, {"number": 9}]
-        details = {
-            "8": {"additions": 9, "deletions": 4},
-            "7": {"additions": 2, "deletions": 1},
-            "9": {"additions": 2, "deletions": 1},
-        }
         with (
             unittest.mock.patch.object(xt, "_gh_items", return_value=listing),
-            unittest.mock.patch.object(xt, "_gh_one", side_effect=lambda path: details[path.rsplit("/", 1)[-1]]),
             unittest.mock.patch.object(xt, "_committed_xt_keys", return_value={"merge_review": "optional"}),
         ):
             args = xt.argparse.Namespace(pr=None, event=None)
-            self.assertEqual(xt._steward_targets(args, "repos/o/r")[0], ["7", "9", "8"])
+            self.assertEqual(xt._steward_targets(args, "repos/o/r")[0], ["7", "8", "9"])

@@ -25,7 +25,7 @@ name: pr-steward
 # Theo sự kiện (AUTO-05, T-1517): xét lại PR ngay khi check xong thay vì chờ lịch — `workflow_run` khi workflow `CI` (job
 # `quality`) chạy xong (check của GitHub Actions; `check_suite` KHÔNG kích workflow cho check suite do Actions tạo — chống
 # đệ quy; stub `merge-gate` không mang thông tin nên không kích, D-122), `check_suite: completed` cho check của app ngoài
-# (CI bên thứ ba). Payload cho biết PR kích hoạt; chế độ mặc định xét mọi PR theo số dòng thay đổi. Head, auto-merge, check luôn
+# (CI bên thứ ba). Payload cho biết PR kích hoạt; chế độ mặc định xét mọi PR theo số PR tăng dần. Head, auto-merge, check luôn
 # đọc lại từ GitHub, và `xt.py` đọc lại PR ngay trước mỗi hành động — khoá (repo, PR, head, hành động): sự kiện lặp, sai
 # thứ tự, re-run sau restart không lặp tác dụng phụ. Lịch 10 phút là lưới bù. Dự án đích đặt tên workflow CI khác thì
 # sửa danh sách `workflows:` (tên không khớp = không bao giờ kích). Hai trigger này đều chạy trên nhánh mặc định, không
@@ -50,7 +50,7 @@ on:
 permissions:
   contents: read
 
-# Một lượt steward tại một thời điểm; mỗi lượt xét các PR theo thứ tự nhỏ trước.
+# Một lượt steward tại một thời điểm; mỗi lượt xét các PR theo số PR tăng dần.
 concurrency:
   group: pr-steward
   cancel-in-progress: false

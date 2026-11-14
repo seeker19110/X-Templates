@@ -619,7 +619,7 @@
 
 ### D-486 · 2026-11-14T08:41:08+00:00 · Cổng merge và thứ tự PR cho khung và dự án đích?
 
-- Phương án: (1) CI xanh, ưu tiên diff nhỏ · (2) Giữ review bắt buộc theo làn
-- Chọn: CI xanh, ưu tiên diff nhỏ
+- Phương án: (1) CI xanh, ưu tiên số PR tăng dần · (2) Giữ review bắt buộc theo làn
+- Chọn: CI xanh, ưu tiên số PR tăng dần
 - Lý do (tiêu chí chất lượng cuối): Chủ dự án yêu cầu áp dụng cho cả dự án đích và không bắt buộc review; giữ check CI và ghim head
 - Đường lùi: Đặt merge_review required và khôi phục thứ tự steward theo ADR-0079

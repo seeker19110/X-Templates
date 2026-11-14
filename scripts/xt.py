@@ -15684,17 +15684,8 @@ def _steward_targets(args: argparse.Namespace, repo: str) -> Tuple[List[str], Di
         return list(heads), heads
     pulls = _gh_items(f"{repo}/pulls?state=open&per_page=100")
     if optional:
-        pulls.sort(key=lambda p: (_steward_size(repo, p), int(p.get("number") or 0)))
+        pulls.sort(key=lambda p: int(p.get("number") or 0))
     return [str(p.get("number")) for p in pulls], heads
-
-
-def _steward_size(repo: str, pr: Dict[str, Any]) -> int:
-    """Số dòng thay đổi của PR; thiếu thông tin được xếp cuối."""
-    details = _gh_one(f"{repo}/pulls/{pr.get('number')}")
-    additions, deletions = details.get("additions"), details.get("deletions")
-    if type(additions) is not int or type(deletions) is not int:
-        return sys.maxsize
-    return additions + deletions
 
 
 def _event_note(out: Dict[str, Any], event_head: str) -> Dict[str, Any]:
