@@ -190,6 +190,8 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
 
 ### Fixed
 
+- AUD-DATA-013: cổng migration web-api-ts từ chối chỉ mục concurrent trong giao dịch và giữ ngoại lệ 0005.
+
 - `xt.py merge-check` kiểm nhánh đích hiện tại trước khi đề xuất merge nếu ruleset đòi cập nhật nhánh. Head tụt sau phải cập nhật
   và chạy lại CI. Lỗi đọc phép so chuyển sang chờ để tránh dùng trạng thái PR cũ (#551).
 
