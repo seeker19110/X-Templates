@@ -9239,8 +9239,7 @@ def _same_failure_hit(st: Dict[str, Any]) -> bool:
 def _loop_block_reason(st: Dict[str, Any], base: Path) -> str:
     """Vòng đang bị chặn đọc từ state cho cổng phát hành (AUD-HAR-377): mọi nguồn của `_blocked_by_state` (cờ — `loop
     block`, `ci-triage`; lỗi lặp; task đỏ quá trần) hoặc vòng đã kết thúc `blocked` chưa `loop unblock`/`loop init` → lý
-    do theo từng nguồn kèm lối ra; không chặn → "". Không suy từ PLAN/verdict (`loop_verdict` coi vòng dừng, PLAN mất,
-    chưa bật là chặn → đỏ oan)."""
+    do theo từng nguồn kèm lối ra; không chặn → "". Chỉ đọc PLAN để chọn lối ra sau khi đã xác định vòng bị chặn."""
     if not (_blocked_by_state(st) or _final_verdict(st) == "blocked"):
         return ""
     why = [f"cờ chặn — {st.get('blocked_reason') or 'cần người quyết định'}"] if st.get("blocked") else []
@@ -9251,7 +9250,12 @@ def _loop_block_reason(st: Dict[str, Any], base: Path) -> str:
     if not why:  # chỉ còn verdict cuối `blocked` của vòng đã kết thúc
         why.append(f"kết thúc `blocked` — {st['final_verdict'].get('reason') or 'không ghi lý do'}")
     stop = "`loop stop` rồi " if st.get("active") else ""
-    end = _halted_loop_exit(st, base) if st.get("started") else f"chưa khởi tạo vòng → {stop}`loop init --plan <mới>`"
+    end = f"chưa khởi tạo vòng → {stop}`loop init --plan <mới>`"
+    if st.get("started"):
+        try:
+            end = _halted_loop_exit(st, base)
+        except OSError:  # PLAN mất quyền đọc hoặc bị dời trong lúc kiểm
+            end = _plan_lost_exit(st, bool(st.get("active")) and not _budget_spent(st))
     if st.get("blocked") and "`loop unblock" not in end:
         end += f"; cờ chặn giữ nguyên ở đợt mới → {EXIT_UNBLOCK}"
     return f"vòng đang bị chặn ({'; '.join(why)}) — {end}"

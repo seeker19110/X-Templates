@@ -394,10 +394,50 @@ class ReleaseBlockedLoopTest(ReleaseCase):
                 self.assertEqual((rc, row["result"]), (1, "FAIL"), row)
                 self.assertIn(f"vòng đang bị chặn ({reason}", row["evidence"])
                 self.assertIn("chưa khởi tạo vòng → `loop init", row["evidence"])
+                self.assertEqual("`loop unblock" in row["evidence"], bool(body.get("blocked")))
         rc, row = self.verify_row({"blocked": True, "same_failure_count": 4, "task_runs": {"T-9": 7}})
         self.assertIn(
             "(cờ chặn — cần người quyết định; cùng một lỗi lặp 4 lần (?); T-9 đỏ 7 lần (trần 6))", row["evidence"]
         )
+
+    def test_blocked_loop_recovery_uses_budget_and_plan(self):
+        self.setup_xt()
+        plan = self.repo / "PLAN.md"
+        plan.write_text("- [ ] `T-001` a — Gate: `true`\n", encoding="utf-8")
+        start = "2026-11-01T00:00:00+00:00"
+        blocked = {"blocked": True, "started": start, "active": True, "plan": "PLAN.md"}
+        cases = (
+            (blocked, "loop unblock", "loop init"),
+            ({**blocked, "iterations": 2, "max_iterations": 2}, "loop init", "loop unblock"),
+            ({**blocked, "deadline": start}, "loop init", "loop unblock"),
+            ({**blocked, "plan": "missing.md"}, "loop stop", "loop unblock"),
+            ({**blocked, "active": False, "plan": "missing.md"}, "loop init", "loop stop"),
+            ({**blocked, "active": False, "final_verdict": {"verdict": "done"}}, "loop init", "loop unblock"),
+            ({**blocked, "active": False, "final_verdict": {"verdict": "blocked"}}, "loop unblock", "loop init"),
+        )
+        for state, expected, incorrect in cases:
+            with self.subTest(state=state):
+                rc, row = self.verify_row(state)
+                self.assertEqual((rc, row["result"]), (1, "FAIL"), row)
+                primary, _, after_init = row["evidence"].partition("; cờ chặn giữ nguyên ở đợt mới → ")
+                self.assertIn(expected, primary)
+                self.assertNotIn(incorrect, primary)
+                self.assertEqual(after_init, xt.EXIT_UNBLOCK if expected != "loop unblock" else "")
+
+        read_text = Path.read_text
+
+        def unreadable_plan(path, *args, **kwargs):
+            if path == plan:
+                raise PermissionError("unreadable PLAN")
+            return read_text(path, *args, **kwargs)
+
+        with unittest.mock.patch.object(Path, "read_text", unreadable_plan):
+            rc, row = self.verify_row(blocked)
+        self.assertEqual((rc, row["result"]), (1, "FAIL"), row)
+        primary, _, after_init = row["evidence"].partition("; cờ chặn giữ nguyên ở đợt mới → ")
+        self.assertIn("loop stop", primary)
+        self.assertNotIn("loop unblock", primary)
+        self.assertEqual(after_init, xt.EXIT_UNBLOCK)
 
     def test_unblocked_or_done_loop_passes(self):
         """Vòng xong/dừng/dưới trần/tắt trần/sai kiểu → không chặn: không đỏ oan."""
@@ -496,6 +536,26 @@ class ReleaseVerifyWorktreeTest(ReleaseCase):
                 self.assertIn(str(other.resolve()), row["evidence"])
         other.write_text("{}", encoding="utf-8")
         self.assertEqual(self.verify_from(self.repo)["result"], "PASS")
+
+    def test_blocked_guidance_uses_plan_in_the_ledgers_worktree(self):
+        plan = self.wt / "other.md"
+        plan.write_text("- [ ] `T-001` a — Gate: `true`\n", encoding="utf-8")
+        state = self.wt / ".autopilot/state.json"
+        state.parent.mkdir()
+        state.write_text(
+            json.dumps({"active": True, "blocked": True, "started": "2026-11-01T00:00:00+00:00", "plan": plan.name}),
+            encoding="utf-8",
+        )
+        row = self.verify_from(self.repo)
+        self.assertEqual(row["result"], "FAIL", row)
+        self.assertIn("loop unblock", row["evidence"])
+        plan.unlink()
+        row = self.verify_from(self.repo)
+        self.assertEqual(row["result"], "FAIL", row)
+        primary, _, after_init = row["evidence"].partition("; cờ chặn giữ nguyên ở đợt mới → ")
+        self.assertIn("loop stop", primary)
+        self.assertNotIn("loop unblock", primary)
+        self.assertEqual(after_init, xt.EXIT_UNBLOCK)
 
     def test_no_ledger_anywhere_is_na_and_unlistable_fails(self):
         """Không worktree nào có sổ → N/A SHOULD như cũ (không chạy autopilot); không liệt kê được worktree → FAIL."""
