@@ -8,6 +8,11 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
 
 ### Added
 
+- F-111 (`T-3845`, D-452/D-453/D-455/D-460): `install.py --new` tạo repo sản phẩm cùng khung, gói,
+  `PROJECT.md` và blueprint, rồi chạy `doctor --offline`. Thư mục đích được nhận bằng `mkdir` độc quyền trước
+  bootstrap; giữ inode thư mục và `.git`, không nhận nhầm thư mục của tiến trình khác hay xoá dữ liệu khi lỗi.
+  Git bootstrap cách ly cấu hình, hooks và metadata môi trường; identity không đọc được dùng mặc định, không in
+  byte cấu hình. Gate task: 46 test đạt; kiểm độc lập bốn ca race/identity đạt, các helper mới phủ dòng và nhánh 100 %.
 - T-3842 (D-484): `xt.py deploy status` kiểm schema và đọc sổ receipt triển khai, có bộ lọc môi trường.
 
 - [ADR-0077](docs/adr/0077-deployment-receipts.md) (T-3841, D-422…D-424) chốt cấu hình theo môi trường, receipt của
@@ -185,10 +190,10 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
 
 ### Fixed
 
+- `xt.py doctor` nạp guard của dự án một lần để kiểm cả bộ lệnh mẫu (AUD-PERF-028, phần đầu T-3726).
+
 - `release-check` (ADR-0077, D-422): loại đúng `docs/ops/DEPLOYS.json` khỏi `subject.content` để ghi sổ triển khai
   và commit sổ mà vẫn giữ định danh nội dung của ứng viên.
-
-- `xt.py doctor` nạp guard của dự án một lần để kiểm cả bộ lệnh mẫu (AUD-PERF-028, phần đầu T-3726).
 
 - T-3728: skill `autopilot` theo hành động `stage-approve` của `loop next-step` khi dự án bật tự nghiệm thu MVP
   (AUD-XFEAT-048). Cập nhật số đo biên dịch guard trong chú thích `_lib.sh` theo audit 2026-11-11 (AUD-PERF-031).
