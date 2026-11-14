@@ -657,6 +657,14 @@ class DoctorStateAndEnvTest(DoctorCase):
                 else:
                     self.assertIn("api-service", out.getvalue())
 
+    def test_guard_check_blocks_on_unsupported_runtime(self):
+        with (
+            unittest.mock.patch.object(sys, "version_info", (3, 14, 10)),
+            redirect_stderr(io.StringIO()) as err,
+        ):
+            self.assertEqual(xt.main(["guard-check", "--", "echo OK"]), 126)
+        self.assertIn("CPython 3.15.x", err.getvalue())
+
     def test_cli_help_remains_available_on_unsupported_python(self):
         with (
             unittest.mock.patch.object(sys, "version_info", (3, 14, 10)),

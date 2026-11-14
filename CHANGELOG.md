@@ -86,6 +86,7 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
 - **Tương thích:** Bộ cài, CLI và các workflow đi kèm dùng CPython 3.15.x. Repo và CI ghim 3.15.2.
   Dự án đích cần chọn CPython 3.15 cho công cụ khung và cập nhật thiết lập CI theo mẫu khi nâng khung
   ([ADR-0078](docs/adr/0078-python-315-runtime.md), D-485).
+  `dev-task.sh` dừng lệnh cần qua guard nếu interpreter của CLI sai phiên bản.
 
 - Lưu nguyên văn D-361…D-372 vào sổ tháng 11 theo D-314; giữ ID, thứ tự và trần tài liệu (D-482).
 

@@ -20227,7 +20227,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         runtime = _python_runtime_error()
         if runtime:
             print(f"✗ {runtime.msg}", file=sys.stderr)
-            return 2
+            # dev-task.sh dùng 126 để dừng lệnh khi kiểm guard trả về từ chối.
+            return 126 if args.cmd == "guard-check" else 2
     args.argv = list(sys.argv[1:] if argv is None else argv)  # `perf trial` chạy lại đúng lệnh bằng công cụ gốc (§5)
     args.framework = Path(args.framework).resolve()
     if args.cmd in ("validate", "checks", "list", "compose", "stats") and not args.framework.is_dir():
