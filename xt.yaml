@@ -48,6 +48,8 @@ merge_risk_paths: "scripts/*, framework/templates/*, docs/autopilot/PLAN*.md, do
 # (ADR-0024; pha build: review ghi nợ); không dùng auto-merge của GitHub (D-122, ADR-0036). L2 = máy chỉ tự merge làn
 # nhanh; L1 = người merge mọi PR.
 merge_autonomy: L3
+# Tự merge khi check đạt; thứ tự PR theo tổng dòng thêm và xoá (ADR-0079).
+merge_review: optional
 # Ngoại lệ cứng (tiền/dữ liệu thật/auth/mật mã/bí mật): chủ repo chọn 2026-10-17 "bỏ toàn bộ ngoại lệ cứng" → auto =
 # agent merge như PR khác (ADR-0020); human = người merge (ADR-0016/0019).
 merge_hard_exceptions: auto

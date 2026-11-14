@@ -58,6 +58,8 @@ def pr(**over: Any) -> dict:
 def commit_base_xt(base: Path, committed: str, working: str | None = None) -> None:
     """Repo git tạm: `origin/main` có xt.yaml = `committed`; cây làm việc = `working` (mặc định như commit) — ADR-0020
     đọc khoá ở nhánh đích, không ở cây làm việc."""
+    if "merge_review:" not in committed:
+        committed += "\nmerge_review: required\n"
     (base / "xt.yaml").write_text(committed, encoding="utf-8")
     git = ["git", "-C", str(base), "-c", "user.email=t@t", "-c", "user.name=t", "-c", "commit.gpgsign=false"]
     for args in (
@@ -2765,7 +2767,7 @@ class PrNextCliTest(unittest.TestCase):
         self.base.mkdir(parents=True)
         self.enterContext(unittest.mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(self.base)}))
         subprocess.run(["git", "-C", str(root), "init", "-q"], check=True)
-        self.commit({"xt.yaml": "merge_autonomy: L3\n", "../api/b.py": "y = 1\n"})
+        self.commit({"xt.yaml": "merge_autonomy: L3\nmerge_review: required\n", "../api/b.py": "y = 1\n"})
         self.git("update-ref", "refs/remotes/origin/main", "HEAD")
         reviewed = self.commit({"src/a.py": "x = 1\n"})
         ledger = "## Phát hiện\n\n| ID | Mức | Trạng thái | Ghi chú |\n|---|---|---|---|\n| AUD-SEC-001 | 🟢 | mở | nợ-review: #7 |\n"
@@ -4116,7 +4118,7 @@ class StewardEventsTest(unittest.TestCase):
             self.assertRegex(on, rf"\n  {trigger}: # zizmor: ignore\[dangerous-triggers\] — \S")
         self.assertNotRegex(on, r"pull_request(_target)?:")  # không chạy trong ngữ cảnh PR
         self.assertIn('--event "$GITHUB_EVENT_PATH"', text)
-        self.assertIn("pr-steward-${{", text)  # nhóm concurrency theo PR: sự kiện PR khác không thay lượt đang chờ
+        self.assertIn("group: pr-steward\n", text)  # mọi lượt xét cùng thứ tự PR
 
 
 class StewardFollowupTest(unittest.TestCase):
@@ -5028,3 +5030,56 @@ class CiBlockerLatestRunTest(unittest.TestCase):
         for old, verdict in ((run, "wait"), (red, "fix")):
             old = {**old, "startedAt": "2026-10-21T15:50:00Z"}
             self.assertEqual(xt._ci_blocker({"statusCheckRollup": [old, green]})[0], verdict)
+
+
+class GreenMergePolicyTest(unittest.TestCase):
+    def test_green_standard_lane_without_review(self):
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            commit_base_xt(base, "merge_autonomy: L3\nmerge_review: optional\n")
+            with unittest.mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": directory}):
+                decision, _ = xt._merge_eval(pr(files=[{"path": "scripts/xt.py", "additions": 1, "deletions": 0}]))
+            self.assertEqual(decision["verdict"], "merge")
+            self.assertEqual(xt.pr_next(decision, False, {})["action"], "merge")
+
+    def test_existing_project_without_setting_uses_optional_review(self):
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            commit_base_xt(base, "merge_autonomy: L3\nmerge_review: optional\n")
+            (base / "xt.yaml").write_text("merge_autonomy: L3\n", encoding="utf-8")
+            subprocess.run(
+                ["git", "-C", directory, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qam", "old config"],
+                check=True,
+                capture_output=True,
+            )
+            subprocess.run(["git", "-C", directory, "update-ref", "refs/remotes/origin/main", "HEAD"], check=True)
+            with unittest.mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": directory}):
+                self.assertEqual(xt._merge_eval(pr())[0]["review"], "optional")
+
+    def test_red_ci_does_not_merge(self):
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            commit_base_xt(base, "merge_autonomy: L3\nmerge_review: optional\n")
+            failed = [{"__typename": "CheckRun", "name": "test", "status": "COMPLETED", "conclusion": "FAILURE"}]
+            with unittest.mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": directory}):
+                decision, _ = xt._merge_eval(pr(statusCheckRollup=failed))
+            self.assertEqual(decision["verdict"], "fix")
+            self.assertEqual(xt.pr_next(decision, False, {})["action"], "fix")
+
+    def test_optional_review_does_not_require_approval(self):
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            commit_base_xt(base, "merge_autonomy: L3\nmerge_review: optional\n")
+            for state in ("CHANGES_REQUESTED", "REVIEW_REQUIRED"):
+                with self.subTest(state=state), unittest.mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": directory}):
+                    decision, _ = xt._merge_eval(pr(reviewDecision=state))
+                self.assertEqual(decision["verdict"], "merge")
+
+    def test_steward_orders_by_pr_number(self):
+        listing = [{"number": 8}, {"number": 7}, {"number": 9}]
+        with (
+            unittest.mock.patch.object(xt, "_gh_items", return_value=listing),
+            unittest.mock.patch.object(xt, "_committed_xt_keys", return_value={"merge_review": "optional"}),
+        ):
+            args = xt.argparse.Namespace(pr=None, event=None)
+            self.assertEqual(xt._steward_targets(args, "repos/o/r")[0], ["7", "8", "9"])

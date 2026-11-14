@@ -11579,7 +11579,20 @@ def _merge_eval(pr: Dict[str, Any], local: bool = False) -> Tuple[Dict[str, Any]
         phase, phase_notes = "harden", [*phase_notes, "PR sửa xt.yaml — tính pha harden (D-137)"]
     risk = merge_risk_globs(project_dir(), ref)
     rec = _pr_record(read_reviews(project_dir()), str(pr.get("number", ""))) if local else None
-    return merge_check_result(pr, autonomy, risk, hard_auto, phase, rec), notes + hard_notes + phase_notes
+    decision = merge_check_result(pr, autonomy, risk, hard_auto, phase, rec)
+    if _committed_xt_keys(project_dir(), ref).get("merge_review", "optional") == "optional":
+        decision = merge_decision({**pr, "reviewDecision": ""}, autonomy, risk, hard_auto)
+        decision.update(
+            {
+                PHASE_KEY: phase,
+                "review": "optional",
+                "review_deferred": False,
+                "eligible": decision["verdict"] == "merge",
+                "auto_merge_ok": not decision.get("hard"),
+                "review_optional": True,
+            }
+        )
+    return decision, notes + hard_notes + phase_notes
 
 
 def _check_live_base(pr: Dict[str, Any], d: Dict[str, Any]) -> Dict[str, Any]:
@@ -15098,6 +15111,8 @@ def pr_next(
         }
 
     early = _pr_next_blocked(d, auto_merge, act, disable)
+    if d.get("review_optional"):
+        return early or _pr_next_final(d, auto_merge, "check CI", act, disable)
     if early is None:  # review chỉ có ở sổ cục bộ: đăng lại trước, không merge theo nó (AUD-XFEAT-011)
         early = _pr_next_republish(
             d, auto_merge, rec, gate["state"] in ("missing", "blocking") and not deferred, act, disable
@@ -15859,7 +15874,7 @@ def _steward_one(pr_arg: str, repo: str, base: Path, apply: bool, gh_repo: List[
     out = {**next_step, "applied": False}
     if why_not and out["action"] not in ("done", "closed", "disable-auto-merge"):
         return {**out, "action": "defer-human", "why": why_not}
-    if apply and d["lane"] == "chuẩn" and not _standard_seen(pr):
+    if apply and d["lane"] == "chuẩn" and not d.get("review_optional") and not _standard_seen(pr):
         n = str(d["pr"])
         label_err = _steward_run(
             [["gh", "api", "-X", "POST", f"{repo}/issues/{n}/labels", "-f", f"labels[]={STANDARD_LABEL}"]]
@@ -15923,7 +15938,7 @@ def _steward_apply(
             return _add_note(out, f"bỏ qua {out['key']} — {stale}")
         err = _steward_run(cmds)
         out.update(applied=not err, **({"error": err} if err else {}))
-        if not err and out["action"] == "merge" and not can_update:  # GITHUB_TOKEN: merge không kích `push` của CI
+        if not err and out["action"] == "merge" and not can_update:
             _steward_dispatch_ci(out, repo, base)
             if tag:
                 _steward_dispatch_tag(out, repo, base, str(d["pr"]))
@@ -16023,9 +16038,13 @@ def _steward_targets(args: argparse.Namespace, repo: str) -> Tuple[List[str], Di
         except (OSError, ValueError) as exc:
             raise PrInputError(f"không đọc được payload sự kiện {args.event}: {exc}") from exc
         heads = steward_event_prs(event) if isinstance(event, dict) else {}
-    if heads:
+    optional = _committed_xt_keys(project_dir(), "HEAD").get("merge_review", "optional") == "optional"
+    if heads and not optional:
         return list(heads), heads
-    return [str(p.get("number")) for p in _gh_items(f"{repo}/pulls?state=open&per_page=100")], {}
+    pulls = _gh_items(f"{repo}/pulls?state=open&per_page=100")
+    if optional:
+        pulls.sort(key=lambda p: int(p.get("number") or 0))
+    return [str(p.get("number")) for p in pulls], heads
 
 
 def _event_note(out: Dict[str, Any], event_head: str) -> Dict[str, Any]:

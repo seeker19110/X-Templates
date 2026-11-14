@@ -89,6 +89,8 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
 
 ### Changed
 
+- Steward xét PR theo số tăng dần, mặc định merge khi check xanh không bắt buộc review (ADR-0079, D-486). Dự án đích nâng khung, workflow steward và ruleset để nhận chính sách mới; check CI giữ nguyên.
+
 - **Tương thích:** Bộ cài, CLI và các workflow đi kèm dùng CPython 3.15.x. Repo và CI ghim 3.15.2.
   Dự án đích cần chọn CPython 3.15 cho công cụ khung và cập nhật thiết lập CI theo mẫu khi nâng khung
   ([ADR-0078](docs/adr/0078-python-315-runtime.md), D-485).
