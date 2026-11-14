@@ -13,6 +13,7 @@ from test_xt_cli import TmpRepoCase, run_main
 
 LEDGER = "docs/ops/DEPLOYS.json"
 EMPTY = {"schema": 1, "envs": {}, "events": []}
+EMPTY_STATUS = {**EMPTY, "metrics": {}}
 HEAD = "a" * 40
 DIGEST = "b" * 64
 CONTENT = "c" * 64
@@ -74,12 +75,12 @@ class DeployStatusTest(TmpRepoCase):
         self.assertEqual(len(err.splitlines()), 1, err)
 
     def test_missing_and_empty_ledgers_are_read_only(self):
-        self.assertEqual(self.status_json(), EMPTY)
+        self.assertEqual(self.status_json(), EMPTY_STATUS)
         self.assertFalse(self.ledger.parent.exists())
         self.assertFalse((self.project / ".autopilot").exists())
         self.write_ledger(EMPTY)
         original = self.ledger.read_bytes()
-        self.assertEqual(self.status_json("--env", "a123456789012345"), EMPTY)
+        self.assertEqual(self.status_json("--env", "a123456789012345"), EMPTY_STATUS)
         rc, out, err = run_main("deploy", "status")
         self.assertEqual((rc, err), (0, ""))
         self.assertIn("Chưa có biên nhận", out)
@@ -103,7 +104,7 @@ class DeployStatusTest(TmpRepoCase):
         envs = {
             "dev": {
                 "current": dev,
-                "previous": receipt(subject={**dev["subject"], "digest": CONTENT}),
+                "previous": receipt(subject={**dev["subject"], "digest": CONTENT}, served_digest=CONTENT),
                 "unknown": False,
             },
             "empty": UNDEPLOYED,
@@ -115,11 +116,22 @@ class DeployStatusTest(TmpRepoCase):
         original = self.ledger.read_bytes()
         original_mtime = self.ledger.stat().st_mtime_ns
         original_git = self.git("status", "--porcelain", "--untracked-files=all")
-        self.assertEqual(self.status_json(), data)
+        status = self.status_json()
+        self.assertEqual({key: status[key] for key in data}, data)
+        self.assertEqual(set(status["metrics"]), set(envs))
         self.assertEqual(
-            self.status_json("--env", "dev"), {"schema": 1, "envs": {"dev": envs["dev"]}, "events": [dev, dev]}
+            self.status_json("--env", "dev"),
+            {
+                "schema": 1,
+                "envs": {"dev": envs["dev"]},
+                "events": [dev, dev],
+                "metrics": {"dev": status["metrics"]["dev"]},
+            },
         )
-        self.assertEqual(self.status_json("--env", "prod"), {"schema": 1, "envs": {"prod": UNKNOWN}, "events": [prod]})
+        self.assertEqual(
+            self.status_json("--env", "prod"),
+            {"schema": 1, "envs": {"prod": UNKNOWN}, "events": [prod], "metrics": {"prod": status["metrics"]["prod"]}},
+        )
         rc, out, err = run_main("deploy", "status")
         self.assertEqual((rc, err), (0, ""))
         self.assertIn(f"dev: deployed {DIGEST}", out)
@@ -242,3 +254,63 @@ class DeployStatusTest(TmpRepoCase):
             with self.subTest(fields=fields):
                 self.write_ledger({**EMPTY, "events": [receipt(**fields)]})
                 self.assert_error(LEDGER)
+
+    def test_rejects_receipt_with_impossible_success_or_timestamps(self):
+        for fields, expected in (
+            ({"served_digest": None}, "`served_digest`"),
+            ({"served_digest": CONTENT}, "`served_digest`"),
+            ({"deploy": {**STEP, "exit_code": 1}}, "`deploy`"),
+            ({"smoke": None}, "`smoke`"),
+            ({"smoke": {**STEP, "exit_code": 1}}, "`smoke`"),
+            ({"rollback": STEP}, "`rollback`"),
+            ({"finished": "2026-11-14T11:59:59Z"}, "`finished`"),
+            ({"result": "rolled_back", "rollback": STEP, "previous_digest": CONTENT}, "`served_digest`"),
+            ({"result": "rolled_back", "previous_digest": DIGEST}, "`rollback`"),
+            ({"result": "rolled_back", "rollback": STEP}, "`previous_digest`"),
+            ({"result": "rolled_back", "rollback": {**STEP, "exit_code": 1}, "previous_digest": DIGEST}, "`rollback`"),
+            ({"result": "rollback_failed", "previous_digest": DIGEST}, "`rollback`"),
+            ({"result": "failed", "previous_digest": DIGEST}, "`failed`"),
+            ({"result": "failed", "rollback": STEP}, "`failed`"),
+        ):
+            with self.subTest(fields=fields):
+                self.write_ledger({**EMPTY, "events": [receipt(**fields)]})
+                self.assert_error(expected)
+
+    def test_current_and_previous_must_be_confirmed_deployments(self):
+        unconfirmed = receipt(result="failed", deploy={**STEP, "exit_code": 1}, served_digest=None)
+        for field in ("current", "previous"):
+            with self.subTest(field=field):
+                self.write_ledger({**EMPTY, "envs": {"dev": {**UNDEPLOYED, field: unconfirmed}}})
+                self.assert_error(f"envs.dev.{field}")
+
+    def test_metrics_use_retained_events_grouped_by_environment(self):
+        successful = receipt(finished="2026-11-14T12:00:02.500Z")
+        rolled_back = receipt(
+            result="rolled_back",
+            deploy={**STEP, "exit_code": 1},
+            rollback=STEP,
+            previous_digest=CONTENT,
+            served_digest=CONTENT,
+            finished="2026-11-14T12:00:04+00:00",
+        )
+        self.write_ledger(
+            {
+                **EMPTY,
+                "envs": {"dev": {**UNDEPLOYED, "current": successful}, "empty": UNDEPLOYED},
+                "events": [successful, receipt("prod"), rolled_back],
+            }
+        )
+        self.assertEqual(
+            self.status_json()["metrics"],
+            {
+                "dev": {"runs": 2, "rollback_rate": 0.5, "durations_seconds": [2.5, 4.0]},
+                "empty": {"runs": 0, "rollback_rate": 0.0, "durations_seconds": []},
+                "prod": {"runs": 1, "rollback_rate": 0.0, "durations_seconds": [0.0]},
+            },
+        )
+        self.assertEqual(
+            self.status_json("--env", "dev")["metrics"],
+            {
+                "dev": {"runs": 2, "rollback_rate": 0.5, "durations_seconds": [2.5, 4.0]},
+            },
+        )

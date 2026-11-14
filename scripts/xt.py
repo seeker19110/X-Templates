@@ -13697,13 +13697,14 @@ def _deploy_step_ok(step: Any) -> bool:
     )
 
 
-def _deploy_utc(value: Any) -> bool:
+def _deploy_utc(value: Any) -> Optional[_dt.datetime]:
     if not isinstance(value, str):
-        return False
+        return None
     try:
-        return _dt.datetime.fromisoformat(value).utcoffset() == _dt.timedelta(0)
+        when = _dt.datetime.fromisoformat(value)
     except ValueError:
-        return False
+        return None
+    return when if when.utcoffset() == _dt.timedelta(0) else None
 
 
 def _deploy_runner_ok(runner: Any) -> bool:
@@ -13730,13 +13731,16 @@ def _deploy_receipt_problem(receipt: Any) -> str:
     for key in ("smoke", "rollback"):
         if receipt[key] is not None and not _deploy_step_ok(receipt[key]):
             return f"`{key}` không hợp lệ"
-    return _deploy_receipt_detail_problem(receipt)
+    return _deploy_receipt_detail_problem(receipt) or _deploy_result_problem(receipt)
 
 
 def _deploy_receipt_detail_problem(receipt: Dict[str, Any]) -> str:
-    for key in ("started", "finished"):
-        if not _deploy_utc(receipt[key]):
-            return f"`{key}` phải là thời điểm ISO 8601 UTC"
+    started = _deploy_utc(receipt["started"])
+    finished = _deploy_utc(receipt["finished"])
+    if started is None or finished is None:
+        return "`started` và `finished` phải là thời điểm ISO 8601 UTC"
+    if finished < started:
+        return "`finished` sớm hơn `started`"
     for key in ("served_digest", "previous_digest"):
         if receipt[key] is not None and not _deploy_sha256(receipt[key]):
             return f"`{key}` phải là SHA-256 hoặc null"
@@ -13744,6 +13748,38 @@ def _deploy_receipt_detail_problem(receipt: Dict[str, Any]) -> str:
         if not isinstance(receipt[key], (str, type(None))):
             return f"`{key}` phải là chuỗi hoặc null"
     return "" if _deploy_runner_ok(receipt["runner"]) else "`runner` không hợp lệ"
+
+
+def _deploy_result_problem(receipt: Dict[str, Any]) -> str:
+    result = receipt["result"]
+    if result == "deployed":
+        if receipt["deploy"]["exit_code"] != 0:
+            return "`deploy` phải thành công khi `result` là `deployed`"
+        if receipt["smoke"] is None or receipt["smoke"]["exit_code"] != 0:
+            return "`smoke` phải thành công khi `result` là `deployed`"
+        if receipt["served_digest"] != receipt["subject"]["digest"]:
+            return "`served_digest` không khớp digest của bản đã triển khai"
+        if receipt["rollback"] is not None:
+            return "`rollback` phải là null khi `result` là `deployed`"
+    elif result == "failed":
+        if receipt["rollback"] is not None or receipt["previous_digest"] is not None:
+            return "`failed` chỉ dùng khi chưa có bản trước để quay lui"
+    else:
+        return _deploy_rollback_problem(receipt)
+    return ""
+
+
+def _deploy_rollback_problem(receipt: Dict[str, Any]) -> str:
+    rollback = receipt["rollback"]
+    previous = receipt["previous_digest"]
+    if rollback is None or previous is None:
+        return "`rollback` và `previous_digest` là bắt buộc khi quay lui"
+    if receipt["result"] == "rolled_back":
+        if rollback["exit_code"] != 0:
+            return "`rollback` phải thành công khi `result` là `rolled_back`"
+        if receipt["served_digest"] != previous:
+            return "`served_digest` không khớp digest của bản trước khi quay lui"
+    return ""
 
 
 def _deploy_ledger_error(where: str, why: str) -> DeployError:
@@ -13763,6 +13799,8 @@ def _check_deploy_state(env: str, state: Any) -> None:
         why = _deploy_receipt_problem(receipt)
         if why or receipt["env"] != env:
             raise _deploy_ledger_error(f"{where}.{key}", why or "`env` không khớp môi trường")
+        if receipt["result"] != "deployed":
+            raise _deploy_ledger_error(f"{where}.{key}", "cần biên nhận của bản triển khai đã xác nhận")
 
 
 def read_deploy_ledger(base: Path) -> Dict[str, Any]:
@@ -13811,6 +13849,26 @@ def _print_deploy_status(ledger: Dict[str, Any]) -> None:
             print(f"{env}: {current['result']} {current['subject']['digest']}")
 
 
+def _deploy_metrics(ledger: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+    """Tính số liệu từ các sự kiện còn giữ trong sổ, theo cùng bộ lọc với đầu ra trạng thái."""
+    grouped: Dict[str, List[Dict[str, Any]]] = {name: [] for name in ledger["envs"]}
+    for receipt in ledger["events"]:
+        grouped.setdefault(receipt["env"], []).append(receipt)
+    return {
+        name: {
+            "runs": len(events),
+            "rollback_rate": sum(event["result"] == "rolled_back" for event in events) / len(events) if events else 0.0,
+            "durations_seconds": [
+                (
+                    _dt.datetime.fromisoformat(event["finished"]) - _dt.datetime.fromisoformat(event["started"])
+                ).total_seconds()
+                for event in events
+            ],
+        }
+        for name, events in grouped.items()
+    }
+
+
 def cmd_deploy_status(args: argparse.Namespace) -> int:
     base = project_dir()
     env = args.env
@@ -13828,7 +13886,7 @@ def cmd_deploy_status(args: argparse.Namespace) -> int:
         ledger["envs"] = {name: state for name, state in ledger["envs"].items() if name == env}
         ledger["events"] = [receipt for receipt in ledger["events"] if receipt["env"] == env]
     if args.json:
-        print(json.dumps(ledger))
+        print(json.dumps({**ledger, "metrics": _deploy_metrics(ledger)}))
     else:
         _print_deploy_status(ledger)
     return 0
@@ -19987,7 +20045,7 @@ def build_parser() -> argparse.ArgumentParser:
     dsub = pdeploy.add_subparsers(dest="deploy_cmd", required=True)
     ds = dsub.add_parser("status", allow_abbrev=False, help="đọc sổ triển khai")
     ds.add_argument("--env", help="chỉ in biên nhận của môi trường này")
-    ds.add_argument("--json", action="store_true", help="in sổ triển khai schema 1 dưới dạng JSON")
+    ds.add_argument("--json", action="store_true", help="in sổ schema 1 và số liệu theo môi trường dưới dạng JSON")
     ds.set_defaults(fn=cmd_deploy_status)
     prg = sub.add_parser(
         "registry",
