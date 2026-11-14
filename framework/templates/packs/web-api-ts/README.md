@@ -1,7 +1,7 @@
 ---
 title: Gói web-api-ts — API nhiều tenant trên Node 24 + Postgres
 kind: index
-updated: 2026-11-06
+updated: 2026-11-14
 ---
 
 # Gói `web-api-ts`
@@ -9,6 +9,8 @@ updated: 2026-11-06
 > Stack lấy từ dự án đích hotel-manager (`seeker19110/hotel-manager@30492c9`, đọc 2026-11-05): Node 24, pnpm 12.16.1,
 > TypeScript 7.0.2, `pg` 8.23.1 + `kysely` 0.29.6, `vitest` 5.0.3, `biome` 2.5.15, Postgres 17.11 (ghim digest). Không có
 > UI (Next.js của hotel-manager không vào gói đầu — D-359). Hạn hỗ trợ: `pack.json` → `support_until`.
+
+Phiên bản đang ghim trong starter xem ở [`starter/package.json`](starter/package.json).
 
 ## Có gì (starter)
 
@@ -34,11 +36,11 @@ phải làm đỏ đúng test ghi ở `expect_fail`.
 
 ## Giới hạn đã biết
 
-- Migration chạy trong transaction (runner kysely) nên không dựng được index `CONCURRENTLY` trong migration (DB-MIG-006,
-  AUD-DATA-011): `0005_sessions_expiry` dựng hai index thường trên `sessions` — bảng lớn ở môi trường thật khoá ghi trong
-  lúc dựng. Với bảng có dữ liệu: dựng index bằng bước riêng ngoài transaction (`CREATE INDEX CONCURRENTLY …` qua `psql`),
-  xoá index INVALID nếu thất bại, rồi để migration dùng `CREATE INDEX IF NOT EXISTS` cùng tên. Runner không transaction
-  cho từng migration chưa có trong gói (cách kysely cho tắt transaction: chưa xác minh với bản 0.29.6). Test
+- Runner [`src/migrate.ts`](starter/src/migrate.ts) dùng `Migrator` với cấu hình transaction mặc định của Kysely.
+  Gói chưa có tuỳ chọn chạy riêng một migration ngoài transaction (DB-MIG-006, AUD-DATA-011).
+  `0005_sessions_expiry` dựng hai index thường trên `sessions` — bảng lớn ở môi trường thật khoá ghi trong lúc dựng.
+  Với bảng có dữ liệu, dựng index bằng bước riêng ngoài transaction (`CREATE INDEX CONCURRENTLY …` qua `psql`),
+  xoá index INVALID nếu thất bại, rồi để migration dùng `CREATE INDEX IF NOT EXISTS` cùng tên. Test
   `MigrationIndexTest` (`tests/test_packs.py`) buộc migration mới dùng `CONCURRENTLY` trên bảng có sẵn; chỉ `0005` được miễn.
 
 - Kết nối ứng dụng dùng một vai trò có quyền `SET ROLE app_rw`; triển khai thật: vai trò đăng nhập riêng chỉ là thành viên
