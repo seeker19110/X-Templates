@@ -520,6 +520,12 @@
 - Lý do (tiêu chí chất lượng cuối): (1) an toàn: đo trên 19.026 lệnh Bash thật cả hai phương án chênh 0 lệnh; khi chi phí bằng nhau chọn bên chặt (printf -v ghi biến như read/let; pytest chạy mã từ conftest/-p). ADR-0076 không sửa (đã Accepted): câu 'pytest không qua cổng' bị D này thay — cổng chỉ chặn dạng cờ/lệnh con có mở rộng nên rất hiếm chạm pytest.
 - Đường lùi: Chuyển printf về GATE_PASSIVE hoặc pytest/tox/nox sang GATE_PASSIVE (sửa PASSIVE_PIN và test ghim)
 
+### D-451 · 2026-11-13T11:35:37+00:00 · Xếp hai sửa tài liệu pilot ở đâu?
+
+- Phương án: (1) Tạo ca cho/chặn giả chỉ để gắn ID đã sửa · (2) Xếp hai sửa tài liệu vào nhóm tài liệu/bằng chứng có sẵn, giữ review nguồn sống và kiểm liên kết
+- Chọn: Xếp hai sửa tài liệu vào nhóm tài liệu/bằng chứng có sẵn, giữ review nguồn sống và kiểm liên kết
+- Lý do (tiêu chí chất lượng cuối): Nhóm cũ giữ nghĩa/ngưỡng, thêm hai ID. Review độc lập nguồn sống: workflow ghim/API environment/metadata; receipt chưa xác minh, không tạo ca giả.
+- Đường lùi: Có adapter triển khai thật: thêm ca, gỡ hai ID khỏi scope.
 ### D-442 · 2026-11-13T10:37:42+00:00 · Khôi phục vòng bị chặn khi đổi PLAN hoặc ngân sách như thế nào?
 
 - Phương án: (1) Từ chối mọi loop init tới khi loop unblock · (2) Giữ nguyên cờ blocked, lý do và thời điểm qua mọi loop init; chỉ loop unblock có lý do mới gỡ chặn
