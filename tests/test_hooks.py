@@ -2177,6 +2177,24 @@ class DevTaskTest(unittest.TestCase):
         self.assertEqual(go.read_text(encoding="utf-8"), row)
         self.assertIn("GO-NO-GO", r.stderr)
 
+    def test_format_preserves_release_signoff_and_formatter_status(self):
+        release = self.tmp / "GO-NO-GO-fixture.md"
+        notes = self.tmp / "notes.md"
+        original = b"release document\n"
+        config = self.tmp / "xt.yaml"
+        for status in (0, 7):
+            with self.subTest(status=status):
+                release.write_bytes(original)
+                config.write_text(
+                    f"format: for f in *.md; do printf 'formatted\\n' > \"$f\"; done; exit {status}\n",
+                    encoding="utf-8",
+                )
+                notes.touch()
+                result = self.run_task("format")
+                self.assertEqual(result.returncode, status, result.stderr)
+                self.assertEqual(notes.read_bytes(), b"formatted\n")
+                self.assertEqual(release.read_bytes(), original)
+
     def test_format_file_never_breaks_json(self):
         """AUD-HAR-037: formatter khai báo cho Python (`ruff format {}`) từng biến settings.json thành JSON hỏng (dấu phẩy
         thừa) — format-file khôi phục file JSON nếu trước hợp lệ mà sau không còn hợp lệ."""

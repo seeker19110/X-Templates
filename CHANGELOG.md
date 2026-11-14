@@ -208,6 +208,8 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
 
 ### Fixed
 
+- T-3746 (AUD-SEC-648): `dev-task.sh format` bảo toàn nội dung GO-NO-GO đã có khi formatter sửa tệp, kể cả lúc formatter báo lỗi.
+
 - Hướng dẫn merge và chú thích `xt.yaml` khớp ADR-0079: xét theo số PR, review chỉ bắt buộc khi `merge_review: required`.
 - `doctor` và `ci-check` báo lỗi khi `merge_review` đã khai giá trị khác `optional` hoặc `required`; thiếu khóa vẫn dùng mặc định.
 - AUD-SEC-730: cập nhật trạng thái sau #535, đối chiếu guard-check và ba test chặn/đối chứng; giới hạn đệ quy tiếp tục theo T-3867.
