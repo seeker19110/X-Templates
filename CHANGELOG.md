@@ -190,6 +190,8 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
 
 ### Fixed
 
+- T-3736 (AUD-HAR-378): `release-check` và `release-sign` chỉ lối xử lý theo PLAN và ngân sách của vòng bị chặn.
+
 - AUD-DATA-013: cổng migration web-api-ts từ chối chỉ mục concurrent trong giao dịch và giữ ngoại lệ 0005.
 
 - T-3726, AUD-PERF-030: lưu kết quả lệnh kiểm Blueprint theo khóa chuẩn, giữ quy tắc phân biệt nháy.
@@ -199,6 +201,8 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
 - `xt.py doctor` nạp guard của dự án một lần để kiểm cả bộ lệnh mẫu (AUD-PERF-028, phần đầu T-3726).
 
 - AUD-TEST-105: cổng đo CPU so cỡ nhỏ và lớn trong cùng lượt retry, giữ ngưỡng hiện hành (D-483).
+
+- Tài liệu và mẫu GO-NO-GO ghi rõ quyền ký phát hành (ADR-0074) và duyệt MVP (ADR-0069) khi dự án bật tự động (D-481).
 
 - T-3728: skill `autopilot` theo hành động `stage-approve` của `loop next-step` khi dự án bật tự nghiệm thu MVP
   (AUD-XFEAT-048). Cập nhật số đo biên dịch guard trong chú thích `_lib.sh` theo audit 2026-11-11 (AUD-PERF-031).

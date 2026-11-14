@@ -214,7 +214,7 @@ class ReleaseSignTest(SignoffRepo):
         wt = self.worktree()
         (wt / ".autopilot").mkdir()
         (wt / ".autopilot/state.json").write_text('{"blocked": true, "blocked_reason": "cần quyết kiến trúc"}', "utf-8")
-        self.refused("vòng đang bị chặn (cờ chặn — cần quyết kiến trúc) — người xem rồi `loop unblock --reason …`")
+        self.refused("vòng đang bị chặn (cờ chặn — cần quyết kiến trúc) — chưa có vòng lặp")
         self.refused(f"{wt.resolve() / '.autopilot/state.json'}: vòng đang bị chặn")
         (wt / ".autopilot/state.json").write_text("{}", "utf-8")
         for body, reason in (
