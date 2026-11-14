@@ -13,6 +13,7 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
   bootstrap; giữ inode thư mục và `.git`, không nhận nhầm thư mục của tiến trình khác hay xoá dữ liệu khi lỗi.
   Git bootstrap cách ly cấu hình, hooks và metadata môi trường; identity không đọc được dùng mặc định, không in
   byte cấu hình. Gate task: 46 test đạt; kiểm độc lập bốn ca race/identity đạt, các helper mới phủ dòng và nhánh 100 %.
+- T-3842 (D-484): `xt.py deploy status` kiểm schema và đọc sổ receipt triển khai, có bộ lọc môi trường.
 - Ghi [audit delta DOC](docs/ops/AUDIT-REPORT-2026-11-14-delta.md) đến `2bf2e1cf` và mở AUD-DOC-293.
   Lưu kho nguyên văn 10 phát hiện DOC đã sửa ở v3.31.0 để giữ trần `docs/ops`.
 

@@ -682,6 +682,13 @@
 - Lý do (tiêu chí chất lượng cuối): Người dùng yêu cầu bỏ các dòng cũ. Một dòng Python giữ môi trường phát triển và CI nhất quán. Giữ kiểm thử nhánh main và ngưỡng coverage hiện hành.
 - Đường lùi: Revert PR runtime và trả về bản khung trước khi nâng nếu dự án đích chưa chuyển được.
 
+### D-484 · 2026-11-14T04:01:16+00:00 · T-3842: tách việc đưa CLI triển khai vào khung ra sao?
+
+- Phương án: (1) Tách bộ đọc sổ và deploy status khỏi lệnh có hiệu ứng · (2) Đưa cùng lúc bộ đọc, chạy và quay lui
+- Chọn: Tách bộ đọc sổ và deploy status khỏi lệnh có hiệu ứng
+- Lý do (tiêu chí chất lượng cuối): Bộ đọc sổ có test offline và có thể dùng chung cho release-check và registry. Lát điều khiển cần giữ trạng thái khi thất bại và cổng quyền riêng.
+- Đường lùi: Revert lát đọc sổ mà chưa cần thay đổi đích triển khai hay dữ liệu thật
+
 ### D-486 · 2026-11-14T08:41:08+00:00 · Cổng merge và thứ tự PR cho khung và dự án đích?
 
 - Phương án: (1) CI xanh, ưu tiên số PR tăng dần · (2) Giữ review bắt buộc theo làn
