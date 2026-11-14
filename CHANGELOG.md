@@ -190,6 +190,8 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
 
 ### Fixed
 
+- AUD-DATA-012: cổng migration web-api-ts nhận diện cả CREATE INDEX không ghi tên trên bảng có sẵn.
+
 - `xt.py doctor` nạp guard của dự án một lần để kiểm cả bộ lệnh mẫu (AUD-PERF-028, phần đầu T-3726).
 
 - AUD-DOC-273/274: báo cáo pilot phân biệt số đo chưa xác minh với bằng chứng CI; PLAN chỉ rõ cổng Production, reviewer bắt buộc và phê duyệt đúng run, theo cấu hình đọc ngày 2026-11-13. Chỉ sửa tài liệu, không thay quyền triển khai.
