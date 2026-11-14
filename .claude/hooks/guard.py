@@ -2239,6 +2239,10 @@ RULED_WORD_WHY = (
     " (`git push -d$X`, `$X--delete`, `git stash drop$X`, `python3 -$X`; ADR-0076, AUD-SEC-690/710/711/726); viết lại:"
     ' tên cờ và lệnh con nguyên văn, mở rộng chỉ ở giá trị (`--repo="$R"`, `-m "$M"`, `-j "$(nproc)"`)'
 )
+RULED_SUBST_WHY = (
+    "thay tiến trình làm đối số hay thay lệnh trần ghép với chữ/đối số khác (`{}`) — guard có thể bỏ sót đối số"
+    " (ADR-0076 P4, AUD-SEC-609); viết lại: lưu kết quả vào biến rồi dùng trong nháy kép, hoặc dùng tệp nguyên văn"
+)
 GATE_DYN, GATE_GLOB = "\0", "\1"
 GATE_FLAG_DYN_RE = re.compile("-[\\w-]*[\0\1]|[\0\1]+-")  # P2 | P3 trên khung của từ
 # nhóm 1: `$?`/`$#`/`$$` luôn ra số; `$!` RỖNG khi chưa có job nền (bash: `-d$!` → `-d`), `$-`/`$_`/`$0`/`$@` rỗng được
@@ -2246,16 +2250,44 @@ GATE_VAR_RE = re.compile(r"\$(?:([?#$])|[A-Za-z_]\w*|[0-9@*!-])")
 GIT_SUB2 = frozenset({"stash", "remote", "worktree", "reflog"})
 
 
-def _ruled_word_why(cmd: str) -> str:
-    """Lý do (rỗng = qua) của cổng P1 cấp hai/P2/P3 trên mọi lệnh đơn — cùng bộ đọc với `_command_heads`."""
+def _ruled_word_why(cmd: str, only_p4: bool = False) -> str:
+    """Lý do (rỗng = qua) của cổng P1 cấp hai/P2/P3/P4 trên mọi lệnh đơn — cùng bộ đọc với `_command_heads`."""
     raw = _raw_tokens(cmd, True)
     argvs = None if raw is None else _plain_argvs(raw)
     for seg in (s for argv in argvs or [] for s in _brace_segments(argv)):
         rest = _ifs_prefix(seg)[1]
-        bad = _gate_bad_word(rest[len(rest) - len(_strip_prefixes([_dequote(t) for t in rest])) :])
+        words = rest[len(rest) - len(_strip_prefixes([_dequote(t) for t in rest])) :]
+        bad = "" if only_p4 else _gate_bad_word(words)
         if bad:
             return RULED_WORD_WHY.format(clean_text(bad)[:80])
+        if _gate_substitution(words):
+            return RULED_SUBST_WHY.format(clean_text(" ".join(words))[:80])
     return ""
+
+
+def _gate_substitution(words: List[str]) -> bool:
+    """P4 chỉ ở GATE_NAMES: thay tiến trình là đối số; `$()` không nháy dính chữ trước/sau hay còn đối số sau nó.
+    Nháy kép và số học giữ nguyên; backtick đã ngoài tập con chuẩn. Chỉ dùng bộ đọc có sẵn."""
+    name = posixpath.basename(_dequote(words[0])) if words else ""
+    if name not in GATE_NAMES:
+        return False
+    for k, word in enumerate(words[1:], 1):
+        if word == PROCSUB_WORD or _gate_bare_substitution(word, k + 1 < len(words)):
+            return True
+    return False
+
+
+def _gate_bare_substitution(word: str, more: bool) -> bool:
+    view = _CodeView(word)
+    pairs = _code_paren_pairs(view) if "$((" in word else {}
+    for i in range(len(word)):
+        if view.top[i] and view.kind[i] == "c" and word.startswith("$(", i):
+            end = pairs.get(i + 1, -1)
+            if end >= 0 and pairs.get(i + 2, -2) + 1 == end:  # số học chỉ khi hai ngoặc mã đóng liền nhau
+                continue
+            if more or i > 0 or _raw_group_end(word, i + 2, "(") != len(word):
+                return True
+    return False
 
 
 def _gate_bad_word(words: List[str]) -> str:
@@ -2410,7 +2442,7 @@ def _plain_argvs(tokens: List[str]) -> Optional[List[List[str]]]:
 ARITH_LEADS = ("for", "time")  # cùng `SHELL_KEYWORDS`: `((` sau các từ này vẫn ở vị trí lệnh (`if ((`, `for ((`)
 # Mảnh của một dãy dấu: mở thay tiến trình, ngoặc, chuyển hướng (`>&`, `>|`, `&>>`, `<<<`), toán tử điều khiển.
 PUNCT_PIECE_RE = re.compile(r"[<>]\(|[()]|&>>?|[<>]+[&|]?|[;&|\n]+")
-PROCSUB_WORD = "_procsub_"  # chỗ của `<(…)`/`>(…)` trong argv lệnh ngoài (đích chuyển hướng, đối số)
+PROCSUB_WORD = "\0_procsub_"  # chỗ của `<(…)`/`>(…)` trong argv ngoài; NUL không thể là tên file bash nguyên văn
 
 
 class _ArgvSplit:
@@ -3943,9 +3975,11 @@ def _dequote(t: str) -> str:
     return _lit(out) if _is_punct(out) and not _is_punct(t) else out
 
 
-def _raw_heads_why(cmd: str) -> str:
+def _raw_heads_why(cmd: str, depth: int = 0) -> str:
     """AUD-SEC-309: mỗi lệnh đơn mà đầu (sau lệnh bọc/gán) là shell có `-c` hay `eval` — thân (chuỗi lệnh của `-c`; mọi
     đối số của `eval`) đọc trên token còn nháy: thay lệnh/`$'…'`/backtick/biến gán từ thay lệnh ngoài nháy đơn → chặn."""
+    if depth > MAX_NEST:
+        return "thân shell literal lồng quá sâu — vượt ngân sách quét"
     raw = _raw_tokens(cmd)
     if raw is None:
         return "nháy không tách được để xét đầu `sh -c`/`eval` (AUD-SEC-309)" if STRICT_SHELL_RE.search(cmd) else ""
@@ -3958,6 +3992,10 @@ def _raw_heads_why(cmd: str) -> str:
         body = argv[at + 1 :] if n[0] == "eval" else argv[at + _shell_c_index(n) : at + _shell_c_index(n) + 1]
         if any(_raw_word_dynamic(w, cmd) for w in body):
             return "thân `sh -c`/`eval` dựng lúc chạy (đầu theo argv, tên có nháy/thoát) (AUD-SEC-309)"
+        script = " ".join(_dequote(w) for w in body)
+        why = _ruled_word_why(script, only_p4=True) or _raw_heads_why(script, depth + 1)
+        if why:
+            return why
     return ""
 
 

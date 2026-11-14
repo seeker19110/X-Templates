@@ -439,9 +439,9 @@ class NestedShellArgvTest(unittest.TestCase):
         "printf 'ls\\n' | bash",
         "git log --oneline | head -5",
         "diff <(sort a) <(sort b)",
-        "bash x.sh <(cat f)",
-        "bash <(echo 'echo hi')",
-        "source <(printf 'x=1\\n')",
+        "bash x.sh input.txt",
+        "bash literal-script.sh",
+        "source ./env.sh",
         "bash <<'X'\necho $HOME\nX",
         "cat <<X\n$HOME\nX",
         "source .venv/bin/activate",
@@ -462,6 +462,18 @@ class NestedShellArgvTest(unittest.TestCase):
         for cmd in self.ALLOW:
             with self.subTest(cmd=cmd):
                 self.assertEqual(decide(cmd)["decision"], "", decide(cmd))
+
+    def test_p4_process_substitution_arguments_budget(self):  # D-475: đối số thay tiến trình ngoài tập con P4
+        for policy in ("", "strict"):
+            with mock.patch.dict(os.environ, {"XT_GUARD_POLICY": policy}):
+                for cmd in ("bash x.sh <(cat f)", "bash <(echo 'echo hi')", "source <(printf 'x=1\\n')"):
+                    with self.subTest(policy=policy, cmd=cmd):
+                        d = guard.apply_policy(guard.bash_decision(cmd, str(ROOT)))
+                        self.assertEqual((d["decision"], d.get("code")), ("deny", guard.BUDGET), d)
+                for cmd in ("bash x.sh input.txt", "bash literal-script.sh", "source ./env.sh"):
+                    with self.subTest(policy=policy, cmd=cmd):
+                        d = guard.apply_policy(guard.bash_decision(cmd, str(ROOT)))
+                        self.assertEqual(d["decision"], "", d)
 
     def test_raw_tokens_keep_quotes(self):
         """Bộ tách giữ nháy (review #404): `\\"` trong nháy kép, `$(…)`/`${…}` lồng nháy là một từ như bash; không đóng →

@@ -143,11 +143,19 @@ class RmPwdParentTest(unittest.TestCase):
             "rm -rf ~+/dist",
             "rm -rf build/../dist",
             "rm -rf $TMPDIR/x",
-            "rm -rf $(pwd)/build",
+            'rm -rf "$(pwd)"/build',
             'echo "$(pwd)"',
         ):
             with self.subTest(cmd=cmd):
                 self.assertEqual(policy(cmd)["decision"], "", cmd)
+
+    def test_guard_bare_pwd_suffix_budget(self):  # D-478: chữ sau thay lệnh trần ngoài tập con P4
+        for name in ("", "strict"):
+            with mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(ROOT), "XT_GUARD_POLICY": name}):
+                out = guard.apply_policy(guard.bash_decision("rm -rf $(pwd)/build", str(ROOT)))
+                self.assertEqual((out["decision"], out.get("code")), ("deny", "BUDGET"), out)
+                rewrite = guard.apply_policy(guard.bash_decision('rm -rf "$(pwd)"/build', str(ROOT)))
+                self.assertEqual(rewrite["decision"], "", rewrite)
 
 
 if __name__ == "__main__":

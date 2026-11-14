@@ -559,6 +559,19 @@
 - Chọn: Giữ guard; lấy nproc vào biến rồi tính cùng ceil(N/2)
 - Lý do (tiêu chí chất lượng cuối): Hai ngoại lệ parser thử nghiệm đều bị review độc lập tìm ra bypass thật bằng sentinel vô hại. Theo D-415, viết lại lệnh vào tập con đọc chắc; giữ fallback 2, tập test, runner, công thức và ngưỡng. Test so sánh 12 đầu vào số và ca nproc lỗi cho kết quả như cũ; hai payload phải vẫn BUDGET.
 - Đường lùi: Hoàn lại cú pháp lệnh khi có parser nháy đủ bằng chứng; không nới guard hay cổng để phục hồi CI.
+### D-444 · 2026-11-13T11:12:00+00:00 · P4 xử lý thay lệnh trần có hậu tố và câu hỏi GO_SIGN cũ thế nào?
+
+- Phương án: (1) Ngoại lệ cho những câu hỏi hoặc control từng được phép · (2) Áp đúng P4; bare substitution còn chữ sau ra BUDGET, giữ các deny cũ
+- Chọn: Áp đúng P4; bare substitution còn chữ sau ra BUDGET, giữ các deny cũ
+- Lý do (tiêu chí chất lượng cuối): D-415: tập con đọc chắc. patch đổi raw ask GO_SIGN → deny BUDGET (default vẫn deny; strict siết ask), không nới ma trận build/harden. Mẫu 505 lượt không đổi quyết định, chưa đại diện lịch sử; bản nháp, AUD-SEC-609 mở.
+- Đường lùi: Hoàn lại lát P4 bằng PR riêng nếu phép đo rộng hơn vượt 0,2%; không đổi ngưỡng hay che lỗ còn lại.
+
+### D-447 · 2026-11-13T11:22:00+00:00 · P4 có giữ thay lệnh trần dính tiền tố ở từ cuối khi có thể thành đường gốc?
+
+- Phương án: (1) Giữ phạm vi chỉ hậu tố, để AUD-SEC-609 mở · (2) Chặn cả tiền tố/hậu tố, chỉ giữ thay lệnh trần là nguyên từ cuối
+- Chọn: Chặn cả tiền tố/hậu tố, chỉ giữ thay lệnh trần là nguyên từ cuối
+- Lý do (tiêu chí chất lượng cuối): Guard-only probe rm -rf /$(echo) được cho qua, còn Bash stub rm chỉ in argv xác nhận đối số cuối thành /. Đây là cùng lỗi thu hẹp argv nên chọn cách chặt theo D-415; dạng có nháy giữ nguyên. Thay thế giới hạn chỉ hậu tố của D-444; cập nhật control dính tiền tố và test viết lại có nháy. Không đổi ngưỡng D-431.
+- Đường lùi: Hoàn lại phần mở rộng P4 bằng PR riêng nếu số đo rộng hơn vượt ngưỡng, giữ ca khai thác và ghi rõ residual.
 ### D-445 · 2026-11-13T11:12:01+00:00 · Ngoặc trong tham số Bash không nháy làm lệch tokenizer, nên chặn ở đâu?
 
 - Phương án: (1) Mở rộng parser để hiểu mọi dạng tham số lồng · (2) Precheck lexical theo ngữ cảnh nháy, ngoài tập con trả BUDGET
@@ -594,6 +607,13 @@
 - Lý do (tiêu chí chất lượng cuối): Hai PLAN có 13 task đều đóng, không được PROGRESS nhắc là việc sống; dời giữ nguyên lịch sử và số ID, viết lại liên kết. Không đổi trần hoặc dời PLAN đang chạy.
 - Đường lùi: git mv ngược và hoàn lại liên kết trong PR riêng.
 
+### D-459 · 2026-11-13T13:21:24+00:00 · P4: cùng thân bash -c chứa $(pwd)/sub bị tokenizer thay bằng $PWD, làm mất chặn khi bọc. Xử lý thế nào?
+
+- Phương án: (1) Kiểm P4 trên đường thân shell literal nguyên văn đang có trước bước thay $(pwd), không thêm parser · (2) Miễn $(pwd) hoặc nới bất biến wrapper của fuzz
+- Chọn: Kiểm P4 trên đường thân shell literal nguyên văn đang có trước bước thay $(pwd), không thêm parser
+- Lý do (tiêu chí chất lượng cuối): Cùng byte thân lệnh phải giữ kết luận khi bọc bash -c. Miễn trừ hoặc bỏ invariant che một đường mất cú pháp. Dùng đường raw literal sẵn có giữ D415; phải giữ quoted/whole-final control và đo lại đúng source.
+- Đường lùi: Revert bản bổ sung trong PR riêng; giữ audit609 mở và ca fuzz đỏ làm bằng chứng.
+
 ### D-460 · 2026-11-13T13:24:09+00:00 · F111: publish thư mục mới mà không thay inode thư mục xuất hiện đồng thời như thế nào?
 
 - Phương án: (1) Mkdir đích thiếu với exist_ok=False rồi bootstrap qua cwd giữ inode; giữ output dở nếu lỗi, cùng cơ chế claim .git như đích rỗng đã có · (2) Giữ staging rồi thêm rename-noreplace riêng theo từng hệ điều hành
@@ -601,6 +621,19 @@
 - Lý do (tiêu chí chất lượng cuối): Path.rename ghi đè thư mục rỗng xuất hiện giữa chừng, làm cwd của người khác mất liên kết. Exclusive mkdir portable trong stdlib nhận một đích duy nhất; giữ inode và dữ liệu khi lỗi quan trọng hơn atomic publish. Chỉ ghi sau khi kiểm đầu vào. Từ chối nếu tiến trình khác tạo đích trước mkdir; không chuyển sang nhánh existing trong race. Thay D452 phần staging cho đích thiếu.
 - Đường lùi: Khôi phục staging chỉ khi có primitive no-replace portable và probe giữ inode qua race xanh; giữ regression cạnh tranh.
 
+### D-475 · 2026-11-13T14:49:02+00:00 · T3763 Gate gốc có ba ALLOW process-sub argv trái P4: giữ grammar hay miễn các lệnh cat/echo/source này?
+
+- Phương án: (1) Giữ P4: đúng ba process-sub argv thành BUDGET rõ ràng, giữ đối chứng ALLOW bằng script/input file nguyên văn · (2) Thêm ngoại lệ cho nội dung process-sub được xem là lành
+- Chọn: Giữ P4: đúng ba process-sub argv thành BUDGET rõ ràng, giữ đối chứng ALLOW bằng script/input file nguyên văn
+- Lý do (tiêu chí chất lượng cuối): Gate riêng đã chạy801test891s, chỉ ba subtest bash x.sh <(cat f), bash <(echo echo-hi), source <(printf...) trái hợp đồng tất cả process-sub argv ngoài tập con (D444/ADR0076). Ngoại lệ theo nội dung lành quay lại bảng cấm. Đổi đúngbaexpect là siết theo spec, không hạ invariant hay phạm vi; hashguard/505sample0delta giữ nguyên. Fuzz đầy đủ đã qua ở lượt riêng.
+- Đường lùi: Chỉ mở process-sub qua SPEC/ADR có bộ đọc và bằng chứng tương đương; không trả expect ALLOW khi parser chưa chắc.
+
+### D-478 · 2026-11-13T16:30:30+00:00 · P4 gate-fast toàn repo còn hai ALLOW dùng thay lệnh trần/process-sub argv trái grammar: xử lý thế nào?
+
+- Phương án: (1) Đúng hai input cũ thành BUDGET, thêm quoted/literal rewrites ALLOW ở default và strict; numeric-loop giữ nguyên assertion · (2) Miễn hai dạng lành cụ thể để giữ ALLOW cũ
+- Chọn: Đúng hai input cũ thành BUDGET, thêm quoted/literal rewrites ALLOW ở default và strict; numeric-loop giữ nguyên assertion
+- Lý do (tiêu chí chất lượng cuối): Full455classsummaries chỉ có hai mâu thuẫn grammar và mộtnumeric-loop chưa rõnguyênnhân. Probe2original+2rewrites default/strict8callsđúngkếtluận; numericquietbaseline75ebd025/candidateec758 đềuallowNONE với8sunchanged, CPU1.68/1.57s, chưađủquykếtlượtđỏdotải. Khôngthêmexemption, khôngnớiSCAN_SECONDS/timeout/invariant. Chỉbổsungfailurediagnostic nếu cầnđểgiữreason/code lầnsau.
+- Đường lùi: Mở dạng ngoài grammar chỉ qua ADR có bằngchứng tươngđương; không trả ALLOW hoặc tăngbudget chỉđểcổngxanh.
 ### D-477 · 2026-11-13T15:59:22+00:00 · Lát T3736/T3737 vượt150dòng khi cần adapter corpus CLI thật: tách hình thức hay giữ một PR nguyên khối?
 
 - Phương án: (1) Một PR cùng lifecyclefix, adapter giới hạn, hồi quy và auditrefs; mỗi phần cần để bằng chứng đúng hành vi · (2) Tách nhiều PR helper/adapter/fix làm mỗi phần dưới150dòng
