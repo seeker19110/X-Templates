@@ -12654,7 +12654,8 @@ def _release_verify_elsewhere(base: Path, files: List[Path]) -> Dict[str, str]:
     return _release_row(
         "verify",
         "FAIL",
-        f"worktree này không có sổ máy; sổ ở {roots}: {final_check(base, files[0].parent)}",
+        f"worktree này không có sổ máy; sổ ở {roots}. Chạy `loop verify --all` từ worktree chứa sổ "
+        "trên cây khớp ứng viên, hoặc chạy `loop init` với PLAN harden tại checkout ứng viên rồi `loop verify --all`.",
     )
 
 
