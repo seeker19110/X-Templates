@@ -79,6 +79,7 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
   chặn như AUD-SEC-498.
 - Nghiên cứu [nâng tự động hoá tới mức máy làm được](research/2026-11-08-full-automation.md): kiểm kê 247 điểm chờ
   người, định nghĩa "máy không thể", phân loại, lát triển khai.
+- AUD-TEST-061: thêm fixture SARIF trích từ CodeQL 2.27.4 trên CI để kiểm adapter đọc kết quả quét rỗng.
 
 ### Changed
 
