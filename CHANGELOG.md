@@ -201,6 +201,9 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
   `{fd}>o d=/`). ADR-0076: lát 0, 1, 2, 4 xong. Dự án đích: nâng bản để nhận `.claude/hooks/guard.py` mới; lệnh bị
   chặn đọc dòng `viết lại:` của lý do.
 
+- T-3728: skill `autopilot` theo hành động `stage-approve` của `loop next-step` khi dự án bật tự nghiệm thu MVP
+  (AUD-XFEAT-048). Cập nhật số đo biên dịch guard trong chú thích `_lib.sh` theo audit 2026-11-11 (AUD-PERF-031).
+
 - Gói `web-api-ts` dùng Kysely 0.29.8, Biome 2.6.6 và Vitest 5.1.0 (#513, D-479). Giữ kiểu Node 24
   theo runtime của gói. Chuẩn hoá khoảng trắng trước chú thích trong mẫu `xt.yaml` để qua formatter YAML của Biome.
 - Guard — ADR-0076 lát 2 (T-3762; lý do chạm hàng rào: bốn 🔴 có từ trước cùng gốc AUD-SEC-644, D-430/D-431/D-435 — chỉ
