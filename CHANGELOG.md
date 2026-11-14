@@ -79,8 +79,14 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
   chặn như AUD-SEC-498.
 - Nghiên cứu [nâng tự động hoá tới mức máy làm được](research/2026-11-08-full-automation.md): kiểm kê 247 điểm chờ
   người, định nghĩa "máy không thể", phân loại, lát triển khai.
+- AUD-TEST-061: thêm fixture SARIF trích từ CodeQL 2.27.4 trên CI để kiểm adapter đọc kết quả quét rỗng.
 
 ### Changed
+
+- **Tương thích:** Bộ cài, CLI và các workflow đi kèm dùng CPython 3.15.x. Repo và CI ghim 3.15.2.
+  Dự án đích cần chọn CPython 3.15 cho công cụ khung và cập nhật thiết lập CI theo mẫu khi nâng khung
+  ([ADR-0078](docs/adr/0078-python-315-runtime.md), D-485).
+  `dev-task.sh` dừng lệnh cần qua guard nếu interpreter của CLI sai phiên bản.
 
 - Lưu nguyên văn D-361…D-372 vào sổ tháng 11 theo D-314; giữ ID, thứ tự và trần tài liệu (D-482).
 
@@ -199,6 +205,10 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
 - AUD-DATA-012: cổng migration web-api-ts nhận diện cả CREATE INDEX không ghi tên trên bảng có sẵn.
 
 - `xt.py doctor` nạp guard của dự án một lần để kiểm cả bộ lệnh mẫu (AUD-PERF-028, phần đầu T-3726).
+
+- Vòng tự động (T-3736/T-3737, AUD-HAR-378/379, D-442): `loop init` giữ cờ chặn, lý do và thời điểm qua cả đổi PLAN
+  và `--force`; chỉ `loop unblock --reason …` mới gỡ cờ và ghi can thiệp. Hàng `verify`/`release-sign` chỉ đúng lối
+  phục hồi khi hết ngân sách, mất PLAN hoặc chưa khởi tạo, theo cây làm việc chứa state; tạo đợt mới vẫn phải gỡ cờ.
 
 - Tài liệu và mẫu GO-NO-GO ghi rõ quyền ký phát hành (ADR-0074) và duyệt MVP (ADR-0069) khi dự án bật tự động (D-481).
 

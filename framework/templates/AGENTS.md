@@ -1,12 +1,12 @@
 ---
 title: Mẫu AGENTS.md cho dự án
 kind: template
-updated: 2026-11-05
+updated: 2026-11-14
 ---
 
 # AGENTS.md — luật vận hành cho AI agent trong dự án này
 
-> Do `install.py` của khung X-Templates tạo (copy-if-absent). Sửa phần `[ĐIỀN]`; phần còn lại là luật chung của khung ở `.xtemplates/` (`framework/` = thư viện yêu cầu, `scripts/xt.py` = công cụ; `<XT>` dưới đây = `python3 .xtemplates/scripts/xt.py`). Dùng chung cho mọi agent; `CLAUDE.md` chỉ import file này. Hướng dẫn này **không thay cho hook/permission**: hàng rào thật là `.claude/settings.json` + hook guard.
+> Do `install.py` của khung X-Templates tạo (copy-if-absent). Sửa phần `[ĐIỀN]`; phần còn lại là luật chung của khung ở `.xtemplates/` (`framework/` = thư viện yêu cầu, `scripts/xt.py` = công cụ; `<XT>` dưới đây = `python3 .xtemplates/scripts/xt.py`). CPython 3.15.x trên PATH; `CLAUDE.md` chỉ import file này. Hướng dẫn này **không thay cho hook/permission**: hàng rào thật là `.claude/settings.json` + hook guard.
 
 ## 1. Dự án này
 - **Tên / mục tiêu:** [ĐIỀN — một câu]
