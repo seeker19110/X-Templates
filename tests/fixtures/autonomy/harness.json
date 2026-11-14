@@ -434,6 +434,38 @@
     "green": true,
     "matches": true
    }
+  },
+  {
+   "id": "link-request-iri",
+   "origin": "audit",
+   "refs": [
+    "AUD-CI-033"
+   ],
+   "input": {
+    "kind": "link_request",
+    "url": "https://example.invalid/hồ%20sơ?q=tiếng+Việt&next=%2F#phần"
+   },
+   "expect": {
+    "green": true,
+    "requests": [
+     "/h%E1%BB%93%20s%C6%A1?q=ti%E1%BA%BFng+Vi%E1%BB%87t&next=%2F"
+    ]
+   }
+  },
+  {
+   "id": "link-request-ascii",
+   "origin": "control",
+   "refs": [],
+   "input": {
+    "kind": "link_request",
+    "url": "https://example.invalid/a%2Fb?q=x+y&next=/a?b"
+   },
+   "expect": {
+    "green": true,
+    "requests": [
+     "/a%2Fb?q=x+y&next=/a?b"
+    ]
+   }
   }
  ]
 }
