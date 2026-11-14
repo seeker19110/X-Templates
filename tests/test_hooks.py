@@ -9894,6 +9894,26 @@ class GuardPrefixGateTest(_GuardDebtCase):
     def test_controls_allowed(self):  # bài học #517: từ khoá làm đối số/trong nháy giữ qua; idiom stack khác
         self.assert_allowed(self.ALLOWED)
 
+    def test_known_descriptor_names(self):
+        self.assert_allowed(("{build_log}>o git status", "{build_log[1]}>o git status"))
+        for name in ("{1log}", "{log[index]}"):
+            with self.subTest(name=name):
+                argv = [name, ">", "o"]
+                self.assertEqual(self.g._strip_prefixes(argv), argv)
+
+    def test_descriptor_like_argument_before_redirection_is_ambiguous(self):
+        self.assert_code(('printf "%s" "{build_log}" >o', "printf '%s' {build_log} >o"), "BUDGET")
+
+    def test_nested_wrappers_keep_known_quoted_values(self):
+        self.assert_allowed(
+            (
+                'env -- nice -n "$priority" make',
+                'nice -n "${priority}" timeout -k "$delay" 10 make',
+                'env -C "$build_dir" xargs -P "$(( (cpus + 1) / 2 ))" -n 1 echo',
+                'command -pv "$tool"',
+            )
+        )
+
     def test_old_rule_code_kept(self):  # luật cũ chặn trước giữ mã cũ (bài học review #523), cả strict
         cmds = (
             "nice -n$X git push origin feat/me --force",

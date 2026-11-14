@@ -3823,10 +3823,11 @@ def _argv_shell_why(cmd: str, tokens: List[str], root: str, cwd: Optional[str]) 
     return old or _allowlist_why(cmd, root, cwd)
 
 
-def _raw_tokens(cmd: str, subst: bool = False) -> Optional[List[str]]:
+def _raw_tokens(cmd: str, subst: bool = False, fd_issues: Optional[List[str]] = None) -> Optional[List[str]]:
     """Token GIỮ nháy/thoát (shlex không POSIX) của chữ đã nối dòng, gấp heredoc, giải `$'…'` thành chữ nháy, bỏ comment
     — cùng tiền xử lý `tokenize` trừ viết lại `$IFS`/`$(pwd)`; nháy không đóng → None. `subst`: gấp heredoc như
-    `_ShellScan` (thân có nháy trong `"$(…)"` thành dòng trống — chữ, ngoặc lẻ trong đó không làm hỏng tách từ)."""
+    `_ShellScan` (thân có nháy trong `"$(…)"` thành dòng trống — chữ, ngoặc lẻ trong đó không làm hỏng tách từ).
+    `fd_issues` giữ từ dạng fd mà không thể xác nhận trước khi bỏ khoảng trắng và nháy."""
     s = strip_comments(expand_ansi_c(_fold_heredocs(join_continuations(cmd), subst, True)), True)
     out: List[str] = []
     word: List[str] = []
@@ -3834,7 +3835,13 @@ def _raw_tokens(cmd: str, subst: bool = False) -> Optional[List[str]]:
     while i < len(s):
         c = s[i]
         if c in " \t\r" or c in PUNCT:
-            out += ["".join(word)] if word else []
+            joined = "".join(word)
+            if fd_issues is not None and c in "<>&":
+                fd = _uncertain_named_fd(joined, out[-1] if out else "", s[i : i + 3])
+                if fd:
+                    fd_issues.append(fd)
+            if joined:
+                out.append(joined)
             word = []
             j = i
             while j < len(s) and s[j] in PUNCT:  # dãy dấu liền nhau là một token (như shlex `punctuation_chars`)
@@ -5084,7 +5091,10 @@ BASH_BUILTINS = frozenset(
 
 def _prefix_why(cmd: str) -> str:
     """Lý do (rỗng = qua) của P0 trên mọi lệnh đơn — cùng bộ đọc với `_ruled_word_why`; một lượt, tuyến tính."""
-    raw = _raw_tokens(cmd, True)
+    fd_issues: List[str] = []
+    raw = _raw_tokens(cmd, True, fd_issues)
+    if fd_issues:
+        return FD_PREFIX_WHY.format(clean_text(fd_issues[0])[:80])
     for argv in (None if raw is None else _plain_argvs(raw)) or []:
         bad = _lead_word_bad(argv) or next(filter(None, map(_wrapper_bad, _brace_segments(argv))), "")
         if bad:
@@ -5110,24 +5120,79 @@ def _lead_word_bad(argv: List[str]) -> str:
 
 
 def _wrapper_bad(seg: List[str]) -> str:
-    """Từ phạm (c)/(d) trong phần tiền tố của lệnh đơn `seg` (token còn nháy) — phần `_strip_prefixes` bỏ; rỗng = qua.
-    Gán (`env X=$Y`, `X=$Y cmd`) và đích chuyển hướng không tính. Giá trị của cờ nhận giá trị (`xargs -P "$(nproc)"`,
-    `nice -n "$N"`) nằm trong MỘT cặp nháy kép thì qua — luôn đúng một từ (ADR-0076: giữ nháy kép ở vị trí giá trị); trần
-    (`-n $N`: tách từ dời vị trí tên lệnh), dính cờ (`-n$N`) hay ở chỗ thời lượng/tên (`timeout "$T"`: có thể là cờ) → chặn."""
+    """Đọc nguyên văn từng trình bọc, từ cờ đến giá trị rồi mới chuyển sang tên lệnh tiếp theo."""
     rest = _no_redirects(seg)
     plain = [_dequote(t) for t in rest]
-    name, prev = "", ""
-    for w, p in zip(rest, plain[: len(rest) - len(_strip_prefixes(plain))]):
-        skel, value = _gate_skeleton(w), _wrapper_value(name, prev)
-        if (GATE_DYN in skel or GATE_GLOB in skel) and not ENV_ASSIGN_RE.fullmatch(p):
-            if not (value and DQ_WORD_RE.fullmatch(w)):
-                return w
-        base = posixpath.basename(p)
-        name, prev = base if not value and (base in WRAPPERS or base == "env") else name, p
+    i, known = 0, True
+    while i < len(rest):
+        head = plain[i]
+        i += 1
+        if head in SHELL_KEYWORDS or ENV_ASSIGN_RE.fullmatch(head):
+            continue
+        name = posixpath.basename(head)
+        if name not in WRAPPERS and name != "env":
+            break
+        i, known, bad = _wrapper_arguments(name, rest, plain, i, known)
+        if bad:
+            return bad
     return ""
 
 
-DQ_WORD_RE = re.compile(r'"[^"]*"')  # từ là đúng một cặp nháy kép (thân không có `"` — `"$(echo "x")"` không tính)
+WRAPPER_FIXED_FLAGS = {
+    "command": frozenset({"-p", "-v", "-V", "-pv", "-pV", "-vp", "-Vp"}),
+    "env": frozenset({"-", "-i", "--ignore-environment", "-0", "--null", "--debug"}),
+    "exec": frozenset({"-c", "-l", "-cl", "-lc"}),
+    "nice": frozenset(),
+    "time": frozenset({"-p", "--portability", "-a", "--append", "-v", "--verbose"}),
+    "timeout": frozenset({"--foreground", "--preserve-status", "-v", "--verbose"}),
+    "xargs": frozenset(
+        {"-0", "--null", "-r", "--no-run-if-empty", "-x", "--exit", "-p", "--interactive", "-t", "--verbose"}
+    ),
+}
+DQ_SCALAR_RE = re.compile(r'"(?:[^"$\x60\\]|\$(?:[A-Za-z_][A-Za-z0-9_]*|\{[A-Za-z_][A-Za-z0-9_]*\}|[0-9?#$!*]))*"')
+DQ_ARITH_RE = re.compile(r'"\$\(\([0-9A-Za-z_ \t()+*/%-]+\)\)"')
+DQ_COMMAND_RE = re.compile(r'"\$\((?!\()[0-9A-Za-z_./ \t<>|&-]+\)"')
+
+
+def _quoted_scalar(word: str) -> bool:
+    """Phần nháy kép được phép làm đúng một giá trị cờ."""
+    return bool(
+        DQ_SCALAR_RE.fullmatch(word)
+        or DQ_ARITH_RE.fullmatch(word)
+        and _raw_group_end(word, 3, "(") == len(word) - 1
+        or DQ_COMMAND_RE.fullmatch(word)
+    )
+
+
+def _wrapper_dynamic(word: str) -> bool:
+    skeleton = _gate_skeleton(word)
+    return GATE_DYN in skeleton or GATE_GLOB in skeleton
+
+
+def _wrapper_arguments(name: str, raw: List[str], plain: List[str], start: int, known: bool) -> Tuple[int, bool, str]:
+    """Đọc cờ của riêng một trình bọc; khi gặp cờ lạ, chưa rõ vai trò của các giá trị động theo sau."""
+    i = start
+    while i < len(plain) and plain[i].startswith("-") and (plain[i] != "-" or name == "env"):
+        opt = plain[i]
+        if _wrapper_dynamic(raw[i]):
+            return i, known, raw[i]
+        i += 1
+        if opt == "--":
+            break
+        if _wrapper_value(name, opt):
+            if i < len(plain) and _wrapper_dynamic(raw[i]) and not (known and _quoted_scalar(raw[i])):
+                return i, known, raw[i]
+            i += 1
+        else:
+            known = known and opt in WRAPPER_FIXED_FLAGS.get(name, ())
+    if name == "env":
+        while i < len(plain) and ENV_ASSIGN_RE.fullmatch(plain[i]):
+            if not re.match(r"[A-Za-z_][A-Za-z0-9_]*\+?=", raw[i]):
+                return i, known, raw[i]
+            i += 1
+    if i < len(plain) and (name == "timeout" or not known) and _wrapper_dynamic(raw[i]):
+        return i, known, raw[i]
+    return i + (name == "timeout"), known, ""
 
 
 def _wrapper_value(name: str, prev: str) -> bool:
@@ -7835,8 +7900,27 @@ def _vague(tok: str) -> bool:
 XT_MODULE_RE = re.compile(r"-[A-Za-z]*m((?:[\w.]*\.)?xt)?")
 XT_MODULE_NAME_RE = re.compile(r"(?:[\w.]*\.)?xt")
 STDIN_FEEDERS = ("xargs", "parallel")  # thêm đối số từ stdin vào lệnh
-# fd trước chuyển hướng: `2>`, `{fd}>`, `{a[1]}>` (bash 5.3 nhận phần tử mảng — AUD-SEC-700)
-FD_NAME_RE = re.compile(r"\d+|\{\w+(?:\[[^\]\s]*\])?\}")
+# Chỉ bóc fd có tên nguyên văn và chỉ số mảng thập phân cố định. Các dạng còn lại do bộ đọc thô xét.
+FD_NAME_RE = re.compile(r"\d+|\{[A-Za-z_][A-Za-z0-9_]*(?:\[[0-9]+\])?\}")
+FD_PREFIX_WHY = (
+    "không xác nhận được fd có tên (`{}`) trước chuyển hướng — viết lại: dùng tên biến nguyên văn"
+    " viết liền với toán tử chuyển hướng, hoặc đặt đối số chữ sau chuyển hướng"
+)
+
+
+def _uncertain_named_fd(adjacent: str, previous: str, operator: str) -> str:
+    """Từ trông như fd mà cách đọc đã bỏ nháy/khoảng trắng có thể hiểu khác bộ đọc thô."""
+    if operator.startswith((">(", "<(")) or operator[0] == "&" and not operator.startswith("&>"):
+        return ""
+    word = adjacent or previous
+    if "{" not in word:
+        return ""
+    dequoted = _dequote(word)
+    if not (dequoted.startswith("{") and dequoted.endswith("}") and dequoted[1:-1]):
+        return ""
+    return "" if operator[0] in "<>" and adjacent and FD_NAME_RE.fullmatch(adjacent) else word
+
+
 # Lệnh chỉ đọc/so/chép file, không chạy script — `cat scripts/xt.py "$F"` không phải gọi `xt.py`
 STAGE_READERS = frozenset(
     {"cat", "grep", "rg", "git", "ruff", "black", "mypy", "shellcheck", "wc", "head", "tail", "less", "more", "bat"}
