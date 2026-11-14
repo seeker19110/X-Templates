@@ -600,11 +600,80 @@ class DoctorStateAndEnvTest(DoctorCase):
         self.assertIn(("git", "warn"), codes)
 
     def test_runtime_tools_and_python(self):
-        with unittest.mock.patch.object(xt.shutil, "which", return_value=None):
+        with (
+            unittest.mock.patch.object(sys, "version_info", (3, 15, 2)),
+            unittest.mock.patch.object(xt.shutil, "which", return_value=None),
+        ):
             self.assertEqual([f.code for f in xt._doctor_runtime()], ["runtime", "runtime"])
             self.assertEqual(xt._doctor_git(self.base), [])
-        with unittest.mock.patch.object(sys, "version_info", (3, 10, 0)):
-            self.assertIn("< 3.11", xt._doctor_runtime()[0].msg)
+        with (
+            unittest.mock.patch.object(sys, "version_info", (3, 14, 10)),
+            unittest.mock.patch.object(xt.shutil, "which", return_value="/usr/bin/tool"),
+        ):
+            (finding,) = xt._doctor_runtime()
+            self.assertIn("CPython 3.15.x", finding.msg)
+
+    def test_unsupported_python_reports_runtime_without_fixing(self):
+        for implementation, version in (("cpython", (3, 14, 10)), ("cpython", (3, 16, 0)), ("pypy", (3, 15, 2))):
+            with (
+                self.subTest(implementation=implementation, version=version),
+                unittest.mock.patch.object(sys, "version_info", version),
+                unittest.mock.patch.object(sys, "version", ".".join(map(str, version))),
+                unittest.mock.patch.object(sys.implementation, "name", implementation),
+                unittest.mock.patch.object(xt, "doctor_fix", return_value=([], [])) as fix,
+            ):
+                rc, out, err = self.run_doctor("--json", "--fix", "--offline")
+                self.assertEqual(rc, 1, err)
+                self.assertEqual(err, "")
+                report = json.loads(out)
+                self.assertFalse(report["ok"])
+                self.assertEqual(report["fixed"], [])
+                self.assertEqual(len(report["findings"]), 1)
+                (finding,) = report["findings"]
+                self.assertEqual((finding["code"], finding["level"], finding["fixable"]), ("runtime", "error", False))
+                self.assertIn("CPython 3.15.x", finding["msg"])
+                self.assertIn(".".join(map(str, version)), finding["msg"])
+                fix.assert_not_called()
+
+    def test_cli_requires_cpython_315_minor(self):
+        for implementation, version, expected in (
+            ("cpython", (3, 14, 10), 2),
+            ("cpython", (3, 16, 0), 2),
+            ("pypy", (3, 15, 2), 2),
+            ("cpython", (3, 15, 2), 0),
+            ("cpython", (3, 15, 4), 0),
+        ):
+            with (
+                self.subTest(implementation=implementation, version=version),
+                unittest.mock.patch.object(sys, "version_info", version),
+                unittest.mock.patch.object(sys.implementation, "name", implementation),
+                redirect_stdout(io.StringIO()) as out,
+                redirect_stderr(io.StringIO()) as err,
+            ):
+                self.assertEqual(xt.main(["--framework", str(self.fw), "list", "profiles"]), expected)
+                if expected:
+                    self.assertEqual(out.getvalue(), "")
+                    self.assertIn("CPython 3.15.x", err.getvalue())
+                else:
+                    self.assertIn("api-service", out.getvalue())
+
+    def test_guard_check_blocks_on_unsupported_runtime(self):
+        with (
+            unittest.mock.patch.object(sys, "version_info", (3, 14, 10)),
+            redirect_stderr(io.StringIO()) as err,
+        ):
+            self.assertEqual(xt.main(["guard-check", "--", "echo OK"]), 126)
+        self.assertIn("CPython 3.15.x", err.getvalue())
+
+    def test_cli_help_remains_available_on_unsupported_python(self):
+        with (
+            unittest.mock.patch.object(sys, "version_info", (3, 14, 10)),
+            redirect_stdout(io.StringIO()) as out,
+            self.assertRaises(SystemExit) as exit_status,
+        ):
+            xt.main(["--help"])
+        self.assertEqual(exit_status.exception.code, 0)
+        self.assertIn("CPython 3.15.x", out.getvalue())
 
     def test_scripts_and_version(self):
         (self.base / ".xtemplates" / "scripts" / "dev-task.sh").unlink()

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""install.py — cài khung X-Templates vào một dự án đích (mọi hệ điều hành, chỉ cần Python >= 3.11).
+"""install.py — cài khung X-Templates vào một dự án đích (mọi hệ điều hành, cần CPython 3.15.x).
 
 Kết quả trong dự án đích:
   .xtemplates/framework/        bản sao thư viện yêu cầu (chỉ đọc; cập nhật bằng cách chạy lại install)
@@ -2571,7 +2571,7 @@ def new_flags_error(args: argparse.Namespace) -> str | None:
 
 
 def main(argv: list[str] | None = None) -> int:
-    p = argparse.ArgumentParser(description="Cài khung X-Templates vào dự án đích")
+    p = argparse.ArgumentParser(description="Cài khung X-Templates vào dự án đích (cần CPython 3.15.x)")
     p.add_argument("target", help="thư mục gốc dự án đích")
     p.add_argument("--new", action="store_true", help="tạo dự án git mới từ thư mục trống, không cần mạng")
     p.add_argument("--idea", help="ý tưởng gốc (dữ liệu, 1…4000 ký tự), bắt buộc cùng --new")
@@ -2616,6 +2616,9 @@ def main(argv: list[str] | None = None) -> int:
         help="gói sản phẩm framework/templates/packs/<id>: starter chỉ vào repo sạch, managed nâng theo hash (ADR-0068)",
     )
     a = p.parse_args(argv)
+    if sys.implementation.name != "cpython" or sys.version_info[:2] != (3, 15):
+        log(f"✗ cần CPython 3.15.x — hiện là {sys.implementation.name} {sys.version.split()[0]}")
+        return 2
     new_error = new_flags_error(a)
     if new_error:
         log(f"✗ {new_error}")

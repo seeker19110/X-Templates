@@ -28,6 +28,7 @@ CI = TEMPLATES / "ci.yml"
 SCAN = TEMPLATES / "secret-scan.yml"
 PR_TITLE = TEMPLATES / "pr-title.yml"
 DEV_TASK = "bash .xtemplates/scripts/dev-task.sh"  # đường dẫn ở dự án đích (install.py chép scripts vào .xtemplates/)
+FRAMEWORK_CLI = '"$XT_FRAMEWORK_PYTHON" .xtemplates/scripts/xt.py'
 SETUP = f"run: {DEV_TASK} setup\n"
 # Dòng YAML khối đơn giản mà mẫu dùng: comment, `khoá:`/`khoá: giá trị`, `- khoá: giá trị`, `- giá trị`.
 YAML_LINE_RE = re.compile(r"^(?: {2})*(?:#.*|(?:- )?[A-Za-z0-9_.-]+:(?: .*)?|- \S.*)$")
@@ -106,17 +107,17 @@ class CiTemplateTest(unittest.TestCase):
                 self.assertEqual(r.returncode, rc, r.stdout + r.stderr)
 
     def test_gate_job_runs_gate_and_framework_checks_in_order(self):
-        """`gate`: require (đỏ sớm, D-096) → setup → `dev-task.sh gate-par` (song song trong job, D-128) → sàn M/L `floor --run`
-        → doctor → ci-check (tiêu đề PR đã chuyển sang `pr-title.yml`, T-2401)."""
+        """`gate`: Python của khung → require (D-096) → setup của dự án → `gate-par` (D-128) → sàn M/L → doctor → ci-check."""
         body = self.jobs["gate"]
         order = [
             body.index("actions/checkout@"),
+            body.index("actions/setup-python@"),
             step_index(body, f"{DEV_TASK} require lint test"),
             body.index(SETUP),
             step_index(body, f"{DEV_TASK} gate-par"),
-            step_index(body, "python3 .xtemplates/scripts/xt.py floor --run --skip e2e"),  # AUD-XFEAT-020
-            step_index(body, "python3 .xtemplates/scripts/xt.py doctor"),
-            step_index(body, "python3 .xtemplates/scripts/xt.py ci-check"),
+            step_index(body, f"'{FRAMEWORK_CLI} floor --run --skip e2e'"),  # AUD-XFEAT-020
+            step_index(body, f"'{FRAMEWORK_CLI} doctor'"),
+            step_index(body, f"'{FRAMEWORK_CLI} ci-check'"),
         ]
         self.assertEqual(order, sorted(order))
         self.assertIn("fetch-depth: 0", body)  # doctor: SHA bàn giao là tổ tiên HEAD
@@ -126,7 +127,16 @@ class CiTemplateTest(unittest.TestCase):
         for gone in ("test-shard", "test-combine", "test-mode", "upload-artifact", "download-artifact", "XT_MIN_TESTS"):
             self.assertNotIn(gone, self.text)
         code = "\n".join(ln for ln in self.text.splitlines() if not ln.lstrip().startswith("#"))
-        self.assertNotRegex(code, r"\b(npm|pip|pytest|go test|cargo|ruff|setup-(node|python|go))\b")  # không theo stack
+        self.assertNotRegex(code, r"\b(npm|pip|pytest|go test|cargo|ruff|setup-(node|go))\b")
+
+    def test_framework_runtime_keeps_application_path(self):
+        for job in ("gate", "e2e"):
+            with self.subTest(job=job):
+                body = self.jobs[job]
+                self.assertIn("update-environment: false", body)
+                self.assertIn("FRAMEWORK_PYTHON: ${{ steps.framework-python.outputs.python-path }}", body)
+                self.assertLess(body.index("XT_FRAMEWORK_PYTHON=%s"), body.index(SETUP))
+                self.assertNotIn("GITHUB_PATH", body)
 
     def test_pr_title_step(self):
         self.assertNotIn("pull_request.title", self.text)  # không còn ở CI nặng (T-2401)
@@ -169,6 +179,7 @@ class CiTemplateTest(unittest.TestCase):
         self.assertIn("thêm shard", e2e.lower())
         self.assertIn(f'mode="$({DEV_TASK} e2e-mode)"\n', e2e)  # gán riêng: lỗi dev-task → bước đỏ (set -e)
         self.assertIn("set -euo pipefail", e2e)
+        self.assertLess(e2e.index("actions/setup-python@"), e2e.index("e2e-mode"))
         self.assertLess(e2e.index("e2e-mode"), e2e.index(SETUP))
         self.assertIn(f'run: {DEV_TASK} e2e "$SHARD" "$TOTAL"\n', e2e)
         self.assertIn("fail-fast: false", e2e)
