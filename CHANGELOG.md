@@ -183,6 +183,8 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
 
 ### Fixed
 
+- `xt.py doctor` nạp guard của dự án một lần để kiểm cả bộ lệnh mẫu (AUD-PERF-028, phần đầu T-3726).
+
 - Guard (T-3763; lý do chạm hàng rào: đóng đường bỏ sót argv hoặc cho qua khi parser không đọc được): P4: chặn thay tiến trình làm đối số và thay lệnh trần dính chữ hoặc còn argv; số học chỉ miễn khi cặp ngoặc có xét nháy đóng liền. Thân shell literal được kiểm trước chuẩn hoá `$(pwd)` (D-459). AUD-SEC-609 còn mở cho P0, tham số và nháy lồng.
   D-475: ba đối chứng `bash x.sh <(cat f)`, `bash <(echo 'echo hi')`, `source <(printf 'x=1\n')` trả BUDGET ở default/strict;
   các đối chứng tệp `bash x.sh input.txt`, `bash literal-script.sh`, `source ./env.sh` được cho phép.
