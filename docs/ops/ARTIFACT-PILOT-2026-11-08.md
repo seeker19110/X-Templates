@@ -2,9 +2,16 @@
 
 Báo cáo 2026-11-08 ghi nhận **pilot đạt** trên xboss `ab7389aa9901d329cd7f1081311e498c3c4ba5ed`: build/staging ở hai job, tải theo ID, kiểm SHA-256 trước giải nén, kiểm cây cài và Next đang phục vụ. Hai receipt `verified` được báo cáo khớp metadata run.
 
-**Bằng chứng rà 2026-11-13:** receipt CI chưa có bản sao trong repo. Metadata hai artifact phục hồi báo hạn
-2026-12-08; tải ZIP bị `Forbidden`, nên nội dung receipt và số đo CI dưới đây **(chưa tái xác minh)**. Trước nghiệm
-thu/phát hành phải tải, đối chiếu và lưu bền; run xanh/metadata chưa chứng minh các trường receipt.
+**Lần rà 2026-11-13:** metadata hai artifact phục hồi báo hạn 2026-12-08. Lần tải ZIP trả `Forbidden`, nên lần rà
+này chỉ xác minh metadata.
+
+**Đối chiếu độc lập 2026-11-14:** đã tải và đọc sáu artifact CI công khai. Bốn receipt staging trong hai bảng ghi
+4/4 probe HTTP đạt. Hai receipt phục hồi ghi đúng từng số đo rollback, restore và RPO giả lập trong bảng CI staging
+(đối chiếu theo mili giây). Việc lưu bền receipt trước nghiệm thu/phát hành và xác minh artifact trên VPS còn mở.
+[Staging push ban đầu](https://github.com/seeker19110/xboss/actions/runs/42436743483/artifacts/13599129044) ·
+[Staging PR ban đầu](https://github.com/seeker19110/xboss/actions/runs/42436772427/artifacts/13600320655) ·
+[Staging push bản cuối](https://github.com/seeker19110/xboss/actions/runs/42438776670/artifacts/13600920872) ·
+[Staging PR bản cuối](https://github.com/seeker19110/xboss/actions/runs/42438780299/artifacts/13600474134)
 
 | Run | Trigger | Giờ Việt Nam | SHA-256 archive đã đối chiếu | Build ID quan sát | Probe HTTP đạt |
 | --- | ------- | ------------ | --------------------------- | ----------------- | -------------- |
