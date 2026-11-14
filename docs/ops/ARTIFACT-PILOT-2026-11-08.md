@@ -5,9 +5,9 @@ Báo cáo 2026-11-08 ghi nhận **pilot đạt** trên xboss `ab7389aa9901d329cd
 **Lần rà 2026-11-13:** metadata hai artifact phục hồi báo hạn 2026-12-08. Lần tải ZIP trả `Forbidden`, nên lần rà
 này chỉ xác minh metadata.
 
-**Đối chiếu độc lập 2026-11-14:** đã tải và đọc sáu artifact CI công khai. Bốn receipt staging trong hai bảng ghi
-4/4 probe HTTP đạt. Hai receipt phục hồi ghi đúng từng số đo rollback, restore và RPO giả lập trong bảng CI staging
-(đối chiếu theo mili giây). Việc lưu bền receipt trước nghiệm thu/phát hành và xác minh artifact trên VPS còn mở.
+**Đối chiếu độc lập 2026-11-14:** tải sáu ZIP qua GitHub REST `actions/artifacts/{id}/zip`. Bốn receipt staging
+khớp run, SHA nguồn, SHA-256 archive/manifest và Build ID với metadata trong ZIP, đều ghi đủ 4 probe đạt. Hai ZIP
+phục hồi chứa kết quả khớp số đo rollback, restore và RPO giả lập trong bảng. Còn lưu receipt bền và kiểm VPS.
 [Staging push ban đầu](https://github.com/seeker19110/xboss/actions/runs/42436743483/artifacts/13599129044) ·
 [Staging PR ban đầu](https://github.com/seeker19110/xboss/actions/runs/42436772427/artifacts/13600320655) ·
 [Staging push bản cuối](https://github.com/seeker19110/xboss/actions/runs/42438776670/artifacts/13600920872) ·
@@ -39,7 +39,7 @@ Commit cuối `7e831ce123bc638217770d4ee1e32692977f1eee` có hai lượt độc 
 | [42438776670](https://github.com/seeker19110/xboss/actions/runs/42438776670) | `push` | 09:32:50 | `65ecc5128abbb6ad142fe4557ad42843dd37f53ad5876070caae6a3f7c348fed` | `6JB6HIM6JxgUMOBew7_M_` | 4/4 |
 | [42438780299](https://github.com/seeker19110/xboss/actions/runs/42438780299) | `pull_request` | 09:32:37 | `ec602839f2d8d12fd5a56b60deaa66db634d9306c6f8445027c96cffd2d2810d` | `MUvSfOFfRNeHAg-YEXwm9` | 4/4 |
 
-Báo cáo không có deployment Preview/Production cho SHA cuối. [CI chung bản cuối](https://github.com/seeker19110/xboss/actions/runs/42438780309)
+Báo cáo ghi GitHub không có deployment Preview/Production cho SHA cuối; chưa kiểm lại mục này. [CI chung bản cuối](https://github.com/seeker19110/xboss/actions/runs/42438780309)
 
 ## Diễn tập sau khi pilot đạt
 
