@@ -183,6 +183,8 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
 
 ### Fixed
 
+- `xt.py doctor` nạp guard của dự án một lần để kiểm cả bộ lệnh mẫu (AUD-PERF-028, phần đầu T-3726).
+
 - T-3726, AUD-PERF-029: `audit plan` đọc blame một lần cho mọi dòng blueprint, giữ nguyên cảnh báo bằng chứng cũ.
 
 - T-3728: skill `autopilot` theo hành động `stage-approve` của `loop next-step` khi dự án bật tự nghiệm thu MVP
