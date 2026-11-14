@@ -716,3 +716,10 @@
 - Chọn: Giữ NO-GO, xử lý từng mục đỏ đã xác minh, ghi delta và chỉ tiến tới ký khi cổng G7 đạt
 - Lý do (tiêu chí chất lượng cuối): Blueprint không có MUST mở nhưng sổ strict còn 16 mục đỏ, 47 mục cam và hai nhóm chưa quét. Cần bằng chứng trên đúng cây ứng viên và xác nhận độc lập các lỗi mới.
 - Đường lùi: Dừng đợt harden và tiếp tục từ sổ audit hiện tại; giữ nguyên cổng phát hành.
+
+### D-491 · 2026-11-14T14:58:25+00:00 · AUD-CI-033 mã hoá liên kết Unicode ở đâu?
+
+- Phương án: (1) Sửa từng liên kết Markdown khi lịch phát hiện lỗi · (2) Mã hoá path và query tại điểm gửi HTTP, giữ liên kết nguyên văn trong báo cáo
+- Chọn: Mã hoá path và query tại điểm gửi HTTP, giữ liên kết nguyên văn trong báo cáo
+- Lý do (tiêu chí chất lượng cuối): Hai kiểm độc lập xác nhận Unicode thô làm dừng cả báo cáo. Điểm gửi dùng chung xử lý cả URL hiện tại và URL mới, không mã hoá lại %xx.
+- Đường lùi: Revert PR kiểm liên kết và mã hoá thủ công URL nguồn trong lúc điều tra.
