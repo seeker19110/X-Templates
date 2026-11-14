@@ -192,6 +192,8 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
 
 - AUD-DATA-013: cổng migration web-api-ts từ chối chỉ mục concurrent trong giao dịch và giữ ngoại lệ 0005.
 
+- T-3726, AUD-PERF-030: lưu kết quả lệnh kiểm Blueprint theo khóa chuẩn, giữ quy tắc phân biệt nháy.
+
 - AUD-DATA-012: cổng migration web-api-ts nhận diện cả CREATE INDEX không ghi tên trên bảng có sẵn.
 
 - `xt.py doctor` nạp guard của dự án một lần để kiểm cả bộ lệnh mẫu (AUD-PERF-028, phần đầu T-3726).
