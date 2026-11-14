@@ -5100,13 +5100,13 @@ class GreenMergePolicyTest(unittest.TestCase):
                 self.assertEqual(decision["verdict"], "merge")
 
     def test_steward_orders_by_pr_number(self):
-        listing = [{"number": 8}, {"number": 7}, {"number": 9}]
+        listing = [{"number": 10}, {"number": 2}, {"number": 9}]
         with (
             unittest.mock.patch.object(xt, "_gh_items", return_value=listing),
             unittest.mock.patch.object(xt, "_committed_xt_keys", return_value={"merge_review": "optional"}),
         ):
             args = xt.argparse.Namespace(pr=None, event=None)
-            self.assertEqual(xt._steward_targets(args, "repos/o/r")[0], ["7", "8", "9"])
+            self.assertEqual(xt._steward_targets(args, "repos/o/r")[0], ["2", "9", "10"])
 
     def test_steward_event_optional_scans_every_pr_in_number_order(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -5114,7 +5114,7 @@ class GreenMergePolicyTest(unittest.TestCase):
             commit_base_xt(base, "merge_autonomy: L3\nmerge_review: optional\n")
             event = base / "event.json"
             event.write_text(json.dumps({"check_suite": {"pull_requests": [{"number": 9}]}}), encoding="utf-8")
-            gh = StewardGh(open_prs=[{"number": 9}, {"number": 7}, {"number": 8}])
+            gh = StewardGh(open_prs=[{"number": 10}, {"number": 9}, {"number": 2}])
 
             def one(n, repo, worktree, apply, gh_repo):
                 return {"pr": n, "head": "", "action": "wait", "why": "CI", "applied": False}
@@ -5124,9 +5124,10 @@ class GreenMergePolicyTest(unittest.TestCase):
                 unittest.mock.patch.object(xt, "_steward_one", side_effect=one),
                 gh.patch(),
             ):
+                os.environ.pop("GITHUB_STEP_SUMMARY", None)
                 rc, out, _ = run_main("pr", "steward", "--event", str(event), "--json")
             self.assertEqual(rc, 0)
-            self.assertEqual([r["pr"] for r in json.loads(out)], ["7", "8", "9"])
+            self.assertEqual([r["pr"] for r in json.loads(out)], ["2", "9", "10"])
 
 
 class MergeRequiredEvidenceTest(unittest.TestCase):
@@ -5141,6 +5142,7 @@ class MergeRequiredEvidenceTest(unittest.TestCase):
     def setUp(self):
         self.base = Path(self.enterContext(tempfile.TemporaryDirectory()))
         self.enterContext(unittest.mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(self.base)}))
+        os.environ.pop("GITHUB_STEP_SUMMARY", None)
         commit_base_xt(self.base, "merge_autonomy: L3\nmerge_review: optional\n")
 
     def test_rules_api_failure_blocks_cli_and_steward(self):
