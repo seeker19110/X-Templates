@@ -4,8 +4,9 @@
 
 ## Đang làm
 - 2026-11-11 **ADR-0075** xưởng đầu-cuối (chủ dự án: song song theo file · thiết lập sau bản dev · mọi quy mô — D-419) + [PLAN-factory-e2e](docs/autopilot/PLAN-factory-e2e.md) (D-420, T-3841…T-3866) + 7 đặc tả `docs/specs/SPEC-factory-*.md` (D-422…D-424). T-3866 xong ([research](research/2026-11-12-dev-self-host-live-sources.md)). T-3841 chốt hợp đồng triển khai ([ADR-0077](docs/adr/0077-deployment-receipts.md)). T-3845 (#536): `install.py --new`, `doctor --offline` (D-452/D-453/D-455/D-460). Kế T-3842, triển khai lệnh và receipt.
-- Đã merge #513–#515 (phụ thuộc, D-479) và #538 (T-3728). `audit check --strict` ngày 2026-11-14 còn 21 🔴, 51 🟠 mở và ba nhóm chưa quét: TEST, DOC, HAR. D-480 sửa Gate T-3729 để kiểm đủ ba nhóm.
+- #513–#515, #538 đã merge. Audit 2026-11-14: xem sổ `docs/ops/AUDIT-STATUS.md`; D-480 sửa Gate T-3729.
 - T-3763: xét lại tham số thay lệnh Bash. [Mẫu 505 lượt](research/evidence/2026-11-13-guard-p4.json) giữ nguyên quyết định; AUD-SEC-609 còn mở.
+- AUD-DOC-273/274: [báo cáo pilot](docs/ops/ARTIFACT-PILOT-2026-11-08.md) đối chiếu receipt staging và cổng Production. Còn receipt bền và kiểm artifact trên VPS.
 - Chờ người: §5 ký GO-NO-GO 3.30.0…3.31.1 và [3.33.0](docs/ops/GO-NO-GO-2026-11-08-v3.33.0.md) (3.32.0 đã ký #476); bật `release_signoff: agent` ở `xt.yaml` là PR chủ repo merge (HARD_GATED, D-402). T-3557 còn `[ ]`.
 - Dự án đích (`main` 2026-11-08, [registry](docs/ops/registry.json)): cả 4 ở 3.32.0; PR nâng 3.33.0 chưa mở. Còn mở: AUD-TEST-061 (CodeQL); fixture host Codex/Gemini.
 - D-457: lưu kho PLAN factory-A/BE đã đóng (ADR-0070). `LOOP-ORCH-020`: chỉ tăng agent khi có số (ADR-0061). 10 nhóm `cong-cu` chờ phân loại ([TARGETS](docs/ops/TARGETS.md)).
@@ -13,7 +14,7 @@
 
 ## Tiếp theo
 1. Phản hồi dự án đích qua `xt.py feedback`; PR nâng do `pr-steward` của từng dự án merge.
-2. **Kế tiếp:** trả nợ 🟠 còn mở (AUD-SEC-554/555/583 guard, AUD-HAR-334/340, AUD-DOC-273/274) và 🟢 → cắt 3.34.0 (#480 đổi việc dự án đích; guard chặn thêm nhiều dạng) → PR nâng ở 4 dự án → `registry.json`/`TARGETS.md`.
+2. **Kế tiếp:** trả nợ 🟠 còn mở (AUD-SEC-554/555/583 guard, AUD-HAR-334/340) và 🟢 → cắt 3.34.0 (#480 đổi việc dự án đích; guard chặn thêm nhiều dạng) → PR nâng ở 4 dự án → `registry.json`/`TARGETS.md`.
 3. PLAN-harden-2026-10-27-loops còn T-3554 (pilot `next-step`) và T-3555 (nay ở PLAN-factory-e2e, trừ event policy `pull_request_target`). 🟢 mở của `perf trial`/`dev-task.sh` rà ở audit kế (sổ: AUD-HAR-294…297, AUD-TEST-082/083, AUD-PERF-020…025).
 4. Còn: máy hoá `LOOP-HARNESS-031` (dấu hook theo phiên), `LOOP-STOP-030` (ConfigChange); task `[perf]` trong `loop` (D-041); URL phiên do máy chủ MCP gắn vào thân PR; ép báo "đã đo/chưa đo" cho task UI (`LOOP-DESIGN-021`); sàn quyền token; `xt.pyz` (ADR-0010); ca đối kháng cho `autonomy-bench`; `project-commands.sh` được `source` hai lần mỗi task.
 5. Giới hạn guard đã biết: ở sổ audit và `harness-files.md`; tên dựng lúc chạy chấp nhận tới 2027-01-21 (AUD-SEC-406, ADR-0067). Đánh giá sandbox Bash opt-in cho khung trước 2027-01-21 (D-331/D-332); cùng đợt T-3709 đo chi phí compile `guard.py` mỗi lệnh Bash (ADR-0072, hạn 2027-01-21). **Xét lại hàng rào 2027-01-21** hoặc khi đổi model (LOOP-DESIGN-014; Claude Code ≥ `claude_min_version`).
@@ -32,7 +33,7 @@
 - Coverage cục bộ < 100 % khi `coverage` cài ở site người dùng: hook chạy `python3 -I` nên tiến trình con không được đo — CI là cổng coverage (đo 2026-11-05).
 
 ## Bàn giao phiên
-- `main` `a492bf2d` (#536). #532 và #537 đã merge. Tiếp #533, #534, #539 theo `xt.py pr next`.
+- `main` `25791928` (#545). Tiếp các PR mở theo `xt.py pr next`.
 - Chờ người (một lần, gom theo lát S8 của nghiên cứu): fixture Codex/Gemini (tài khoản trả phí); T-1834 gỡ `merge-gate` ở ruleset hai dự án đích rồi xoá stub (hạn xét: 2026-12-31); ruleset X-Templates sống còn tắt resolve thread + bật "Allow auto-merge" (RUNBOOK-PR-STEWARD §1), `XT_STEWARD_TOKEN` (một GitHub App); Dependabot security updates. Máy làm được, chưa làm (lộ trình nghiên cứu): Routine tuần `feedback aggregate` có tồn tại nhưng push 403 vì thiếu nguồn repo (S2); bỏ `pull_request_target` khỏi `pr-review.yml` trước 2026-12-02 (S3); T-1508 ghi D-NNN không bật (S1).
 - Autopilot: không chạy (phiên tương tác). `pr stats --days 7` (2026-11-05):
 
