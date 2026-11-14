@@ -17,6 +17,9 @@ import unittest.mock as mock
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT / "tests"))
+from git_fixture import fixture_git, init_git_fixture, isolated_git_environment
+
 os.environ.setdefault("XT_GUARD_PHASE", "harden")
 sys.path.insert(0, str(ROOT / ".claude" / "hooks"))
 import guard
@@ -67,6 +70,53 @@ class StrictSubsetDenyTest(unittest.TestCase):
                 self.assertEqual(d.get("code"), guard.BUDGET)
                 self.assertIn("ADR-0063", str(d["reason"]))
                 self.assertIn(name.split()[0][-3:], str(d["reason"]))
+
+    def test_unquoted_parameter_parentheses(self):  # AUD-SEC-730, T-3769
+        for cmd in (
+            "rm -rf ${x:-(a)} /",
+            "rm -rf ${x:-!(a)} /",
+            "git push ${x:-(a)} origin feat/me --force",
+            "rm -rf x ${z:-$(echo)} /",
+            "rm -rf x ${z:-<(echo)} /",
+            "rm -rf x ${z:->(echo)} /",
+            "rm -rf ${z:-$((1))} /",
+            "rm -rf ${x:-${y:-(a)}} /",
+            "rm -rf ${x:-safe}${y:-(a)} /",
+            'echo "$(git diff ${x:-(a)} HEAD)"',
+            "sh -c 'rm -rf ${x:-(a)} /'",
+        ):
+            with self.subTest(cmd=cmd):
+                d = decide(cmd)
+                self.assertEqual((d["decision"], d.get("code")), ("deny", "BUDGET"))
+                self.assertIn("730", str(d["reason"]))
+                self.assertIn("viết lại", str(d["reason"]))
+
+    def test_parameter_parentheses_deny_policy_matrix(self):
+        self.enterContext(isolated_git_environment())
+        root = Path(self.enterContext(tempfile.TemporaryDirectory())).resolve()
+        (root / "xt.yaml").write_text("delivery_phase: build\n", encoding="utf-8")
+        init_git_fixture(root)
+        fixture_git(root, "add", "xt.yaml")
+        fixture_git(root, "commit", "-qm", "init")
+        fixture_git(root, "update-ref", "refs/remotes/origin/main", "HEAD")
+        self.addCleanup(guard._BUILD_PHASE.clear)
+        for policy in ("", "strict"):
+            for phase in ("", "harden"):
+                with (
+                    self.subTest(policy=policy, phase=phase),
+                    mock.patch.dict(os.environ, {"XT_GUARD_POLICY": policy, "XT_GUARD_PHASE": phase}),
+                ):
+                    guard._BUILD_PHASE.clear()
+                    self.assertEqual(guard.build_phase(str(root)), not policy and not phase)
+                    for cmd in ("rm -rf ${x:-(a)} /", "rm -rf x ${z:-$(echo)} /", "git reset --hard ${x:-(a)}"):
+                        out = guard.bash_decision(cmd, str(root))
+                        final = out if policy else guard.apply_policy(out)
+                        self.assertEqual((final["decision"], final.get("code")), ("deny", "BUDGET"))
+
+    def test_unreadable_parameter_is_blocked(self):
+        self.assertIn("730", guard._parameter_paren_why(guard._CodeView("${x:-(a)")))
+        self.assertEqual(decide("git diff ${x:-(a)")["decision"], "deny")
+        self.assertIn("730", guard._parameter_paren_why(guard._CodeView("${x:-" * 1_000 + "(a)" + "}" * 1_000)))
 
     def test_nested_shell_script_strict(self):
         """Script `bash -c '…'` là chữ bash đọc: tập con áp cả ở lệnh lồng."""
@@ -119,6 +169,25 @@ class StrictSubsetAllowTest(unittest.TestCase):
 
     def test_allowed(self):
         for cmd in self.OK:
+            with self.subTest(cmd=cmd):
+                self.assertEqual(guard._strict_why(cmd), "")
+                self.assertEqual(decide(cmd)["decision"], "")
+
+    def test_parameter_parentheses_controls(self):
+        for cmd in (
+            'git diff "${x:-(a)}" HEAD',
+            'git diff "${z:-$(echo)}" HEAD',
+            'git diff "${z:-<(echo)}" HEAD',
+            'git diff "${x:-${y:-(a)}}" HEAD',
+            "git diff '${x:-(a)}' HEAD",
+            r"git diff ${x:-\(a\)} HEAD",
+            "git diff ${x:-plain} ${y:-safe} HEAD",
+            "cat <<'EOF'\n${x:-(a)} ${z:-$(echo)}\nEOF",
+            "cat <<EOF\n${x:-(a)}\nEOF",
+            "echo '${x:-(a)}'",
+            'echo "${x:-$(true)}"',
+            "python3 -c 'print(\"${x:-(a)}\")'",
+        ):
             with self.subTest(cmd=cmd):
                 self.assertEqual(guard._strict_why(cmd), "")
                 self.assertEqual(decide(cmd)["decision"], "")

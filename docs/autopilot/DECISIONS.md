@@ -572,6 +572,12 @@
 - Chọn: Chặn cả tiền tố/hậu tố, chỉ giữ thay lệnh trần là nguyên từ cuối
 - Lý do (tiêu chí chất lượng cuối): Guard-only probe rm -rf /$(echo) được cho qua, còn Bash stub rm chỉ in argv xác nhận đối số cuối thành /. Đây là cùng lỗi thu hẹp argv nên chọn cách chặt theo D-415; dạng có nháy giữ nguyên. Thay thế giới hạn chỉ hậu tố của D-444; cập nhật control dính tiền tố và test viết lại có nháy. Không đổi ngưỡng D-431.
 - Đường lùi: Hoàn lại phần mở rộng P4 bằng PR riêng nếu số đo rộng hơn vượt ngưỡng, giữ ca khai thác và ghi rõ residual.
+### D-445 · 2026-11-13T11:12:01+00:00 · Ngoặc trong tham số Bash không nháy làm lệch tokenizer, nên chặn ở đâu?
+
+- Phương án: (1) Mở rộng parser để hiểu mọi dạng tham số lồng · (2) Precheck lexical theo ngữ cảnh nháy, ngoài tập con trả BUDGET
+- Chọn: Precheck lexical theo ngữ cảnh nháy, ngoài tập con trả BUDGET
+- Lý do (tiêu chí chất lượng cuối): D-415 ưu tiên chặn cú pháp chưa đọc chắc. Precheck trước tách argv đóng cả thay lệnh/thay tiến trình trong tham số; literal và dạng có nháy giữ nguyên. Một số lý do RULE_DENY thành BUDGET nhưng ma trận chính sách không nới deny; corpus cũ không đổi quyết định. RecursionError ở lối đọc sớm được tách thành lát kế, không khai đã đóng.
+- Đường lùi: Hoàn lại precheck bằng PR riêng khi có parser tương đương được kiểm đối kháng; giữ các ca regression.
 
 ### D-452 · 2026-11-13T11:47:36+00:00 · Khởi tạo dự án mới offline nguyên tử và không chạy hook trước commit đầu thế nào?
 
