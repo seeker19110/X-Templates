@@ -13273,33 +13273,59 @@ _DECISIONS_STEM, _DECISIONS_SUFFIX = os.path.splitext(DECISIONS_LOG)
 # Bản tháng của sổ chính (`decision_logs`, T-3651): `docs/autopilot/DECISIONS-YYYY-MM.md` — mẫu glob không có `*`,
 # cùng nghĩa ở `fnmatch` và pathspec `:(glob)`; chỉ thư mục sổ chính (AUD-HAR-329).
 DECISIONS_MONTH = _DECISIONS_STEM + DECISION_MONTH_GLOB + _DECISIONS_SUFFIX
+DEPLOY_LEDGER = "docs/ops/DEPLOYS.json"
+DEPLOY_ENV_NAME = re.compile(r"[a-z][a-z0-9]{0,15}")
 
 
-def _subject_excluded(path: str) -> bool:
+def _subject_excluded(path: str, *, deploy_enabled: bool = False) -> bool:
     """File ngoài `subject.content` (D-393): `GO-NO-GO*.md` nằm TRỰC TIẾP ở `GO_NO_GO_DIRS`, sổ `DECISIONS_LOG` và bản
-    tháng của nó (`DECISIONS_MONTH`, AUD-HAR-329), `PROGRESS.md` gốc, `.autopilot/` — hẹp hơn `_signoff_excluded` (theo
-    tên ở mọi cấp: `src/DECISIONS.md`, `src/DECISIONS-2026-10.md` là mã)."""
+    tháng của nó (`DECISIONS_MONTH`, AUD-HAR-329), sổ triển khai khi bật `deploy_envs` (ADR-0077), `PROGRESS.md` gốc,
+    `.autopilot/` — hẹp hơn `_signoff_excluded` (theo tên ở mọi cấp: `src/DECISIONS.md`, `src/DECISIONS-2026-10.md` là mã)."""
     folder, _, name = path.rpartition("/")
-    if path.startswith(".autopilot/") or path in ("PROGRESS.md", DECISIONS_LOG):
+    if (
+        path.startswith(".autopilot/")
+        or path in ("PROGRESS.md", DECISIONS_LOG)
+        or (deploy_enabled and path == DEPLOY_LEDGER)
+    ):
         return True
     if fnmatch.fnmatchcase(path, DECISIONS_MONTH):
         return True
     return (folder or ".") in GO_NO_GO_DIRS and fnmatch.fnmatchcase(name, "GO-NO-GO*.md")
 
 
-SUBJECT_EXCLUDE = [  # pathspec cùng tập `_subject_excluded`; `glob`: `*` không qua `/`
+SUBJECT_EXCLUDE = [  # pathspec mặc định của `_subject_excluded`; `glob`: `*` không qua `/`
     *(f":(exclude,glob){'' if d == '.' else d + '/'}GO-NO-GO*.md" for d in GO_NO_GO_DIRS),
     f":(exclude,literal){DECISIONS_LOG}",
     f":(exclude,glob){DECISIONS_MONTH}",
     ":(exclude,literal)PROGRESS.md",
 ]
+# Ký tự glob đơn để Git không loại thư mục cùng tên.
+DEPLOY_LEDGER_EXCLUDE = f":(exclude,glob){DEPLOY_LEDGER[:-1]}[{DEPLOY_LEDGER[-1]}]"
+
+
+def _deploy_env_names(base: Path) -> List[str]:
+    """Danh sách môi trường từ YAML phẳng; dấu null không có nháy nghĩa là chưa bật."""
+    config = base / "xt.yaml"
+    if not config.is_file():
+        return []
+    lines = config.read_text(encoding="utf-8").splitlines()
+    raw = next((m[2] for m in map(YAML_KEY_RE.match, reversed(lines)) if m and m[1] == "deploy_envs"), "")
+    if re.fullmatch(r"(?:null|Null|NULL|~)(?:[ \t]+#.*)?", raw):
+        return []
+    return yaml_scalar(raw).split()
 
 
 def _subject_fingerprint(base: Path, git: Callable[..., str]) -> str:
+    try:
+        envs = _deploy_env_names(base)
+        deploy_enabled = bool(envs) and all(DEPLOY_ENV_NAME.fullmatch(name) for name in envs)
+    except (OSError, ValueError):  # không đọc được cấu hình → vẫn tính sổ như nội dung dự án
+        deploy_enabled = False
     tree = git("ls-tree", "-r", "-z", "HEAD", "--", ".")
     paths = ((e, e.partition("\t")[2]) for e in tree.split("\0") if e)
-    kept = "\0".join(e for e, p in paths if not _subject_excluded(p))
-    return tree_hash(base, kept, git, SUBJECT_EXCLUDE)[0]
+    kept = "\0".join(e for e, p in paths if not _subject_excluded(p, deploy_enabled=deploy_enabled))
+    exclude = [*SUBJECT_EXCLUDE, DEPLOY_LEDGER_EXCLUDE] if deploy_enabled else SUBJECT_EXCLUDE
+    return tree_hash(base, kept, git, exclude)[0]
 
 
 def subject_fingerprint(base: Path) -> Optional[str]:
