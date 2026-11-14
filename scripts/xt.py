@@ -16999,6 +16999,21 @@ def _bench_merge_policy_docs(inp: Dict[str, Any], env: BenchEnv) -> Dict[str, An
     return {"green": True, "matches": matches}  # kiểm tài liệu là mismatch, không phải chặn oan thao tác
 
 
+def _bench_link_request(inp: Dict[str, Any], env: BenchEnv) -> Dict[str, Any]:
+    """Kiểm request do trình kiểm liên kết tạo, qua opener giả không gọi mạng."""
+    links = types.ModuleType("xt_bench_links")
+    _exec_source(SCRIPT_DIR / "check-links.py", links)
+    requests: List[str] = []
+
+    def open_request(req: Any, *, timeout: float) -> Any:
+        requests.append(req.selector)
+        return contextlib.nullcontext(types.SimpleNamespace(status=200))
+
+    opener = types.SimpleNamespace(open=open_request)
+    status = links.http_status(inp["url"], 1.0, opener)
+    return {"green": status == 200, "requests": requests}
+
+
 # Nhóm harness: tái hiện REMEDIATION §2 ngoài PR/rollup/review/guard. `green` = máy coi là đạt/cho qua.
 BENCH_HARNESS: Dict[str, Callable[[Dict[str, Any], BenchEnv], bool]] = {
     "same_command": lambda inp, env: same_command(str(inp["a"]), str(inp["b"])),  # bằng chứng tính cho Gate khác nghĩa
@@ -17016,9 +17031,11 @@ def _bench_harness(inp: Dict[str, Any], env: BenchEnv) -> Dict[str, Any]:
         return _bench_merge_review_config(inp, env)
     if inp.get("kind") == "merge_policy_docs":
         return _bench_merge_policy_docs(inp, env)
+    if inp.get("kind") == "link_request":
+        return _bench_link_request(inp, env)
     fn = BENCH_HARNESS.get(str(inp.get("kind")))
     if fn is None:
-        kinds = (*BENCH_HARNESS, "loop_block", "merge_review_config", "merge_policy_docs")
+        kinds = (*BENCH_HARNESS, "loop_block", "merge_review_config", "merge_policy_docs", "link_request")
         raise BenchInputError(f"kind lạ: {inp.get('kind')!r} (có: {', '.join(kinds)})")
     return {"green": fn(inp, env)}
 
