@@ -37,6 +37,9 @@ class RealReportFixtureTest(unittest.TestCase):
         self.assertNotIn("AKIA", doc)  # --redact
         self.check("gitleaks-8.30.1-leak.sarif", ("sarif", "FAIL", 1, 1))
 
+    def test_codeql_sarif(self):
+        self.check("codeql-2.27.4-clean.sarif", ("sarif", "PASS", 0, 0))
+
     def test_secret_scanner_vs_other_tools(self):
         """Tổng hợp: run gitleaks (tên không phân biệt hoa thường) có level `note` vẫn FAIL; run công cụ khác không
         ghi level giữ luật cũ (warning → không phải error); tên driver không phải chuỗi → luật cũ."""

@@ -39,7 +39,7 @@ Máy chia ba nhóm, không hỏi người: **máy chặn** (không đảo ngư�
 Cổng merge: CI xanh + review khi `pr next` đòi + `CHANGELOG.md` khi đổi mục/ID/công cụ.
 
 ## 7. Sửa khung thế nào (nhà: `framework/00-method/conventions.md`)
-Giữ ID cũ (mục bỏ → `MAY` + "Ngừng dùng"), cập nhật `updated` + `CHANGELOG.md`; module mới đúng `conventions.md` + README chỉ mục; đổi cấu trúc/công cụ → ADR mới (`/adr`, không sửa ADR cũ); đổi buộc dự án đích làm gì → cắt bản sớm (`VERSION` + CHANGELOG, workflow `release-tag.yml`); `scripts/xt.py` có test, chỉ stdlib Python ≥ 3.11; `.claude/` là harness dự án đích copy — fail-open, không hard-code stack, test bằng payload giả; phản hồi: `xt.py feedback`.
+Giữ ID cũ (mục bỏ → `MAY` + "Ngừng dùng"), cập nhật `updated` + `CHANGELOG.md`; module mới đúng `conventions.md` + README chỉ mục; đổi cấu trúc/công cụ → ADR mới (`/adr`, không sửa ADR cũ); đổi buộc dự án đích làm gì → cắt bản sớm (`VERSION` + CHANGELOG, workflow `release-tag.yml`); `scripts/xt.py` có test, chỉ stdlib CPython 3.15.x; `.claude/` là harness dự án đích copy — fail-open, không hard-code stack, test bằng payload giả; phản hồi: `xt.py feedback`.
 
 ## 8. Skill và subagent (nhà: `orchestration-and-subagents.md`)
 Skill `.claude/skills/`: autopilot complete optimize blueprint gate research audit review adr handover; tác vụ debug tdd ui-verify upgrade migrate-db incident. Subagent: `researcher` · `executor`/`executor-deep` (tầng `loop status`, ADR-0029) · `reviewer`/`reviewer-alt` (cao hơn người viết, `LOOP-ORCH-005`; không rõ → `pr reviewed --inconclusive`). Phiên chính điều phối (Fable → Opus → Sonnet, `LOOP-ORCH-019`); không lồng subagent; song song chỉ khi độc lập file.

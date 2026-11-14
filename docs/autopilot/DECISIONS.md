@@ -520,6 +520,19 @@
 - Lý do (tiêu chí chất lượng cuối): (1) an toàn: đo trên 19.026 lệnh Bash thật cả hai phương án chênh 0 lệnh; khi chi phí bằng nhau chọn bên chặt (printf -v ghi biến như read/let; pytest chạy mã từ conftest/-p). ADR-0076 không sửa (đã Accepted): câu 'pytest không qua cổng' bị D này thay — cổng chỉ chặn dạng cờ/lệnh con có mở rộng nên rất hiếm chạm pytest.
 - Đường lùi: Chuyển printf về GATE_PASSIVE hoặc pytest/tox/nox sang GATE_PASSIVE (sửa PASSIVE_PIN và test ghim)
 
+### D-442 · 2026-11-13T10:37:42+00:00 · Khôi phục vòng bị chặn khi đổi PLAN hoặc ngân sách như thế nào?
+
+- Phương án: (1) Từ chối mọi loop init tới khi loop unblock · (2) Giữ nguyên cờ blocked, lý do và thời điểm qua mọi loop init; chỉ loop unblock có lý do mới gỡ chặn
+- Chọn: Giữ nguyên cờ blocked, lý do và thời điểm qua mọi loop init; chỉ loop unblock có lý do mới gỡ chặn
+- Lý do (tiêu chí chất lượng cuối): Từ chối init gây bế tắc khi ngân sách hết hoặc PLAN mất vì unblock cũng từ chối. Mang cờ giữ nguyên hàng rào và bằng chứng gỡ chặn, đồng thời cho sửa PLAN/ngân sách. Hướng dẫn release dùng lối ra thật của vòng.
+- Đường lùi: Hoàn lại bản vá và test trong PR riêng nếu hợp đồng vòng cần đổi.
+
+### D-450 · 2026-11-13T11:35:35+00:00 · Đóng AUD-HAR-378/379 trong corpus khi adapter hiện tại chưa chạy vòng thật?
+
+- Phương án: (1) Chỉ thêm ID hoặc miễn trừ vào scope · (2) Thêm adapter loop_block giới hạn, chạy CLI thật và kiểm trạng thái/hướng dẫn
+- Chọn: Thêm adapter loop_block giới hạn, chạy CLI thật và kiểm trạng thái/hướng dẫn
+- Lý do (tiêu chí chất lượng cuối): Hành vi block/init/unblock là quyết định tự chủ nên phải có bằng chứng corpus. Hai kịch bản carry/expired, mỗi kịch bản có control phục hồi; mutation bỏ cờ phải false_green, sai lối ra phải mismatch. Không gắn nhãn vào ca không liên quan hay nới yêu cầu phủ.
+- Đường lùi: Tách adapter bằng PR riêng khi có nhóm corpus vòng lặp tương đương, giữ các ca và không khai đóng nợ nếu mất coverage.
 ### D-440 · 2026-11-13T10:26:25+00:00 · Lát 4: cờ exec ngoài -a TÊN (AUD-SEC-659) và {fd}> đứng đầu lệnh (AUD-SEC-657/700) — BUDGET như bảng P0 của ADR-0076 hay đọc lại như bash?
 
 - Phương án: (1) BUDGET mọi lệnh có luật mà exec có cờ ngoài -a TÊN hoặc có {fd}> ở đầu (đúng chữ ADR; phải đổi ca đối chứng d432-ctl-432-exec-al (exec -al bash -c true, #433)) · (2) Đọc lại như bash: cụm cờ exec theo getopt (_wrapper_opt_takes_next, như _exec_login) và {tên} coi như số fd trong _strip_prefixes — dạng nguy hiểm ra cùng mã dạng trơn, dạng lành vẫn qua
@@ -576,6 +589,13 @@
 - Lý do (tiêu chí chất lượng cuối): Path.rename ghi đè thư mục rỗng xuất hiện giữa chừng, làm cwd của người khác mất liên kết. Exclusive mkdir portable trong stdlib nhận một đích duy nhất; giữ inode và dữ liệu khi lỗi quan trọng hơn atomic publish. Chỉ ghi sau khi kiểm đầu vào. Từ chối nếu tiến trình khác tạo đích trước mkdir; không chuyển sang nhánh existing trong race. Thay D452 phần staging cho đích thiếu.
 - Đường lùi: Khôi phục staging chỉ khi có primitive no-replace portable và probe giữ inode qua race xanh; giữ regression cạnh tranh.
 
+### D-477 · 2026-11-13T15:59:22+00:00 · Lát T3736/T3737 vượt150dòng khi cần adapter corpus CLI thật: tách hình thức hay giữ một PR nguyên khối?
+
+- Phương án: (1) Một PR cùng lifecyclefix, adapter giới hạn, hồi quy và auditrefs; mỗi phần cần để bằng chứng đúng hành vi · (2) Tách nhiều PR helper/adapter/fix làm mỗi phần dưới150dòng
+- Chọn: Một PR cùng lifecyclefix, adapter giới hạn, hồi quy và auditrefs; mỗi phần cần để bằng chứng đúng hành vi
+- Lý do (tiêu chí chất lượng cuối): Hai bug cùng hợp đồng blocked và recovery. Đóng HAR378379 đòi ca thật carry/expired/control cùng lúc, không gắnIDvào ca khôngliênquan hoặc miễntrừ scope. Gitfixture phải cáchly routing/config để tests khôngđụngrepo ngoài. Mộtlát rollbackđược, độc lậpreviewvàgate-fast xanh; tách chỉ đểđếm dòng làm review phải ghép nhiều phần bằngchứng.
+- Đường lùi: Revert toàn PR hoặc tách adapter ở PR sau khi có nguồn bằngchứng tươngđương, không bỏ coverage hoặc khai đóng nợ khi mất ca.
+
 ### D-479 · 2026-11-14T02:39:45+00:00 · PR #513: nâng gói web-api-ts sau khi Biome kiểm YAML và kiểu Node vượt runtime?
 
 - Phương án: (1) Nâng Kysely, Biome và Vitest; giữ @types/node 24.19.2 và chuẩn hoá khoảng trắng trước chú thích trong mẫu xt.yaml · (2) Giữ cả nhóm ở bản cũ và đợi Dependabot tách các nâng cấp
@@ -603,3 +623,16 @@
 - Chọn: Dời nguyên văn các quyết định cũ đã có trong bản phát hành sang sổ tháng theo D-314
 - Lý do (tiêu chí chất lượng cuối): Các PR đang sửa PLAN hoặc cần nghiệm thu chúng; sổ tháng được máy đọc, giữ nguyên ID và giảm xung đột trên các mục đang dùng
 - Đường lùi: Đưa các mục về đúng thứ tự trong DECISIONS.md và phục hồi mô tả phạm vi sổ tháng
+
+### D-483 · 2026-11-14T04:00:47+00:00 · AUD-TEST-105: xử lý cặp mẫu retry CPU được ghép chéo thế nào?
+
+- Phương án: (1) Dùng cặp nhỏ/lớn từ cùng lần đo lại · (2) Giữ cực trị từ hai lần đo và thêm báo cáo chỉ số riêng
+- Chọn: Dùng cặp nhỏ/lớn từ cùng lần đo lại
+- Lý do (tiêu chí chất lượng cuối): Nếu cả hai lượt đều vượt ngưỡng, phép kiểm phải đỏ; đối chiếu trong cùng lượt giữ tỷ lệ, sàn, độ dư và một lần retry
+- Đường lùi: Revert thay đổi helper và ca đồng hồ giả nếu cần
+### D-485 · 2026-11-14T07:23:00+00:00 · Chọn chính sách runtime cho X-Templates khi chuyển Python 3.15?
+
+- Phương án: (1) Chỉ hỗ trợ dòng Python 3.15, ghim 3.15.2 trong repo và CI · (2) Dùng Python 3.15 mặc định, giữ cổng hỗ trợ 3.11 và 3.14
+- Chọn: Chỉ hỗ trợ dòng Python 3.15, ghim 3.15.2 trong repo và CI
+- Lý do (tiêu chí chất lượng cuối): Người dùng yêu cầu bỏ các dòng cũ. Một dòng Python giữ môi trường phát triển và CI nhất quán. Giữ kiểm thử nhánh main và ngưỡng coverage hiện hành.
+- Đường lùi: Revert PR runtime và trả về bản khung trước khi nâng nếu dự án đích chưa chuyển được.
