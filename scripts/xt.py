@@ -16974,6 +16974,30 @@ def _bench_loop_block(inp: Dict[str, Any], env: BenchEnv) -> Dict[str, Any]:
     }
 
 
+def _bench_merge_review_config(inp: Dict[str, Any], env: BenchEnv) -> Dict[str, Any]:
+    base = env.scratch({"xt.yaml": inp["yaml"]})
+    with _env_patch("CLAUDE_PROJECT_DIR", str(base)), contextlib.chdir(base), contextlib.redirect_stdout(io.StringIO()):
+        ci_ok = main(["ci-check"]) == 0
+    doctor_ok = not any("merge_review" in f.msg for f in _doctor_xt_yaml(base, SCRIPT_DIR.parent / "framework"))
+    return {"green": ci_ok or doctor_ok, "ci_green": ci_ok, "doctor_green": doctor_ok}
+
+
+def _bench_merge_policy_docs(inp: Dict[str, Any], env: BenchEnv) -> Dict[str, Any]:
+    root = SCRIPT_DIR.parent
+    config = (root / "xt.yaml").read_text(encoding="utf-8")
+    method = (root / "framework/11-autonomous-loop/stop-points-and-escalation.md").read_text(encoding="utf-8")
+    checks = {"xt.yaml": config.splitlines()}
+    checks.update(
+        {
+            item: [line for line in method.splitlines() if line.startswith(f"- [ ] `{item}` ")]
+            for item in inp["clauses"]
+            if item != "xt.yaml"
+        }
+    )
+    matches = all(any(phrase in line for line in checks[item]) for item, phrase in inp["clauses"].items())
+    return {"green": True, "matches": matches}  # kiểm tài liệu là mismatch, không phải chặn oan thao tác
+
+
 # Nhóm harness: tái hiện REMEDIATION §2 ngoài PR/rollup/review/guard. `green` = máy coi là đạt/cho qua.
 BENCH_HARNESS: Dict[str, Callable[[Dict[str, Any], BenchEnv], bool]] = {
     "same_command": lambda inp, env: same_command(str(inp["a"]), str(inp["b"])),  # bằng chứng tính cho Gate khác nghĩa
@@ -16987,9 +17011,14 @@ BENCH_HARNESS: Dict[str, Callable[[Dict[str, Any], BenchEnv], bool]] = {
 def _bench_harness(inp: Dict[str, Any], env: BenchEnv) -> Dict[str, Any]:
     if inp.get("kind") == "loop_block":
         return _bench_loop_block(inp, env)
+    if inp.get("kind") == "merge_review_config":
+        return _bench_merge_review_config(inp, env)
+    if inp.get("kind") == "merge_policy_docs":
+        return _bench_merge_policy_docs(inp, env)
     fn = BENCH_HARNESS.get(str(inp.get("kind")))
     if fn is None:
-        raise BenchInputError(f"kind lạ: {inp.get('kind')!r} (có: {', '.join([*BENCH_HARNESS, 'loop_block'])})")
+        kinds = (*BENCH_HARNESS, "loop_block", "merge_review_config", "merge_policy_docs")
+        raise BenchInputError(f"kind lạ: {inp.get('kind')!r} (có: {', '.join(kinds)})")
     return {"green": fn(inp, env)}
 
 
