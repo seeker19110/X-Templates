@@ -1,12 +1,12 @@
 ---
 title: Mẫu GO-NO-GO
 kind: template
-updated: 2026-11-08
+updated: 2026-11-14
 ---
 
 # Mẫu GO-NO-GO.md — báo cáo phát hành
 
-> **Ai viết:** AI/người kiểm chạy ở chế độ **report-only** (không deploy, không sửa); **người có thẩm quyền ký** quyết định cuối. **Giai đoạn:** G7 Verify & Release, trước mỗi phát hành production; cũng dùng cho nghiệm thu bàn giao.
+> **Ai viết:** AI/người kiểm chạy ở chế độ **report-only** (không deploy, không sửa); **người có thẩm quyền** ký quyết định cuối, hoặc agent ký theo §5 khi dự án đã bật. **Giai đoạn:** G7 Verify & Release, trước mỗi phát hành production; cũng dùng cho nghiệm thu bàn giao.
 > **Cổng dùng:** G7 (`xt.py blueprint-status --strict` = 0 MUST mở, 0 BLOCKER FAIL), `PM-HANDOVER-006`. `release-check` (hàng `go_no_go`) nhận file khi dòng tiêu đề `# ` hoặc đuôi tên file (`-v<VERSION>.md`) ghi đúng phiên bản — không đọc phiên bản ở chỗ khác trong file.
 > **Luật "Evidence or FAIL":** mỗi mục ghi PASS / FAIL / N/A kèm bằng chứng cụ thể (file:dòng, giá trị cấu hình, output lệnh, link CI); "trông ổn", "framework lo rồi" = FAIL; N/A phải có lý do một dòng. Quét artefact thật (kể cả lịch sử git), không chỉ working tree. Mỗi bằng chứng gắn **nhãn** (`QA-STRAT-012`): `real-path` (chạy thật trên đường thật) · `faithful-fixture` (fixture/adapter giả trung thực, replay) · `asserted-not-measured` (chưa đo — không được tính PASS cho BLOCKER).
 > **Mức:** `BLOCKER` — FAIL thì NO-GO; `SHOULD` — được GO nếu có ticket + chủ + hạn; `NICE` — ghi nhận. Thứ tự output cố định: đếm → bảng FAIL → kết luận → chữ ký.
@@ -22,7 +22,7 @@ subject: content <64 hex — dòng `release-check` in>
 subject: digest <64 hex — chỉ khi khai `release_artifacts`>
 
 ## 1. Đếm
-> Phần máy: `xt.py release-check --json` (blueprint `--strict --run` · sổ audit `--strict` · kiểm lại cuối · cây git · `attack`/`perf` · cổng production `migration_check`/`acceptance`/`rollback` (ADR-0062) · `go_no_go`: file này nhắc `v<VERSION>` và mục 5 đã ký — chưa ký là BLOCKER chờ người · đề xuất "Khi chạy thật") → dán `verdict` và từng hàng FAIL vào mục 3; NO-GO của máy là NO-GO. Người vẫn ký mục 5. `promotion` (schema 3, ADR-0068): `approved` chỉ khi không FAIL/việc người, mục 5 ký GO (không chữ NO-GO) còn hạn `release_approval_days` và file này có dòng `subject: content <64 hex>` (= `subject.content`: vân tay nội dung trừ đúng `GO-NO-GO*.md` ở gốc/`docs`/`docs/ops`, sổ `docs/autopilot/DECISIONS.md` và bản tháng `DECISIONS-YYYY-MM.md` cùng thư mục, `PROGRESS.md` gốc, `.autopilot/` — file khác, kể cả cùng tên ở thư mục khác, đều tính (D-393); giữ nguyên qua commit ký và squash, đổi khi mã đổi) cùng — khi khai `release_artifacts` — `subject: digest <64 hex>` (= `subject.digest`); so đủ 64 hex, thiếu hay lệch = chờ người xem lại và ký lại (D-389). `release-check` dạng chữ in sẵn các dòng này để chép vào đầu file (được đặt sau `>`/gạch đầu dòng, hex trong backtick; trong khối code hay chú thích HTML không tính — dòng ký GO ở §5 cũng vậy, còn dòng NO-GO đọc cả văn bản thô: ẩn đi vẫn là từ chối, AUD-HAR-323) — chạy trên cây sạch, sau khi commit VERSION/CHANGELOG (cây bẩn: không in dòng).
+> Phần máy: `xt.py release-check --json` (blueprint `--strict --run` · sổ audit `--strict` · kiểm lại cuối · cây git · `attack`/`perf` · cổng production `migration_check`/`acceptance`/`rollback` (ADR-0062) · `go_no_go`: file này nhắc `v<VERSION>` và mục 5 đã ký — chưa ký hiển thị N/A ở hàng BLOCKER chờ chữ ký · đề xuất "Khi chạy thật") → dán `verdict` và từng hàng FAIL vào mục 3; NO-GO của máy là NO-GO. Người ký mục 5 theo mặc định. Agent chỉ ký khi đủ điều kiện ở mục 5. `promotion` (schema 3, ADR-0068): `approved` chỉ khi không FAIL/việc người, mục 5 ký GO (không chữ NO-GO) còn hạn `release_approval_days` và file này có dòng `subject: content <64 hex>` (= `subject.content`: vân tay nội dung trừ đúng `GO-NO-GO*.md` ở gốc/`docs`/`docs/ops`, sổ `docs/autopilot/DECISIONS.md` và bản tháng `DECISIONS-YYYY-MM.md` cùng thư mục, `PROGRESS.md` gốc, `.autopilot/` — file khác, kể cả cùng tên ở thư mục khác, đều tính (D-393); giữ nguyên qua commit ký và squash, đổi khi mã đổi) cùng — khi khai `release_artifacts` — `subject: digest <64 hex>` (= `subject.digest`); so đủ 64 hex, thiếu hay lệch = chờ người xem lại và ký lại (D-389). `release-check` dạng chữ in sẵn các dòng này để chép vào đầu file (được đặt sau `>`/gạch đầu dòng, hex trong backtick; trong khối code hay chú thích HTML không tính — dòng ký GO ở §5 cũng vậy, còn dòng NO-GO đọc cả văn bản thô: ẩn đi vẫn là từ chối, AUD-HAR-323) — chạy trên cây sạch, sau khi commit VERSION/CHANGELOG (cây bẩn: không in dòng).
 | Mức | PASS | FAIL | N/A |
 |---|---|---|---|
 | BLOCKER | | | |
