@@ -3,7 +3,6 @@
 > Giai đoạn hiện tại: G8 Vận hành & tiến hoá (khung 3.33.0, pha `harden` — D-136) · Cập nhật: 2026-11-14
 
 ## Đang làm
-- T-3736/T-3737 (D-442) giữ cờ chặn qua `loop init` và sửa hướng dẫn phục hồi. Gate và hồi quy CLI đã qua trên nhánh #533.
 - 2026-11-11 **ADR-0075** xưởng đầu-cuối (chủ dự án: song song theo file · thiết lập sau bản dev · mọi quy mô — D-419) + [PLAN-factory-e2e](docs/autopilot/PLAN-factory-e2e.md) (D-420, T-3841…T-3866) + 7 đặc tả `docs/specs/SPEC-factory-*.md` (D-422…D-424). T-3866 xong ([research](research/2026-11-12-dev-self-host-live-sources.md)). T-3841 chốt hợp đồng triển khai ([ADR-0077](docs/adr/0077-deployment-receipts.md)). T-3845 (#536): `install.py --new`, `doctor --offline` (D-452/D-453/D-455/D-460). T-3842 giữ fingerprint khi ghi receipt; kế là lệnh triển khai.
 - Đã merge #513–#515 (phụ thuộc, D-479) và #538 (T-3728). `audit check --strict` ngày 2026-11-14 còn 21 🔴, 51 🟠 mở và ba nhóm chưa quét: TEST, DOC, HAR. D-480 sửa Gate T-3729 để kiểm đủ ba nhóm.
 - Chờ người: §5 ký GO-NO-GO 3.30.0…3.31.1 và [3.33.0](docs/ops/GO-NO-GO-2026-11-08-v3.33.0.md) (3.32.0 đã ký #476); bật `release_signoff: agent` ở `xt.yaml` là PR chủ repo merge (HARD_GATED, D-402). T-3557 còn `[ ]`.
