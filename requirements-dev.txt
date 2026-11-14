@@ -1,5 +1,5 @@
 # Công cụ cổng của repo khung (ruff, mypy, coverage, shellcheck-py) — KHOÁ kèm hash, CI cài bằng: pip install --require-hashes -r requirements-dev.txt
-# Sinh lại: printf 'ruff==X\nmypy==Y\ncoverage==Z\nshellcheck-py==W\n' > req.in && uv pip compile --python-version 3.11 --generate-hashes --universal --no-header --exclude-newer <ngày−3>T00:00:00Z req.in -o requirements-dev.txt
+# Sinh lại: printf 'ruff==X\nmypy==Y\ncoverage==Z\nshellcheck-py==W\n' > req.in && uv pip compile --python-version 3.15 --generate-hashes --universal --no-header --exclude-newer <ngày−3>T00:00:00Z req.in -o requirements-dev.txt
 # Dependabot (ecosystem pip) đề xuất nâng; không sửa tay hash.
 # License (xác minh PyPI 2026-10-14): ruff, mypy, mypy-extensions, librt, ast-serialize — MIT; coverage — Apache-2.0; typing-extensions — PSF-2.0;
 # pathspec — MPL-2.0 (copyleft yếu, theo file); shellcheck-py — MIT, gói kèm binary shellcheck GPL-3.0 (2026-10-21). Quyết định: chấp nhận — gói chỉ chạy trên runner CI/máy dev, không sửa,
@@ -184,7 +184,7 @@ coverage==7.17.2 \
     --hash=sha256:f94d465ee00ebe694ca866d66bbe45fa04618b1afcb377de934694f624fa7cf6 \
     --hash=sha256:ffbaadf8612781358b3f949ad68dce26c5a35beaafcc48125fc231dbcce7d362
     # via -r req.in
-librt==0.16.0 ; platform_python_implementation != 'PyPy' \
+librt==0.16.0 \
     --hash=sha256:001bfd59a7d45b17e3e75f2a8c6405280b35e7b84471792778e718c4f368950e \
     --hash=sha256:0058f9d68721094105917254c72ac0569117bb7b13b9769cf45d26d89f9d21cd \
     --hash=sha256:02118f56a9c36ddd07dfd9b919d9ecc117ba20a90987d56aa4c429fa34509188 \

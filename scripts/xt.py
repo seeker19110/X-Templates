@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""xt.py — công cụ dòng lệnh của khung X-Templates (chỉ dùng thư viện chuẩn Python >= 3.11).
+"""xt.py — công cụ dòng lệnh của khung X-Templates (chỉ dùng thư viện chuẩn CPython 3.15.x).
 
 Lệnh:
   validate                      Kiểm quy ước toàn khung (frontmatter, ID, liên kết, hồ sơ/gói ngành).
@@ -1154,18 +1154,28 @@ def run_blueprint_checks(checks: List[Dict[str, Any]], base: Path, timeout: int)
     """Chạy lệnh kiểm của các mục trong thư mục `base` = thư mục chứa blueprint (mỗi lệnh một lần, mục cùng lệnh dùng
     chung kết quả): [{"id","cmd","exit_code","output_tail"}] theo thứ tự mục; `cmd`/`output_tail` đã qua `redact`.
     Lệnh rỗng (ghi chú `Kiểm:` không có lệnh trong một cặp backtick) → exit 2, không chạy."""
-    done: List[Tuple[str, int, str]] = []
+    done: Dict[Tuple[bool, str], Tuple[int, str]] = {}
     out: List[Dict[str, Any]] = []
     for c in checks:
-        hit = next(((code, tail) for cmd, code, tail in done if same_command(cmd, c["cmd"])), None)
-        if not c["cmd"]:
+        cmd = c["cmd"]
+        if not cmd:
             hit = (2, "ghi chú `Kiểm:` phải có đúng một lệnh trong một cặp backtick (nhiều lệnh gộp bằng `&&`)")
-        elif hit is None:
-            code, text = run_gate_shell(c["cmd"], base, timeout)
-            hit = (code, redact_tail(text, 20))
-            done.append((c["cmd"], *hit))
-        out.append({"id": c["id"], "cmd": redact(c["cmd"]), "exit_code": hit[0], "output_tail": hit[1]})
+        else:
+            key = _blueprint_command_key(cmd)
+            if key not in done:
+                code, text = run_gate_shell(cmd, base, timeout)
+                done[key] = (code, redact_tail(text, 20))
+            hit = done[key]
+        out.append({"id": c["id"], "cmd": redact(cmd), "exit_code": hit[0], "output_tail": hit[1]})
     return out
+
+
+def _blueprint_command_key(cmd: str) -> Tuple[bool, str]:
+    """Khử trùng lệnh chuẩn và giữ cùng phép so chuỗi thô cho các lệnh lệch nháy."""
+    try:
+        return True, canonical_command(cmd)
+    except ValueError:
+        return False, cmd.strip()
 
 
 def _stale_ids(text: str) -> List[str]:
@@ -4545,10 +4555,16 @@ def _fix_rename(src: Path, dst: Path, what: str) -> Callable[[], str]:
     return fix
 
 
+def _python_runtime_error() -> Optional[Finding]:
+    if sys.implementation.name == "cpython" and sys.version_info[:2] == (3, 15):
+        return None
+    detected = f"{sys.implementation.name} {sys.version.split()[0]}"
+    return Finding("runtime", "error", f"cần CPython 3.15.x — hiện là {detected}")
+
+
 def _doctor_runtime() -> List[Finding]:
-    out = []
-    if sys.version_info < (3, 11):
-        out.append(Finding("runtime", "error", f"Python {sys.version.split()[0]} < 3.11 — xt.py và hook cần ≥ 3.11"))
+    runtime = _python_runtime_error()
+    out = [runtime] if runtime else []
     out += [
         Finding("runtime", "error", f"thiếu `{t}` trên PATH — hook, cổng commit và commit/push của autopilot cần nó")
         for t in ("git", "bash")
@@ -7331,6 +7347,9 @@ def _carry_previous(prev: Dict[str, Any], state: Dict[str, Any], base: Path) -> 
     tasks = parse_plan(base / state["plan"])
     _carry_interventions(prev, state)
     notes, same = [], (prev.get("plan"), prev.get("blueprint")) == (state["plan"], state["blueprint"])
+    if prev.get("blocked"):  # AUD-HAR-379: đổi đợt/ngân sách không phải quyết định gỡ chặn
+        state.update({k: prev[k] for k in ("blocked", "blocked_reason", "blocked_at") if k in prev})
+        notes.append(f"⚠ Cờ chặn của vòng trước giữ nguyên — {EXIT_UNBLOCK}")
     keep, renamed = _deferred_to_keep(prev, state, base, tasks)
     dropped = sorted(set(_deferred(prev)) - set(keep) - set(renamed)) if not same else []
     if renamed:
@@ -9252,11 +9271,10 @@ def _same_failure_hit(st: Dict[str, Any]) -> bool:
         return False
 
 
-def _loop_block_reason(st: Dict[str, Any]) -> str:
+def _loop_block_reason(st: Dict[str, Any], base: Path) -> str:
     """Vòng đang bị chặn đọc từ state cho cổng phát hành (AUD-HAR-377): mọi nguồn của `_blocked_by_state` (cờ — `loop
     block`, `ci-triage`; lỗi lặp; task đỏ quá trần) hoặc vòng đã kết thúc `blocked` chưa `loop unblock`/`loop init` → lý
-    do theo từng nguồn kèm lối ra; không chặn → "". Không suy từ PLAN/verdict (`loop_verdict` coi vòng dừng, PLAN mất,
-    chưa bật là chặn → đỏ oan)."""
+    do theo từng nguồn kèm lối ra; không chặn → "". Chỉ đọc PLAN để chọn lối ra sau khi đã xác định vòng bị chặn."""
     if not (_blocked_by_state(st) or _final_verdict(st) == "blocked"):
         return ""
     why = [f"cờ chặn — {st.get('blocked_reason') or 'cần người quyết định'}"] if st.get("blocked") else []
@@ -9266,7 +9284,16 @@ def _loop_block_reason(st: Dict[str, Any]) -> str:
     why += [f"{t} đỏ {runs[t]} lần (trần {_max_task_runs(st)})" for t in _task_runs_blocking(st)]
     if not why:  # chỉ còn verdict cuối `blocked` của vòng đã kết thúc
         why.append(f"kết thúc `blocked` — {st['final_verdict'].get('reason') or 'không ghi lý do'}")
-    return f"vòng đang bị chặn ({'; '.join(why)}) — {EXIT_UNBLOCK}"
+    stop = "`loop stop` rồi " if st.get("active") else ""
+    end = f"chưa khởi tạo vòng → {stop}`loop init --plan <mới>`"
+    if st.get("started"):
+        try:
+            end = _halted_loop_exit(st, base)
+        except OSError:  # PLAN mất quyền đọc hoặc bị dời trong lúc kiểm
+            end = _plan_lost_exit(st, bool(st.get("active")) and not _budget_spent(st))
+    if st.get("blocked") and "`loop unblock" not in end:
+        end += f"; cờ chặn giữ nguyên ở đợt mới → {EXIT_UNBLOCK}"
+    return f"vòng đang bị chặn ({'; '.join(why)}) — {end}"
 
 
 def _final_verdict(st: Dict[str, Any]) -> Optional[str]:
@@ -12526,7 +12553,7 @@ def _release_verify(base: Path) -> Dict[str, str]:
         )
     files = [f for f, _ in live]
     for f, st in live:
-        blocked = _loop_block_reason(st)
+        blocked = _loop_block_reason(st, f.parent.parent)
         if blocked:  # AUD-HAR-377: vòng bị chặn chờ người quyết — verify xanh cũ không đủ để GO
             return _release_row("verify", "FAIL", blocked if f == here else f"{f}: {blocked}")
     if files[0] == here:
@@ -14078,7 +14105,7 @@ def _sign_deferred(base: Path) -> List[str]:
         deferred = st.get("deferred", {})
         if not isinstance(deferred, dict):
             raise ReleaseSignError(f"{f} hỏng: `deferred` không phải object — agent không ký")
-        blocked = _loop_block_reason(st)
+        blocked = _loop_block_reason(st, f.parent.parent)
         if blocked:  # AUD-HAR-377: vòng bị chặn = người phải quyết trước, không chỉ còn chữ ký (ADR-0074)
             raise ReleaseSignError(f"{f}: {blocked}; agent không ký")
         waiting.update(deferred)
@@ -16270,9 +16297,10 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     if args.drift:
         return cmd_doctor_drift(args)
     base = project_dir()
-    findings = doctor_findings(base, args.framework, offline=offline)
+    runtime = _python_runtime_error()
+    findings = [runtime] if runtime else doctor_findings(base, args.framework, offline=offline)
     fixed: List[str] = []
-    if args.fix:
+    if args.fix and runtime is None:
         fixed, failed = doctor_fix(findings)
         findings = doctor_findings(base, args.framework, offline=offline) + failed
     errors = sum(f.level == "error" for f in findings)
@@ -16493,6 +16521,90 @@ def _bench_ask_removed(inp: Dict[str, Any], env: BenchEnv) -> bool:
     return str(inp["rule"]) in report["ask_remove"]
 
 
+def _bench_loop_call(*args: str) -> None:
+    """Chỉ các bước `loop` cố định của fixture bên dưới; lỗi CLI là ca không chạy được, không phải đạt."""
+    output = io.StringIO()
+    with contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
+        rc = main(["loop", *args])
+    if rc:
+        raise BenchInputError(f"loop {' '.join(args)} exit {rc}: {output.getvalue()[-500:]}")
+
+
+@contextlib.contextmanager
+def _bench_loop_env(base: Path) -> Iterator[None]:
+    """Repo fixture không nhận định tuyến/config/hook/ký từ người gọi; CLI và git con cùng dùng môi trường này."""
+    for name in (".git-hooks", ".git-template"):
+        (base / name).mkdir()
+    previous = {k: v for k, v in os.environ.items() if k.startswith("GIT_")}
+    try:
+        for key in previous:
+            del os.environ[key]
+        os.environ.update(
+            GIT_CONFIG_NOSYSTEM="1",
+            GIT_CONFIG_SYSTEM=os.devnull,
+            GIT_CONFIG_GLOBAL=os.devnull,
+            GIT_TEMPLATE_DIR=str(base / ".git-template"),
+            GIT_CEILING_DIRECTORIES=str(base.parent),
+            GIT_TERMINAL_PROMPT="0",
+            GIT_CONFIG_COUNT="3",
+        )
+        for i, (key, value) in enumerate(
+            (("core.hooksPath", str(base / ".git-hooks")), ("commit.gpgsign", "false"), ("tag.gpgsign", "false"))
+        ):
+            os.environ[f"GIT_CONFIG_KEY_{i}"], os.environ[f"GIT_CONFIG_VALUE_{i}"] = key, value
+        yield
+    finally:
+        for key in list(os.environ):
+            if key.startswith("GIT_"):
+                del os.environ[key]
+        os.environ.update(previous)
+
+
+def _bench_loop_block(inp: Dict[str, Any], env: BenchEnv) -> Dict[str, Any]:
+    """AUD-HAR-378/379: CLI thật tạo cờ, chuyển đợt và gỡ có dấu; hàng verify thật quyết định và chỉ lối ra."""
+    scenario = inp.get("scenario")
+    if scenario not in ("carry", "expired"):
+        raise BenchInputError("loop_block cần scenario carry hoặc expired")
+    plan = "- [x] `T-001` cổng mẫu — Gate: `true`\n"
+    base = env.scratch(
+        {
+            "docs/autopilot/PLAN.md": plan,
+            "docs/autopilot/PLAN-next.md": plan,
+            "BLUEPRINT.md": "---\nkind: blueprint\nprofile: cli-tool\nscale: S\n---\n"
+            "- [x] `BASE-X-001` **MUST** mẫu — Kiểm: `true`\n",
+            ".gitignore": ".autopilot/\n",
+        }
+    )
+    with _bench_loop_env(base), _env_patch("CLAUDE_PROJECT_DIR", str(base)), contextlib.chdir(base):
+        for args in (
+            ("init", "-q", "-b", "main"),
+            ("add", "--", "."),
+            ("-c", "user.name=fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "fixture"),
+        ):
+            if _git(base, *args).returncode:
+                raise BenchInputError("không dựng được repo fixture loop_block")
+        _bench_loop_call("init", "--hours", "0" if scenario == "expired" else "24")
+        _bench_loop_call("verify", "--all")
+        _bench_loop_call("block", "--reason", "fixture cần người quyết")
+        if scenario == "carry":
+            _bench_loop_call("stop", "--reason", "fixture đổi đợt")
+            _bench_loop_call("init", "--plan", "docs/autopilot/PLAN-next.md")
+            _bench_loop_call("verify", "--all")
+        if inp.get("recover"):
+            if scenario == "expired":
+                _bench_loop_call("init", "--plan", "docs/autopilot/PLAN-next.md")
+            _bench_loop_call("unblock", "--reason", "fixture đã duyệt")
+            _bench_loop_call("verify", "--all")
+        row, st = _release_verify(base), read_state(base) or {}
+    hint = row["evidence"]
+    return {
+        "green": row["result"] == "PASS",
+        "blocked": bool(st.get("blocked")),
+        "recovery": "init" if "`loop init" in hint else "unblock" if "`loop unblock" in hint else "",
+        "unblocked": len(_interventions(st, "unblocked")),
+    }
+
+
 # Nhóm harness: tái hiện REMEDIATION §2 ngoài PR/rollup/review/guard. `green` = máy coi là đạt/cho qua.
 BENCH_HARNESS: Dict[str, Callable[[Dict[str, Any], BenchEnv], bool]] = {
     "same_command": lambda inp, env: same_command(str(inp["a"]), str(inp["b"])),  # bằng chứng tính cho Gate khác nghĩa
@@ -16504,9 +16616,11 @@ BENCH_HARNESS: Dict[str, Callable[[Dict[str, Any], BenchEnv], bool]] = {
 
 
 def _bench_harness(inp: Dict[str, Any], env: BenchEnv) -> Dict[str, Any]:
+    if inp.get("kind") == "loop_block":
+        return _bench_loop_block(inp, env)
     fn = BENCH_HARNESS.get(str(inp.get("kind")))
     if fn is None:
-        raise BenchInputError(f"kind lạ: {inp.get('kind')!r} (có: {', '.join(BENCH_HARNESS)})")
+        raise BenchInputError(f"kind lạ: {inp.get('kind')!r} (có: {', '.join([*BENCH_HARNESS, 'loop_block'])})")
     return {"green": fn(inp, env)}
 
 
@@ -19634,7 +19748,7 @@ def _add_perf_trial(ppsub: "argparse._SubParsersAction[argparse.ArgumentParser]"
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="xt.py",
-        description="Công cụ khung X-Templates",
+        description="Công cụ khung X-Templates (cần CPython 3.15.x)",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="ví dụ:\n"
         "  xt.py list profiles\n"
@@ -20176,6 +20290,12 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: Optional[List[str]] = None) -> int:
     args = build_parser().parse_args(argv)
+    if args.cmd != "doctor" or args.drift:
+        runtime = _python_runtime_error()
+        if runtime:
+            print(f"✗ {runtime.msg}", file=sys.stderr)
+            # dev-task.sh dùng 126 để dừng lệnh khi kiểm guard trả về từ chối.
+            return 126 if args.cmd == "guard-check" else 2
     args.argv = list(sys.argv[1:] if argv is None else argv)  # `perf trial` chạy lại đúng lệnh bằng công cụ gốc (§5)
     args.framework = Path(args.framework).resolve()
     if args.cmd in ("validate", "checks", "list", "compose", "stats") and not args.framework.is_dir():
