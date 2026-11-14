@@ -1,6 +1,6 @@
 # AUDIT-REPORT — X-Templates · 2026-11-04 (delta)
 
-> Mốc quét `23447d817d2b` trên `main`, sau [PR #434](https://github.com/seeker19110/X-Templates/pull/434). Phiên chính rà sổ và chạy cổng. Hai lượt rà độc lập tập trung vào Git guard và workflow GitHub. Kết quả theo ID được theo dõi tại [sổ audit](AUDIT-STATUS.md).
+> Mốc quét `23447d817d2b` trên `main`, sau [PR #434](https://github.com/seeker19110/X-Templates/pull/434). Phiên chính rà sổ và chạy cổng. Hai lượt rà độc lập tập trung vào Git guard và workflow GitHub. Kết quả theo ID được theo dõi tại [sổ audit](../../ops/AUDIT-STATUS.md).
 
 ## 1. Tóm tắt ở mốc quét
 
@@ -70,7 +70,7 @@ Trong repo tạm, `ln .git/hooks/pre-commit hk` tạo hai đường dẫn cùng 
 | Mục | Chủ | Hạn hoặc mốc rà lại |
 |---|---|---|
 | AUD-DOC-244 · lưu tệp gzip khớp digest provenance | Chủ workflow phát hành | Trước lần phát hành cần kiểm chứng provenance từ tệp tải về |
-| AUD-CODE-047 · theo dõi dấu nháy thoát khi đọc scalar YAML | Chủ `dev-task.sh` và `xt.py` | Rà lần tới theo [sổ audit](AUDIT-STATUS.md) |
+| AUD-CODE-047 · theo dõi dấu nháy thoát khi đọc scalar YAML | Chủ `dev-task.sh` và `xt.py` | Rà lần tới theo [sổ audit](../../ops/AUDIT-STATUS.md) |
 
 ## 8. Kiểm lại thay đổi
 

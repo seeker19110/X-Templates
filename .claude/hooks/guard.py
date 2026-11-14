@@ -62,6 +62,7 @@ SHELLS = {"sh", "bash", "zsh", "dash", "ksh", "fish", "mksh", "ash"}  # mksh kh�
 # Ubuntu), `osh`/`ysh` (Oils) — review lượt 2.
 SHELLS |= {"hush", "yash", "posh", "oksh", "loksh", "lksh", "pdksh", "csh", "tcsh", "rbash", "osh", "ysh"}
 INTERPRETERS = SHELLS | {"python", "python3", "node", "perl", "ruby", "php", "deno", "bun", "pwsh"}
+# `GATE_NAMES` (ADR-0076, tên lệnh có luật) gom các bảng tên lệnh này và bảng sau; định nghĩa sau bảng cuối.
 FETCHERS = {"curl", "wget"}
 MAIN_BRANCHES = {"main", "master"}
 # Tuỳ chọn toàn cục của git theo `handle_options` (git.c, đối chiếu v2.43.0 và master ngày 2026-10-28 — D-216). Ăn
@@ -1454,9 +1455,14 @@ STRICT_PLAIN = {
 }
 STRICT_WORD_BREAK = " \t\n;&|()<>"
 STRICT_BRACE_RE = re.compile(r"\{[^{}\s]*(?:,|\.\.)[^{}\s]*\}")
+# ADR-0076 P6 (lát 1): cú pháp toàn lệnh không gắn tên lệnh nên vẫn là bảng cấm như ADR-0063 — cổng dương của các lát sau
+# chỉ xét lệnh có tên có luật. `${ …; }`/`${| …; }` (bash 5.3) chạy lệnh cả trong nháy kép và thân heredoc không nháy.
+FUNSUB_RE = re.compile(r"\$\{[\s|]")
+FUNSUB_WHY = "thay lệnh `${ …; }`/`${| …; }` của bash 5.3 — guard không quét lệnh bên trong (AUD-SEC-665); dùng `$(…)`"
 STRICT_LIVE = (
     (re.compile(r"\$\$\("), "`$$(` (AUD-SEC-243)"),
     (re.compile(r"\$\{?[!#]?IFS\b"), "mở rộng `IFS` (AUD-SEC-232/238/239)"),
+    (FUNSUB_RE, FUNSUB_WHY),
 )
 # Chữ thô (cả trong nháy): chuỗi nháy gán vào biến có thể được đánh giá lại khi số học.
 STRICT_RAW = ((re.compile(r"\w\[[^\]\n]*\$\((?!\()"), "thay lệnh trong chỉ số mảng (AUD-SEC-249)"),)
@@ -1500,6 +1506,84 @@ STRICT_BARE = (
     (re.compile(r"(?:^|[\s=:;&|(<>])~[+-]?\d"), "`~N` ngăn xếp thư mục (AUD-SEC-240)"),  # `~+`/`~-`: guard đã giải
     (re.compile(r"[{,]#|#[,}]"), "brace bung ra `#` (AUD-SEC-233)"),
 )
+# bash không tách từ ở CR (ký tự thường: `a<CR>-h` là MỘT từ), tokenizer và các tầng đọc theo `\s` thì tách (AUD-SEC-645,
+# D-429): CR ở mã ngoài nháy hay trong `${…}` (`-m ${X:-x<CR>-l}`) → chặn; CR trong nháy/thân heredoc là chữ, không tính.
+BARE_CR_WHY = "CR (`\\r`) trần ngoài nháy — bash coi CR là ký tự của từ (AUD-SEC-645); bỏ ký tự CR khỏi dòng lệnh"
+# `\` lẻ cuối lệnh: `shlex` lỗi và `tokenize` rơi về tách thô, không tách `(`/`<` khỏi từ (AUD-SEC-656).
+TAIL_BACKSLASH_WHY = "`\\` lẻ cuối lệnh — guard tách thô khác bash (AUD-SEC-656); bỏ `\\` cuối hoặc đặt trong nháy"
+EXTGLOB_WHY = (
+    "extglob trần `?(`/`*(`/`+(`/`@(`/`!(` ngoài `((…))` — bật `extglob` thì bash bung thành tên tệp (AUD-SEC-666);"
+    " liệt kê tệp nguyên văn, `! (lệnh)` có dấu cách, mẫu glob/grep đặt trong nháy; regex của `[[ $x =~ … ]]` gán vào"
+    " biến trước (`re='^v?([0-9]+)$'; [[ $x =~ $re ]]` — nháy trong `[[` làm regex thành chữ); số học viết `$((…))`"
+)
+
+
+def _bare_cr_why(v: "_CodeView") -> str:
+    return BARE_CR_WHY if "\r" in v.s and any(c == "\r" and k in "cp" for c, k in zip(v.s, v.kind)) else ""
+
+
+def _code_paren_pairs(v: "_CodeView") -> Dict[int, int]:
+    """Cặp ngoặc cấu trúc (mã ngoài nháy, hay `(` của `$(` trong nháy kép/`${…}`): vị trí mở → vị trí đóng. Khác
+    `_paren_pairs` (đếm thô cả trong nháy): ngoặc trong chữ nháy không ghép nhầm thành `((…))`."""
+    s, kind, opens, pairs = v.s, v.kind, [], {}
+    for i, c in enumerate(s):
+        if c == "(" and (kind[i] == "c" or (i and s[i - 1] == "$" and kind[i - 1] == kind[i] != "q")):
+            opens.append(i)
+        elif c == ")" and kind[i] == "c" and opens:
+            pairs[opens.pop()] = i
+    return pairs
+
+
+def _extglob_why(v: "_CodeView") -> str:
+    """AUD-SEC-666: `X(` (X ∈ `?*+@!`) ở mã ngoài nháy, không trong số học `((…))`/`$((…))` (bash: cặp đóng của `((`
+    liền nhau; `((a) )` là subshell). `$(` trong số học mở lại ngữ cảnh lệnh. Một lượt trên cặp ngoặc, tuyến tính."""
+    s, kind = v.s, v.kind
+    pairs, arith = _code_paren_pairs(v), [False]
+    for i, c in enumerate(s):
+        if i in pairs:
+            prev = s[i - 1] if i else ""
+            if prev and prev in "?*+@!" and kind[i - 1] == kind[i] == "c" and not arith[-1]:
+                return EXTGLOB_WHY
+            inner = pairs.get(i + 1, -2)
+            arith.append(inner + 1 == pairs[i] or (arith[-1] and prev != "$"))
+        elif c == ")" and kind[i] == "c" and len(arith) > 1:
+            arith.pop()
+    return ""
+
+
+# review #528: bash không có comment trong số học (`((…))`, `$((…))`, `$[…]`, chỉ số mảng `tên[…]`) — `1 #${ cmd; }` là
+# chữ số học, mở rộng (chạy `cmd`) rồi mới báo lỗi; guard đọc `#…` là comment (kind `q`) nên không thấy gì sau nó.
+ARITH_HASH_WHY = (
+    "`#` sau khoảng trắng trong số học `((…))`/`$((…))`/`$[…]`/chỉ số mảng — bash không coi là comment, guard thì có"
+    " (AUD-SEC-665); bỏ `#` hoặc đưa chú thích ra sau lệnh"
+)
+
+
+def _arith_hash_why(v: "_CodeView") -> str:
+    """`#` mở comment (theo `_CodeView`) mà đang trong ngoặc có thể là số học hay `[` chưa đóng. Ngoặc có thể
+    là số học: `((` liền nhau (không đợi cặp đóng — bash đọc số học trước, lùi về subshell sau: `(( 1 #… ))`↵`) )` vẫn
+    chạy dòng 1), hay nằm trong số học mà không phải `$(` (thay lệnh)."""
+    if not v.comments:
+        return ""
+    s, kind, starts = v.s, v.kind, {a for a, _ in v.comments}
+    parens: List[bool] = [False]
+    brackets: List[
+        int
+    ] = []  # độ sâu ngoặc lúc mở mỗi `[` chưa đóng — `]` trong `$(…)` không đóng `[` ngoài (review #528)
+    for i, c in enumerate(s):
+        if i in starts and (parens[-1] or brackets):
+            return ARITH_HASH_WHY
+        if c == "(" and (kind[i] == "c" or (i and s[i - 1] == "$" and kind[i - 1] == kind[i] != "q")):
+            parens.append(s.startswith("((", i) or (parens[-1] and s[i - 1 : i] != "$"))
+        elif kind[i] != "c":
+            continue
+        elif c == ")" and len(parens) > 1:
+            parens.pop()
+        elif c == "[":  # mọi `[` ở mã: `$[`, `tên[`, cả `[k …]=v` trong `x=( … )` (comment chỉ hợp lệ khi đã đóng)
+            brackets.append(len(parens))
+        elif c == "]" and brackets and brackets[-1] == len(parens):
+            brackets.pop()
+    return ""
 
 
 class _CodeView:
@@ -1622,8 +1706,13 @@ def _strict_why(cmd: str, cwd: Optional[str] = None) -> str:
             return "backtick trong thân heredoc không nháy — dùng `$(…)` (AUD-SEC-181/231/245)"
         if "'" in body and "$(" in body:
             return "thân heredoc không nháy có `'` cùng thay lệnh (AUD-SEC-196)"
+        if FUNSUB_RE.search(body):  # cả `\${ ` (chặt hơn: không đếm `\` thoát)
+            return FUNSUB_WHY
         lines[a:b] = [" " * len(x) for x in lines[a:b]]  # chữ (thay lệnh trong thân: `_heredoc_feed` của luật cũ)
-    v = _CodeView(_fold_heredocs("\n".join(lines), True))
+    joined = "\n".join(lines)
+    if (len(joined) - len(joined.rstrip("\\"))) % 2:
+        return TAIL_BACKSLASH_WHY
+    v = _CodeView(_fold_heredocs(joined, True))
     if v.why:
         return v.why
     live, bare = _code_views(v)
@@ -1631,7 +1720,8 @@ def _strict_why(cmd: str, cwd: Optional[str] = None) -> str:
     why = next((why for rules, text in checks for rx, why in rules if rx.search(text)), "")
     if not why and STRICT_IFS_RE.search(v.s) and STRICT_SHELL_RE.search(v.s):
         why = "`$IFS` trong script của shell lồng (AUD-SEC-239)"
-    return why or _ifs_split_why(cmd, live, bare) or _dyn_text_why(v, live, bare) or _gh_strict_why(v.s, live, cwd)
+    why = why or _bare_cr_why(v) or _extglob_why(v) or _arith_hash_why(v) or _ifs_split_why(cmd, live, bare)
+    return why or _dyn_text_why(v, live, bare) or _gh_strict_why(v.s, live, cwd)
 
 
 def _code_views(v: _CodeView) -> Tuple[str, str]:
@@ -2103,7 +2193,106 @@ def _allowlist_why(cmd: str, root: str = "", cwd: Optional[str] = None) -> str:
     why = _dyn_head_why(cmd) or _reread_why(cmd) or _split_why(cmd) or _here_shell_why(cmd)
     why = why or _array_arg_why(cmd) or _script_run_why(cmd) or _reuse_why(cmd) or _fd_script_why(cmd)
     why = why or _home_dyn_why(cmd) or _run_named_why(cmd) or _implicit_load_why(cmd) or _patch_file_why(cmd)
-    return why or _git_cfg_env_why(cmd, root, cwd)
+    return why or _git_cfg_env_why(cmd, root, cwd) or _ruled_word_why(cmd)
+
+
+# ADR-0076 lát 2 (D-430/D-431): cổng tập con dương — mắt xích cuối của `_allowlist_why` nên chạy sau luật cũ:
+# luật cũ đã chặn trên CÙNG cách đọc giữ mã cũ (`_argv_shell_check`). Quyết định cuối không nhẹ đi, nhưng mã/lý do
+# có thể thành BUDGET khi luật cũ chặn ở cách đọc khác hay chỉ hỏi (review #529 F2, AUD-SEC-749): hai cách đọc
+# `LitWord` (`_stricter_reading` lấy cách đọc mới khi chặt ngang), bản bung brace, câu hỏi nhường của
+# `_go_patch_asks`, câu hỏi BUDGET của luật git/gh (D-438) — nói chung mọi BUDGET của lần quét lồng (`$(…)`,
+# `sh -c`: trả trước luật cũ ở tầng ngoài) và mọi câu hỏi gom sau tập con (`xt_inproc_asks`) có thể đổi mã.
+# Lệnh đơn mà tên (sau gán/từ khoá/trình bọc) thuộc `GATE_NAMES`: mỗi từ quy về khung (`_gate_skeleton`) — P2 phần
+# chữ trước mở rộng/glob đầu tiên là tên cờ (`-d$X`, `--creat$X`, `-f*`; sau `=` là giá trị: `--repo="$R"`), P3 từ
+# mở đầu bằng mở rộng mà liền sau là `-` (`$X--delete`, `"$X"-f`); P1 lệnh con cấp hai của git (`stash drop$X`;
+# cấp một ở `git_rules`). Trình thông dịch (`GATE_PASSIVE`, D-435): P2/P3 chỉ ở vùng cờ.
+RULED_WORD_WHY = (
+    "từ dạng cờ/lệnh con có mở rộng hay glob ở lệnh có luật (`{}`) — bash có thể dựng ra cờ/lệnh con guard không thấy"
+    " (`git push -d$X`, `$X--delete`, `git stash drop$X`, `python3 -$X`; ADR-0076, AUD-SEC-690/710/711/726); viết lại:"
+    ' tên cờ và lệnh con nguyên văn, mở rộng chỉ ở giá trị (`--repo="$R"`, `-m "$M"`, `-j "$(nproc)"`)'
+)
+GATE_DYN, GATE_GLOB = "\0", "\1"
+GATE_FLAG_DYN_RE = re.compile("-[\\w-]*[\0\1]|[\0\1]+-")  # P2 | P3 trên khung của từ
+# nhóm 1: `$?`/`$#`/`$$` luôn ra số; `$!` RỖNG khi chưa có job nền (bash: `-d$!` → `-d`), `$-`/`$_`/`$0`/`$@` rỗng được
+GATE_VAR_RE = re.compile(r"\$(?:([?#$])|[A-Za-z_]\w*|[0-9@*!-])")
+GIT_SUB2 = frozenset({"stash", "remote", "worktree", "reflog"})
+
+
+def _ruled_word_why(cmd: str) -> str:
+    """Lý do (rỗng = qua) của cổng P1 cấp hai/P2/P3 trên mọi lệnh đơn — cùng bộ đọc với `_command_heads`."""
+    raw = _raw_tokens(cmd, True)
+    argvs = None if raw is None else _plain_argvs(raw)
+    for seg in (s for argv in argvs or [] for s in _brace_segments(argv)):
+        rest = _ifs_prefix(seg)[1]
+        bad = _gate_bad_word(rest[len(rest) - len(_strip_prefixes([_dequote(t) for t in rest])) :])
+        if bad:
+            return RULED_WORD_WHY.format(clean_text(bad)[:80])
+    return ""
+
+
+def _gate_bad_word(words: List[str]) -> str:
+    """Từ đầu tiên ngoài ngữ pháp cổng của lệnh đơn `words` (từ lệnh đứng đầu); rỗng = qua."""
+    name = posixpath.basename(_dequote(words[0])) if words else ""
+    interp = name not in GATE_NAMES and bool(INTERP_RE.fullmatch(name))
+    if name not in GATE_NAMES and not interp:
+        return ""
+    skels = [_gate_skeleton(w) for w in words[1:]]
+    bad = _gate_flag_zone(words[1:], skels, interp)
+    return bad or _git_sub2(words[1:], skels) if name == "git" else bad
+
+
+def _gate_skeleton(word: str) -> str:
+    """Khung của từ còn nháy: chữ đã bỏ nháy/thoát; mở rộng (`$x`, `${…}`, `$(…)`) → `GATE_DYN`, glob không nháy →
+    `GATE_GLOB`, `$?`/`$#`/`$$` → `0`. Ngữ cảnh nháy theo `_CodeView.kind`; một lượt, tuyến tính. Backtick: `_CodeView`
+    dừng ở đó (phần sau là chữ) — tập con chuẩn đã chặn backtick (ADR-0063)."""
+    kind, out, i = _CodeView(word).kind, [], 0
+    while i < len(word):
+        piece, i = _gate_piece(word, i, kind[i])
+        out.append(piece)
+    return "".join(out)
+
+
+def _gate_piece(word: str, i: int, kind: str) -> Tuple[str, int]:
+    """(mảnh khung, vị trí kế) tại `word[i]`; `kind` `q` (nháy đơn, `\\x`) là chữ — bỏ dấu nháy đơn và `\\` thoát."""
+    c = word[i]
+    if kind == "q":
+        return ("", i + 1) if c == "'" else (word[i + 1 : i + 2], i + 2) if c == "\\" else (c, i + 1)
+    if word.startswith(("$(", "${"), i):
+        j = _raw_group_end(word, i + 2, word[i + 1])
+        return GATE_DYN, j if j > i else len(word)
+    m = GATE_VAR_RE.match(word, i)
+    if m:
+        return "0" if m[1] else GATE_DYN, m.end()
+    glob = kind == "c" and c in "*?["
+    return GATE_GLOB if glob else "" if c == '"' else c, i + 1
+
+
+def _git_sub2(args: List[str], skels: List[str]) -> str:
+    """P1 cấp hai: từ đầu tiên không phải cờ sau `git [tuỳ chọn toàn cục] stash|remote|worktree|reflog` có mở
+    rộng/glob."""
+    plain = [_dequote(a) for a in args]
+    i = 0
+    while i < len(plain) and plain[i].startswith("-"):
+        i += 1 + (plain[i] in GIT_OPTS_WITH_VALUE)
+    if i >= len(plain) or plain[i] not in GIT_SUB2:
+        return ""
+    k = next((k for k in range(i + 1, len(plain)) if not plain[k].startswith("-")), i)
+    return args[k] if k > i and (GATE_DYN in skels[k] or GATE_GLOB in skels[k]) else ""
+
+
+def _gate_flag_zone(args: List[str], skels: List[str], interp: bool) -> str:
+    """P2/P3 trên vùng cờ: tới `--` nguyên văn mà từ trước không phải cờ nguyên văn (cờ trước có thể ăn `--` làm giá
+    trị: `-m --`); trình thông dịch (D-435, AUD-SEC-726) dừng thêm ở từ nguyên văn không phải cờ mà từ trước không
+    phải cờ (script; giá trị của `-m mod`/`-c '…'` thì sang từ kế) — đối số sau đó là của script."""
+    value = False
+    for a, s in zip(args, skels):
+        if GATE_FLAG_DYN_RE.match(s):
+            return a
+        lit = GATE_DYN not in s and GATE_GLOB not in s
+        if lit and not value and (s == "--" or interp and s[:1] != "-"):
+            return ""
+        value = lit and s[:1] == "-"
+    return ""
 
 
 def _reread_why(cmd: str) -> str:
@@ -3649,7 +3838,7 @@ def _raw_tokens(cmd: str, subst: bool = False) -> Optional[List[str]]:
             j = i
             while j < len(s) and s[j] in PUNCT:  # dãy dấu liền nhau là một token (như shlex `punctuation_chars`)
                 j += 1
-            out += [s[i:j]] if j > i else []
+            out += _unglue([s[i:j]]) if j > i else []  # toán tử dài nhất của bash, như `tokenize` (AUD-SEC-610)
             i = max(j, i + 1)
             continue
         j = _raw_word_part(s, i)
@@ -3657,7 +3846,7 @@ def _raw_tokens(cmd: str, subst: bool = False) -> Optional[List[str]]:
             return None
         word.append(s[i:j])
         i = j
-    return out + (["".join(word)] if word else [])
+    return _fn_forms(out + (["".join(word)] if word else []))
 
 
 def _raw_word_part(s: str, i: int) -> int:
@@ -4546,7 +4735,18 @@ PWD_SUBST_RE = re.compile(
 )  # `$(pwd)`/`` `pwd` `` = `$PWD` (review #187: không nháy bị tách token)
 
 
-def tokenize(cmd: str) -> List[str]:
+SHLEX_UNCLOSED_WHY = (
+    'ngoài tập con guard đọc chắc — bộ tách từ thấy nháy không đóng (`\'` trong `"…"` lồng trong `"$(…)"`) mà bash'
+    " thì không, guard chỉ tách thô (AUD-SEC-656, D-415); đưa chuỗi có nháy lồng vào biến hoặc tệp (ADR-0063)"
+)
+# Lần đọc hiện tại (`_bash_reading`) đã tách thô lệnh chặt: luật cũ vẫn chạy trên token thô (deny giữ mã của luật),
+# còn kết quả không chặn thì đổi thành BUDGET (`_rough_budget`).
+ROUGH_SPLIT: contextvars.ContextVar[bool] = contextvars.ContextVar("ROUGH_SPLIT", default=False)
+
+
+def tokenize(cmd: str, strict: bool = False) -> List[str]:
+    """Tách token như bash (gần đúng). `strict` (lệnh gốc/script lồng nguyên văn, ADR-0063): `shlex` lỗi → đánh dấu
+    `ROUGH_SPLIT` để lần đọc không cho qua; chữ lỏng (`budget.loose`) chỉ tách thô để quét bảo thủ."""
     joined = join_continuations(cmd)
     cmd = expand_ansi_c(_fold_heredocs(joined, False, True))
     strip_comments(cmd, True)  # `)#` chặn TRƯỚC khi `$IFS`/`$(pwd)` bị viết lại (`$(pwd)#` thành `$PWD#`, AUD-SEC-195)
@@ -4560,9 +4760,11 @@ def tokenize(cmd: str) -> List[str]:
     lex.whitespace_split = True
     lex.commenters = ""  # comment đã bỏ ở strip_comments; mặc định của shlex là "#" (mở comment cả giữa từ)
     try:
-        return _with_here_bodies(list(lex), joined)
+        return _with_here_bodies(_fn_forms(_unglue(list(lex))), joined)
     except ValueError:  # nháy không đóng: tách thô để vẫn kiểm được (bảo thủ) — xuống dòng là ranh giới lệnh như bash,
         # không phải khoảng trắng (`"` lẻ trong thân heredoc của `"$(cat <<'EOF'` làm shlex lệch; review #361 lượt 3)
+        if strict:
+            ROUGH_SPLIT.set(True)
         raw = re.split(r"[ \t\r]+|(?=[;&|\n])|(?<=[;&|\n])", cmd)
         return [t if _is_punct(t) else re.sub(r"[\\'\"]", "", t) for t in raw]  # bỏ nháy/`\\`: `\\rm`, `'r'm` (D-276)
 
@@ -4660,6 +4862,51 @@ def _is_punct(t: str) -> bool:
 def _is_redirect(t: str) -> bool:
     """`>`, `>>`, `<`, `&>`, `>|` (ghi đè noclobber) — `|`, `<(`, `>(` không phải chuyển hướng."""
     return _is_punct(t) and ("<" in t or ">" in t) and "(" not in t and ("|" not in t or t == ">|")
+
+
+# Toán tử của bash, dài nhất trước (bộ đọc toán tử của bash cắt dãy dấu theo đúng thứ tự này); ký tự dấu nào cũng khớp
+# một toán tử một ký tự nên `findall` phủ kín token (AUD-SEC-610).
+_OPS_RE = re.compile(r";;&|&>>|<<<|;;|;&|&&|\|\||\|&|&>|>&|<&|>\||>>|<<|<>|<\(|>\(|[;&|<>()\n]")
+
+
+def _unglue(tokens: List[str]) -> List[str]:
+    """Cắt token dấu gộp theo toán tử của bash: `shlex` (và bộ đọc thô `_raw_tokens`) gộp dãy dấu thành MỘT token
+    (`;<`, `&&<`, `)<`, `(<`, `&\\n<`, `);>>`), mà `_is_redirect` thấy `<`/`>` là coi cả token là chuyển hướng hay dấu
+    tách nuốt mất chuyển hướng → `split_commands` không cắt lệnh và lệnh sau nó (`echo x;< /dev/null git push --force`)
+    lọt mọi luật (AUD-SEC-610). Chỉ động tới token dấu có `<`/`>` mà không phải đúng một toán tử (`>`, `>>`, `&>`, `>|`,
+    `<(`, `2>&1` → `>&`…); `LitWord` (có nháy) là chữ, giữ nguyên."""
+    out: List[str] = []
+    for t in tokens:
+        parts = _OPS_RE.findall(t) if _is_punct(t) and ("<" in t or ">" in t) else [t]
+        out += parts if len(parts) > 1 else [t]
+    return out
+
+
+def _fn_forms(tokens: List[str]) -> List[str]:
+    """Đọc từ khoá khai thân như dạng đã được mọi bộ đọc xử lý đúng (AUD-SEC-611): `function TÊN …` thành `TÊN () …` (như
+    `TÊN() …`, nơi `()` tách lệnh nên thân là lệnh thường — gán biến, `HOME=`, `for`, `cd` đầu thân đều được các bộ đọc
+    thấy), `for|select TÊN do …` (không `in`) thành `… TÊN ; do …`. Chỉ ở đầu lệnh (sau dấu tách, `{`, `!`, `if`, `do`…);
+    token có nháy (`'function'`, `\\function`) ở bộ đọc thô còn nháy nên không khớp. `function` một mình/theo dấu tách giữ
+    nguyên; `function TÊN ()` đã có ngoặc thì không thêm."""
+    out: List[str] = []
+    start, i, n = True, 0, len(tokens)
+    while i < n:
+        t = tokens[i]
+        nxt = tokens[i + 1] if i + 1 < n else ""
+        if start and t == "function" and nxt and not _is_punct(nxt):
+            out += [nxt] + ([] if tokens[i + 2 : i + 3] == ["()"] or tokens[i + 2 : i + 4] == ["(", ")"] else ["()"])
+            i += 2
+        elif start and t in ("for", "select") and nxt and not _is_punct(nxt) and tokens[i + 2 : i + 3] == ["do"]:
+            out += [t, nxt, ";"]
+            i += 2
+        else:
+            out.append(t)
+            i += 1
+        last = out[-1]
+        # từ khoá chỉ giữ vị trí đầu lệnh khi chính nó đứng ở đầu lệnh: `do`/`!`/`then` làm ĐỐI SỐ (`rm -rf do function x /`)
+        # không được mở đầu lệnh mới, kẻo `function x` bị viết lại thành `x ()` và cắt argv (review #517 🔴)
+        start = (_is_punct(last) and not _is_redirect(last)) or (start and last in SHELL_KEYWORDS)
+    return out
 
 
 def split_commands(tokens: List[str]) -> List[List[str]]:
@@ -4793,6 +5040,8 @@ def _strip_prefixes(argv: List[str], dirs: Optional[List[str]] = None) -> List[s
             del a[:2]  # toán tử + đích
         elif head.isdigit() and len(a) > 1 and _is_redirect(a[1]):
             a.pop(0)  # số fd (`2>`)
+        elif head == "function" and len(a) > 1:
+            del a[:2]  # `function TÊN`: từ khoá khai báo hàm + tên — thân hàm là lệnh thường (AUD-SEC-611)
         elif head in SHELL_KEYWORDS:
             a.pop(0)
         elif ENV_ASSIGN_RE.fullmatch(head):
@@ -4827,10 +5076,54 @@ def _push_spread_opt(opt: str, nxt: str) -> bool:
     return opt.startswith("-c") and len(opt) > 2 and bool(PUSH_SPREAD_RE.fullmatch(opt[2:]))
 
 
+# Tên lệnh con guard đọc chắc (danh sách trắng): ký tự khác — glob, extglob `@(`/`+(`/`!(`, mở rộng — thì bash có thể
+# bung ra lệnh con khác (AUD-SEC-635).
+GIT_SUB_RE = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_.-]*")
+# Lệnh con là nguyên một mảng/tham số vị trí (`"${a[*]}"`, `"$@"`): lớp `_array_arg_why` (AUD-SEC-399/405) đã giải mảng
+# chữ nguyên văn và chặn BUDGET khi không giải được — không chặn thêm ở đây
+GIT_SUB_ARRAY_RE = re.compile(r"\$\{!?[A-Za-z_]\w*\[[^]]*\]\}|\$(?:[@*1-9]|\{[@*1-9]\})")
+# Chữ số/`{x}` trước chuyển hướng ngay sau tuỳ chọn cần giá trị: giá trị (`git -C 2 >o …`) hay fd (`-C 2>o`) — tokenize
+# không phân biệt, hai cách đọc ra lệnh con khác nhau → lệnh con không đọc chắc (D-415). `$` để thư mục `-C` là không biết.
+GIT_AMBIG_WORD = "$xt-fd-or-value"
+REDIRECT_NO_FD = ("&>", "&>>")  # toán tử không nhận số fd đứng trước: chữ số trước nó là một từ của argv
+
+
+def _git_dashed_builtin(base: str) -> str:
+    """`git-<tên>` chạy thẳng mà git chạy như `git <tên>` (AUD-SEC-633): `<tên>` dựng sẵn (GIT_BUILTINS) hay tên bash
+    còn bung (`/usr/lib/git-core/git-pus?`, `git-@(push)`) → `<tên>`; khác → ''."""
+    sub = base[4:]
+    return sub if base[:4] == "git-" and (sub in GIT_BUILTINS or not GIT_SUB_RE.fullmatch(sub)) else ""
+
+
+def _git_words(a: List[str]) -> List[str]:
+    """Lệnh git `a` (đã bỏ tiền tố) như git thấy: `git-<tên> …` dựng sẵn → `git <tên> …` (đối số sau nó là của lệnh
+    con, AUD-SEC-633); chuyển hướng (kèm số fd/`{fd}` đứng trước) giữa `git` và lệnh con bỏ đi — bash không đưa nó vào
+    argv, kể cả giữa tuỳ chọn và giá trị (`git -C 2>/dev/null x push`, AUD-SEC-632). Lệnh khác giữ nguyên."""
+    base = posixpath.basename(a[0]) if a else ""
+    sub = _git_dashed_builtin(base)
+    if sub or base != "git":
+        return ["git", sub, *a[1:]] if sub else a
+    out, i, value = a[:1], 1, False
+    while i < len(a):
+        t, nxt = a[i], a[i + 1] if i + 1 < len(a) else ""
+        fd = (t.isdigit() or bool(FD_VAR_RE.fullmatch(t))) and _is_redirect(nxt) and nxt not in REDIRECT_NO_FD
+        if fd and value:  # giá trị của tuỳ chọn hay fd: lệnh con là dấu không đọc chắc (GIT_AMBIG_WORD)
+            return [*out, GIT_AMBIG_WORD, GIT_AMBIG_WORD, *a[i:]]
+        if _is_redirect(t) or fd:
+            i += 1 if fd else 2  # số fd · toán tử + đích
+            continue
+        if not value and not t.startswith("-"):
+            break
+        out.append(t)
+        value = not value and t in GIT_OPTS_WITH_VALUE
+        i += 1
+    return out + a[i:]
+
+
 def _strip_git_global_opts(a: List[str]) -> List[str]:
     """`git -C p -c k=v --no-pager sub …` → `git sub …` (tuỳ chọn có giá trị ăn thêm một token); `-c` cấu hình push →
-    `git sub --xt-push-config …`."""
-    rest = a[1:]
+    `git sub --xt-push-config …`. Dạng như git thấy trước (`_git_words`)."""
+    rest = _git_words(a)[1:]
     i = 0
     push_cfg = False
     while i < len(rest) and rest[i].startswith("-"):
@@ -4843,7 +5136,7 @@ def _strip_git_global_opts(a: List[str]) -> List[str]:
 
 def _git_C_dirs(argv: List[str]) -> List[str]:
     """Giá trị các `-C <dir>` (tuỳ chọn toàn cục của git, theo thứ tự) — commit rơi vào repo ở đó, không phải cwd."""
-    a = _strip_prefixes(argv)
+    a = _git_words(_strip_prefixes(argv))
     rest, dirs, i = a[1:], [], 0
     while i < len(rest) and rest[i].startswith("-"):
         if rest[i] == "-C" and i + 1 < len(rest):  # gọi cho mọi lệnh git (`_ledger_asks`): `git -C` có thể đứng cuối
@@ -5274,7 +5567,7 @@ def normalize(argv: List[str]) -> List[str]:
     if not a:
         return a
     a[0] = posixpath.basename(a[0])
-    return _strip_git_global_opts(a) if a[0] == "git" else a
+    return _strip_git_global_opts(a) if a[0] == "git" or _git_dashed_builtin(a[0]) else a
 
 
 SHORT_CLUSTER_RE = re.compile(r"-[A-Za-z0-9]+")  # cụm cờ ngắn: chữ số là cờ (`-4`/`-6` của push, `-2`/`-3` checkout)
@@ -6197,6 +6490,9 @@ ALIAS_ENV_RE = re.compile(
     r"GIT_CONFIG_(?:COUNT|PARAMETERS|GLOBAL|SYSTEM|NOSYSTEM|KEY_\d+|VALUE_\d+)|HOME|XDG_CONFIG_HOME|GIT_DIR"
 )
 ALIAS_TABLE_KEY_RE = re.compile(r"(?:alias|include|includeif)\..*", re.I | re.S)  # khoá mà giá trị đổi bảng alias
+AUTOCORRECT_KEY = "\0help.autocorrect"  # mục `help.autocorrect` trong AliasTable (tên alias không chứa NUL)
+# Giá trị chỉ gợi ý, không chạy lệnh (đo git 2.53); giá trị còn mở rộng (`$X`) không khớp → tính là bật (chặt)
+AUTOCORRECT_OFF_RE = re.compile(r"never|show|false|no|off|[+-]?0+", re.I)
 UNRESOLVED_ALIAS_MARK = "alias git guard không giải được"  # dấu của UNRESOLVED_TARGET
 UNKNOWN_GIT_OPT_MARK = "tuỳ chọn toàn cục git guard không biết"  # dấu của UNRESOLVED_TARGET (D-216)
 SHELL_EXPANDS = set("$`")  # giá trị còn biến/thay lệnh: guard không biết giá trị thật
@@ -6207,7 +6503,7 @@ AliasRead = Tuple[List[str], Dict[str, str]]  # (tuỳ chọn toàn cục cho `g
 def _git_globals(s: List[str]) -> List[Tuple[str, str]]:
     """Tuỳ chọn toàn cục của lệnh git `s` (đã bỏ tiền tố) dạng (tên, giá trị): `-c k=v`, `-ck=v`, `--opt v`, `--opt=v`."""
     out: List[Tuple[str, str]] = []
-    i = 1
+    s, i = _git_words(s), 1
     while i < len(s) and s[i].startswith("-"):
         a = s[i]
         i += 1
@@ -6223,7 +6519,7 @@ def _git_unknown_global(s: List[str]) -> str:
     """Tuỳ chọn toàn cục `--…` đầu tiên của lệnh git `s` (đã bỏ tiền tố) mà guard không biết (ngoài GIT_LONG_FLAGS,
     GIT_OPTS_WITH_VALUE, dạng `=` của GIT_LONG_OPTS_EQ); rỗng nếu không. Không biết nó có ăn token kế không thì cũng
     không biết lệnh con là gì (D-216)."""
-    i = 1
+    s, i = _git_words(s), 1
     while i < len(s) and s[i].startswith("-"):
         a = s[i]
         known = (
@@ -6290,13 +6586,38 @@ def _existing_dir(d: str) -> str:
 
 
 def _alias_entries(raw: bytes) -> AliasTable:
-    """Mục `alias.*` của `git config --list -z` (`khoá<LF>giá trị<NUL>`; không giá trị: `khoá<NUL>`), theo thứ tự."""
+    """Mục `alias.*` của `git config --list -z` (`khoá<LF>giá trị<NUL>`; không giá trị: `khoá<NUL>`), theo thứ tự;
+    `help.autocorrect` thành mục AUTOCORRECT_KEY."""
     out: AliasTable = []
     for item in raw.decode("utf-8", "surrogateescape").split("\0"):
         key, nl, val = item.partition("\n")
-        if key[:6].lower() == "alias.":
-            out.append((key[6:], val if nl else None))
+        name = key[6:] if key[:6].lower() == "alias." else AUTOCORRECT_KEY if key.lower() == "help.autocorrect" else ""
+        out += [(name, val if nl else None)] if name else []
     return out
+
+
+def _autocorrect_on(table: AliasTable) -> bool:
+    """`help.autocorrect` (mục sau thắng) làm git CHẠY lệnh con đoán từ tên gõ sai: số khác 0, `immediate`, `prompt`,
+    giá trị lạ (chặt); chưa đặt, `0`/`never`/`show`/sai → chỉ gợi ý."""
+    vals = [v for k, v in table if k == AUTOCORRECT_KEY]
+    return bool(vals) and not AUTOCORRECT_OFF_RE.fullmatch(vals[-1] or "")
+
+
+@functools.lru_cache(maxsize=1)
+def _git_exec_path() -> str:
+    """`git --exec-path` (thư mục `git-<tên>` đi kèm git); lỗi → '' (chặt: lệnh ngoài ở đó không thấy)."""
+    try:
+        r = subprocess.run(["git", "--exec-path"], capture_output=True, text=True, timeout=5, check=False)
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    return r.stdout.strip() if r.returncode == 0 else ""
+
+
+def _git_external(sub: str) -> bool:
+    """`git-<sub>` chạy được ở exec-path hay PATH — git chạy nó thay vì sửa tên (`git lfs`, `git submodule`)."""
+    dirs = [os.environ.get("GIT_EXEC_PATH") or _git_exec_path(), *os.environ.get("PATH", "").split(os.pathsep)]
+    paths = [os.path.join(d, "git-" + sub) for d in dirs if d and "/" not in sub]
+    return any(os.path.isfile(p) and os.access(p, os.X_OK) for p in paths)
 
 
 def _git_alias_table(
@@ -6375,6 +6696,13 @@ def _alias_def_rule(n: List[str], cwd: Optional[str]) -> Tuple[str, str]:
     return _remote_ref_rule(sub, args, cwd) if sub in REMOTE_REF_NAMES else ("", "")
 
 
+GIT_DYN_NAME_MARK = "lệnh con git không đọc chắc"  # dấu của mã BUDGET
+GIT_DYN_NAME_WHY = (
+    f"{GIT_DYN_NAME_MARK}: tên có mở rộng/glob/extglob (`git pus? …`, `git $(echo reset) …`, `git push$X …`,"
+    " `git @(reset) …`) hay chữ số/`{x}` trước chuyển hướng ngay sau tuỳ chọn cần giá trị (`git -C 2 >o …`: thư mục"
+    " hay fd) — guard không biết git chạy lệnh con nào (AUD-SEC-632/635, D-415); viết lại: tên lệnh con nguyên văn,"
+    " mở rộng chỉ ở đối số, chuyển hướng đặt cuối lệnh"
+)
 GIT_RULES: Dict[str, GitRule] = {
     "reset": _git_reset,
     "clean": _git_clean,
@@ -6407,12 +6735,40 @@ def _git_long(a: str) -> str:
     return full + eq + val if full else a
 
 
-def git_rules(n: List[str], cwd: Optional[str] = None) -> Tuple[str, str]:
+# AUD-SEC-644 (D-415, như ADR-0065 lớp A cho gh): tên cờ dài có mở rộng/glob mà phần chữ trước nó còn là viết tắt có thể
+# của cờ nguy hiểm (`--delet$X`: X chưa gán → `--delet` = `--delete`) — guard không biết bash mở ra cờ nào, không đoán.
+GIT_DYN_FLAG_MARK = "tên cờ dài `git` có mở rộng shell/glob"
+GIT_DYN_FLAG_WHY = (
+    f"{GIT_DYN_FLAG_MARK} có thể thành cờ nguy hiểm viết tắt (`git push --delet$X`: X chưa gán → `--delet` = `--delete`)"
+    " — guard không biết bash mở ra cờ nào (AUD-SEC-644, D-415); viết lại: tên cờ nguyên văn, mở rộng chỉ ở giá trị"
+    ' (`--repo="$R"`, `origin "$B"`)'
+)
+GIT_DYN_FLAG_RE = re.compile(r"[$`*?\[]")
+# lệnh con mà luật đọc cờ dài nguy hiểm (`fetch`/`pull`: luật chỉ xét refspec — `--all`/`--prune` ở đó lành)
+GIT_DYN_SUBS = frozenset({"push", *GIT_RULES, *REMOTE_REF_NAMES}) - {"fetch", "pull"}
+
+
+def _git_dyn_flag(a: str) -> bool:
+    key = a.split("=", 1)[0]
+    m = GIT_DYN_FLAG_RE.search(key)
+    return key.startswith("--") and m is not None and any(d.startswith(key[: m.start()]) for d in GIT_DANGER_LONG)
+
+
+def git_rules(n: List[str], cwd: Optional[str] = None, dyn: bool = True) -> Tuple[str, str]:
     """Luật theo lệnh con của git (bảng GIT_RULES; `push` riêng vì cần thư mục để biết nhánh hiện tại); không có luật → cho qua.
     Ghi ref remote/tạo ref trùng tên remote, đặt alias trỏ lệnh ghi ref (AUD-SEC-119) xét trước, `cwd` để đọc tên remote
-    của repo. Lệnh con là alias được mở ở `_git_alias_sources` (bản viết lại quét như lệnh thật)."""
+    của repo. Lệnh con là alias được mở ở `_git_alias_sources` (bản viết lại quét như lệnh thật). Cờ dài có mở rộng
+    (`_git_dyn_flag`) → hỏi mã BUDGET, trừ khi luật cũ đã chặn — trên argv đầy đủ trước (`--force$X`: luật push đọc
+    tiền tố `--force`), rồi trên phần còn lại khi bỏ token có mở rộng (giữ mã luật đó; `dyn=False`: không xét lại)."""
     if len(n) < 2:
         return "", ""
+    if not n[1].startswith("-") and not GIT_SUB_RE.fullmatch(n[1]) and not GIT_SUB_ARRAY_RE.fullmatch(n[1]):  # D-415
+        return "ask", GIT_DYN_NAME_WHY
+    if dyn and n[1] in GIT_DYN_SUBS and any(map(_git_dyn_flag, n[2:])):
+        verdict = git_rules(n, cwd, False)
+        if verdict[0] != "deny":
+            verdict = git_rules([*n[:2], *(a for a in n[2:] if not _git_dyn_flag(a))], cwd, False)
+        return verdict if verdict[0] == "deny" else ("ask", GIT_DYN_FLAG_WHY)
     args = [_git_long(a) for a in n[2:]]
     forged = _remote_ref_rule(n[1], args, cwd) if n[1] in REMOTE_REF_NAMES else _alias_def_rule(n, cwd)
     if forged[0]:
@@ -14234,19 +14590,24 @@ def _alias_resolve(
     env: Dict[str, str],
     budget: Optional["ScanBudget"],
     defined: Optional[AliasTable] = None,
-) -> Tuple[str, List[str]]:
-    """Mở alias của lệnh git `n` (`g` = argv chưa chuẩn hoá, `env` = biến của lệnh) bằng bảng git dựng ở `gdir` nối
-    thêm alias đặt ở lệnh trước trong cùng chuỗi (`defined`, AUD-SEC-464 — mục sau thắng): như `_git_alias_expand`,
-    lệnh con không phải alias → ("", n); lệnh con là file `find -exec {}` tìm thấy (`find update-ref -exec git {} …`)
-    hay không đọc được cấu hình → ("unresolved", [lý do])."""
+) -> List[Tuple[str, List[str]]]:
+    """Mọi cách mở alias của lệnh git `n` (`g` = argv chưa chuẩn hoá, `env` = biến của lệnh) bằng bảng git dựng ở
+    `gdir` và alias đặt ở lệnh trước trong cùng chuỗi (`defined`, AUD-SEC-464): như `_git_alias_expand`, lệnh con
+    không phải alias → ("", n); lệnh con là file `find -exec {}` tìm thấy (`find update-ref -exec git {} …`), không đọc
+    được cấu hình hay autocorrect bật → [("unresolved", [lý do])]."""
     if FIND_FOUND in n[1]:
-        return "unresolved", ["lệnh con là file `find` tìm thấy"]
+        return [("unresolved", ["lệnh con là file `find` tìm thấy"])]
     read = _alias_read_args(g, env)
     table = _git_alias_table(gdir, *read, budget) if read else None
     if table is None:
-        return "unresolved", ["không đọc được cấu hình alias của lệnh (biến, lỗi, quá hạn)"]
-    kind, out = _git_alias_expand(n, [*table, *(defined or [])])
-    return (kind, out) if kind else ("", n)
+        return [("unresolved", ["không đọc được cấu hình alias của lệnh (biến, lỗi, quá hạn)"])]
+    # Mục đặt trong chuỗi (`defined`) có thể thua bảng git dựng (`-c` thắng tệp, local thắng global, `-f` tệp khác không
+    # được đọc) hay thắng nó: xét cả hai thứ tự, mọi cách đọc khác nhau đều quét (AUD-SEC-634 review)
+    orders = [[*table, *(defined or [])], [*(defined or []), *table]]
+    found = list(dict.fromkeys((k, tuple(o)) for k, o in (_git_alias_expand(n, t) for t in orders)))
+    if any(not k for k, _ in found) and any(map(_autocorrect_on, orders)) and not _git_external(n[1]):
+        return [("unresolved", [f"help.autocorrect bật: git chạy lệnh con đoán từ `{n[1]}`"])]
+    return [(k, list(o)) if k else ("", n) for k, o in found]
 
 
 def _git_alias_sources(
@@ -14269,10 +14630,15 @@ def _git_alias_sources(
         g, wrapped, fed = _stdin_fed(c, s)
         n = normalize(g)
         pos = _git_config_write(n)
-        if len(pos) > 1 and pos[0][:6].lower() == "alias.":  # mọi phạm vi/tệp (`--global`, `-f`): chiều chặt
-            defined.append((pos[0][6:], pos[1]))
-            if budget is not None and defined[-1] not in budget.aliases:
-                budget.aliases.append(defined[-1])
+        key = pos[0].lower() if len(pos) > 1 else ""
+        if key[:6] == "alias." or key == "help.autocorrect":  # mọi phạm vi/tệp (`--global`, `-f`): chiều chặt
+            # autocorrect đặt trong chuỗi chỉ được BẬT: thứ tự trong chuỗi không phải ưu tiên phạm vi (local thắng
+            # global, `-f` tệp lạ git không đọc) nên lệnh tắt không chắc tắt (AUD-SEC-634 review)
+            entry = (pos[0][6:] if key[:6] == "alias." else AUTOCORRECT_KEY, pos[1])
+            keep = key[:6] == "alias." or _autocorrect_on([entry])
+            defined += [entry] if keep else []
+            if budget is not None and keep and entry not in budget.aliases:
+                budget.aliases.append(entry)
             continue
         sub = n[1] if n[:1] == ["git"] and len(n) > 1 else ""
         aliased = bool(sub) and not sub.startswith("-") and sub not in GIT_BUILTINS
@@ -14280,15 +14646,15 @@ def _git_alias_sources(
             continue
         gdir = _git_dir(g, here) or root
         env = {**exported, **_assign_values(c[: len(c) - len(s)])}
-        kind, out = _alias_resolve(n, g, gdir, env, budget, defined) if aliased else ("", n)
-        why = "" if not wrapped or kind == "unresolved" else _fed_ref_why(out, fed, kind == "shell")
-        asks += [f"{why}: {' '.join(c)[:200]}"] if why else []
-        if kind == "git":
-            rewritten.append((_join_tokens([*g[: len(g) - len(n) + 1], *out[1:]]), here))
-        elif kind == "shell":
-            nested.append((" ".join([out[0], _join_tokens(out[1:])]), gdir))
-        elif kind:
-            asks.append(f"{UNRESOLVED_ALIAS_MARK} ({out[0]}): {' '.join(c)[:200]}")
+        for kind, out in _alias_resolve(n, g, gdir, env, budget, defined) if aliased else [("", n)]:
+            why = "" if not wrapped or kind == "unresolved" else _fed_ref_why(out, fed, kind == "shell")
+            asks += [f"{why}: {' '.join(c)[:200]}"] if why else []
+            if kind == "git":
+                rewritten.append((_join_tokens([*g[: len(g) - len(n) + 1], *out[1:]]), here))
+            elif kind == "shell":
+                nested.append((" ".join([out[0], _join_tokens(out[1:])]), gdir))
+            elif kind:
+                asks.append(f"{UNRESOLVED_ALIAS_MARK} ({out[0]}): {' '.join(c)[:200]}")
     return rewritten, nested, asks
 
 
@@ -15573,6 +15939,105 @@ COPY_VALUE_OPTS = {
 }
 CLOUD_URL_RE = re.compile(r"(?:s3|gs|az|r2|b2)://")
 CLOUD_COPIERS = ("aws", "gsutil", "rclone", "gcloud", "azcopy")
+# ADR-0076 lát 0: tên lệnh có luật — lệnh đơn mà basename từ đầu thuộc tập này qua cổng tập con dương
+# (`_ruled_word_why`, lát 2). Gom từ bảng có sẵn: git/gh, shell, eval/source, trình bọc và mọi tên luật của
+# `_scan_command` (bắc cầu, cả phương thức lớp) rẽ nhánh; `GuardGateNamesTest` đọc mã và khẳng định các tập khớp nhau —
+# tên rẽ nhánh mà bộ đọc không thấy (biến vòng lặp/comprehension, kết quả hàm phụ) khai ở `GATE_UNREAD` của test kèm lý
+# do và lệnh mẫu. Rẽ nhánh theo tiền tố hay biểu thức chính quy (`mkfs*`, `git-<lệnh con>`, `INTERP_RE`: `python3.12`,
+# `pypy3`, `nodejs`) không nằm ở đây — tập hợp không biểu diễn được (review #526).
+# D-434: tên luật có rẽ nhánh nhưng KHÔNG kích hoạt cổng — trình thông dịch không phải shell (ADR-0076: `python3
+# scripts/xt.py …` không qua cổng) và lệnh chỉ đọc/in (bảng thụ động của D-432): không thuộc bảng ghi tệp, chạy lệnh từ
+# đối số, ra mạng hay ghi biến theo tên nào của guard (`GuardGateNamesTest.ACTIVE_TABLES`). Ngoại lệ đã biết, có từ trước
+# ADR-0076 (guard cho qua, không thuộc bảng ghi/chạy nào): `rg --pre CMD` chạy lệnh, `less -o FILE` ghi tệp. Lệnh đọc mà có
+# dạng ghi (`sort -o`, `uniq in out`, `touch`, `tee`, trình soạn thảo, formatter) ở lại `GATE_NAMES`; `printf` cũng vậy
+# (D-439: `printf -v VAR` ghi biến như `read`/`let`).
+GATE_PASSIVE: FrozenSet[str] = frozenset(
+    "python python3 node perl ruby php cat tac head tail wc grep egrep fgrep zgrep ugrep rg ag ack diff cmp jq echo"
+    " date true false nproc pwd ls whoami hostname uname id test [ [[ basename dirname readlink realpath stat file"
+    " du md5sum sha1sum sha224sum sha256sum sha384sum sha512sum b2sum cksum less more bat ps pgrep cut type which"
+    " printenv tr :".split()
+)
+# Tên lệnh có luật — mọi tên luật rẽ nhánh, gồm cả `GATE_PASSIVE`: tập để hỏi "tên này có luật không" (đọc lại hậu tố của
+# lát 6, D-432), còn `GATE_NAMES` chỉ để kích hoạt cổng. Đúng bằng tập tên rẽ nhánh mà bộ đọc mã của `GuardGateNamesTest`
+# thấy cộng `GATE_UNREAD` của test; tên khớp tiền tố/biểu thức chính quy không thuộc tập (comment trên).
+_GATE_BRANCHED: FrozenSet[str] = frozenset(
+    "git gh eval source . { function trap pushd env sudo doas xt.py claude codex gemini coverage nix-shell ar cpio jar"
+    " lzip link rev openssl patch gpatch nerdctl docker-compose podman-compose composer.phar printenv".split()
+    # Review #526: `m4` (`_is_m4`), `mkfs` (`GLOB_COMMANDS` định nghĩa sau), `for` (`_argv_split_trigger`), `alias`
+    # (`_alias_rule` khớp mẫu `_may_be_alias`). Từ khoá shell (`SHELL_KEYWORDS`: `if then else elif while until do !`)
+    # không thuộc tập: `_strip_prefixes` bỏ chúng trước khi lấy tên nên cổng không bao giờ gặp chúng làm tên lệnh.
+    + "m4 mkfs for alias".split()
+).union(
+    IMPLICIT_TOOL_HEADS,  # công cụ nạp tệp ngầm: `just`, `pytest`, `mvn`… (`_implicit_tools`)
+    HEREDOC_RUN_SAFE - {""},  # `:`, `tr` (`_heredoc_runner`)
+    CD_MOVE_HEADS,  # `popd` (`_cd_step`)
+    IFS_TAINT_HEADS,  # `select` (`_argv_tainted`)
+    SHELLS,
+    WRAPPERS,
+    INTERPRETERS,
+    FETCHERS,
+    DB_CLIENTS,
+    DECLARE_CMDS,
+    PERM_CMDS,
+    GO_DELETERS,
+    REUSE_DELETERS,
+    REUSE_O_NOT_FILE,
+    ASK_CMDS,
+    AWK_NAMES,
+    SED_NAMES,
+    TAR_NAMES,
+    SEVEN_ZIP,
+    UNPACK_HEADS,
+    DECOMPRESSORS,
+    DECOMPRESS_FLAGS,
+    DECODE_FLAGS,
+    BASH_ENV_DATA_CMDS,
+    CLOUD_COPIERS,
+    COPY_OPT_TABLES,
+    COPY_VALUE_OPTS,
+    REMOTE_COPY,
+    REMOTE_SHELLS,
+    STREAM_SENDERS,
+    GIT_DIR_COPIERS,
+    FEED_SAFE,
+    NO_FILE_READ,
+    NO_STDIN_READ,
+    STDIN_READERS,
+    STDIN_FEEDERS,
+    SCRIPT_FIRST,
+    RECURSIVE_READERS,
+    RECURSIVE_FLAG_READERS,
+    RUN_F_FLAG_HEADS,
+    FIND_READONLY_EXEC,
+    GH_READERS,
+    GH_LITERALS,
+    PENDING_BARE_PLAIN_HEADS,
+    PIPE_FILTERS,
+    PKG_ADD,
+    PKG_WRAPPERS,
+    RUNNERS,
+    SHELL_JOIN_RUNNERS,
+    STAGE_READERS,
+    XARGS_WRITERS,
+    XARGS_FILE_EDITORS,
+    FILE_WRITERS,  # `pax`, `split`, `csplit` ghi tệp (`write_targets`)
+    GO_CHECKERS,  # formatter `--write`/`--fix` (AUD-SEC-648)
+    GO_MODELLED,
+    GO_PAGERS,
+    AGENT_SELF_APPROVE,  # CLI agent: `aider`, `copilot`… như `codex`/`gemini`
+    AGENT_CLI_ALIASES,
+    SKILL_RUNNER_NAMES,
+    GIT_DASHED_REWRITERS,
+    CALLBACK_OPTS,  # `mapfile -C`, `compgen -C` chạy lệnh
+    VAR_WRITER_CMDS,  # ghi biến theo tên đối số: `read`, `let`, `mapfile`…
+    GIT_CFG_VAR_HEADS,
+    HOME_VAR_HEADS,
+    HOME_VAR_FLAG_HEADS,  # `wait -p`, `printf -v`
+    REUSE_READERS,
+    ENV_OPTS,
+    DESTROY_CMDS,
+)
+GATE_NAMES: FrozenSet[str] = _GATE_BRANCHED - GATE_PASSIVE
 
 
 def _copy_files(n: List[str]) -> Optional[List[str]]:
@@ -15839,24 +16304,34 @@ def _bash_reading(
     """Một lần đọc của `bash_decision` (theo `READING`)."""
     token = FD_DIRS.set(tuple(dict.fromkeys((*FD_DIRS.get(), *_fd_open_dirs(cmd)))))
     split = GH_SPLIT_WORDS.set(GH_SPLIT_WORDS.get())
+    rough = ROUGH_SPLIT.set(False)
     try:
         GH_SPLIT_WORDS.set(GH_SPLIT_WORDS.get() | _gh_split_words(cmd))  # lệnh lồng cộng dồn (AUD-SEC-590)
-        return _bash_decision(cmd, root, cwd, depth, budget, rewrites)
+        res = _bash_decision(cmd, root, cwd, depth, budget, rewrites)
+        return _rough_budget(res, cmd) if ROUGH_SPLIT.get() else res
     except ScanTooComplex as e:
-        reason = f"Lệnh quá phức tạp để guard quét hết ({e}): {clean_text(cmd)[:200]}{BUDGET_REWRITE}"
-        out: Dict[str, object] = {
-            "decision": "deny",
-            "reason": reason,
-            "commit": False,
-            "no_verify": False,
-            "commit_dir": "",
-            "code": BUDGET,
-        }
+        out = _budget_result(cmd, str(e))
         out.update(getattr(e, "flags", {}))  # review #433 R1: giữ cờ bỏ hook (`no_verify`/`push_no_verify`) cho adapter
         return out
     finally:
+        ROUGH_SPLIT.reset(rough)
         GH_SPLIT_WORDS.reset(split)
         FD_DIRS.reset(token)
+
+
+def _budget_result(cmd: str, why: str) -> Dict[str, object]:
+    reason = f"Lệnh quá phức tạp để guard quét hết ({why}): {clean_text(cmd)[:200]}{BUDGET_REWRITE}"
+    return {"decision": "deny", "reason": reason, "commit": False, "no_verify": False, "commit_dir": "", "code": BUDGET}
+
+
+def _rough_budget(res: Dict[str, object], cmd: str) -> Dict[str, object]:
+    """AUD-SEC-656 (review #528): lệnh chặt mà `shlex` phải tách thô — lần đọc này đã chặn (sau chính sách) thì giữ mã đó,
+    không thì BUDGET (D-415): token thô không tách `(`/`<`/hàm như bash nên "không thấy gì" không phải bằng chứng.
+    Quyết định cuối không nhẹ đi; lệnh cần hai lần đọc (`LitWord`) mà chỉ lần đọc cũ chặn thì mã có thể thành BUDGET
+    (`_stricter_reading` hoà lấy lần đọc mới)."""
+    if policy_action(decide(res)) == "deny":
+        return res
+    return {**res, "decision": "deny", "reason": _budget_result(cmd, SHLEX_UNCLOSED_WHY)["reason"], "code": BUDGET}
 
 
 def _clean_strict(cmd: str, budget: ScanBudget) -> Tuple[str, bool]:
@@ -15975,7 +16450,7 @@ def _bash_decision(
         return res
     _shell_precheck(cmd, strict, cwd)
     _heredoc_precheck(cmd, whole)
-    tokens = tokenize(cmd)
+    tokens = tokenize(cmd, strict)
     rx = remote_exec(cmd, tokens)
     if rx:
         res.update(
@@ -16115,6 +16590,8 @@ REASON_CODES: Tuple[Tuple[str, str], ...] = (
     (PERM_NO_TARGET_WHY, UNRESOLVED_TARGET),  # `… | xargs chmod 000` (T-3532)
     ("vượt ngân sách quét", BUDGET),
     (GH_DYN_NAME_MARK, BUDGET),  # `gh pr merge$Z`: tên lệnh/cờ gh guard không biết (AUD-SEC-587, ADR-0065 lớp A)
+    (GIT_DYN_NAME_MARK, BUDGET),  # `git pus? …`: lệnh con git guard không biết (AUD-SEC-635)
+    (GIT_DYN_FLAG_MARK, BUDGET),  # `git push --delet$X`: viết tắt cờ nguy hiểm có mở rộng (AUD-SEC-644, D-415)
     ("brace expansion quá nhiều", BRACE_OVERFLOW),
 )
 # Giữ tên cũ cho mã/ test đọc danh sách dấu nguy hiểm.
