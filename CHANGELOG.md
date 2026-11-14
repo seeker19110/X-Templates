@@ -208,6 +208,8 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
 
 ### Fixed
 
+- AUD-SEC-648: dừng formatter khi không sao lưu được GO-NO-GO và giữ bản sao phục hồi nếu ghi trả thất bại.
+
 - T-3746 (AUD-SEC-648): `dev-task.sh format` bảo toàn nội dung GO-NO-GO đã có khi formatter sửa tệp, kể cả lúc formatter báo lỗi.
 
 - Hướng dẫn merge và chú thích `xt.yaml` khớp ADR-0079: xét theo số PR, review chỉ bắt buộc khi `merge_review: required`.

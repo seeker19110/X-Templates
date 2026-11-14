@@ -709,3 +709,10 @@
 - Chọn: Dùng lại cơ chế giữ nội dung GO-NO-GO của format-file tại điểm vào format
 - Lý do (tiêu chí chất lượng cuối): Đo bằng DevTaskTest: formatter thay nội dung GO-NO-GO ở cả exit 0 và 7. Cơ chế dùng chung bảo toàn nội dung và không phụ thuộc stack.
 - Đường lùi: Revert lát format và áp dụng quy tắc ignore của từng formatter.
+
+### D-490 · 2026-11-14T14:34:42+00:00 · Duyệt PLAN-harden-2026-11-14-complete cho repo khung?
+
+- Phương án: (1) Đóng audit và xin ký ngay theo kết quả CI gần nhất · (2) Giữ NO-GO, xử lý từng mục đỏ đã xác minh, ghi delta và chỉ tiến tới ký khi cổng G7 đạt
+- Chọn: Giữ NO-GO, xử lý từng mục đỏ đã xác minh, ghi delta và chỉ tiến tới ký khi cổng G7 đạt
+- Lý do (tiêu chí chất lượng cuối): Blueprint không có MUST mở nhưng sổ strict còn 16 mục đỏ, 47 mục cam và hai nhóm chưa quét. Cần bằng chứng trên đúng cây ứng viên và xác nhận độc lập các lỗi mới.
+- Đường lùi: Dừng đợt harden và tiếp tục từ sổ audit hiện tại; giữ nguyên cổng phát hành.

@@ -2195,6 +2195,37 @@ class DevTaskTest(unittest.TestCase):
                 self.assertEqual(notes.read_bytes(), b"formatted\n")
                 self.assertEqual(release.read_bytes(), original)
 
+    def test_format_stops_if_signoff_snapshot_cannot_be_written(self):
+        release = self.tmp / "GO-NO-GO-fixture.md"
+        release.write_text("release document\n", encoding="utf-8")
+        (self.tmp / "xt.yaml").write_text("format: touch format-ran\n", encoding="utf-8")
+        copy = self.tmp / "cp"
+        copy.write_text("#!/bin/sh\nexit 1\n", encoding="utf-8")
+        copy.chmod(0o755)
+        with mock.patch.dict(os.environ, PATH=f"{self.tmp}:{os.environ['PATH']}"):
+            result = self.run_task("format")
+        self.assertNotEqual(result.returncode, 0, result.stderr)
+        self.assertFalse((self.tmp / "format-ran").exists())
+        self.assertEqual(release.read_text(encoding="utf-8"), "release document\n")
+
+    def test_format_keeps_recovery_copy_when_restore_fails(self):
+        release = self.tmp / "GO-NO-GO-fixture.md"
+        original = "release document\n"
+        release.write_text(original, encoding="utf-8")
+        (self.tmp / "xt.yaml").write_text("format: rm GO-NO-GO-fixture.md\n", encoding="utf-8")
+        copy = self.tmp / "cp"
+        copy.write_text(
+            '#!/bin/sh\ncase "$4" in *GO-NO-GO-fixture.md) exit 1;; esac\nexec "$REAL_COPY" "$@"\n', encoding="utf-8"
+        )
+        copy.chmod(0o755)
+        with mock.patch.dict(
+            os.environ, PATH=f"{self.tmp}:{os.environ['PATH']}", TMPDIR=str(self.tmp), REAL_COPY=shutil.which("cp")
+        ):
+            result = self.run_task("format")
+        self.assertNotEqual(result.returncode, 0, result.stderr)
+        self.assertIn("không khôi phục được", result.stderr)
+        self.assertEqual([p.read_text(encoding="utf-8") for p in self.tmp.glob("tmp.*/1")], [original])
+
     def test_format_file_never_breaks_json(self):
         """AUD-HAR-037: formatter khai báo cho Python (`ruff format {}`) từng biến settings.json thành JSON hỏng (dấu phẩy
         thừa) — format-file khôi phục file JSON nếu trước hợp lệ mà sau không còn hợp lệ."""

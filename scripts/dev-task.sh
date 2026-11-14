@@ -513,27 +513,41 @@ json_ok() { # $1=file → 0 nếu là JSON hợp lệ; không có python3 thì k
 # `GO-NO-GO*.md` (tên không phân biệt hoa thường) dưới gốc dự án trước khi chạy formatter, khôi phục file nào đổi/mất.
 go_snapshot() { # $1=thư mục chụp (rỗng, đã tồn tại)
   local i=0 f
-  ( cd "$ROOT" && find . \( -name .git -o -name node_modules -o -name .venv \) -prune -o -type f -iname 'go-no-go*.md' -print0 2>/dev/null ) >"$1/list"
+  ( cd "$ROOT" && find . \( -name .git -o -name node_modules -o -name .venv \) -prune -o -type f -iname 'go-no-go*.md' -print0 ) >"$1/list" || return 1
   while IFS= read -r -d '' f; do
-    i=$((i + 1)); cp -p -- "$ROOT/$f" "$1/$i" 2>/dev/null || true
+    i=$((i + 1)); cp -p -- "$ROOT/$f" "$1/$i" || return 1
   done <"$1/list"
 }
 go_restore() { # $1=thư mục chụp
-  local i=0 f
+  local i=0 frc=0 f
   while IFS= read -r -d '' f; do
-    i=$((i + 1)); [ -f "$1/$i" ] || continue
+    i=$((i + 1))
+    if [ ! -f "$1/$i" ]; then frc=1; continue; fi
     if ! cmp -s -- "$1/$i" "$ROOT/$f" 2>/dev/null; then
-      cp -p -- "$1/$i" "$ROOT/$f" && log "$TASK: formatter đổi GO-NO-GO '$f' (chữ ký §5 là của người) → khôi phục bản trước"
+      if cp -p -- "$1/$i" "$ROOT/$f"; then
+        log "$TASK: formatter đổi GO-NO-GO '$f' (chữ ký §5 là của người) → khôi phục bản trước"
+      else
+        frc=1
+      fi
     fi
-  done <"$1/list"
+  done <"$1/list" || return 1
+  return "$frc"
 }
-run_format() {
+run_format() { # $1=lệnh; đối số còn lại được truyền cho bash -c như ở format-file
   local snap rc=0
   snap="$(mktemp -d)" || return 1
-  go_snapshot "$snap"
-  ( cd "$ROOT" && bash -o pipefail -c "$1" ) || rc=$?
-  go_restore "$snap"
+  if ! go_snapshot "$snap"; then
+    log "$TASK: không sao lưu được GO-NO-GO — dừng formatter"
+    rm -rf -- "$snap"
+    return 1
+  fi
+  ( cd "$ROOT" && bash -o pipefail -c "$@" ) || rc=$?
+  if ! go_restore "$snap"; then
+    log "$TASK: không khôi phục được GO-NO-GO — giữ bản sao ở '$snap'"
+    return 1
+  fi
   rm -rf -- "$snap"
+  [ "$TASK" = format-file ] && return 0  # formatter của hook là best-effort; lỗi bảo vệ vẫn trả đỏ
   return "$rc"
 }
 real_path() { # $1=đường dẫn (tương đối theo gốc dự án như lúc formatter chạy) → đường dẫn thật; thiếu realpath thì dùng python3
@@ -596,14 +610,13 @@ case "$TASK" in
     else
       log "format-file: mẫu dựng sẵn của khung — không qua guard"
     fi
-    GO_SNAP="$(mktemp -d)" && go_snapshot "$GO_SNAP"
-    ( cd "$ROOT" && bash -c "$C" _ "$P" ) || true
-    [ -n "$GO_SNAP" ] && { go_restore "$GO_SNAP"; rm -rf -- "$GO_SNAP"; }
+    format_rc=0
+    run_format "$C" _ "$P" || format_rc=$?
     if [ -n "$keep" ]; then
       json_ok "$F" || { cp -p -- "$keep" "$F"; log "format-file: formatter làm hỏng JSON '$P' → khôi phục bản trước"; }
       rm -f -- "$keep"
     fi
-    exit 0 ;;
+    exit "$format_rc" ;;
   gate)
     rc=0
     # test_floor (T-1812): khoá có lệnh → chạy sau `test` (vd kiểm sàn runtime của dự án); vắng/rỗng → không chạy.
