@@ -2279,6 +2279,36 @@ class LoopInterventionsTest(TmpDirCase):
         self.assertEqual(xt.read_state(self.tmp), before)
         return err
 
+    def test_init_keeps_explicit_block_until_recorded_unblock(self):
+        self.init()
+        self.assertEqual(run_main("loop", "block", "--reason", "cần người quyết")[0], 0)
+        blocked = xt.read_state(self.tmp)
+        self.assertEqual(run_main("loop", "stop")[0], 0)
+        (self.tmp / "docs/autopilot/PLAN-next.md").write_text("- [ ] `T-004` mới — Gate: `true`\n", encoding="utf-8")
+        for force in (["--plan", "docs/autopilot/PLAN-next.md"], ["--force"]):
+            with self.subTest(force=force):
+                self.assertEqual(run_main("loop", "init", *force)[0], 0)
+                current = xt.read_state(self.tmp)
+                for key in ("blocked", "blocked_reason", "blocked_at"):
+                    self.assertEqual(current[key], blocked[key])
+                self.assertEqual(xt.loop_verdict(self.tmp)["verdict"], "blocked")
+                self.assertNotIn("unblocked", current)
+        self.assertEqual(run_main("loop", "unblock", "--reason", "đã xem quyết định")[0], 0)
+        current = xt.read_state(self.tmp)
+        self.assertFalse(current["blocked"])
+        self.assertEqual(current["unblocked"][-1]["reason"], "đã xem quyết định")
+
+    def test_init_keeps_block_before_first_loop_or_after_budget_exhausted(self):
+        for old in ({"blocked": True}, {"blocked": True, "iterations": 100, "max_iterations": 100}):
+            with self.subTest(old=old):
+                xt.write_state(old, self.tmp)
+                self.assertEqual(run_main("loop", "init")[0], 0)
+                st = xt.read_state(self.tmp)
+                self.assertTrue(st["blocked"])
+                self.assertNotIn("blocked_reason", st)
+                self.assertEqual(run_main("loop", "unblock", "--reason", "đã xem cờ cũ")[0], 0)
+                self.assertFalse(xt.read_state(self.tmp)["blocked"])
+
     # ------------------------------------------------------------------ attach
 
     def test_attach_new_session_keeps_wait_failures_blocked(self):

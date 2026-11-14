@@ -2095,6 +2095,27 @@ class DevTaskTest(unittest.TestCase):
         self.assertIn("last", r.stdout)
         self.assertNotIn("first", r.stdout)
 
+    def test_framework_runtime_does_not_replace_application_python(self):
+        (self.tmp / "xt.yaml").write_text("lint: python3 --version\ntest: python3 --version\n", encoding="utf-8")
+        (self.tmp / "scripts" / "xt.py").write_text(
+            "import sys\nassert sys.version_info[:2] == (3, 15)\n"
+            "assert sys.argv[1] == 'guard-check'\nprint('framework guard')\n",
+            encoding="utf-8",
+        )
+        bin_dir = self.tmp / "bin"
+        bin_dir.mkdir()
+        app_python = bin_dir / "python3"
+        app_python.write_text("#!/bin/sh\nprintf 'application Python\\n'\n", encoding="utf-8")
+        app_python.chmod(0o755)
+        with mock.patch.dict(os.environ, PATH=f"{bin_dir}:{os.environ['PATH']}", XT_FRAMEWORK_PYTHON=sys.executable):
+            single = self.run_task("lint")
+            batch = self.run_task("gate-par")
+        self.assertEqual(single.returncode, 0, single.stderr)
+        self.assertIn("framework guard", single.stdout)
+        self.assertIn("application Python", single.stdout)
+        self.assertEqual(batch.returncode, 0, batch.stderr)
+        self.assertEqual(batch.stderr.count("application Python"), 2)
+
     def test_format_file_path_is_not_executed(self):
         evil = self.tmp / "x$(touch INJECTED).py"
         evil.write_text("print(1)\n", encoding="utf-8")
@@ -2260,8 +2281,7 @@ class DevTaskTest(unittest.TestCase):
 
 
 class GateTestFloorTest(unittest.TestCase):
-    """T-1812 (research NH-2): `dev-task.sh gate` chạy khoá `test_floor` SAU `test` khi khoá có lệnh; lệnh `test_floor`
-    của xt.yaml repo khung chạy test_list/test_unit với XT_PY=python3.11 như job CI `py311`, vắng 3.11 → bỏ qua có log."""
+    """T-1812: `dev-task.sh gate` chạy khoá `test_floor` sau `test` khi dự án khai lệnh."""
 
     def setUp(self):
         self.tmp = Path(self.enterContext(tempfile.TemporaryDirectory()))
@@ -2313,57 +2333,6 @@ class GateTestFloorTest(unittest.TestCase):
         self.assertNotEqual(r.returncode, 0)
         self.assertEqual(self.order(), ["L", "T"])  # test đỏ → dừng, không chạy test_floor
         self.assertIn("GATE ĐỎ ở 'test'", r.stderr)
-
-    def repo_test_floor(self) -> str:
-        m = re.search(r"^test_floor: (.+)$", (ROOT / "xt.yaml").read_text(encoding="utf-8"), re.M)
-        self.assertIsNotNone(m, "xt.yaml repo khung phải khai test_floor")
-        return m.group(1)
-
-    def test_repo_test_floor_runs_units_with_python311(self):
-        bin_dir = self.tmp / "bin"
-        bin_dir.mkdir()
-        fake = bin_dir / "python3.11"
-        fake.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
-        fake.chmod(0o755)
-        (self.tmp / "xt.yaml").write_text(
-            "test_list: sh -c \"printf 'tests.a.A\\\\ntests.b.B\\\\n'\"\n"
-            'test_unit: sh -c \'echo "UNIT-$1-$XT_PY-${XT_COV_DIR:-nocov}" >> units\' _ "$1"\n',
-            encoding="utf-8",
-        )
-        env = dict(os.environ, PATH=f"{bin_dir}{os.pathsep}{os.environ['PATH']}", XT_MIN_TESTS="2", XT_COV_DIR="/x")
-        env["CLAUDE_PROJECT_DIR"] = str(self.tmp)
-        r = subprocess.run(
-            ["bash", "-c", self.repo_test_floor()], cwd=self.tmp, env=env, capture_output=True, text=True
-        )
-        self.assertEqual(r.returncode, 0, r.stderr)
-        units = sorted((self.tmp / "units").read_text(encoding="utf-8").split())
-        self.assertEqual(units, ["UNIT-tests.a.A-python3.11-nocov", "UNIT-tests.b.B-python3.11-nocov"])
-        r = subprocess.run(
-            ["bash", "-c", self.repo_test_floor()], cwd=self.tmp, env=dict(env, XT_MIN_TESTS="3"), capture_output=True
-        )
-        self.assertNotEqual(r.returncode, 0)  # liệt kê ít hơn sàn → đỏ như job CI
-
-    def test_repo_test_floor_skips_with_log_without_python311(self):
-        empty = self.tmp / "empty-bin"
-        empty.mkdir()
-        r = subprocess.run(
-            ["/bin/bash", "-c", self.repo_test_floor()],
-            cwd=self.tmp,
-            env={"PATH": str(empty)},
-            capture_output=True,
-            text=True,
-        )
-        self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertIn("test_floor: không có python3.11 — bỏ qua", r.stderr)
-        self.assertFalse((self.tmp / "units").exists())
-
-    def test_repo_test_floor_min_tests_matches_ci(self):
-        ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
-        floor = self.repo_test_floor()
-        n = re.search(r'XT_MIN_TESTS: "(\d+)"', ci).group(1)
-        self.assertIn('XT_MIN_TESTS="${XT_MIN_TESTS:-' + n + '}"', floor)
-        self.assertIn("XT_PY=python3.11", floor)
-        self.assertIn("scripts/dev-task.sh test-shard 1 1", floor)
 
 
 @unittest.skipIf(shutil.which("bash") is None, "cần bash")

@@ -1730,6 +1730,12 @@ class CpuBudgetTest(unittest.TestCase):
         with self.assertRaises(AssertionError):
             cpu_budget.assert_not_quadratic(self, work, 10_000, clock=clock)
 
+    def test_retry_uses_small_and_large_measurements_from_the_same_round(self):
+        samples = iter((0.20, 3.00, 0.09, 1.44))
+        clock, work = self.fake_clock(lambda _size: next(samples))
+        with self.assertRaises(AssertionError):
+            cpu_budget.assert_not_quadratic(self, work, 10_000, clock=clock)
+
     def test_no_hard_cpu_thresholds_left(self):
         hard = re.compile(r"assertLess\(\s*time\.process_time\(\)\s*-\s*\w+\s*,\s*[0-9.]+\s*\)")
         found = [
