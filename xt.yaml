@@ -44,11 +44,11 @@ test_fast: xt_test_cpus="$(nproc 2>/dev/null || echo 2)" && python3 scripts/xt.p
 # đường dẫn này thành ngoại lệ cứng.
 merge_risk_paths: "scripts/*, framework/templates/*, docs/autopilot/PLAN*.md, docs/archive/autopilot/PLAN*.md"
 # Merge PR (ADR-0013/0014/0015): chủ repo yêu cầu 2026-10-16 "mở PR luôn kèm auto merge" → L3: máy merge GHIM head mọi
-# làn khi `merge-check` = `merge` ở đúng head đó — làn nhanh khi CI xanh, làn chuẩn khi CI xanh + review sạch ở head
-# (ADR-0024; pha build: review ghi nợ); không dùng auto-merge của GitHub (D-122, ADR-0036). L2 = máy chỉ tự merge làn
+# làn khi `merge-check` = `merge` ở đúng head; review theo `merge_review` (ADR-0079); không dùng auto-merge của
+# GitHub (D-122, ADR-0036). L2 = máy chỉ tự merge làn
 # nhanh; L1 = người merge mọi PR.
 merge_autonomy: L3
-# Tự merge khi check đạt; thứ tự PR theo tổng dòng thêm và xoá (ADR-0079).
+# Tự merge khi check đạt; xét theo số PR tăng dần (ADR-0079).
 merge_review: optional
 # Ngoại lệ cứng (tiền/dữ liệu thật/auth/mật mã/bí mật): chủ repo chọn 2026-10-17 "bỏ toàn bộ ngoại lệ cứng" → auto =
 # agent merge như PR khác (ADR-0020); human = người merge (ADR-0016/0019).
@@ -58,7 +58,7 @@ merge_hard_exceptions: auto
 # chính (D-402): lúc đó `release_signoff` đã thuộc HARD_GATED_KEYS nên PR bật khoá luôn người merge.
 # release_signoff: agent
 # Pha giao hàng (ADR-0031): repo khung LUÔN là production — chủ repo 2026-10-22 (D-136, thay D-109) → `harden`: PR làn
-# chuẩn cần review sạch ở head bởi reviewer năng lực cao hơn người viết; guard không nới việc cục bộ (ADR-0040 chỉ áp pha build).
+# chuẩn cần review sạch ở head khi `merge_review: required`; guard không nới việc cục bộ (ADR-0040 chỉ áp pha build).
 delivery_phase: harden
 # Trần `pr rethink` mỗi PR (ADR-0061, bài học #372): hết → `pr next` trả `split-or-close`; 0 = không trần; PR cắt bản miễn.
 max_rethink: 1
