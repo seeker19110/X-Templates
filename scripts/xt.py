@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""xt.py — công cụ dòng lệnh của khung X-Templates (chỉ dùng thư viện chuẩn Python >= 3.11).
+"""xt.py — công cụ dòng lệnh của khung X-Templates (chỉ dùng thư viện chuẩn CPython 3.15.x).
 
 Lệnh:
   validate                      Kiểm quy ước toàn khung (frontmatter, ID, liên kết, hồ sơ/gói ngành).
@@ -4555,10 +4555,16 @@ def _fix_rename(src: Path, dst: Path, what: str) -> Callable[[], str]:
     return fix
 
 
+def _python_runtime_error() -> Optional[Finding]:
+    if sys.implementation.name == "cpython" and sys.version_info[:2] == (3, 15):
+        return None
+    detected = f"{sys.implementation.name} {sys.version.split()[0]}"
+    return Finding("runtime", "error", f"cần CPython 3.15.x — hiện là {detected}")
+
+
 def _doctor_runtime() -> List[Finding]:
-    out = []
-    if sys.version_info < (3, 11):
-        out.append(Finding("runtime", "error", f"Python {sys.version.split()[0]} < 3.11 — xt.py và hook cần ≥ 3.11"))
+    runtime = _python_runtime_error()
+    out = [runtime] if runtime else []
     out += [
         Finding("runtime", "error", f"thiếu `{t}` trên PATH — hook, cổng commit và commit/push của autopilot cần nó")
         for t in ("git", "bash")
@@ -16224,9 +16230,10 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     if args.drift:
         return cmd_doctor_drift(args)
     base = project_dir()
-    findings = doctor_findings(base, args.framework, offline=offline)
+    runtime = _python_runtime_error()
+    findings = [runtime] if runtime else doctor_findings(base, args.framework, offline=offline)
     fixed: List[str] = []
-    if args.fix:
+    if args.fix and runtime is None:
         fixed, failed = doctor_fix(findings)
         findings = doctor_findings(base, args.framework, offline=offline) + failed
     errors = sum(f.level == "error" for f in findings)
@@ -19674,7 +19681,7 @@ def _add_perf_trial(ppsub: "argparse._SubParsersAction[argparse.ArgumentParser]"
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="xt.py",
-        description="Công cụ khung X-Templates",
+        description="Công cụ khung X-Templates (cần CPython 3.15.x)",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="ví dụ:\n"
         "  xt.py list profiles\n"
@@ -20216,6 +20223,11 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: Optional[List[str]] = None) -> int:
     args = build_parser().parse_args(argv)
+    if args.cmd != "doctor" or args.drift:
+        runtime = _python_runtime_error()
+        if runtime:
+            print(f"✗ {runtime.msg}", file=sys.stderr)
+            return 2
     args.argv = list(sys.argv[1:] if argv is None else argv)  # `perf trial` chạy lại đúng lệnh bằng công cụ gốc (§5)
     args.framework = Path(args.framework).resolve()
     if args.cmd in ("validate", "checks", "list", "compose", "stats") and not args.framework.is_dir():

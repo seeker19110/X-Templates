@@ -603,3 +603,10 @@
 - Chọn: Dời nguyên văn các quyết định cũ đã có trong bản phát hành sang sổ tháng theo D-314
 - Lý do (tiêu chí chất lượng cuối): Các PR đang sửa PLAN hoặc cần nghiệm thu chúng; sổ tháng được máy đọc, giữ nguyên ID và giảm xung đột trên các mục đang dùng
 - Đường lùi: Đưa các mục về đúng thứ tự trong DECISIONS.md và phục hồi mô tả phạm vi sổ tháng
+
+### D-485 · 2026-11-14T07:23:00+00:00 · Chọn chính sách runtime cho X-Templates khi chuyển Python 3.15?
+
+- Phương án: (1) Chỉ hỗ trợ dòng Python 3.15, ghim 3.15.2 trong repo và CI · (2) Dùng Python 3.15 mặc định, giữ cổng hỗ trợ 3.11 và 3.14
+- Chọn: Chỉ hỗ trợ dòng Python 3.15, ghim 3.15.2 trong repo và CI
+- Lý do (tiêu chí chất lượng cuối): Người dùng yêu cầu bỏ các dòng cũ. Một dòng Python giữ môi trường phát triển và CI nhất quán. Giữ kiểm thử nhánh main và ngưỡng coverage hiện hành.
+- Đường lùi: Revert PR runtime và trả về bản khung trước khi nâng nếu dự án đích chưa chuyển được.
