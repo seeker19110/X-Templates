@@ -40,7 +40,7 @@ updated: 2026-11-14
    — `attack`/`perf` của `xt.yaml`, ADR-0042; cổng production `migration_check`/`rollback`/`acceptance`, ADR-0062 → GO/NO-GO máy đọc; report có kiểu `<khoá>_report`,
    digest `release_artifacts` và `promotion` — `templates/xt.yaml`, ADR-0068 lát A;
    chữ ký `GO-NO-GO.md` của người, hoặc của agent khi dự án đã bật và đủ điều kiện theo
-   [ADR-0074](../../docs/adr/0074-agent-release-signoff.md)). Chỉ G7 mới đòi E2E đầy đủ, kiểm tải, diễn tập rollback/khôi phục. Không phải hạ chuẩn:
+   ADR-0074). Chỉ G7 mới đòi E2E đầy đủ, kiểm tải, diễn tập rollback/khôi phục. Không phải hạ chuẩn:
    cùng tiêu chí cuối, khác **thời điểm** kiểm. Máy merge theo pha bằng khoá `delivery_phase: build|harden` của `xt.yaml`
    — build hoãn review thành nợ (trừ PR rủi ro cao — ADR-0062), G7 đòi harden và hết nợ (ADR-0031 của repo khung). **Pha build (`/autopilot`, ADR-0046) dùng đầu
    ra mức S cho G0–G4 ở mọi quy mô** (đọc repo, `compose` không tick, PLAN có Gate + Given/When/Then ngắn; `PROJECT.md`/SPEC
@@ -51,7 +51,7 @@ updated: 2026-11-14
    Thiết kế → Lập trình → Kiểm thử → Audit → Tối ưu → Production → Vận hành → Tăng trưởng, dự án đi **MVP** (bản thử chờ
    nghiệm thu) → **hoàn thiện** (phạm vi đã duyệt, G7, phát hành) → **tối ưu** (cải tiến có số). Giai đoạn sau mở khi bản trình
    được duyệt bằng `xt.py stage approve`. Nếu dự án chưa bật `stage_approval: agent`, người duyệt. Agent chỉ được duyệt MVP theo
-   [ADR-0069](../../docs/adr/0069-agent-stage-approval.md) khi dự án đã bật và bản trình đạt tiêu chí. Máy khoá giai đoạn
+   ADR-0069 khi dự án đã bật và bản trình đạt tiêu chí. Máy khoá giai đoạn
    qua PLAN khai `Giai đoạn sản phẩm: N (C-NNN)`, `loop` từ chối giai đoạn
    khoá, `release-check` FAIL ở MVP. Giai đoạn ≠ pha build/harden (chế độ kiểm soát merge). Dùng khi có `docs/autopilot/STAGE.json`
    (`xt.py stage init`); ma trận 11 bước × 3 giai đoạn: `docs/autopilot/upgrades/2026-10-29-three-stage-delivery.md` của repo khung.
