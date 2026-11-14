@@ -610,3 +610,10 @@
 - Chọn: Precheck lexical theo ngữ cảnh nháy, ngoài tập con trả BUDGET
 - Lý do (tiêu chí chất lượng cuối): D-415 ưu tiên chặn cú pháp chưa đọc chắc. Precheck trước tách argv đóng cả thay lệnh/thay tiến trình trong tham số; literal và dạng có nháy giữ nguyên. Một số lý do RULE_DENY thành BUDGET nhưng ma trận chính sách không nới deny; corpus cũ không đổi quyết định. RecursionError ở lối đọc sớm được tách thành lát kế, không khai đã đóng.
 - Đường lùi: Hoàn lại precheck bằng PR riêng khi có parser tương đương được kiểm đối kháng; giữ các ca regression.
+
+### D-479 · 2026-11-14T02:39:45+00:00 · PR #513: nâng gói web-api-ts sau khi Biome kiểm YAML và kiểu Node vượt runtime?
+
+- Phương án: (1) Nâng Kysely, Biome và Vitest; giữ @types/node 24.19.2 và chuẩn hoá khoảng trắng trước chú thích trong mẫu xt.yaml · (2) Giữ cả nhóm ở bản cũ và đợi Dependabot tách các nâng cấp
+- Chọn: Nâng Kysely, Biome và Vitest; giữ @types/node 24.19.2 và chuẩn hoá khoảng trắng trước chú thích trong mẫu xt.yaml
+- Lý do (tiêu chí chất lượng cuối): Kiểu Node bám runtime 24; cách sinh YAML giữ nguyên giá trị, vẫn được formatter kiểm; lint, typecheck, build và 34 test trên PostgreSQL đã chạy
+- Đường lùi: Revert PR #513 để trở về lockfile và khoảng trắng mẫu trước nâng cấp
