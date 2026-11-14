@@ -8,7 +8,7 @@
 - T-3769 (D-445): thêm kiểm tra ngoặc tham số Bash. Mẫu 505 lượt (464 thân lệnh) giữ nguyên quyết định. T-3867 xử lý giới hạn đệ quy riêng.
 - Chờ người: §5 ký GO-NO-GO 3.30.0…3.31.1 và [3.33.0](docs/ops/GO-NO-GO-2026-11-08-v3.33.0.md) (3.32.0 đã ký #476); bật `release_signoff: agent` ở `xt.yaml` là PR chủ repo merge (HARD_GATED, D-402). T-3557 còn `[ ]`.
 - Dự án đích (`main` 2026-11-08, [registry](docs/ops/registry.json)): cả 4 ở 3.32.0; PR nâng 3.33.0 chưa mở. Còn mở: AUD-TEST-061 (CodeQL); fixture host Codex/Gemini.
-- Phép đo `LOOP-ORCH-020` tích luỹ; tăng số agent chỉ khi có số (ADR-0061). Phản hồi dự án đích: 10 nhóm `cong-cu` chờ phân loại ([TARGETS](docs/ops/TARGETS.md)).
+- D-457: lưu kho PLAN factory-A/BE đã đóng (ADR-0070). `LOOP-ORCH-020`: chỉ tăng agent khi có số (ADR-0061). 10 nhóm `cong-cu` chờ phân loại ([TARGETS](docs/ops/TARGETS.md)).
 - Hoãn tới harden: T-1690/T-1691 (quét lại SEC-091…099). Rà `seeker19110/stored`: chờ chủ repo (HAR-036/041, SEC-026, CI-006/7/9, SEC-043; hạn xét: 2026-12-31).
 
 ## Tiếp theo
