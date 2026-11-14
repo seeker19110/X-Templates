@@ -604,13 +604,6 @@
 - Lý do (tiêu chí chất lượng cuối): (1) an toàn: đo trên 19.026 lệnh Bash thật cả hai phương án chênh 0 lệnh; khi chi phí bằng nhau chọn bên chặt (printf -v ghi biến như read/let; pytest chạy mã từ conftest/-p). ADR-0076 không sửa (đã Accepted): câu 'pytest không qua cổng' bị D này thay — cổng chỉ chặn dạng cờ/lệnh con có mở rộng nên rất hiếm chạm pytest.
 - Đường lùi: Chuyển printf về GATE_PASSIVE hoặc pytest/tox/nox sang GATE_PASSIVE (sửa PASSIVE_PIN và test ghim)
 
-### D-457 · 2026-11-13T13:19:31+00:00 · Tạo chỗ cho các lát harden và xưởng dưới trần docs/autopilot bằng cách nào?
-
-- Phương án: (1) Dời hai PLAN factory-A và factory-BE đã đóng, không còn trong PROGRESS, vào docs/archive/autopilot theo ADR-0070 · (2) Tăng trần byte docs/autopilot
-- Chọn: Dời hai PLAN factory-A và factory-BE đã đóng, không còn trong PROGRESS, vào docs/archive/autopilot theo ADR-0070
-- Lý do (tiêu chí chất lượng cuối): Hai PLAN có 13 task đều đóng, không được PROGRESS nhắc là việc sống; dời giữ nguyên lịch sử và số ID, viết lại liên kết. Không đổi trần hoặc dời PLAN đang chạy.
-- Đường lùi: git mv ngược và hoàn lại liên kết trong PR riêng.
-
 ### D-452 · 2026-11-13T11:47:36+00:00 · Khởi tạo dự án mới offline nguyên tử và không chạy hook trước commit đầu thế nào?
 
 - Phương án: (1) Bootstrap trực tiếp trong đích, giữ file dở khi hỏng · (2) Dựng ở sibling riêng, commit rồi hook/doctor, công bố bằng rename nguyên tử
@@ -632,9 +625,30 @@
 - Lý do (tiêu chí chất lượng cuối): Probe shell thật thấy rename cả thư mục làm cwd cũ mất liên kết, dù tên đích có đủ file. Giữ inode cho đích có sẵn; ghi tương đối trong thư mục đã giữ, kiểm danh tính đích trước mỗi pha và không đi theo symlink thay thế. Khi hỏng giữ output dở và dữ liệu đồng thời, không xoá đệ quy đích có sẵn. Đích chưa tồn tại vẫn công bố staging nguyên tử. Chỉ thay nhánh đích rỗng của D-452; không thêm hạn chế dùng dấu chấm.
 - Đường lùi: Hoàn lại nhánh tại chỗ khi có cách công bố giữ cwd tương đương; giữ probe shell/race và không xoá dữ liệu để khôi phục.
 
+### D-457 · 2026-11-13T13:19:31+00:00 · Tạo chỗ cho các lát harden và xưởng dưới trần docs/autopilot bằng cách nào?
+
+- Phương án: (1) Dời hai PLAN factory-A và factory-BE đã đóng, không còn trong PROGRESS, vào docs/archive/autopilot theo ADR-0070 · (2) Tăng trần byte docs/autopilot
+- Chọn: Dời hai PLAN factory-A và factory-BE đã đóng, không còn trong PROGRESS, vào docs/archive/autopilot theo ADR-0070
+- Lý do (tiêu chí chất lượng cuối): Hai PLAN có 13 task đều đóng, không được PROGRESS nhắc là việc sống; dời giữ nguyên lịch sử và số ID, viết lại liên kết. Không đổi trần hoặc dời PLAN đang chạy.
+- Đường lùi: git mv ngược và hoàn lại liên kết trong PR riêng.
+
 ### D-460 · 2026-11-13T13:24:09+00:00 · F111: publish thư mục mới mà không thay inode thư mục xuất hiện đồng thời như thế nào?
 
 - Phương án: (1) Mkdir đích thiếu với exist_ok=False rồi bootstrap qua cwd giữ inode; giữ output dở nếu lỗi, cùng cơ chế claim .git như đích rỗng đã có · (2) Giữ staging rồi thêm rename-noreplace riêng theo từng hệ điều hành
 - Chọn: Mkdir đích thiếu với exist_ok=False rồi bootstrap qua cwd giữ inode; giữ output dở nếu lỗi, cùng cơ chế claim .git như đích rỗng đã có
 - Lý do (tiêu chí chất lượng cuối): Path.rename ghi đè thư mục rỗng xuất hiện giữa chừng, làm cwd của người khác mất liên kết. Exclusive mkdir portable trong stdlib nhận một đích duy nhất; giữ inode và dữ liệu khi lỗi quan trọng hơn atomic publish. Chỉ ghi sau khi kiểm đầu vào. Từ chối nếu tiến trình khác tạo đích trước mkdir; không chuyển sang nhánh existing trong race. Thay D452 phần staging cho đích thiếu.
 - Đường lùi: Khôi phục staging chỉ khi có primitive no-replace portable và probe giữ inode qua race xanh; giữ regression cạnh tranh.
+
+### D-479 · 2026-11-14T02:39:45+00:00 · PR #513: nâng gói web-api-ts sau khi Biome kiểm YAML và kiểu Node vượt runtime?
+
+- Phương án: (1) Nâng Kysely, Biome và Vitest; giữ @types/node 24.19.2 và chuẩn hoá khoảng trắng trước chú thích trong mẫu xt.yaml · (2) Giữ cả nhóm ở bản cũ và đợi Dependabot tách các nâng cấp
+- Chọn: Nâng Kysely, Biome và Vitest; giữ @types/node 24.19.2 và chuẩn hoá khoảng trắng trước chú thích trong mẫu xt.yaml
+- Lý do (tiêu chí chất lượng cuối): Kiểu Node bám runtime 24; cách sinh YAML giữ nguyên giá trị, vẫn được formatter kiểm; lint, typecheck, build và 34 test trên PostgreSQL đã chạy
+- Đường lùi: Revert PR #513 để trở về lockfile và khoảng trắng mẫu trước nâng cấp
+
+### D-480 · 2026-11-14T03:11:52+00:00 · T-3729: kiểm việc quét lại TEST, DOC, HAR bằng cổng nào?
+
+- Phương án: (1) Kiểm sổ theo schema và đòi đúng ba nhóm có trạng thái đã quét · (2) Dùng audit check --strict cho cả sổ và mọi nợ phát hành
+- Chọn: Kiểm sổ theo schema và đòi đúng ba nhóm có trạng thái đã quét
+- Lý do (tiêu chí chất lượng cuối): Cổng cũ exit 0 khi cả ba nhóm chưa quét. Cổng theo phạm vi kiểm đúng việc và không buộc đóng nợ ngoài T-3729
+- Đường lùi: Revert thay đổi Gate của T-3729, giữ cổng phát hành audit --strict
