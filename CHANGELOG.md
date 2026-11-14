@@ -82,6 +82,8 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
 
 ### Changed
 
+- Lưu nguyên văn D-361…D-372 vào sổ tháng 11 theo D-314; giữ ID, thứ tự và trần tài liệu (D-482).
+
 - Lưu kho hai PLAN `factory-A`/`factory-BE` đã đóng theo ADR-0070 (D-457); sửa liên kết, giữ ID và trần byte.
 - `xt.py loop decide-prod` + guard (lý do chạm hàng rào: 🟠 AUD-SEC-541, audit delta 2026-11-11): quyết đề xuất "Khi
   chạy thật" là việc của chủ dự án nhưng phiên agent chạy được nó, làm hàng `prod_switch` PASS và `release-sign` (ADR-0074)
