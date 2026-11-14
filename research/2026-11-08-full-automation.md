@@ -269,7 +269,7 @@ Dữ kiện dùng mà còn chưa chắc: số bản chưa ký là 5 (không ph�
   https://github.blog/changelog/2026-11-02-pull_request_target-blocked-by-default-december-2 (đường dẫn như bản ghi tra
   cứu; đuôi slug đầy đủ chưa xác minh) · GitHub App manifest —
   https://docs.github.com/en/apps/sharing-github-apps/registering-a-github-app-from-a-manifest · artifact attestations —
-  https://docs.github.com/en/actions/how-tos/secure-your-work/use-artifact-attestations/use-artifact-attestation ·
+  https://docs.github.com/en/actions/how-tos/secure-your-work/use-artifact-attestations/use-artifact-attestations ·
   environments — https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/manage-environments
 - Claude Code: scheduled tasks — https://code.claude.com/docs/en/routines · cloud —
   https://code.claude.com/docs/en/claude-code-on-the-web · permissions — https://code.claude.com/docs/en/permissions ·
