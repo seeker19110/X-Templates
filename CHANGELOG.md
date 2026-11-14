@@ -183,6 +183,9 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
   Bằng chứng chặn oan: [mẫu 505 lượt lệnh thật](research/evidence/2026-11-13-guard-parameter.json), 464 thân lệnh,
   0 lượt đổi quyết định trên mẫu; không suy rộng thành bảo đảm cho toàn lịch sử. Gate gốc được ghi bằng `loop record`.
 
+- T-3728: skill `autopilot` theo hành động `stage-approve` của `loop next-step` khi dự án bật tự nghiệm thu MVP
+  (AUD-XFEAT-048). Cập nhật số đo biên dịch guard trong chú thích `_lib.sh` theo audit 2026-11-11 (AUD-PERF-031).
+
 - Gói `web-api-ts` dùng Kysely 0.29.8, Biome 2.6.6 và Vitest 5.1.0 (#513, D-479). Giữ kiểu Node 24
   theo runtime của gói. Chuẩn hoá khoảng trắng trước chú thích trong mẫu `xt.yaml` để qua formatter YAML của Biome.
 
