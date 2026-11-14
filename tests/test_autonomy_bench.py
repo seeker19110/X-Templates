@@ -161,7 +161,12 @@ class AutonomyBenchLoopTest(unittest.TestCase):
             ("add", "tracked"),
             ("-c", "user.name=fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "original"),
         ):
-            subprocess.run(["git", "-C", str(root), *args], env=env, capture_output=True, check=True)
+            subprocess.run(
+                ["git", "-C", str(root), "-c", "maintenance.auto=false", *args],
+                env=env,
+                capture_output=True,
+                check=True,
+            )
         (root / "tracked").write_text("caller dirty worktree", encoding="utf-8")
         return root
 
