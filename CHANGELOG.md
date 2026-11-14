@@ -200,6 +200,10 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
 
 - `xt.py doctor` nạp guard của dự án một lần để kiểm cả bộ lệnh mẫu (AUD-PERF-028, phần đầu T-3726).
 
+- Vòng tự động (T-3736/T-3737, AUD-HAR-378/379, D-442): `loop init` giữ cờ chặn, lý do và thời điểm qua cả đổi PLAN
+  và `--force`; chỉ `loop unblock --reason …` mới gỡ cờ và ghi can thiệp. Hàng `verify`/`release-sign` chỉ đúng lối
+  phục hồi khi hết ngân sách, mất PLAN hoặc chưa khởi tạo, theo cây làm việc chứa state; tạo đợt mới vẫn phải gỡ cờ.
+
 - AUD-DOC-291: cập nhật ngày README gói `web-api-ts`, trỏ tới phiên bản starter đang ghim và mô tả cấu hình
   transaction hiện dùng của runner migration.
 

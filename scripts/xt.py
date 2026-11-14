@@ -7312,6 +7312,9 @@ def _carry_previous(prev: Dict[str, Any], state: Dict[str, Any], base: Path) -> 
     tasks = parse_plan(base / state["plan"])
     _carry_interventions(prev, state)
     notes, same = [], (prev.get("plan"), prev.get("blueprint")) == (state["plan"], state["blueprint"])
+    if prev.get("blocked"):  # AUD-HAR-379: đổi đợt/ngân sách không phải quyết định gỡ chặn
+        state.update({k: prev[k] for k in ("blocked", "blocked_reason", "blocked_at") if k in prev})
+        notes.append(f"⚠ Cờ chặn của vòng trước giữ nguyên — {EXIT_UNBLOCK}")
     keep, renamed = _deferred_to_keep(prev, state, base, tasks)
     dropped = sorted(set(_deferred(prev)) - set(keep) - set(renamed)) if not same else []
     if renamed:
@@ -9246,13 +9249,16 @@ def _loop_block_reason(st: Dict[str, Any], base: Path) -> str:
     why += [f"{t} đỏ {runs[t]} lần (trần {_max_task_runs(st)})" for t in _task_runs_blocking(st)]
     if not why:  # chỉ còn verdict cuối `blocked` của vòng đã kết thúc
         why.append(f"kết thúc `blocked` — {st['final_verdict'].get('reason') or 'không ghi lý do'}")
-    recovery = "chưa có vòng lặp → `loop init`"
+    stop = "`loop stop` rồi " if st.get("active") else ""
+    end = f"chưa khởi tạo vòng → {stop}`loop init --plan <mới>`"
     if st.get("started"):
         try:
-            recovery = _halted_loop_exit(st, base)
+            end = _halted_loop_exit(st, base)
         except OSError:  # PLAN mất quyền đọc hoặc bị dời trong lúc kiểm
-            recovery = _plan_lost_exit(st, bool(st.get("active")) and not _budget_spent(st))
-    return f"vòng đang bị chặn ({'; '.join(why)}) — {recovery}"
+            end = _plan_lost_exit(st, bool(st.get("active")) and not _budget_spent(st))
+    if st.get("blocked") and "`loop unblock" not in end:
+        end += f"; cờ chặn giữ nguyên ở đợt mới → {EXIT_UNBLOCK}"
+    return f"vòng đang bị chặn ({'; '.join(why)}) — {end}"
 
 
 def _final_verdict(st: Dict[str, Any]) -> Optional[str]:
@@ -16441,6 +16447,90 @@ def _bench_ask_removed(inp: Dict[str, Any], env: BenchEnv) -> bool:
     return str(inp["rule"]) in report["ask_remove"]
 
 
+def _bench_loop_call(*args: str) -> None:
+    """Chỉ các bước `loop` cố định của fixture bên dưới; lỗi CLI là ca không chạy được, không phải đạt."""
+    output = io.StringIO()
+    with contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
+        rc = main(["loop", *args])
+    if rc:
+        raise BenchInputError(f"loop {' '.join(args)} exit {rc}: {output.getvalue()[-500:]}")
+
+
+@contextlib.contextmanager
+def _bench_loop_env(base: Path) -> Iterator[None]:
+    """Repo fixture không nhận định tuyến/config/hook/ký từ người gọi; CLI và git con cùng dùng môi trường này."""
+    for name in (".git-hooks", ".git-template"):
+        (base / name).mkdir()
+    previous = {k: v for k, v in os.environ.items() if k.startswith("GIT_")}
+    try:
+        for key in previous:
+            del os.environ[key]
+        os.environ.update(
+            GIT_CONFIG_NOSYSTEM="1",
+            GIT_CONFIG_SYSTEM=os.devnull,
+            GIT_CONFIG_GLOBAL=os.devnull,
+            GIT_TEMPLATE_DIR=str(base / ".git-template"),
+            GIT_CEILING_DIRECTORIES=str(base.parent),
+            GIT_TERMINAL_PROMPT="0",
+            GIT_CONFIG_COUNT="3",
+        )
+        for i, (key, value) in enumerate(
+            (("core.hooksPath", str(base / ".git-hooks")), ("commit.gpgsign", "false"), ("tag.gpgsign", "false"))
+        ):
+            os.environ[f"GIT_CONFIG_KEY_{i}"], os.environ[f"GIT_CONFIG_VALUE_{i}"] = key, value
+        yield
+    finally:
+        for key in list(os.environ):
+            if key.startswith("GIT_"):
+                del os.environ[key]
+        os.environ.update(previous)
+
+
+def _bench_loop_block(inp: Dict[str, Any], env: BenchEnv) -> Dict[str, Any]:
+    """AUD-HAR-378/379: CLI thật tạo cờ, chuyển đợt và gỡ có dấu; hàng verify thật quyết định và chỉ lối ra."""
+    scenario = inp.get("scenario")
+    if scenario not in ("carry", "expired"):
+        raise BenchInputError("loop_block cần scenario carry hoặc expired")
+    plan = "- [x] `T-001` cổng mẫu — Gate: `true`\n"
+    base = env.scratch(
+        {
+            "docs/autopilot/PLAN.md": plan,
+            "docs/autopilot/PLAN-next.md": plan,
+            "BLUEPRINT.md": "---\nkind: blueprint\nprofile: cli-tool\nscale: S\n---\n"
+            "- [x] `BASE-X-001` **MUST** mẫu — Kiểm: `true`\n",
+            ".gitignore": ".autopilot/\n",
+        }
+    )
+    with _bench_loop_env(base), _env_patch("CLAUDE_PROJECT_DIR", str(base)), contextlib.chdir(base):
+        for args in (
+            ("init", "-q", "-b", "main"),
+            ("add", "--", "."),
+            ("-c", "user.name=fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "fixture"),
+        ):
+            if _git(base, *args).returncode:
+                raise BenchInputError("không dựng được repo fixture loop_block")
+        _bench_loop_call("init", "--hours", "0" if scenario == "expired" else "24")
+        _bench_loop_call("verify", "--all")
+        _bench_loop_call("block", "--reason", "fixture cần người quyết")
+        if scenario == "carry":
+            _bench_loop_call("stop", "--reason", "fixture đổi đợt")
+            _bench_loop_call("init", "--plan", "docs/autopilot/PLAN-next.md")
+            _bench_loop_call("verify", "--all")
+        if inp.get("recover"):
+            if scenario == "expired":
+                _bench_loop_call("init", "--plan", "docs/autopilot/PLAN-next.md")
+            _bench_loop_call("unblock", "--reason", "fixture đã duyệt")
+            _bench_loop_call("verify", "--all")
+        row, st = _release_verify(base), read_state(base) or {}
+    hint = row["evidence"]
+    return {
+        "green": row["result"] == "PASS",
+        "blocked": bool(st.get("blocked")),
+        "recovery": "init" if "`loop init" in hint else "unblock" if "`loop unblock" in hint else "",
+        "unblocked": len(_interventions(st, "unblocked")),
+    }
+
+
 # Nhóm harness: tái hiện REMEDIATION §2 ngoài PR/rollup/review/guard. `green` = máy coi là đạt/cho qua.
 BENCH_HARNESS: Dict[str, Callable[[Dict[str, Any], BenchEnv], bool]] = {
     "same_command": lambda inp, env: same_command(str(inp["a"]), str(inp["b"])),  # bằng chứng tính cho Gate khác nghĩa
@@ -16452,9 +16542,11 @@ BENCH_HARNESS: Dict[str, Callable[[Dict[str, Any], BenchEnv], bool]] = {
 
 
 def _bench_harness(inp: Dict[str, Any], env: BenchEnv) -> Dict[str, Any]:
+    if inp.get("kind") == "loop_block":
+        return _bench_loop_block(inp, env)
     fn = BENCH_HARNESS.get(str(inp.get("kind")))
     if fn is None:
-        raise BenchInputError(f"kind lạ: {inp.get('kind')!r} (có: {', '.join(BENCH_HARNESS)})")
+        raise BenchInputError(f"kind lạ: {inp.get('kind')!r} (có: {', '.join([*BENCH_HARNESS, 'loop_block'])})")
     return {"green": fn(inp, env)}
 
 

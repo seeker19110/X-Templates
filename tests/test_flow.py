@@ -519,7 +519,7 @@ class FlowTest(TmpRepoCase):
     @flow("FLOW-13")
     def test_flow_13_block_mid_batch_then_respec_is_same_batch(self) -> None:
         """S3 với `loop block` + Stop hook (`final_verdict: blocked`, review #319 M7): bị chặn không đóng đợt — sửa spec
-        rồi `loop init --force` cùng PLAN-2 vẫn là đợt 2 → `replan`."""
+        rồi `loop init --force` cùng PLAN-2 vẫn giữ chặn và đợt 2; gỡ chặn có dấu rồi kiểm lại → `replan`."""
         self.audit_book(self.git("rev-parse", "HEAD"))
         two = (
             "AUD-ARCH-001 | 🟠 | mở | lỗi | đo được: x | `true` | —",
@@ -537,6 +537,14 @@ class FlowTest(TmpRepoCase):
         self.assertNotIn("done", self.last_mark())
         plan2.write_text(PLAN.replace("việc", "đợt 2 việc sửa spec"), encoding="utf-8")
         self.finish_batch("--plan", "docs/autopilot/PLAN-2.md", "--force")
+        self.assertEqual([b["open"] for b in self.state()["objective"]["batches"]], [2, 1])
+        self.assertEqual(self.next_step()["action"], "blocked")
+        self.assertTrue(self.state()["blocked"])
+        batch_at = self.last_mark()["at"]
+        self.assertEqual(self.loop("unblock", "--reason", "đã duyệt spec sửa")[0], 0)
+        self.assertEqual(self.state()["unblocked"][-1]["reason"], "đã duyệt spec sửa")
+        self.assertEqual(self.loop("verify", "--all")[0], 0)
+        self.assertEqual(self.last_mark()["at"], batch_at)
         self.assertEqual([b["open"] for b in self.state()["objective"]["batches"]], [2, 1])
         self.assertEqual(self.next_step()["action"], "replan")
 
