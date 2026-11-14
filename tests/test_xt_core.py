@@ -1387,10 +1387,27 @@ class LoopRecordBranchesTest(TmpMixin, RealAutopilotUntouchedMixin, unittest.Tes
     def test_command_identity_blueprint_checks_not_merged(self):
         """`run_blueprint_checks` chỉ dùng chung kết quả cho lệnh CÙNG nghĩa."""
         checks = [{"id": "A", "cmd": "echo '$X'"}, {"id": "B", "cmd": 'echo "$X"'}, {"id": "C", "cmd": "echo  '$X'"}]
-        with unittest.mock.patch.object(xt, "run_gate_shell", return_value=(0, "ok")) as run:
+        with (
+            unittest.mock.patch.object(xt, "run_gate_shell", return_value=(0, "ok")) as run,
+            unittest.mock.patch.object(xt, "canonical_command", wraps=xt.canonical_command) as normalize,
+        ):
             out = xt.run_blueprint_checks(checks, self.base, 30)
         self.assertEqual(run.call_count, 2)
+        self.assertEqual(normalize.call_count, len(checks))
         self.assertEqual([c["exit_code"] for c in out], [0, 0, 0])
+
+    def test_command_identity_blueprint_checks_with_invalid_quote(self):
+        checks = [
+            {"id": "A", "cmd": "echo 'text"},
+            {"id": "B", "cmd": "  echo 'text "},
+            {"id": "C", "cmd": "echo 'text'"},
+            {"id": "D", "cmd": ""},
+        ]
+        with unittest.mock.patch.object(xt, "run_gate_shell", side_effect=[(1, "failed"), (0, "ok")]) as run:
+            out = xt.run_blueprint_checks(checks, self.base, 30)
+        self.assertEqual(run.call_count, 2)
+        self.assertEqual([c["exit_code"] for c in out], [1, 1, 0, 2])
+        self.assertEqual(out[0]["output_tail"], out[1]["output_tail"])
 
     def test_invalid_timeout_env_returns_2_and_writes_nothing(self):
         os.environ["XT_RECORD_TIMEOUT"] = "abc"
