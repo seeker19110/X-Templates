@@ -610,3 +610,10 @@
 - Chọn: Xếp hai sửa tài liệu vào nhóm tài liệu/bằng chứng có sẵn, giữ review nguồn sống và kiểm liên kết
 - Lý do (tiêu chí chất lượng cuối): Nhóm cũ giữ nghĩa/ngưỡng, thêm hai ID. Review độc lập nguồn sống: workflow ghim/API environment/metadata; receipt chưa xác minh, không tạo ca giả.
 - Đường lùi: Có adapter triển khai thật: thêm ca, gỡ hai ID khỏi scope.
+
+### D-479 · 2026-11-14T02:39:45+00:00 · PR #513: nâng gói web-api-ts sau khi Biome kiểm YAML và kiểu Node vượt runtime?
+
+- Phương án: (1) Nâng Kysely, Biome và Vitest; giữ @types/node 24.19.2 và chuẩn hoá khoảng trắng trước chú thích trong mẫu xt.yaml · (2) Giữ cả nhóm ở bản cũ và đợi Dependabot tách các nâng cấp
+- Chọn: Nâng Kysely, Biome và Vitest; giữ @types/node 24.19.2 và chuẩn hoá khoảng trắng trước chú thích trong mẫu xt.yaml
+- Lý do (tiêu chí chất lượng cuối): Kiểu Node bám runtime 24; cách sinh YAML giữ nguyên giá trị, vẫn được formatter kiểm; lint, typecheck, build và 34 test trên PostgreSQL đã chạy
+- Đường lùi: Revert PR #513 để trở về lockfile và khoảng trắng mẫu trước nâng cấp

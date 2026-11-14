@@ -181,6 +181,8 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
 
 - AUD-DOC-273/274: báo cáo pilot phân biệt số đo chưa xác minh với bằng chứng CI; PLAN chỉ rõ cổng Production, reviewer bắt buộc và phê duyệt đúng run, theo cấu hình đọc ngày 2026-11-13. Chỉ sửa tài liệu, không thay quyền triển khai.
 - D-451: xếp AUD-DOC-273/274 vào nhóm tài liệu/bằng chứng sẵn có của corpus tự chủ; giữ nguyên định nghĩa nhóm, ca kiểm và ngưỡng.
+- Gói `web-api-ts` dùng Kysely 0.29.8, Biome 2.6.6 và Vitest 5.1.0 (#513, D-479). Giữ kiểu Node 24
+  theo runtime của gói. Chuẩn hoá khoảng trắng trước chú thích trong mẫu `xt.yaml` để qua formatter YAML của Biome.
 
 - Guard — ADR-0076 lát 2 (T-3762; lý do chạm hàng rào: bốn 🔴 có từ trước cùng gốc AUD-SEC-644, D-430/D-431/D-435 — chỉ
   thêm chặn, mã `BUDGET`; quyết định cuối không nhẹ đi — luật cũ chặn trên cùng cách đọc giữ mã cũ, còn mã/lý do có thể
