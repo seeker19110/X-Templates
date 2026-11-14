@@ -8,6 +8,9 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
 
 ### Added
 
+- [ADR-0077](docs/adr/0077-deployment-receipts.md) (T-3841, D-422…D-424) chốt cấu hình theo môi trường, receipt của
+  bản đang phục vụ, hàng `deploy` trong `release-check` và đích dev mặc định của gói `web-api-ts`. Mã triển khai
+  thuộc các lát T-3842 đến T-3844 và T-3860.
 - ADR-0076 lát 0 (T-3760; lý do chạm hàng rào: dựng lưới đối chứng cho các lát cổng tập con dương — chỉ thêm ca và hằng,
   không đổi quyết định nào của guard): 150 ca `control` `adr76-ctl-*` trong `tests/fixtures/autonomy/guard.json` lấy từ
   lệnh agent chạy theo quy trình (`xt.py`, `dev-task.sh`, Gate, git/gh đọc-ghi lành, commit/PR bằng heredoc, `rm -rf
@@ -74,6 +77,7 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
 
 ### Changed
 
+- Lưu kho hai PLAN `factory-A`/`factory-BE` đã đóng theo ADR-0070 (D-457); sửa liên kết, giữ ID và trần byte.
 - `xt.py loop decide-prod` + guard (lý do chạm hàng rào: 🟠 AUD-SEC-541, audit delta 2026-11-11): quyết đề xuất "Khi
   chạy thật" là việc của chủ dự án nhưng phiên agent chạy được nó, làm hàng `prod_switch` PASS và `release-sign` (ADR-0074)
   tự ký. Lệnh nay từ chối (exit 2, sổ không đổi) khi có biến môi trường phiên agent (như `stage approve`), và guard chặn

@@ -625,9 +625,23 @@
 - Lý do (tiêu chí chất lượng cuối): Hai ngoại lệ parser thử nghiệm đều bị review độc lập tìm ra bypass thật bằng sentinel vô hại. Theo D-415, viết lại lệnh vào tập con đọc chắc; giữ fallback 2, tập test, runner, công thức và ngưỡng. Test so sánh 12 đầu vào số và ca nproc lỗi cho kết quả như cũ; hai payload phải vẫn BUDGET.
 - Đường lùi: Hoàn lại cú pháp lệnh khi có parser nháy đủ bằng chứng; không nới guard hay cổng để phục hồi CI.
 
+### D-457 · 2026-11-13T13:19:31+00:00 · Tạo chỗ cho các lát harden và xưởng dưới trần docs/autopilot bằng cách nào?
+
+- Phương án: (1) Dời hai PLAN factory-A và factory-BE đã đóng, không còn trong PROGRESS, vào docs/archive/autopilot theo ADR-0070 · (2) Tăng trần byte docs/autopilot
+- Chọn: Dời hai PLAN factory-A và factory-BE đã đóng, không còn trong PROGRESS, vào docs/archive/autopilot theo ADR-0070
+- Lý do (tiêu chí chất lượng cuối): Hai PLAN có 13 task đều đóng, không được PROGRESS nhắc là việc sống; dời giữ nguyên lịch sử và số ID, viết lại liên kết. Không đổi trần hoặc dời PLAN đang chạy.
+- Đường lùi: git mv ngược và hoàn lại liên kết trong PR riêng.
+
 ### D-479 · 2026-11-14T02:39:45+00:00 · PR #513: nâng gói web-api-ts sau khi Biome kiểm YAML và kiểu Node vượt runtime?
 
 - Phương án: (1) Nâng Kysely, Biome và Vitest; giữ @types/node 24.19.2 và chuẩn hoá khoảng trắng trước chú thích trong mẫu xt.yaml · (2) Giữ cả nhóm ở bản cũ và đợi Dependabot tách các nâng cấp
 - Chọn: Nâng Kysely, Biome và Vitest; giữ @types/node 24.19.2 và chuẩn hoá khoảng trắng trước chú thích trong mẫu xt.yaml
 - Lý do (tiêu chí chất lượng cuối): Kiểu Node bám runtime 24; cách sinh YAML giữ nguyên giá trị, vẫn được formatter kiểm; lint, typecheck, build và 34 test trên PostgreSQL đã chạy
 - Đường lùi: Revert PR #513 để trở về lockfile và khoảng trắng mẫu trước nâng cấp
+
+### D-480 · 2026-11-14T03:11:52+00:00 · T-3729: kiểm việc quét lại TEST, DOC, HAR bằng cổng nào?
+
+- Phương án: (1) Kiểm sổ theo schema và đòi đúng ba nhóm có trạng thái đã quét · (2) Dùng audit check --strict cho cả sổ và mọi nợ phát hành
+- Chọn: Kiểm sổ theo schema và đòi đúng ba nhóm có trạng thái đã quét
+- Lý do (tiêu chí chất lượng cuối): Cổng cũ exit 0 khi cả ba nhóm chưa quét. Cổng theo phạm vi kiểm đúng việc và không buộc đóng nợ ngoài T-3729
+- Đường lùi: Revert thay đổi Gate của T-3729, giữ cổng phát hành audit --strict
