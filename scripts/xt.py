@@ -13151,14 +13151,15 @@ _DECISIONS_STEM, _DECISIONS_SUFFIX = os.path.splitext(DECISIONS_LOG)
 # Bản tháng của sổ chính (`decision_logs`, T-3651): `docs/autopilot/DECISIONS-YYYY-MM.md` — mẫu glob không có `*`,
 # cùng nghĩa ở `fnmatch` và pathspec `:(glob)`; chỉ thư mục sổ chính (AUD-HAR-329).
 DECISIONS_MONTH = _DECISIONS_STEM + DECISION_MONTH_GLOB + _DECISIONS_SUFFIX
+DEPLOY_LEDGER = "docs/ops/DEPLOYS.json"
 
 
 def _subject_excluded(path: str) -> bool:
     """File ngoài `subject.content` (D-393): `GO-NO-GO*.md` nằm TRỰC TIẾP ở `GO_NO_GO_DIRS`, sổ `DECISIONS_LOG` và bản
-    tháng của nó (`DECISIONS_MONTH`, AUD-HAR-329), `PROGRESS.md` gốc, `.autopilot/` — hẹp hơn `_signoff_excluded` (theo
-    tên ở mọi cấp: `src/DECISIONS.md`, `src/DECISIONS-2026-10.md` là mã)."""
+    tháng của nó (`DECISIONS_MONTH`, AUD-HAR-329), sổ triển khai (ADR-0077), `PROGRESS.md` gốc, `.autopilot/` — hẹp hơn
+    `_signoff_excluded` (theo tên ở mọi cấp: `src/DECISIONS.md`, `src/DECISIONS-2026-10.md` là mã)."""
     folder, _, name = path.rpartition("/")
-    if path.startswith(".autopilot/") or path in ("PROGRESS.md", DECISIONS_LOG):
+    if path.startswith(".autopilot/") or path in ("PROGRESS.md", DECISIONS_LOG, DEPLOY_LEDGER):
         return True
     if fnmatch.fnmatchcase(path, DECISIONS_MONTH):
         return True
@@ -13169,6 +13170,7 @@ SUBJECT_EXCLUDE = [  # pathspec cùng tập `_subject_excluded`; `glob`: `*` kh�
     *(f":(exclude,glob){'' if d == '.' else d + '/'}GO-NO-GO*.md" for d in GO_NO_GO_DIRS),
     f":(exclude,literal){DECISIONS_LOG}",
     f":(exclude,glob){DECISIONS_MONTH}",
+    f":(exclude,glob){DEPLOY_LEDGER[:-1]}[{DEPLOY_LEDGER[-1]}]",  # ký tự glob đơn để Git không loại thư mục cùng tên
     ":(exclude,literal)PROGRESS.md",
 ]
 

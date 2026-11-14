@@ -182,6 +182,8 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
 
 ### Fixed
 
+- `release-check` (ADR-0077, D-422): loại đúng `docs/ops/DEPLOYS.json` khỏi `subject.content` để ghi sổ triển khai
+  và commit sổ mà vẫn giữ định danh nội dung của ứng viên.
 - Guard — ADR-0076 lát 2 (T-3762; lý do chạm hàng rào: bốn 🔴 có từ trước cùng gốc AUD-SEC-644, D-430/D-431/D-435 — chỉ
   thêm chặn, mã `BUDGET`; quyết định cuối không nhẹ đi — luật cũ chặn trên cùng cách đọc giữ mã cũ, còn mã/lý do có thể
   thành `BUDGET` ở hai cách đọc `LitWord`, bản bung brace, câu hỏi nhường của `_go_patch_asks`, câu hỏi BUDGET của luật
