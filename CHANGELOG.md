@@ -8,6 +8,8 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
 
 ### Added
 
+- `autonomy-bench` phủ AUD-CI-033 bằng request HTTP giả, gồm URL Unicode và URL đã mã hoá.
+
 - `autonomy-bench` phủ AUD-HAR-407…410: thiếu bằng chứng ruleset, nguồn check, lỗi cấu hình review và tài liệu chính sách merge.
 
 - Audit TEST/HAR sau #558 ghi hai sai lệch cổng merge, hai vấn đề cấu hình/tài liệu và một khoảng trống test; các nhóm vẫn chưa quét đủ.
