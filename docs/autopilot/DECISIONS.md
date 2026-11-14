@@ -533,6 +533,26 @@
 - Chọn: Thêm adapter loop_block giới hạn, chạy CLI thật và kiểm trạng thái/hướng dẫn
 - Lý do (tiêu chí chất lượng cuối): Hành vi block/init/unblock là quyết định tự chủ nên phải có bằng chứng corpus. Hai kịch bản carry/expired, mỗi kịch bản có control phục hồi; mutation bỏ cờ phải false_green, sai lối ra phải mismatch. Không gắn nhãn vào ca không liên quan hay nới yêu cầu phủ.
 - Đường lùi: Tách adapter bằng PR riêng khi có nhóm corpus vòng lặp tương đương, giữ các ca và không khai đóng nợ nếu mất coverage.
+### D-440 · 2026-11-13T10:26:25+00:00 · Lát 4: cờ exec ngoài -a TÊN (AUD-SEC-659) và {fd}> đứng đầu lệnh (AUD-SEC-657/700) — BUDGET như bảng P0 của ADR-0076 hay đọc lại như bash?
+
+- Phương án: (1) BUDGET mọi lệnh có luật mà exec có cờ ngoài -a TÊN hoặc có {fd}> ở đầu (đúng chữ ADR; phải đổi ca đối chứng d432-ctl-432-exec-al (exec -al bash -c true, #433)) · (2) Đọc lại như bash: cụm cờ exec theo getopt (_wrapper_opt_takes_next, như _exec_login) và {tên} coi như số fd trong _strip_prefixes — dạng nguy hiểm ra cùng mã dạng trơn, dạng lành vẫn qua
+- Chọn: Đọc lại như bash: cụm cờ exec theo getopt (_wrapper_opt_takes_next, như _exec_login) và {tên} coi như số fd trong _strip_prefixes — dạng nguy hiểm ra cùng mã dạng trơn, dạng lành vẫn qua
+- Lý do (tiêu chí chất lượng cuối): (1) đúng và an toàn: đọc lại cho đúng mã luật cũ của dạng trơn (exec -la x git push --force → RULE_DENY như dạng không cờ; {fd}>o git reset --hard → RULE_DENY) — đóng đúng lỗ 657/659/700 mà KHÔNG làm đổi mã luật; (3) bền/đơn giản: dùng lại cơ chế getopt đã có của _exec_login thay vì liệt kê; (4) trải nghiệm: không đụng ca #433 (exec -al bash -c true) và đo thêm 0 lệnh thật bị chặn nếu chọn BUDGET cho {fd}> nên không cần siết thêm. Ngoại lệ ADR chỉ là lựa chọn cách đóng, không nới luật.
+- Đường lùi: Chuyển sang BUDGET đúng chữ ADR (exec cờ lạ, {fd}> đầu lệnh có luật), đổi ca d432-ctl-432-exec-al sang BUDGET và ghi lý do
+
+### D-441 · 2026-11-13T10:27:22+00:00 · docs/autopilot vượt trần byte 318 B sau D-440 và T-3790: cắt chỗ nào?
+
+- Phương án: (1) Dời PLAN-harden-2026-11-05.md (đã đóng, 0 task mở, 3,5 KB) sang docs/archive/autopilot theo ADR-0070 · (2) Nới trần byte của docs/autopilot
+- Chọn: Dời PLAN-harden-2026-11-05.md (đã đóng, 0 task mở, 3,5 KB) sang docs/archive/autopilot theo ADR-0070
+- Lý do (tiêu chí chất lượng cuối): (1) đúng quy tắc ADR-0043: cắt chỗ khác, không nới trần; PLAN không còn task mở, PROGRESS không nhắc, các chỗ nhắc (ADR-0069, DECISIONS, CHANGELOG, guard.py) chỉ là văn xuôi nên không có liên kết nào hỏng; xt.py vẫn quét docs/archive/autopilot khi cấp số task nên T-NNNN không tái sử dụng.
+- Đường lùi: git mv ngược PLAN-harden-2026-11-05.md về docs/autopilot
+
+### D-443 · 2026-11-13T11:11:58+00:00 · Khôi phục CI #530 khi test_fast có nháy lồng ngoài ngữ pháp P0?
+
+- Phương án: (1) Mở ngoại lệ số học có nháy lồng trong guard · (2) Giữ guard; lấy nproc vào biến rồi tính cùng ceil(N/2)
+- Chọn: Giữ guard; lấy nproc vào biến rồi tính cùng ceil(N/2)
+- Lý do (tiêu chí chất lượng cuối): Hai ngoại lệ parser thử nghiệm đều bị review độc lập tìm ra bypass thật bằng sentinel vô hại. Theo D-415, viết lại lệnh vào tập con đọc chắc; giữ fallback 2, tập test, runner, công thức và ngưỡng. Test so sánh 12 đầu vào số và ca nproc lỗi cho kết quả như cũ; hai payload phải vẫn BUDGET.
+- Đường lùi: Hoàn lại cú pháp lệnh khi có parser nháy đủ bằng chứng; không nới guard hay cổng để phục hồi CI.
 ### D-445 · 2026-11-13T11:12:01+00:00 · Ngoặc trong tham số Bash không nháy làm lệch tokenizer, nên chặn ở đâu?
 
 - Phương án: (1) Mở rộng parser để hiểu mọi dạng tham số lồng · (2) Precheck lexical theo ngữ cảnh nháy, ngoài tập con trả BUDGET
