@@ -34,6 +34,37 @@ class InstallTest(unittest.TestCase):
     def run_install(self, *extra) -> int:
         return install.main([str(self.target), "--label", "test", *extra])
 
+    def test_install_requires_cpython_315_minor_before_writing(self):
+        for implementation, version in (("cpython", (3, 14, 10)), ("cpython", (3, 16, 0)), ("pypy", (3, 15, 2))):
+            with (
+                self.subTest(implementation=implementation, version=version),
+                mock.patch.object(sys, "version_info", version),
+                mock.patch.object(sys, "version", ".".join(map(str, version))),
+                mock.patch.object(sys.implementation, "name", implementation),
+                redirect_stdout(io.StringIO()) as out,
+                redirect_stderr(io.StringIO()) as err,
+            ):
+                self.assertEqual(self.run_install(), 2)
+                self.assertEqual(list(self.target.iterdir()), [])
+                self.assertEqual(out.getvalue(), "")
+                self.assertIn("CPython 3.15.x", err.getvalue())
+                self.assertIn(".".join(map(str, version)), err.getvalue())
+
+    def test_install_accepts_a_cpython_315_patch(self):
+        with mock.patch.object(sys, "version_info", (3, 15, 4)):
+            self.assertEqual(self.run_install(), 0)
+        self.assertTrue((self.target / ".xtemplates" / "VERSION").is_file())
+
+    def test_install_help_remains_available_on_unsupported_python(self):
+        with (
+            mock.patch.object(sys, "version_info", (3, 14, 10)),
+            redirect_stdout(io.StringIO()) as out,
+            self.assertRaises(SystemExit) as exit_status,
+        ):
+            install.main(["--help"])
+        self.assertEqual(exit_status.exception.code, 0)
+        self.assertIn("CPython 3.15.x", out.getvalue())
+
     def test_fresh_install_layout(self):
         self.assertEqual(self.run_install(), 0)
         self.assertTrue((self.target / ".xtemplates" / "framework" / "00-method" / "conventions.md").exists())
@@ -2158,6 +2189,7 @@ class InstallUpgradeTest(unittest.TestCase):
             lines,
         )
         self.assertFalse([ln for ln in lines if "khi nâng từ 3.4.1" in ln])  # bước của 3.5.0 (≤ bản đã cài)
+        self.assertTrue(any("Dự án đích cần chọn CPython 3.15" in ln for ln in lines), lines)
         per_section: dict[str, list[str]] = {}
         for ln in lines:
             if ln.startswith("[install]   ["):

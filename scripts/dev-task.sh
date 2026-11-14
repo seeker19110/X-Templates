@@ -62,6 +62,8 @@ if [ "$(basename "$_parent")" = ".xtemplates" ]; then _parent="$(dirname "$_pare
 ROOT="${CLAUDE_PROJECT_DIR:-$_parent}"
 DECL="$ROOT/.claude/project-commands.sh"
 YAML="$ROOT/xt.yaml"
+# Runtime riêng cho CLI khung trong CI mẫu. Lệnh của dự án vẫn dùng PATH của dự án.
+FRAMEWORK_PYTHON="${XT_FRAMEWORK_PYTHON:-python3}"
 
 log() { printf '[dev-task] %s\n' "$*" >&2; }
 
@@ -255,9 +257,9 @@ loop_noop() { # $1=task $2=lệnh -> true (kèm log) nếu autopilot đang chạ
 # script này → chạy như cũ (fail-open về luồng; dự án chưa cài harness).
 guard_ok() { # $1=lệnh -> 0 nếu được chạy
   local xt; xt="$(dirname "$0")/xt.py"
-  [ -f "$xt" ] && command -v python3 >/dev/null 2>&1 || return 0
+  [ -f "$xt" ] && command -v "$FRAMEWORK_PYTHON" >/dev/null 2>&1 || return 0
   # Chỉ exit 126 (guard cấm) là chặn; xt.py sập (python cũ…) → chạy như cũ (fail-open về luồng, ADR-0002).
-  CLAUDE_PROJECT_DIR="$ROOT" python3 "$xt" guard-check -- "$1"
+  CLAUDE_PROJECT_DIR="$ROOT" "$FRAMEWORK_PYTHON" "$xt" guard-check -- "$1"
   [ "$?" -ne 126 ]
 }
 # gate/gate-fast: hỏi guard MỘT lần cho mọi lệnh của lượt (stdin, các lệnh cách nhau bằng NUL — lệnh nhiều dòng của
@@ -273,8 +275,8 @@ guard_cached() { # $1=lệnh -> 0 nếu đúng lệnh này đã qua guard trong 
 }
 guard_ok_all() { # $@=lệnh -> 126 nếu guard cấm lệnh nào, 0 nếu được chạy (ghi GUARDED_CMDS khi xt.py xác nhận)
   local xt n c joined=""; xt="$(dirname "$0")/xt.py"
-  [ -f "$xt" ] && command -v python3 >/dev/null 2>&1 || return 0
-  n="$(printf '%s\0' "$@" | CLAUDE_PROJECT_DIR="$ROOT" python3 "$xt" guard-check --stdin)"
+  [ -f "$xt" ] && command -v "$FRAMEWORK_PYTHON" >/dev/null 2>&1 || return 0
+  n="$(printf '%s\0' "$@" | CLAUDE_PROJECT_DIR="$ROOT" "$FRAMEWORK_PYTHON" "$xt" guard-check --stdin)"
   case "$?" in
     126) return 126 ;;
     0) [ -n "$n" ] && { for c in "$@"; do joined="$joined$GSEP$c$GSEP"; done; GUARDED_CMDS="$joined"; } ;;
@@ -398,8 +400,8 @@ cov_dir() { # $1=thư mục → export XT_COV_DIR (đường dẫn tuyệt đố
 }
 xt_py() { # chạy xt.py cạnh script này (cần cho chia theo trọng số); thiếu python3/xt.py → log, 2
   local xt; xt="$(dirname "$0")/xt.py"
-  [ -f "$xt" ] && command -v python3 >/dev/null 2>&1 || { log "$TASK: cần python3 và $xt (khoá 'test_weights')"; return 2; }
-  CLAUDE_PROJECT_DIR="$ROOT" python3 "$xt" "$@"
+  [ -f "$xt" ] && command -v "$FRAMEWORK_PYTHON" >/dev/null 2>&1 || { log "$TASK: cần $FRAMEWORK_PYTHON và $xt (khoá 'test_weights')"; return 2; }
+  CLAUDE_PROJECT_DIR="$ROOT" "$FRAMEWORK_PYTHON" "$xt" "$@"
 }
 weights_file() { # đường dẫn tuyệt đối của `test_weights` trong xt.yaml; rỗng nếu không khai
   local w; w="$(declared_cmd test_weights)"
@@ -594,7 +596,7 @@ case "$TASK" in
     exit 0 ;;
   gate)
     rc=0
-    # test_floor (T-1812): khoá có lệnh → chạy sau `test` (vd sàn Python như job CI py311); vắng/rỗng → không chạy.
+    # test_floor (T-1812): khoá có lệnh → chạy sau `test` (vd kiểm sàn runtime của dự án); vắng/rỗng → không chạy.
     FLOOR=""; [ -n "$(declared_cmd test_floor)" ] && FLOOR=test_floor
     guard_turn build typecheck lint test $FLOOR || exit 126
     for t in build typecheck lint test $FLOOR; do
