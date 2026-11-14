@@ -10,3 +10,10 @@ Snapshot `5d34bb7b` (#558); phạm vi là thay đổi chính sách merge, không
 Xác minh đối kháng: hai fixture CLI độc lập chạy trên Python 3.15.2 tái hiện 407/408; API và PR là giả, không merge thật. `harness-check` exit 0; doctor exit 1 vì môi trường không bật sandbox. `tests.test_ci_template tests.test_install_new tests.test_merge.GreenMergePolicyTest`: 82 test đạt. Giới hạn: chưa rà toàn bộ delta TEST/HAR; giữ nhóm chưa quét.
 
 Kế hoạch: D-488 xử lý 407/408 và thiếu context trước; sau đó sửa 409/410, bổ sung test 106. Không nới check hoặc ruleset. Các PR riêng chạy gate và CI; dự án đích đang tạm dừng.
+
+## Delta harden tại e0745c07 (D-490)
+
+- CI trên main run 43605248555 xanh; 226 test merge/app, 52 test steward/CI, 22 test bench đều exit 0. Bench đạt 2.684 ca, 0 false-green. Đây là quét lát #558–#566; TEST/HAR vẫn chưa quét đủ nhóm.
+- T-3890: kiểm độc lập bằng lỗi I/O giả trên tệp mẫu cho thấy snapshot lỗi vẫn chạy formatter và restore lỗi mất bản sao. Sửa ở điểm vào formatter của khung; AUD-SEC-648 vẫn mở cho formatter gọi trực tiếp.
+- T-3891: README, skill complete và runbook còn mô tả review cũ. Đối chiếu `GreenMergePolicyTest` 7/7 và ruleset sống ngày 2026-11-14.
+- Nợ test mức xanh: kiểm thứ tự qua hai chữ số, cách ly GITHUB_STEP_SUMMARY và ghim điều kiện review vào đúng mệnh đề LOOP-STOP-002.
