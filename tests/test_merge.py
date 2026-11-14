@@ -3274,9 +3274,66 @@ class MissingRequiredCheckTest(unittest.TestCase):
 
     def test_rules_unreadable_falls_back(self):
         with unittest.mock.patch.object(xt, "_gh_items", side_effect=xt.PrInputError("403")):
-            self.assertEqual(xt._required_specs("repos/o/r", "main"), [])
+            self.assertEqual(xt._required_specs("repos/o/r", "main"), ([], False))
         with FakeGh(raw={"repos/{owner}/{repo}/rules/branches/rel%2F1": json.dumps([{"type": "x"}])}).patch():
-            self.assertEqual(xt._required_specs("repos/{owner}/{repo}", "rel/1"), [])
+            self.assertEqual(xt._required_specs("repos/{owner}/{repo}", "rel/1"), ([], False))
+
+
+class StrictBaseCheckTest(unittest.TestCase):
+    """Strict ruleset: lệnh merge chỉ xuất hiện khi head đã chứa nhánh đích hiện tại."""
+
+    class Gh(FakeGh):
+        SHA = "1" * 40
+
+    def setUp(self):
+        self.base = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        self.enterContext(unittest.mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(self.base)}))
+        commit_base_xt(self.base, "merge_autonomy: L3\n")
+
+    RULES = [
+        {**r, "parameters": {**r["parameters"], "strict_required_status_checks_policy": True}} for r in REQUIRED_TEST
+    ]
+
+    def fake(self, behind='{"behind_by": 0}', *, strict=True, **pull):
+        path = f"{FakeGh.REPO}/compare/refs%2Fheads%2Fmain...{self.Gh.SHA}?per_page=1"
+        gh = self.Gh(real_git=True, pull=pull, rules=self.RULES if strict else REQUIRED_TEST, raw={path: behind})
+        return gh, path
+
+    def check(self, gh, *args, **kwargs):
+        with gh.patch():
+            rc, out, _ = run_main("merge-check", "--json", *args, **kwargs)
+        return rc, json.loads(out)
+
+    def test_merge_check_rechecks_old_green_snapshot(self):
+        gh, path = self.fake(base={"ref": "main", "sha": "2" * 40})
+        self.assertEqual(self.check(gh, "--pr", "7")[0], 0)
+        gh.raw[path] = '{"behind_by": 2}'  # `main` tiến, ảnh chụp PR và CI vẫn như cũ.
+        rc, result = self.check(gh, "--pr", "7")
+        self.assertEqual((rc, result["verdict"], result["eligible"]), (1, "update", False), result)
+        self.assertIn(f"expected_head_sha={self.Gh.SHA}", result["next"])
+        self.assertNotIn("next_rest", result)
+        self.assertEqual(gh.paths().count(path), 2)
+        self.assertEqual(gh.paths().count(f"{FakeGh.REPO}/rules/branches/main"), 2)
+
+    def test_merge_check_waits_when_compare_is_unavailable(self):
+        for raw in ("{}", '{"behind_by": false}', '{"behind_by": -1}', '{"behind_by": "0"}', "<html>"):
+            with self.subTest(raw=raw):
+                gh, path = self.fake(raw)
+                rc, result = self.check(gh, "--pr", "7")
+                self.assertEqual((rc, result["verdict"]), (1, "wait"), result)
+                self.assertNotIn("next_rest", result)
+                self.assertEqual(gh.paths().count(path), 1)
+
+    def test_compare_requires_live_strict_branch_and_full_head(self):
+        no_base, _ = self.fake(base={})
+        short = FakeGh(real_git=True, rules=self.RULES)
+        loose, _ = self.fake(strict=False)
+        for gh, verdict in ((no_base, "wait"), (short, "wait"), (loose, "merge")):
+            self.assertEqual(self.check(gh, "--pr", "7")[1]["verdict"], verdict)
+            self.assertFalse(any("/compare/" in path for path in gh.paths()))
+        snapshot = json.dumps(pr(strictBaseRepo=FakeGh.REPO, baseRefName="main", headRefOid=self.Gh.SHA))
+        self.assertEqual(self.check(loose, "--pr-json", "-", stdin=snapshot)[1]["verdict"], "merge")
+        self.assertFalse(any("/compare/" in path for path in loose.paths()))
 
 
 class BaseMergeCarryTest(unittest.TestCase):
