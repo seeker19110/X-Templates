@@ -190,6 +190,8 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
 
 ### Fixed
 
+- AUD-DATA-012: cổng migration web-api-ts nhận diện cả CREATE INDEX không ghi tên trên bảng có sẵn.
+
 - `xt.py doctor` nạp guard của dự án một lần để kiểm cả bộ lệnh mẫu (AUD-PERF-028, phần đầu T-3726).
 
 - Guard (T-3763; lý do chạm hàng rào: đóng đường bỏ sót argv hoặc cho qua khi parser không đọc được): P4: chặn thay tiến trình làm đối số và thay lệnh trần dính chữ hoặc còn argv; số học chỉ miễn khi cặp ngoặc có xét nháy đóng liền. Thân shell literal được kiểm trước chuẩn hoá `$(pwd)` (D-459). AUD-SEC-609 còn mở cho P0, tham số và nháy lồng.
