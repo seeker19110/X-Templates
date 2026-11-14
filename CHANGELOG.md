@@ -183,6 +183,8 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
 
 ### Fixed
 
+- `xt.py doctor` nạp guard của dự án một lần để kiểm cả bộ lệnh mẫu (AUD-PERF-028, phần đầu T-3726).
+
 - PR #530 (D-443): `test_fast` lấy `nproc` vào biến trước số học để qua tập con P0. Giữ nguyên ceil(N/2), fallback 2, tập test và ngưỡng; không mở ngoại lệ parser. Có test tương đương số worker và hai ca nháy lồng có thể chạy lệnh.
 - Guard — ADR-0076 lát 4, tiền tố P0 (T-3764; lý do chạm hàng rào: năm 🔴 có từ trước AUD-SEC-657/659/663/664/700,
   D-415/D-430/D-431 — chỉ thêm chặn). Đọc lại để luật cũ thấy đúng lệnh, giữ mã dạng trơn: `{tên}>`/`{tên}<` (cả
@@ -210,6 +212,7 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
 
 - Gói `web-api-ts` dùng Kysely 0.29.8, Biome 2.6.6 và Vitest 5.1.0 (#513, D-479). Giữ kiểu Node 24
   theo runtime của gói. Chuẩn hoá khoảng trắng trước chú thích trong mẫu `xt.yaml` để qua formatter YAML của Biome.
+
 - Guard — ADR-0076 lát 2 (T-3762; lý do chạm hàng rào: bốn 🔴 có từ trước cùng gốc AUD-SEC-644, D-430/D-431/D-435 — chỉ
   thêm chặn, mã `BUDGET`; quyết định cuối không nhẹ đi — luật cũ chặn trên cùng cách đọc giữ mã cũ, còn mã/lý do có thể
   thành `BUDGET` ở hai cách đọc `LitWord`, bản bung brace, câu hỏi nhường của `_go_patch_asks`, câu hỏi BUDGET của luật
