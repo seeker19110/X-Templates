@@ -1,7 +1,7 @@
 ---
 title: Gói web-api-ts — API nhiều tenant trên Node 24 + Postgres
 kind: index
-updated: 2026-11-06
+updated: 2026-11-14
 ---
 
 # Gói `web-api-ts`
@@ -34,12 +34,10 @@ phải làm đỏ đúng test ghi ở `expect_fail`.
 
 ## Giới hạn đã biết
 
-- Migration chạy trong transaction (runner kysely) nên không dựng được index `CONCURRENTLY` trong migration (DB-MIG-006,
-  AUD-DATA-011): `0005_sessions_expiry` dựng hai index thường trên `sessions` — bảng lớn ở môi trường thật khoá ghi trong
-  lúc dựng. Với bảng có dữ liệu: dựng index bằng bước riêng ngoài transaction (`CREATE INDEX CONCURRENTLY …` qua `psql`),
-  xoá index INVALID nếu thất bại, rồi để migration dùng `CREATE INDEX IF NOT EXISTS` cùng tên. Runner không transaction
-  cho từng migration chưa có trong gói (cách kysely cho tắt transaction: chưa xác minh với bản 0.29.6). Test
-  `MigrationIndexTest` (`tests/test_packs.py`) buộc migration mới dùng `CONCURRENTLY` trên bảng có sẵn; chỉ `0005` được miễn.
+- Runner migration dùng giao dịch (DB-MIG-006). Cổng từ chối `CREATE INDEX CONCURRENTLY` trong migration và index thường
+  trên bảng có sẵn, kể cả `IF NOT EXISTS`. Ngoại lệ đã phát hành là `0005_sessions_expiry` với hai index trên `sessions`
+  (AUD-DATA-011). Gói chưa có luồng dựng index ngoài giao dịch. Khi bổ sung luồng đó, kiểm định nghĩa và trạng thái hợp lệ
+  của index trước khi tiếp tục migration (AUD-DATA-013).
 
 - Kết nối ứng dụng dùng một vai trò có quyền `SET ROLE app_rw`; triển khai thật: vai trò đăng nhập riêng chỉ là thành viên
   `app_rw` + vai trò migration riêng (sở hữu bảng) — chưa có trong gói.
