@@ -3,12 +3,13 @@
 # `dev-task.sh test-shard`), job `quality` tổng hợp; local `scripts/dev-task.sh gate` chạy nối tiếp.
 # Công cụ ghim kèm hash: requirements-dev.txt (ruff, mypy, coverage, shellcheck-py — số bản ở file khoá;
 # `pip install` đặt `shellcheck` vào bin của Python, cùng bản ở máy dev và CI — T-1812). Agent KHÔNG suy diễn lệnh từ văn xuôi.
-format: python3 -m ruff format scripts tests .claude/hooks
-format_file: case {} in *.py) python3 -m ruff format {} ;; esac
+# Giữ ngoặc quanh nhiều ngoại lệ để bộ cài và CLI còn báo được lỗi runtime trên Python cũ.
+format: python3 -m ruff format --target-version py313 scripts tests .claude/hooks
+format_file: case {} in *.py) python3 -m ruff format --target-version py313 {} ;; esac
 # lint: `xt.py checks` = validate · progress-check · changelog-check · ci-check · license-check trong MỘT tiến trình (mỗi lần
 # khởi động xt.py ~250 ms), rồi link, ruff, shell, JSON.
-lint: python3 scripts/xt.py checks && python3 scripts/check-links.py && python3 -m ruff check scripts tests .claude/hooks && python3 -m ruff format --check scripts tests .claude/hooks && for f in scripts/*.sh .claude/hooks/*.sh; do bash -n "$f" || exit 1; done && shellcheck --severity=warning scripts/*.sh .claude/hooks/*.sh && python3 -m json.tool .claude/settings.json >/dev/null && python3 -m json.tool .github/rulesets/main.json >/dev/null
-typecheck: python3 -m mypy --strict --python-version 3.11 scripts/xt.py scripts/install.py scripts/xt_adapter.py scripts/check-links.py .claude/hooks/guard.py scripts/xt_app
+lint: python3 scripts/xt.py checks && python3 scripts/check-links.py && python3 -m ruff check scripts tests .claude/hooks && python3 -m ruff format --target-version py313 --check scripts tests .claude/hooks && for f in scripts/*.sh .claude/hooks/*.sh; do bash -n "$f" || exit 1; done && shellcheck --severity=warning scripts/*.sh .claude/hooks/*.sh && python3 -m json.tool .claude/settings.json >/dev/null && python3 -m json.tool .github/rulesets/main.json >/dev/null
+typecheck: python3 -m mypy --strict --python-version 3.15 scripts/xt.py scripts/install.py scripts/xt_adapter.py scripts/check-links.py .claude/hooks/guard.py scripts/xt_app
 # test: mỗi LỚP test một tiến trình, chạy song song theo số CPU (D-079): danh sách lớp lấy từ unittest discover (không có
 # lớp rỗng → không sinh "Ran 0 tests"; module lỗi import → in lỗi, exit 1; `xargs -r`: danh sách rỗng không chạy gì); coverage parallel=True ghi mỗi tiến trình một file, combine rồi đòi 100 % — cùng
 # tập test, cùng ngưỡng, 180 s → ~70 s trên 4 CPU. Một lớp đỏ → xargs exit ≠ 0 → cổng đỏ.
@@ -18,21 +19,15 @@ build: python3 scripts/xt.py stats
 # Môi trường cloud gọi `scripts/dev-task.sh setup` trong setup script (ADR-0056); CI vẫn cài bằng bước riêng của nó.
 setup: python3 -m pip install --quiet --require-hashes -r requirements-dev.txt
 # Chia test cho CI song song (`dev-task.sh test-shard I N [DIR]` / `test-combine DIR`, fan-out/fan-in — WF-CI-024):
-# test_list = ĐÚNG cách liệt kê lớp của `test` ở trên (test kiểm hai chuỗi trùng nhau), chạy bằng XT_PY (python3 |
-# python3.11; chọn bằng `if` để từ lệnh nguyên văn — guard chặn từ lệnh động, ADR-0065 lớp A; giá trị khác → exit 2) để
-# job py311 bắt cả lỗi import trên 3.11; test_unit chạy MỘT lớp ("$1"): có XT_COV_DIR → coverage ghi vào đó, không → không
-# đo; test_combine gộp mọi shard rồi đòi đúng ngưỡng của `test` (100 %, cấu hình .coveragerc). `gate`/`test` không đổi.
-test_list: if [ "${XT_PY:-python3}" = python3 ]; then python3 -c 'import sys,unittest;S=set();f=lambda s:[f(t) if isinstance(t,unittest.TestSuite) else S.add("tests."+t.__class__.__module__+"."+t.__class__.__name__) for t in s if not isinstance(t,unittest.loader._FailedTest) or print(t._exception,file=sys.stderr) or sys.exit(1)];f(unittest.TestLoader().discover("tests"));print("\n".join(sorted(S)))'; elif [ "$XT_PY" = python3.11 ]; then python3.11 -c 'import sys,unittest;S=set();f=lambda s:[f(t) if isinstance(t,unittest.TestSuite) else S.add("tests."+t.__class__.__module__+"."+t.__class__.__name__) for t in s if not isinstance(t,unittest.loader._FailedTest) or print(t._exception,file=sys.stderr) or sys.exit(1)];f(unittest.TestLoader().discover("tests"));print("\n".join(sorted(S)))'; else echo "[dev-task] XT_PY=$XT_PY không hỗ trợ (python3 | python3.11)" >&2; exit 2; fi
-test_unit: if [ -n "${XT_COV_DIR:-}" ]; then COVERAGE_FILE="$XT_COV_DIR/.coverage" python3 -m coverage run -m unittest "$1"; elif [ "${XT_PY:-python3}" = python3 ]; then python3 -m unittest "$1"; elif [ "$XT_PY" = python3.11 ]; then python3.11 -m unittest "$1"; else echo "[dev-task] XT_PY=$XT_PY không hỗ trợ (python3 | python3.11)" >&2; exit 2; fi
+# test_list dùng đúng cách liệt kê lớp của `test`. test_unit chạy một lớp ("$1") và đo coverage khi có XT_COV_DIR.
+# test_combine gộp mọi shard rồi đòi đúng ngưỡng của `test` (100 %, cấu hình .coveragerc).
+test_list: python3 -c 'import sys,unittest;S=set();f=lambda s:[f(t) if isinstance(t,unittest.TestSuite) else S.add("tests."+t.__class__.__module__+"."+t.__class__.__name__) for t in s if not isinstance(t,unittest.loader._FailedTest) or print(t._exception,file=sys.stderr) or sys.exit(1)];f(unittest.TestLoader().discover("tests"));print("\n".join(sorted(S)))'
+test_unit: if [ -n "${XT_COV_DIR:-}" ]; then COVERAGE_FILE="$XT_COV_DIR/.coverage" python3 -m coverage run -m unittest "$1"; else python3 -m unittest "$1"; fi
 # test_weights: file trọng số (giây/lớp, đo có coverage) để `test-shard` chia tham lam LPT thay cho k mod N (D-095:
 # mod N dồn lớp nặng vào một shard). Sinh lại bằng tay: `scripts/dev-task.sh test-weights` rồi commit; lớp mới chưa có
 # trong file lấy trung vị; JSON hỏng → shard đỏ.
 test_weights: tests/shard-weights.json
 test_combine: export COVERAGE_FILE="$XT_COV_DIR/.coverage" && python3 -m coverage combine -q && python3 -m coverage report --fail-under=100
-# test_floor: sàn hỗ trợ Python 3.11 như job CI `py311` (T-1812, research NH-2): `dev-task.sh gate` chạy SAU `test` khi
-# khoá có lệnh — mọi lớp qua test_list/test_unit với XT_PY=python3.11 (không coverage, XT_MIN_TESTS như CI); máy không có
-# python3.11 → bỏ qua có log, exit 0 (CI py311 vẫn giữ sàn).
-test_floor: if command -v python3.11 >/dev/null 2>&1; then XT_PY=python3.11 XT_MIN_TESTS="${XT_MIN_TESTS:-100}" scripts/dev-task.sh test-shard 1 1; else echo "[dev-task] test_floor: không có python3.11 — bỏ qua sàn 3.11 (job CI py311 vẫn chạy)" >&2; fi
 # Cổng trước commit (hook pre-bash-guard): fast = `dev-task.sh gate-fast` — lint (gồm format --check) · typecheck ·
 # test_fast (chỉ lớp test liên quan file đổi, KHÔNG coverage); cổng đầy đủ `dev-task.sh gate` (ngưỡng 100 %) là CI
 # `quality`; cục bộ trước cắt bản (ADR-0056). Vắng = full.
