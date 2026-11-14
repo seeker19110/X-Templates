@@ -16,6 +16,8 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
 - Ghi [audit delta DOC](docs/ops/AUDIT-REPORT-2026-11-14-delta.md) đến `2bf2e1cf` và mở AUD-DOC-293.
   Lưu kho nguyên văn 10 phát hiện DOC đã sửa ở v3.31.0 để giữ trần `docs/ops`.
 
+- Bổ sung bằng chứng HAR và TEST trong báo cáo audit delta 2026-11-14. Mở AUD-TEST-105 cho kết quả đo CPU ghép giữa hai lượt.
+
 - [ADR-0077](docs/adr/0077-deployment-receipts.md) (T-3841, D-422…D-424) chốt cấu hình theo môi trường, receipt của
   bản đang phục vụ, hàng `deploy` trong `release-check` và đích dev mặc định của gói `web-api-ts`. Mã triển khai
   thuộc các lát T-3842 đến T-3844 và T-3860.
