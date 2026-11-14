@@ -6127,6 +6127,10 @@ def _ci_blocker(pr: Dict[str, Any]) -> Optional[Tuple[str, List[str]]]:
     return None
 
 
+PR_BEHIND_REASON = "nhánh tụt sau nhánh đích — cập nhật rồi chờ CI chạy lại"
+MERGE_WAIT_NEXT = "chờ rồi chạy lại merge-check"
+
+
 def _merge_blockers(pr: Dict[str, Any]) -> Optional[Tuple[str, List[str]]]:
     """Trạng thái chặn merge bất kể làn, theo thứ tự: đóng → nháp → tiêu đề → xung đột → CI → review đòi sửa → tụt sau → chưa tính."""
     early = _pr_shape_blocker(pr)
@@ -6145,7 +6149,7 @@ def _merge_blockers(pr: Dict[str, Any]) -> Optional[Tuple[str, List[str]]]:
     if pr.get("reviewDecision") == "CHANGES_REQUESTED":
         return "fix", ["reviewer yêu cầu sửa"]
     if pr.get("mergeStateStatus") == "BEHIND":
-        return "update", ["nhánh tụt sau nhánh đích — cập nhật rồi chờ CI chạy lại"]
+        return "update", [PR_BEHIND_REASON]
     missing = [str(m) for m in pr.get("missingRequired") or []]
     if missing:  # mọi check đã xong mà check bắt buộc vẫn vắng: sẽ không bao giờ tự xuất hiện
         return "human", [
@@ -6186,6 +6190,17 @@ def squash_subject(pr: Dict[str, Any]) -> str:
     return f"{title} (#{n})" if title and n else ""
 
 
+def _pr_update_next(n: object, head: object, base: str) -> str:
+    return (
+        f"gh api -X PUT repos/{{owner}}/{{repo}}/pulls/{n}/update-branch -f expected_head_sha={head}"
+        f" (hoặc git merge origin/{base} && git push)"
+    )
+
+
+def _waived_notes(waived: List[str]) -> List[str]:
+    return [f"ngoại lệ cứng không giữ người ({HARD_KEY}: auto, ADR-0020): {'; '.join(waived)}"] if waived else []
+
+
 def merge_decision(
     pr: Dict[str, Any], autonomy: int = 1, risk_paths: Optional[List[str]] = None, hard_auto: bool = False
 ) -> Dict[str, Any]:
@@ -6222,13 +6237,12 @@ def merge_decision(
         verdict, reasons = "merge", [f"L3 (ADR-0015): làn chuẩn, CI xanh, không xung đột — {'; '.join(lane_reasons)}"]
     else:
         verdict, reasons = "merge", ["làn nhanh, CI xanh, không xung đột"]
-    if waived:
-        reasons.append(f"ngoại lệ cứng không giữ người ({HARD_KEY}: auto, ADR-0020): {'; '.join(waived)}")
+    reasons.extend(_waived_notes(waived))
     base, head = pr.get("baseRefName") or "main", pr.get("headRefOid", "")
     nxt = {
         "merge": f"gh pr merge {n} --squash --match-head-commit {head}",
-        "update": f"gh api -X PUT repos/{{owner}}/{{repo}}/pulls/{n}/update-branch -f expected_head_sha={head} (hoặc git merge origin/{base} && git push)",
-        "wait": "chờ rồi chạy lại merge-check",
+        "update": _pr_update_next(n, head, base),
+        "wait": MERGE_WAIT_NEXT,
         "fix": (
             f"git fetch origin {base} && git merge origin/{base} → giải xung đột, chạy cổng, push, chạy lại merge-check"
             if reasons and reasons[0].startswith("xung đột với nhánh đích")
@@ -6670,21 +6684,34 @@ def _review_decision(reviews: List[Dict[str, Any]], merge_state: str, missing_ch
     return "APPROVED" if "APPROVED" in states else ""
 
 
-def _required_specs(repo: str, branch: str) -> List[Dict[str, Any]]:
-    """Check bắt buộc của nhánh theo ruleset (REST `rules/branches`): [{"context", "appId"?}] (`integration_id` của ruleset
-    là app phải sinh check); không đọc được → [] (không suy ra gì)."""
+def _required_specs(repo: str, branch: str) -> Tuple[List[Dict[str, Any]], bool]:
+    """Các check bắt buộc (`context`, `appId` nếu ruleset ghim app) và cờ phải cập nhật nhánh theo `rules/branches`."""
     try:
         rules = _gh_items(f"{repo}/rules/branches/{urllib.parse.quote(branch, safe='')}")
     except PrInputError:
-        return []
+        return [], False
     out: List[Dict[str, Any]] = []
+    strict = False
     for r in rules:
-        params = r.get("parameters") if r.get("type") == "required_status_checks" else None
-        for c in (params or {}).get("required_status_checks") or []:
+        params = (r.get("parameters") or {}) if r.get("type") == "required_status_checks" else {}
+        strict |= params.get("strict_required_status_checks_policy") is True
+        for c in params.get("required_status_checks") or []:
             if isinstance(c, dict) and c.get("context") and all(o["context"] != c["context"] for o in out):
                 app = c.get("integration_id")
                 out.append({"context": str(c["context"]), **({"appId": app} if isinstance(app, int) else {})})
-    return out
+    return out, strict
+
+
+def _live_base_distance(repo: str, branch: str, head: str) -> Optional[int]:
+    """Số commit head thiếu so với ref nhánh đích đang sống, hoặc None khi không xác minh được."""
+    if not branch or not FULL_SHA_RE.fullmatch(head):
+        return None
+    ref = urllib.parse.quote(f"refs/heads/{branch}", safe="")
+    try:
+        behind = _gh_one(f"{repo}/compare/{ref}...{head}?per_page=1").get("behind_by")
+    except (PrInputError, ValueError):
+        return None
+    return behind if type(behind) is int and behind >= 0 else None
 
 
 BASE_MERGE_HOPS = 5  # số lần "cập nhật nhánh" liên tiếp tối đa được lần ngược khi mang review sang head mới
@@ -6852,7 +6879,7 @@ def _pr_rest(pr_arg: Optional[str], local_check: bool = True) -> Dict[str, Any]:
     base: Dict[str, Any] = raw_base if isinstance(raw_base, dict) else {}
     # BLOCKED có thể vì ruleset đòi check mà head không có (không workflow nào sinh) — không phải thiếu review.
     seen = {str(c.get("name") or c.get("context")) for c in rollup}
-    required = _required_specs(repo, str(base.get("ref") or "main"))
+    required, strict_base = _required_specs(repo, str(base.get("ref") or "main"))
     missing = [r["context"] for r in required if r["context"] not in seen] if merge_state == "BLOCKED" else []
     base_repo: Dict[str, Any] = base["repo"] if isinstance(base.get("repo"), dict) else {}
     # Đáy của phép so khoá/ủy quyền = merge-base (diff ba chấm như danh sách file), chỉ hỏi khi có file cần so.
@@ -6896,6 +6923,7 @@ def _pr_rest(pr_arg: Optional[str], local_check: bool = True) -> Dict[str, Any]:
         **({"missingRequired": missing} if missing else {}),
         # Check bắt buộc của nhánh đích (+ app phải sinh ra): `_ci_blocker` không coi skipped/neutral/sai app là đạt (REC-08).
         **({"requiredChecks": required} if required else {}),
+        **({"strictBaseRepo": repo} if strict_base else {}),
         # Head là "cập nhật nhánh" sạch của các head này (mới → cũ): review sạch ở chúng mang sang head hiện tại.
         **({"baseMergeOf": chain} if (chain := _base_merge_chain(repo, str(base.get("sha", "")), sha)) else {}),
         "headRefOid": sha,
@@ -6935,6 +6963,7 @@ def load_pr(args: argparse.Namespace) -> Dict[str, Any]:
         raise PrInputError(f"JSON của PR không đọc được: {exc}") from exc
     if not isinstance(data, dict):
         raise PrInputError("JSON của PR không đọc được: không phải object")
+    data.pop("strictBaseRepo", None)  # --pr-json chỉ tính từ ảnh chụp đã cấp, không gọi API so nhánh sống.
     return data
 
 
@@ -11511,6 +11540,31 @@ def _merge_eval(pr: Dict[str, Any], local: bool = False) -> Tuple[Dict[str, Any]
     return merge_check_result(pr, autonomy, risk, hard_auto, phase, rec), notes + hard_notes + phase_notes
 
 
+def _check_live_base(pr: Dict[str, Any], d: Dict[str, Any]) -> Dict[str, Any]:
+    """`base.sha` và `mergeable_state` có thể cùng cũ. Chỉ hỏi nhánh đích của PR đã qua các cổng khác."""
+    repo = pr.get("strictBaseRepo")
+    if d["verdict"] != "merge" or not repo:
+        return d
+    base = str(pr.get("baseRefName") or "")
+    behind = _live_base_distance(repo, base, str(d["head"]))
+    if behind == 0:
+        return d
+    verdict, reason, cmd = (
+        ("wait", "chưa xác minh được head chứa nhánh đích hiện tại theo ruleset — đợi rồi kiểm lại", MERGE_WAIT_NEXT)
+        if behind is None
+        else ("update", PR_BEHIND_REASON, _pr_update_next(d["pr"], d["head"], base))
+    )
+    result = {
+        **d,
+        "verdict": verdict,
+        "reasons": [reason, *_waived_notes(d["hard_waived"])],
+        "next": cmd,
+        "eligible": False,
+    }
+    result.pop("next_rest", None)
+    return result
+
+
 def merge_check_result(
     pr: Dict[str, Any],
     autonomy: int,
@@ -11590,6 +11644,7 @@ def cmd_merge_check(args: argparse.Namespace) -> int:
         print(f"✗ {exc}", file=sys.stderr)
         return 2
     d, notes = _merge_eval(pr, local=True)
+    d = _check_live_base(pr, d)
     if args.json:
         print(json.dumps({**d, "notes": notes}, ensure_ascii=False))
     else:
