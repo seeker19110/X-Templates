@@ -287,8 +287,14 @@ class MutantsTest(unittest.TestCase):
         code, out = self.run_main("check", str(PACK), "broken-down", str(wrong))
         self.assertEqual((code, "không ở test mong đợi" in out), (1, True))
         errored = self.tmp / "e.xml"
-        errored.write_text(f'<testsuite><testcase name="{want}"><error/></testcase></testsuite>', encoding="utf-8")
-        self.assertEqual(self.run_main("check", str(PACK), "broken-down", str(errored))[0], 0)
+        for body in (
+            f'<testcase name="{want}"><error/></testcase>',
+            f'<testcase classname="{want}" name="test khác"><failure/></testcase>',
+            f'<testcase name="{want}"><failure/></testcase><testcase name="hạ tầng"><error/></testcase>',
+        ):
+            with self.subTest(body=body):
+                errored.write_text(f"<testsuite>{body}</testsuite>", encoding="utf-8")
+                self.assertEqual(self.run_main("check", str(PACK), "broken-down", str(errored))[0], 1)
 
     def test_list_and_bad_args(self):
         code, out = self.run_main("list", str(PACK))

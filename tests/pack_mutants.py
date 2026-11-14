@@ -35,18 +35,19 @@ def apply(pack: Path, mid: str, project: Path) -> str:
     return ""
 
 
-def failed_tests(junit: Path) -> list[str]:
+def failed_tests(junit: Path) -> list[str] | None:
+    """Tên test có failure, hoặc None khi reporter ghi lỗi ngoài test."""
     root = ET.parse(junit).getroot()
-    out = []
-    for case in root.iter("testcase"):
-        if case.find("failure") is not None or case.find("error") is not None:
-            out.append(f"{case.get('classname', '')} {case.get('name', '')}")
-    return out
+    if next(root.iter("error"), None) is not None:
+        return None
+    return [case.get("name", "") for case in root.iter("testcase") if case.find("failure") is not None]
 
 
 def check(pack: Path, mid: str, junit: Path) -> str:
     want = load(pack)[mid]["expect_fail"]
     failed = failed_tests(junit)
+    if failed is None:
+        return f"ca {mid}: JUnit có lỗi ngoài test, chưa chứng minh mutant bị bắt"
     if not failed:
         return f"ca {mid} SỐNG SÓT: không test nào đỏ"
     if not any(want in name for name in failed):
