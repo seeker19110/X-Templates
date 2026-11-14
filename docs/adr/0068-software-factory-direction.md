@@ -5,9 +5,9 @@
   **1a · 2a hotel-manager · 3a · 4a** (tiền lệ ADR-0064: nháp cùng PR, chấp nhận cùng ngày; **D-353**). Bản nháp cùng ngày
   chỉ khác ở trạng thái và đoạn "Bốn câu hỏi" ở §Quyết định.
 - **Trạng thái triển khai:** lát A đã làm 2026-11-05 trên nhánh, chưa merge (D-355,
-  [`PLAN-factory-A.md`](../autopilot/PLAN-factory-A.md) T-3675…3679: `report_result`, `<khoá>_report`, `release_artifacts`,
+  [`PLAN-factory-A.md`](../archive/autopilot/PLAN-factory-A.md) T-3675…3679: `report_result`, `<khoá>_report`, `release_artifacts`,
   `subject`/`promotion`, `schema: 3`; test `tests/test_release_contract.py`); evidence v2 của `loop record` giữ nguyên.
-  Lát B–E làm 2026-11-05 trên nhánh, chưa merge (D-359, [`PLAN-factory-BE.md`](../autopilot/PLAN-factory-BE.md)
+  Lát B–E làm 2026-11-05 trên nhánh, chưa merge (D-359, [`PLAN-factory-BE.md`](../archive/autopilot/PLAN-factory-BE.md)
   T-3685…3692): gói `framework/templates/packs/web-api-ts/` + workflow `pack-web-api.yml` (lát dọc, 5 ca sai cố ý);
   `install.py --pack` (fresh/brownfield/upgrade, kiểm trên bản clone hotel-manager); worker trong gói (tuyến API/worker);
   `docs/ops/registry.json` + `xt.py registry` + màn app. Còn: fixture payload host thật Codex/Gemini (cần CLI chạy bằng tài
