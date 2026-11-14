@@ -28,7 +28,7 @@ import urllib.request
 from collections.abc import Callable, Iterator, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from urllib.parse import unquote, urlsplit
+from urllib.parse import quote, unquote, urlsplit
 from typing import Any
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -343,10 +343,13 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
 def http_status(url: str, timeout: float, opener: urllib.request.OpenerDirector | None = None) -> int:
     """Mã HTTP của URL (HEAD, rồi GET nếu HEAD trả 4xx khác 404/410 hoặc 501 — nhiều máy chủ từ chối HEAD bằng 400/403/
     405 dù trang còn, PR #173). Timeout/lỗi mạng → `OSError` cho người gọi phân loại."""
+    parts = urlsplit(url)
+    reserved = "!$&'()*+,;=:@%/"  # giữ dấu phân cách và các byte đã mã hoá
+    target = parts._replace(path=quote(parts.path, safe=reserved), query=quote(parts.query, safe=reserved + "?"))
     op = opener or urllib.request.build_opener(_NoRedirect)
     code = 0
     for method in ("HEAD", "GET"):
-        req = urllib.request.Request(url, method=method, headers={"User-Agent": USER_AGENT})
+        req = urllib.request.Request(target.geturl(), method=method, headers={"User-Agent": USER_AGENT})
         try:
             with op.open(req, timeout=timeout) as resp:
                 return int(resp.status)

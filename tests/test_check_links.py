@@ -514,6 +514,13 @@ class LinkClassificationTest(unittest.TestCase):
         self.assertEqual(self.cl.http_status("http://h", 1.0, op), 301)
         self.assertEqual(op.calls, ["HEAD"])
 
+    def test_http_status_encodes_unicode_without_double_encoding(self):
+        opener = mock.Mock()
+        opener.open.return_value = FakeResp(200)
+        self.assertEqual(self.cl.http_status("https://example.invalid/hồ%20sơ?q=tiếng+Việt#phần", 1.0, opener), 200)
+        request = opener.open.call_args.args[0]
+        self.assertEqual(request.selector, "/h%E1%BB%93%20s%C6%A1?q=ti%E1%BA%BFng+Vi%E1%BB%87t")
+
     def test_review173_head_4xx_retried_with_get(self):
         """PR #173: HEAD 4xx (trừ 404/410) không đủ kết luận chết — thử GET; 401 là `unverified`."""
         for head, get, want in [(400, 200, 200), (401, 401, 401), (418, 404, 404), (429, 200, 200)]:
