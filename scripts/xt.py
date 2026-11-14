@@ -13154,32 +13154,42 @@ DECISIONS_MONTH = _DECISIONS_STEM + DECISION_MONTH_GLOB + _DECISIONS_SUFFIX
 DEPLOY_LEDGER = "docs/ops/DEPLOYS.json"
 
 
-def _subject_excluded(path: str) -> bool:
+def _subject_excluded(path: str, *, deploy_enabled: bool = False) -> bool:
     """File ngoài `subject.content` (D-393): `GO-NO-GO*.md` nằm TRỰC TIẾP ở `GO_NO_GO_DIRS`, sổ `DECISIONS_LOG` và bản
-    tháng của nó (`DECISIONS_MONTH`, AUD-HAR-329), sổ triển khai (ADR-0077), `PROGRESS.md` gốc, `.autopilot/` — hẹp hơn
-    `_signoff_excluded` (theo tên ở mọi cấp: `src/DECISIONS.md`, `src/DECISIONS-2026-10.md` là mã)."""
+    tháng của nó (`DECISIONS_MONTH`, AUD-HAR-329), sổ triển khai khi bật `deploy_envs` (ADR-0077), `PROGRESS.md` gốc,
+    `.autopilot/` — hẹp hơn `_signoff_excluded` (theo tên ở mọi cấp: `src/DECISIONS.md`, `src/DECISIONS-2026-10.md` là mã)."""
     folder, _, name = path.rpartition("/")
-    if path.startswith(".autopilot/") or path in ("PROGRESS.md", DECISIONS_LOG, DEPLOY_LEDGER):
+    if (
+        path.startswith(".autopilot/")
+        or path in ("PROGRESS.md", DECISIONS_LOG)
+        or (deploy_enabled and path == DEPLOY_LEDGER)
+    ):
         return True
     if fnmatch.fnmatchcase(path, DECISIONS_MONTH):
         return True
     return (folder or ".") in GO_NO_GO_DIRS and fnmatch.fnmatchcase(name, "GO-NO-GO*.md")
 
 
-SUBJECT_EXCLUDE = [  # pathspec cùng tập `_subject_excluded`; `glob`: `*` không qua `/`
+SUBJECT_EXCLUDE = [  # pathspec mặc định của `_subject_excluded`; `glob`: `*` không qua `/`
     *(f":(exclude,glob){'' if d == '.' else d + '/'}GO-NO-GO*.md" for d in GO_NO_GO_DIRS),
     f":(exclude,literal){DECISIONS_LOG}",
     f":(exclude,glob){DECISIONS_MONTH}",
-    f":(exclude,glob){DEPLOY_LEDGER[:-1]}[{DEPLOY_LEDGER[-1]}]",  # ký tự glob đơn để Git không loại thư mục cùng tên
     ":(exclude,literal)PROGRESS.md",
 ]
+# Ký tự glob đơn để Git không loại thư mục cùng tên.
+DEPLOY_LEDGER_EXCLUDE = f":(exclude,glob){DEPLOY_LEDGER[:-1]}[{DEPLOY_LEDGER[-1]}]"
 
 
 def _subject_fingerprint(base: Path, git: Callable[..., str]) -> str:
+    try:
+        deploy_enabled = bool(_xt_keys(base).get("deploy_envs", "").split())
+    except (OSError, ValueError):  # không đọc được cấu hình → vẫn tính sổ như nội dung dự án
+        deploy_enabled = False
     tree = git("ls-tree", "-r", "-z", "HEAD", "--", ".")
     paths = ((e, e.partition("\t")[2]) for e in tree.split("\0") if e)
-    kept = "\0".join(e for e, p in paths if not _subject_excluded(p))
-    return tree_hash(base, kept, git, SUBJECT_EXCLUDE)[0]
+    kept = "\0".join(e for e, p in paths if not _subject_excluded(p, deploy_enabled=deploy_enabled))
+    exclude = [*SUBJECT_EXCLUDE, DEPLOY_LEDGER_EXCLUDE] if deploy_enabled else SUBJECT_EXCLUDE
+    return tree_hash(base, kept, git, exclude)[0]
 
 
 def subject_fingerprint(base: Path) -> Optional[str]:
