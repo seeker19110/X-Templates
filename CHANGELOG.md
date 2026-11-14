@@ -204,6 +204,8 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
 
 ### Fixed
 
+- Hướng dẫn merge và chú thích `xt.yaml` khớp ADR-0079: xét theo số PR, review chỉ bắt buộc khi `merge_review: required`.
+
 - `pr next`, steward và màn PR chỉ đề xuất merge sau khi cùng kiểm nhánh đích hiện tại theo `merge-check` (#551).
 - T-3736 (AUD-HAR-378): `release-check` và `release-sign` chỉ lối xử lý theo PLAN và ngân sách của vòng bị chặn.
 

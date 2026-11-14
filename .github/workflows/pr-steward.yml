@@ -12,7 +12,7 @@ name: pr-steward
 # `issue_comment` chỉ chạy khi comment mang dấu review của OWNER/COLLABORATOR/MEMBER (MEMBER: `xt.py` hỏi quyền ghi repo
 # trước khi tin dấu). PR từ fork hoặc của tác giả không có quyền
 # ghi repo không bao giờ được steward tự merge (chỉ báo — người merge). PR từng vào làn chuẩn được gắn nhãn
-# `xt-standard-lane` để giữ chặt (cần review sạch ở head) kể cả khi diff thu nhỏ sau đó.
+# Khi `merge_review: required`, `xt-standard-lane` giữ yêu cầu review ở head kể cả khi diff thu nhỏ.
 # Token: NÊN đặt `XT_STEWARD_TOKEN` (fine-grained PAT hoặc GitHub App: contents + pull requests: write) — merge do token
 # này kích workflow `push` trên nhánh chính (CI chạy lại trên commit merge, lớp đỡ khi ruleset không đòi "up to date";
 # trước D-122 việc này do auto-merge của GitHub kích). Không có thì dùng GITHUB_TOKEN: merge vẫn vào, nhưng GitHub không
