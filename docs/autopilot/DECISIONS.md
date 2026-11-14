@@ -624,3 +624,10 @@
 - Chọn: Kiểm sổ theo schema và đòi đúng ba nhóm có trạng thái đã quét
 - Lý do (tiêu chí chất lượng cuối): Cổng cũ exit 0 khi cả ba nhóm chưa quét. Cổng theo phạm vi kiểm đúng việc và không buộc đóng nợ ngoài T-3729
 - Đường lùi: Revert thay đổi Gate của T-3729, giữ cổng phát hành audit --strict
+
+### D-484 · 2026-11-14T04:01:16+00:00 · T-3842: tách việc đưa CLI triển khai vào khung ra sao?
+
+- Phương án: (1) Tách bộ đọc sổ và deploy status khỏi lệnh có hiệu ứng · (2) Đưa cùng lúc bộ đọc, chạy và quay lui
+- Chọn: Tách bộ đọc sổ và deploy status khỏi lệnh có hiệu ứng
+- Lý do (tiêu chí chất lượng cuối): Bộ đọc sổ có test offline và có thể dùng chung cho release-check và registry. Lát điều khiển cần giữ trạng thái khi thất bại và cổng quyền riêng.
+- Đường lùi: Revert lát đọc sổ mà chưa cần thay đổi đích triển khai hay dữ liệu thật

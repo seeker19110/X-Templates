@@ -82,6 +82,8 @@ Lệnh:
   release-sign --note TEXT [--file F]
                                 Agent ký §5 GO-NO-GO khi xt.yaml (cây và nhánh chính) khai `release_signoff: agent`,
                                 release-check không FAIL và chỉ còn chữ ký (ADR-0074); ô tên ghi `agent`.
+  deploy status [--env E] [--json]
+                                Đọc sổ triển khai (ADR-0077).
   merge-check [--pr PR] [--pr-json F] [--json]
                                 Máy quyết khi nào merge PR: merge · review · wait · update · fix · human · closed (exit 0 = merge).
   grant-check GROUP [KHOÁ=GIÁ_TRỊ ...] [--plan F] [--json]
@@ -13626,6 +13628,212 @@ def _print_subject_lines(out: Dict[str, Any]) -> None:
         )
 
 
+# ADR-0077 · SPEC-factory-deploy §2.4, §5
+DEPLOY_RESULTS = ("deployed", "rolled_back", "rollback_failed", "failed")
+DEPLOY_RECEIPT_FIELDS = {
+    "env",
+    "result",
+    "subject",
+    "artifacts",
+    "started",
+    "finished",
+    "deploy",
+    "smoke",
+    "served_digest",
+    "rollback",
+    "previous_digest",
+    "url",
+    "runner",
+    "session",
+}
+
+
+class DeployError(Exception):
+    """Lỗi cấu hình hoặc sổ triển khai; CLI trả 2."""
+
+
+def _deploy_envs(base: Path) -> List[str]:
+    try:
+        envs = _deploy_env_names(base)
+    except (OSError, UnicodeDecodeError):
+        raise DeployError("xt.yaml: không đọc được cấu hình môi trường dưới dạng UTF-8") from None
+    if not envs:
+        raise DeployError("xt.yaml: chưa khai môi trường (`deploy_envs`)")
+    if any(not DEPLOY_ENV_NAME.fullmatch(name) for name in envs):
+        raise DeployError("xt.yaml: mỗi tên trong `deploy_envs` phải khớp [a-z][a-z0-9]{0,15}")
+    return envs
+
+
+def _deploy_sha256(value: Any) -> bool:
+    return isinstance(value, str) and SHA256_HEX_RE.fullmatch(value) is not None
+
+
+def _deploy_subject_ok(subject: Any) -> bool:
+    return (
+        isinstance(subject, dict)
+        and subject.keys() == {"head", "content", "digest"}
+        and isinstance(subject["head"], str)
+        and COMMIT_SHA_RE.fullmatch(subject["head"]) is not None
+        and _deploy_sha256(subject["content"])
+        and _deploy_sha256(subject["digest"])
+    )
+
+
+def _deploy_artifact_ok(artifact: Any) -> bool:
+    return (
+        isinstance(artifact, dict)
+        and artifact.keys() == {"path", "sha256"}
+        and isinstance(artifact["path"], str)
+        and _deploy_sha256(artifact["sha256"])
+    )
+
+
+def _deploy_step_ok(step: Any) -> bool:
+    return (
+        isinstance(step, dict)
+        and step.keys() == {"cmd_sha256", "exit_code"}
+        and _deploy_sha256(step["cmd_sha256"])
+        and type(step["exit_code"]) is int
+    )
+
+
+def _deploy_utc(value: Any) -> bool:
+    if not isinstance(value, str):
+        return False
+    try:
+        return _dt.datetime.fromisoformat(value).utcoffset() == _dt.timedelta(0)
+    except ValueError:
+        return False
+
+
+def _deploy_runner_ok(runner: Any) -> bool:
+    return (
+        isinstance(runner, dict)
+        and runner.keys() == {"kind", "run_id", "run_url"}
+        and runner["kind"] in ("local", "ci")
+        and type(runner["run_id"]) in (str, int, type(None))
+        and isinstance(runner["run_url"], (str, type(None)))
+    )
+
+
+def _deploy_receipt_problem(receipt: Any) -> str:
+    if not isinstance(receipt, dict) or receipt.keys() != DEPLOY_RECEIPT_FIELDS:
+        return "thiếu hoặc thừa trường receipt"
+    if not isinstance(receipt["env"], str) or not DEPLOY_ENV_NAME.fullmatch(receipt["env"]):
+        return "`env` sai tên môi trường"
+    if receipt["result"] not in DEPLOY_RESULTS or not _deploy_subject_ok(receipt["subject"]):
+        return "`result` hoặc `subject` không hợp lệ"
+    if not isinstance(receipt["artifacts"], list) or not all(map(_deploy_artifact_ok, receipt["artifacts"])):
+        return "`artifacts` không hợp lệ"
+    if not _deploy_step_ok(receipt["deploy"]):
+        return "`deploy` không hợp lệ"
+    for key in ("smoke", "rollback"):
+        if receipt[key] is not None and not _deploy_step_ok(receipt[key]):
+            return f"`{key}` không hợp lệ"
+    return _deploy_receipt_detail_problem(receipt)
+
+
+def _deploy_receipt_detail_problem(receipt: Dict[str, Any]) -> str:
+    for key in ("started", "finished"):
+        if not _deploy_utc(receipt[key]):
+            return f"`{key}` phải là thời điểm ISO 8601 UTC"
+    for key in ("served_digest", "previous_digest"):
+        if receipt[key] is not None and not _deploy_sha256(receipt[key]):
+            return f"`{key}` phải là SHA-256 hoặc null"
+    for key in ("url", "session"):
+        if not isinstance(receipt[key], (str, type(None))):
+            return f"`{key}` phải là chuỗi hoặc null"
+    return "" if _deploy_runner_ok(receipt["runner"]) else "`runner` không hợp lệ"
+
+
+def _deploy_ledger_error(where: str, why: str) -> DeployError:
+    return DeployError(f"{DEPLOY_LEDGER} hỏng tại {where}: {why}")
+
+
+def _check_deploy_state(env: str, state: Any) -> None:
+    where = f"envs.{env}"
+    if not isinstance(state, dict) or state.keys() != {"current", "previous", "unknown"}:
+        raise _deploy_ledger_error(where, "cần `current`, `previous` và `unknown`")
+    if type(state["unknown"]) is not bool or (state["unknown"] and state["current"] is not None):
+        raise _deploy_ledger_error(where, "`unknown` phải là boolean và nếu true thì `current` phải là null")
+    for key in ("current", "previous"):
+        receipt = state[key]
+        if receipt is None:
+            continue
+        why = _deploy_receipt_problem(receipt)
+        if why or receipt["env"] != env:
+            raise _deploy_ledger_error(f"{where}.{key}", why or "`env` không khớp môi trường")
+
+
+def read_deploy_ledger(base: Path) -> Dict[str, Any]:
+    """Đọc sổ schema 1. Vắng = sổ rỗng. Hỏng = DeployError, không dùng receipt chưa kiểm."""
+    try:
+        path = _inside(base, DEPLOY_LEDGER)
+        if path is None:
+            raise DeployError(f"{DEPLOY_LEDGER} trỏ ra ngoài dự án")
+        ledger = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return {"schema": 1, "envs": {}, "events": []}
+    except (OSError, ValueError, RuntimeError):
+        # Path.resolve có thể ném RuntimeError cho vòng symlink (Python 3.11); JSON quá sâu cũng là RuntimeError.
+        raise DeployError(f"{DEPLOY_LEDGER} không đọc được dưới dạng JSON UTF-8") from None
+    return _validate_deploy_ledger(ledger)
+
+
+def _validate_deploy_ledger(ledger: Any) -> Dict[str, Any]:
+    if not isinstance(ledger, dict) or ledger.keys() != {"schema", "envs", "events"}:
+        raise _deploy_ledger_error("gốc", "cần `schema`, `envs` và `events`")
+    if type(ledger["schema"]) is not int or ledger["schema"] != 1:
+        raise _deploy_ledger_error("schema", "chỉ hỗ trợ schema 1")
+    if not isinstance(ledger["envs"], dict) or not isinstance(ledger["events"], list):
+        raise _deploy_ledger_error("gốc", "`envs` phải là object và `events` phải là mảng")
+    for env, state in ledger["envs"].items():
+        if not DEPLOY_ENV_NAME.fullmatch(env):
+            raise _deploy_ledger_error("envs", "tên môi trường sai")
+        _check_deploy_state(env, state)
+    for index, receipt in enumerate(ledger["events"]):
+        why = _deploy_receipt_problem(receipt)
+        if why:
+            raise _deploy_ledger_error(f"events[{index}]", why)
+    return ledger
+
+
+def _print_deploy_status(ledger: Dict[str, Any]) -> None:
+    if not ledger["envs"]:
+        print("Chưa có biên nhận triển khai.")
+    for env, state in sorted(ledger["envs"].items()):
+        if state["unknown"]:
+            print(f"{env}: chưa rõ bản đang phục vụ")
+        elif state["current"] is None:
+            print(f"{env}: chưa có biên nhận")
+        else:
+            current = state["current"]
+            print(f"{env}: {current['result']} {current['subject']['digest']}")
+
+
+def cmd_deploy_status(args: argparse.Namespace) -> int:
+    base = project_dir()
+    env = args.env
+    try:
+        if env is not None and not DEPLOY_ENV_NAME.fullmatch(env):
+            raise DeployError("`--env` phải khớp [a-z][a-z0-9]{0,15}")
+        envs = _deploy_envs(base)
+        if env is not None and env not in envs:
+            raise DeployError("môi trường `--env` chưa khai trong `deploy_envs`")
+        ledger = read_deploy_ledger(base)
+    except DeployError as exc:
+        print(f"✗ {exc}", file=sys.stderr)
+        return 2
+    if env is not None:
+        ledger["envs"] = {name: state for name, state in ledger["envs"].items() if name == env}
+        ledger["events"] = [receipt for receipt in ledger["events"] if receipt["env"] == env]
+    if args.json:
+        print(json.dumps(ledger))
+    else:
+        _print_deploy_status(ledger)
+    return 0
+
+
 # ADR-0074 (chủ repo 2026-11-08 "cho agent ký GO-NO-GO", D-401): xt.yaml `release_signoff: agent` → agent ký §5 bằng
 # `release-sign` khi máy đã đạt. Khoá có hiệu lực như `stage_approval` (cây VÀ nhánh chính đã commit, HARD_GATED_KEYS);
 # dòng ký ghi ô tên `agent` — không bao giờ ghi tên người; guard `GO_SIGN` vẫn chặn mọi đường ghi dòng ký khác.
@@ -19775,6 +19983,12 @@ def build_parser() -> argparse.ArgumentParser:
     prs.add_argument("--file", default="", help="GO-NO-GO sẽ ký (mặc định: GO-NO-GO duy nhất của v<VERSION>)")
     prs.add_argument("--note", required=True, help="vì sao GO — bằng chứng máy đã xét (ghi dưới bảng ký)")
     prs.set_defaults(fn=cmd_release_sign)
+    pdeploy = sub.add_parser("deploy", allow_abbrev=False, help="triển khai có biên nhận (ADR-0077)")
+    dsub = pdeploy.add_subparsers(dest="deploy_cmd", required=True)
+    ds = dsub.add_parser("status", allow_abbrev=False, help="đọc sổ triển khai")
+    ds.add_argument("--env", help="chỉ in biên nhận của môi trường này")
+    ds.add_argument("--json", action="store_true", help="in sổ triển khai schema 1 dưới dạng JSON")
+    ds.set_defaults(fn=cmd_deploy_status)
     prg = sub.add_parser(
         "registry",
         help="registry sản phẩm đích: lệch core/gói so với VERSION khung, ngoại lệ hết hạn (ADR-0068 lát E)",
