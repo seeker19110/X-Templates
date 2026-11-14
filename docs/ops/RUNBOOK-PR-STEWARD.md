@@ -20,7 +20,7 @@ với mỗi PR chạy cùng luật với `pr next`, rồi tự làm đúng các 
 CI/clone khác có thể báo `rethink` ở chỗ worktree tác giả báo `split-or-close` (trần `max_rethink`). Vô hại cho merge: cả
 hai chỉ ghi Step Summary, không thuộc hành động máy làm (AUD-XFEAT-042).
 
-PR từ fork hoặc tác giả không có quyền ghi repo luôn thành `defer-human` (người merge). PR làn chuẩn được gắn nhãn
+PR từ fork hoặc tác giả không có quyền ghi repo luôn thành `defer-human` (người merge). Khi `merge_review: required`, PR làn chuẩn được gắn nhãn
 `xt-standard-lane`; không gắn được nhãn thì lượt đó không merge (exit 1, `warn`). Máy **không bao giờ bật auto-merge** của
 GitHub (D-122, [ADR-0036](../adr/0036-pinned-merge-no-auto-merge-drop-merge-gate.md) — auto-merge không ghim head): mọi
 merge là merge ghim head sau `merge-check` = `merge`; CI chưa xong → `wait`, lượt `workflow_run` của `CI` hoặc lịch 10 phút
@@ -37,12 +37,9 @@ nhưng GitHub không chạy workflow `push` cho commit đó — steward bù bằ
 (GitHub cho `GITHUB_TOKEN` tạo sự kiện này; job cần `actions: write`, T-2402; PR đổi `VERSION` thì cả `release-tag.yml` — §4) — và
 không có token thì steward không cập nhật nhánh tụt.
 
-Ruleset sống của repo khung (kiểm `gh api repos/seeker19110/X-Templates/rules/branches/main` 2026-10-23, D-144): required
-check `quality`, `protection-guard`, `gitleaks`, `dep-audit`; **"up to date" bật** (`strict: true`, khớp
-`.github/rulesets/main.json`) → PR tụt sau `main` phải `update` trước khi merge, nên thiếu `XT_STEWARD_TOKEN` thì PR tụt
-kẹt ở "chỉ báo" (cập nhật tay hoặc đặt token). Lệch file: ruleset sống **tắt** "Require conversation resolution"
-(`required_review_thread_resolution: false`, file `true` — `WF-GIT-002`) và repo **bật** "Allow auto-merge" — chủ repo
-bật/tắt lại ở Settings; file giữ chuẩn, không chép theo bản nới.
+Ruleset sống của repo khung (kiểm `gh api repos/seeker19110/X-Templates/rules/branches/main` ngày 2026-11-14):
+`quality`, `protection-guard`, `gitleaks`, `dep-audit` ghim app 15368; **"up to date" bật** (`strict: true`).
+Yêu cầu giải quyết luồng thảo luận tắt, khớp `.github/rulesets/main.json`. PR tụt sau `main` cần cập nhật để CI chạy lại.
 
 ## 2. Triệu chứng và chẩn đoán
 
