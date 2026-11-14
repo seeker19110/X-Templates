@@ -32,7 +32,7 @@ Chỉ mục đầy đủ theo vai đọc: [`framework/README.md`](framework/READ
 ## Dùng cho một dự án
 
 ```bash
-# 1) Cài khung vào dự án (chỉ cần Python >= 3.11; không đè file đã có)
+# 1) Chọn CPython 3.15 trên PATH, rồi cài khung vào dự án
 git clone https://github.com/seeker19110/X-Templates /tmp/x-templates
 python3 /tmp/x-templates/scripts/install.py /đường/dẫn/dự-án --with-github
 
@@ -64,8 +64,9 @@ Ghép thêm module ngoài hồ sơ bằng `--add`, ví dụ web app có tính n�
 
 Để giảm ngữ cảnh mỗi task, dùng `xt.py context --task T-NNN --plan <PLAN>` thay vì nạp toàn bộ blueprint; chọn
 quy mô theo rủi ro thật và giải trình mục không áp dụng. Thư viện dùng được qua nhiều công cụ; harness tự động
-hiện tập trung vào Claude Code + Bash + GitHub. CLI cần Python ≥ 3.11; cập nhật state cần `fcntl` và filesystem
-hỗ trợ `flock` (thiếu → exit 2, không ghi). CI khai Python 3.11/3.14 trên Linux; không suy ra hỗ trợ mọi OS/harness.
+hiện tập trung vào Claude Code + Bash + GitHub. Bộ cài và CLI dùng CPython 3.15.x. Cập nhật state cần `fcntl` và
+filesystem hỗ trợ `flock` (thiếu → exit 2, không ghi). CI trên Linux dùng bản ghim ở `.python-version`. Môi trường local
+và runner cần chọn `python3` là Python 3.15. Xem cách chuyển workflow đã cài ở [ADR-0078](docs/adr/0078-python-315-runtime.md).
 Tài liệu ngành là đầu vào rà soát; yêu cầu pháp lý chưa xác minh cần người có chuyên môn xác nhận.
 
 ## Chạy tự động đến khi xong
@@ -162,9 +163,9 @@ nghe 127.0.0.1, đòi token mỗi lần chạy, kiểm `Host`/`Origin` và đặ
 Biến môi trường (đều tuỳ chọn): `XT_FRAMEWORK` (thư mục khung, mặc định cạnh `scripts/`) · `XT_FRAMEWORK_LINK` (gốc liên kết
 trong blueprint, mặc định `.xtemplates/framework`; ghép lại `BLUEPRINT.md` của chính repo khung: đặt `framework`, nếu không mục đã tick bị coi đổi chữ — AUD-HAR-113) · `XT_RECORD_TIMEOUT` (giây, mặc định 1800) · `XT_PROGRESS_BASE` (nhánh chính cho `progress-check` và `audit check`, mặc định `origin/HEAD` → `origin/main` → `origin/master`; rỗng = tắt) · `CLAUDE_PROJECT_DIR` (gốc dự án cho
 `loop`; không đặt thì: bản cài `.xtemplates/scripts/xt.py` → cha của `.xtemplates`; nếu không, thư mục cha gần nhất có
-`.autopilot`/`xt.yaml`/`.xtemplates`, rồi gần nhất có `.git` — thư mục cha là repo khác (vd `$HOME` dotfiles) sẽ thắng; không thấy thì cwd) · `CLAUDE_CONFIG_DIR` (thư mục cấu hình người dùng của Claude Code mà `doctor`/`loop init` đọc; mặc định `~/.claude` + `~/.claude.json`) · `XT_DEBUG=1` (in traceback khi lỗi) · `XT_GUARD_POLICY=strict` (hook hỏi người như trước ADR-0018; mặc định không hỏi) · `XT_FRAMEWORK_REPO` (repo GitHub để `doctor` so bản phát hành mới nhất, mặc định `seeker19110/X-Templates`) · `XT_STEWARD_UPDATE=off` (`pr steward` không tự cập nhật nhánh tụt base — workflow chạy bằng `GITHUB_TOKEN`) · `XT_CHANGED_FILES` (mỗi dòng một file đổi; `dev-task.sh gate-fast` đặt, `test-select` đọc để chọn lớp test liên quan; không đặt = chạy cả suite) · `XT_MIN_TESTS` (số lớp test tối thiểu `dev-task.sh test-shard` đòi, mặc định 1; liệt kê hỏng không được xanh) · `XT_JOBS` (số tiến trình pytest-xdist cho lệnh `test` tự dò của `dev-task.sh`: nguyên dương, trần 4×số nhân; `1` = `pytest -q` tuần tự; không đặt/rác = `auto`) · `XT_COV_DIR` (thư mục dữ liệu coverage `dev-task.sh test-shard`/`test-combine` dùng, đặt bởi chính script) · `XT_SHARD`, `XT_GATE_ALL_TESTS` (cổng test của `dev-task.sh`, tự đặt) · `XT_CI_WORKFLOW` (tên workflow CI khi khác `ci.yml`) · `XT_GUARD_PHASE=harden` (ép guard vào pha harden, ADR-0040) · `CLAUDE_CODE_SESSION_ID` (id phiên, do Claude Code đặt; chỉ đọc).
+`.autopilot`/`xt.yaml`/`.xtemplates`, rồi gần nhất có `.git` — thư mục cha là repo khác (vd `$HOME` dotfiles) sẽ thắng; không thấy thì cwd) · `CLAUDE_CONFIG_DIR` (thư mục cấu hình người dùng của Claude Code mà `doctor`/`loop init` đọc; mặc định `~/.claude` + `~/.claude.json`) · `XT_DEBUG=1` (in traceback khi lỗi) · `XT_GUARD_POLICY=strict` (hook hỏi người như trước ADR-0018; mặc định không hỏi) · `XT_FRAMEWORK_REPO` (repo GitHub để `doctor` so bản phát hành mới nhất, mặc định `seeker19110/X-Templates`) · `XT_STEWARD_UPDATE=off` (`pr steward` không tự cập nhật nhánh tụt base — workflow chạy bằng `GITHUB_TOKEN`) · `XT_CHANGED_FILES` (mỗi dòng một file đổi; `dev-task.sh gate-fast` đặt, `test-select` đọc để chọn lớp test liên quan; không đặt = chạy cả suite) · `XT_MIN_TESTS` (số lớp test tối thiểu `dev-task.sh test-shard` đòi, mặc định 1; liệt kê hỏng không được xanh) · `XT_JOBS` (số tiến trình pytest-xdist cho lệnh `test` tự dò của `dev-task.sh`: nguyên dương, trần 4×số nhân; `1` = `pytest -q` tuần tự; không đặt/rác = `auto`) · `XT_FRAMEWORK_PYTHON` (đường dẫn Python để `dev-task.sh` chạy CLI của khung, CI mẫu đặt tự động) · `XT_COV_DIR` (thư mục dữ liệu coverage `dev-task.sh test-shard`/`test-combine` dùng, đặt bởi chính script) · `XT_SHARD`, `XT_GATE_ALL_TESTS` (cổng test của `dev-task.sh`, tự đặt) · `XT_CI_WORKFLOW` (tên workflow CI khi khác `ci.yml`) · `XT_GUARD_PHASE=harden` (ép guard vào pha harden, ADR-0040) · `CLAUDE_CODE_SESSION_ID` (id phiên, do Claude Code đặt; chỉ đọc).
 
-Kiểm tra trước khi đóng góp (cần Python ≥ 3.11 và shellcheck; ruff/mypy/coverage khoá kèm hash ở `requirements-dev.txt`):
+Kiểm tra trước khi đóng góp với CPython 3.15.x và công cụ ghim kèm hash trong `requirements-dev.txt`.
 
 ```bash
 pip install --require-hashes -r requirements-dev.txt
