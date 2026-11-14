@@ -9262,11 +9262,10 @@ def _same_failure_hit(st: Dict[str, Any]) -> bool:
         return False
 
 
-def _loop_block_reason(st: Dict[str, Any]) -> str:
+def _loop_block_reason(st: Dict[str, Any], base: Path) -> str:
     """Vòng đang bị chặn đọc từ state cho cổng phát hành (AUD-HAR-377): mọi nguồn của `_blocked_by_state` (cờ — `loop
     block`, `ci-triage`; lỗi lặp; task đỏ quá trần) hoặc vòng đã kết thúc `blocked` chưa `loop unblock`/`loop init` → lý
-    do theo từng nguồn kèm lối ra; không chặn → "". Không suy từ PLAN/verdict (`loop_verdict` coi vòng dừng, PLAN mất,
-    chưa bật là chặn → đỏ oan)."""
+    do theo từng nguồn kèm lối ra; không chặn → "". Chỉ đọc PLAN để chọn lối ra sau khi đã xác định vòng bị chặn."""
     if not (_blocked_by_state(st) or _final_verdict(st) == "blocked"):
         return ""
     why = [f"cờ chặn — {st.get('blocked_reason') or 'cần người quyết định'}"] if st.get("blocked") else []
@@ -9276,7 +9275,13 @@ def _loop_block_reason(st: Dict[str, Any]) -> str:
     why += [f"{t} đỏ {runs[t]} lần (trần {_max_task_runs(st)})" for t in _task_runs_blocking(st)]
     if not why:  # chỉ còn verdict cuối `blocked` của vòng đã kết thúc
         why.append(f"kết thúc `blocked` — {st['final_verdict'].get('reason') or 'không ghi lý do'}")
-    return f"vòng đang bị chặn ({'; '.join(why)}) — {EXIT_UNBLOCK}"
+    recovery = "chưa có vòng lặp → `loop init`"
+    if st.get("started"):
+        try:
+            recovery = _halted_loop_exit(st, base)
+        except OSError:  # PLAN mất quyền đọc hoặc bị dời trong lúc kiểm
+            recovery = _plan_lost_exit(st, bool(st.get("active")) and not _budget_spent(st))
+    return f"vòng đang bị chặn ({'; '.join(why)}) — {recovery}"
 
 
 def _final_verdict(st: Dict[str, Any]) -> Optional[str]:
@@ -12525,7 +12530,7 @@ def _release_verify(base: Path) -> Dict[str, str]:
         )
     files = [f for f, _ in live]
     for f, st in live:
-        blocked = _loop_block_reason(st)
+        blocked = _loop_block_reason(st, f.parent.parent)
         if blocked:  # AUD-HAR-377: vòng bị chặn chờ người quyết — verify xanh cũ không đủ để GO
             return _release_row("verify", "FAIL", blocked if f == here else f"{f}: {blocked}")
     if files[0] == here:
@@ -14077,7 +14082,7 @@ def _sign_deferred(base: Path) -> List[str]:
         deferred = st.get("deferred", {})
         if not isinstance(deferred, dict):
             raise ReleaseSignError(f"{f} hỏng: `deferred` không phải object — agent không ký")
-        blocked = _loop_block_reason(st)
+        blocked = _loop_block_reason(st, f.parent.parent)
         if blocked:  # AUD-HAR-377: vòng bị chặn = người phải quyết trước, không chỉ còn chữ ký (ADR-0074)
             raise ReleaseSignError(f"{f}: {blocked}; agent không ký")
         waiting.update(deferred)
