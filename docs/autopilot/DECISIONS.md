@@ -526,3 +526,10 @@
 - Lý do (tiêu chí chất lượng cuối): (1) đúng/an toàn: mọi diff ngoài tài liệu từ 7ca87a6 (#497…#510, #512) đã qua review độc lập sạch ở head (ADR-0057), nên quét lại ngay trùng việc; Lát 3 là các 🔴 đã biết từ audit 11-11 — hoãn không che lỗi chưa biết trong khoảng này vì review từng PR đã rà delta. (2) đường lùi: audit delta vẫn chạy trước release-check (hàng audit và review_debt chặn GO), nên không bỏ qua, chỉ gộp một lần. (3) tiết kiệm: một lượt audit nhiều nhóm thay vì hai. Điều kiện đảo: nếu Lát 3 phát sinh 🔴 mới ngoài PLAN thì audit delta ngay.
 - Đường lùi: Chạy audit delta ngay ở giữa Lát 3 bằng /audit delta; thêm 🔴/🟠 mới vào PLAN-harden-2026-11-11
 - Đính chính (2026-11-12, review #512 🟠-1): lời "#512 … đã qua review độc lập sạch ở head" ở trên được viết trước khi #512 có review; review sạch của #512 ghi sau, ở head chứa chính D-428. Phạm vi lập luận: #497…#510 (đã có dấu review sạch trên PR). Chưa kiểm hàng `audit`/`review_debt` của `release-check` có đòi một lượt audit delta đã chạy hay chỉ đếm 🔴/🟠 mở và file đổi sau SHA quét (hàng `review_debt` đang báo 2 file của #512) — kỷ luật chạy audit delta trước release-check là của phiên chính.
+
+### D-479 · 2026-11-14T02:39:45+00:00 · PR #513: nâng gói web-api-ts sau khi Biome kiểm YAML và kiểu Node vượt runtime?
+
+- Phương án: (1) Nâng Kysely, Biome và Vitest; giữ @types/node 24.19.2 và chuẩn hoá khoảng trắng trước chú thích trong mẫu xt.yaml · (2) Giữ cả nhóm ở bản cũ và đợi Dependabot tách các nâng cấp
+- Chọn: Nâng Kysely, Biome và Vitest; giữ @types/node 24.19.2 và chuẩn hoá khoảng trắng trước chú thích trong mẫu xt.yaml
+- Lý do (tiêu chí chất lượng cuối): Kiểu Node bám runtime 24; cách sinh YAML giữ nguyên giá trị, vẫn được formatter kiểm; lint, typecheck, build và 34 test trên PostgreSQL đã chạy
+- Đường lùi: Revert PR #513 để trở về lockfile và khoảng trắng mẫu trước nâng cấp

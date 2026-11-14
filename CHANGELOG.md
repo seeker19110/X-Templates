@@ -155,6 +155,9 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
 
 ### Fixed
 
+- Gói `web-api-ts` dùng Kysely 0.29.8, Biome 2.6.6 và Vitest 5.1.0 (#513, D-479). Giữ kiểu Node 24
+  theo runtime của gói. Chuẩn hoá khoảng trắng trước chú thích trong mẫu `xt.yaml` để qua formatter YAML của Biome.
+
 - `install.py` (AUD-SEC-619 🔴, D-425): thư mục cha là symlink trên đường ghi harness `.claude/`, `.github/` và adapter
   (`.codex/`, `.gemini/`…) → `skipped-symlink` kèm cảnh báo, không ghi/tạo gì ngoài dự án (trước đây `.claude -> ngoài`
   khiến `settings.json` ngoài bị gộp quyền). `--plan` báo cùng quyết định. Dự án đích có thư mục harness (`.claude`,
