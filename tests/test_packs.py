@@ -15,6 +15,7 @@ import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
@@ -103,7 +104,7 @@ class PackContractTest(unittest.TestCase):
 
 
 INDEX_RE = re.compile(
-    r"CREATE\s+(?:UNIQUE\s+)?INDEX\s+(?P<conc>CONCURRENTLY\s+)?(?:IF\s+NOT\s+EXISTS\s+)?[\w.\"]+\s+ON\s+(?:ONLY\s+)?(?P<table>[\w.\"]+)",
+    r"CREATE\s+(?:UNIQUE\s+)?INDEX\s+(?P<conc>CONCURRENTLY\s+)?(?:(?:IF\s+NOT\s+EXISTS\s+)?[\w.\"]+\s+)?ON\s+(?:ONLY\s+)?(?P<table>[\w.\"]+)",
     re.IGNORECASE,
 )
 TABLE_RE = re.compile(r"CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(?P<table>[\w.\"]+)", re.IGNORECASE)
@@ -118,10 +119,15 @@ def plain_indexes_on_existing_tables(sql: str) -> list[str]:
 
 
 class MigrationIndexTest(unittest.TestCase):
-    """AUD-DATA-011 (DB-MIG-006): chỉ mục trên bảng có sẵn dựng CONCURRENTLY; bảng mới tạo cùng file thì không cần."""
+    """AUD-DATA-011/013 (DB-MIG-006): giữ đúng khả năng của migration chạy trong giao dịch."""
 
     def test_scanner(self):
         self.assertEqual(plain_indexes_on_existing_tables("CREATE INDEX i ON sessions (a);"), ["sessions"])
+        self.assertEqual(plain_indexes_on_existing_tables("CREATE INDEX ON sessions (a);"), ["sessions"])
+        self.assertEqual(
+            plain_indexes_on_existing_tables("CREATE UNIQUE INDEX ON ONLY public.sessions (a);"), ["public.sessions"]
+        )
+        self.assertEqual(plain_indexes_on_existing_tables("CREATE INDEX CONCURRENTLY ON sessions (a);"), [])
         self.assertEqual(
             plain_indexes_on_existing_tables("create unique index if not exists i on public.t (a)"), ["public.t"]
         )
@@ -131,13 +137,41 @@ class MigrationIndexTest(unittest.TestCase):
             plain_indexes_on_existing_tables("CREATE TABLE n (a int); CREATE INDEX i ON other (a);"), ["other"]
         )
 
-    def test_migrations_build_indexes_concurrently_or_are_listed(self):
+    def test_transactional_migration_index_policy(self):
+        cases = (
+            ("CREATE INDEX CONCURRENTLY ON sessions (created_at);", "CONCURRENTLY"),
+            ("CREATE TABLE n (a int); CREATE UNIQUE INDEX CONCURRENTLY i ON n (a);", "CONCURRENTLY"),
+            ("CREATE INDEX IF NOT EXISTS sessions_created ON sessions (created_at);", "0006_index"),
+            ("CREATE INDEX ON sessions (created_at);", "0006_index"),
+            ("CREATE TABLE n (a int); CREATE INDEX IF NOT EXISTS i ON n (a);", ""),
+            ("", ""),
+        )
+        with tempfile.TemporaryDirectory() as scratch:
+            pack = Path(scratch)
+            migrations = pack / "starter" / "src" / "migrations"
+            migrations.mkdir(parents=True)
+            for legacy in LEGACY_PLAIN_INDEX:
+                shutil.copyfile(PACK / "starter" / "src" / "migrations" / f"{legacy}.ts", migrations / f"{legacy}.ts")
+            for sql, expected_error in cases:
+                with self.subTest(sql=sql), patch(f"{__name__}.PACK", pack):
+                    (migrations / "0006_index.ts").write_text(sql, encoding="utf-8")
+                    if expected_error:
+                        with self.assertRaisesRegex(AssertionError, expected_error):
+                            self.test_transactional_migrations_reject_unsupported_indexes()
+                    else:
+                        self.test_transactional_migrations_reject_unsupported_indexes()
+
+    def test_transactional_migrations_reject_unsupported_indexes(self):
         bad: dict[str, list[str]] = {}
+        concurrent: list[str] = []
         for f in sorted((PACK / "starter" / "src" / "migrations").glob("*.ts")):
-            found = plain_indexes_on_existing_tables(f.read_text(encoding="utf-8"))
-            if found:
+            sql = f.read_text(encoding="utf-8")
+            if any(m["conc"] for m in INDEX_RE.finditer(sql)):
+                concurrent.append(f.stem)
+            if found := plain_indexes_on_existing_tables(sql):
                 bad[f.stem] = found
-        self.assertEqual(set(bad), set(LEGACY_PLAIN_INDEX), "migration mới dùng CREATE INDEX CONCURRENTLY (DB-MIG-006)")
+        self.assertEqual(concurrent, [], "CREATE INDEX CONCURRENTLY cần chạy ngoài giao dịch (DB-MIG-006)")
+        self.assertEqual(set(bad), set(LEGACY_PLAIN_INDEX), "chỉ 0005 được dựng index thường trên bảng cũ (DB-MIG-006)")
         ledger = (ROOT / "docs" / "ops" / "AUDIT-STATUS.md").read_text(encoding="utf-8")
         for aud in LEGACY_PLAIN_INDEX.values():
             self.assertIn(f"| {aud} |", ledger, "mục ngoại lệ phải có dòng sổ")

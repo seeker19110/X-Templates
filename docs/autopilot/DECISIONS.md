@@ -1,7 +1,7 @@
 # Nhật ký quyết định tự duyệt
 
 > Ghi bởi `xt.py loop decide`. Phiên chính tự duyệt điểm quyết định theo tiêu chí chất lượng cuối (`LOOP-STOP-018`, ADR-0008 của khung). Người xem lại bất cứ lúc nào; đổi ý → quyết định mới ghi "thay D-NNN", không sửa mục cũ.
-> Bản tháng trước: [`DECISIONS-2026-10.md`](DECISIONS-2026-10.md) (D-001…D-287), [`DECISIONS-2026-11.md`](DECISIONS-2026-11.md) (D-292…D-360) — máy đọc cả bản tháng (T-3651).
+> Bản tháng trước: [`DECISIONS-2026-10.md`](DECISIONS-2026-10.md) (D-001…D-287), [`DECISIONS-2026-11.md`](DECISIONS-2026-11.md) (D-292…D-372) — máy đọc cả bản tháng (T-3651).
 
 ### D-352 · 2026-11-04T10:29:48+00:00 · Chủ dự án 2026-11-04: cho phép agent quyết định khi nào đã đạt và tuyên bố đạt MVP — đảo một phần ADR-0058 (duyệt giai đoạn chỉ người). Làm thế nào?
 
@@ -51,90 +51,6 @@
 - Chọn: B gói web-api-ts tối giản (node:http + kysely/pg + RLS + vitest + biome, không Next.js) + CI lát dọc + 3 ca sai; C install.py --pack (starter chỉ repo sạch, managed theo manifest, drift, lùi bằng cài lại bản cũ) + chạy --plan trên bản clone hotel-manager; D worker cùng gói (trùng/timeout/crash/reconcile), fixture host thật hoãn (cần tài khoản trả phí của chủ); E registry JSON + xt.py registry + trang app
 - Lý do (tiêu chí chất lượng cuối): (1) đúng/an toàn: không dùng tài khoản trả phí của chủ khi chưa được giao, không đụng repo đích (không PR); (2) đường lùi: gói là thư mục xoá được, --pack opt-in; (3) đơn giản/test được: gói nhỏ chạy được trong CI với Postgres thật, cùng thư viện lõi hotel-manager (kysely/pg/RLS/vitest/biome) nên C dùng chung; Next.js thêm bề mặt lớn không cần cho lát dọc API
 - Đường lùi: xoá framework/templates/packs/, bỏ cờ --pack, xoá registry; ADR-0068 trạng thái về 'lát B–E chưa làm'
-
-### D-361 · 2026-11-05T00:00:58+00:00 · ADR-0071 sau review #440: sáu chi tiết ngoài D-360 — lệnh prepare, mã thoát 4, Gate status --check, cây đo bằng clone --shared, khoá cả pyproject.toml/package.json, nhánh mặc định lấy từ origin/HEAD
-
-- Phương án: (1) Nhận năm chi tiết như bản sửa (prepare riêng; exit 4; Gate perf trial status --check theo target; clone --shared để mã candidate không thấy cây gốc qua git worktree list — T-3702 đo, chậm/hỏng thì về worktree add và ghi giới hạn; khoá cả file pyproject.toml/package.json); riêng nhánh mặc định: lấy từ máy chủ (git ls-remote --symref origin HEAD) khi có mạng, ngoại tuyến mới dùng refs/remotes/origin/HEAD và guard phải chặn git remote set-head/ghi refs/remotes (T-3701 thêm test guard) · (2) Nhận nguyên sáu đề xuất, origin/HEAD cục bộ là nguồn nhánh mặc định
-- Chọn: Nhận năm chi tiết như bản sửa (prepare riêng; exit 4; Gate perf trial status --check theo target; clone --shared để mã candidate không thấy cây gốc qua git worktree list — T-3702 đo, chậm/hỏng thì về worktree add và ghi giới hạn; khoá cả file pyproject.toml/package.json); riêng nhánh mặc định: lấy từ máy chủ (git ls-remote --symref origin HEAD) khi có mạng, ngoại tuyến mới dùng refs/remotes/origin/HEAD và guard phải chặn git remote set-head/ghi refs/remotes (T-3701 thêm test guard)
-- Lý do (tiêu chí chất lượng cuối): (1) origin/HEAD cục bộ do agent đổi được bằng git remote set-head → chọn lại baseline, đúng lỗ 🔴1 mà D-360 đóng; nguồn máy chủ không đổi được nếu không có quyền admin repo; (1) khoá cả file chặt hơn khoá mục; (3) prepare/exit 4/status --check tách hành vi để mỗi task có Gate riêng, test được
-- Đường lùi: Dùng origin/HEAD cục bộ (phương án 2) nếu dự án đích thường chạy ngoại tuyến và guard đã chặn set-head
-
-### D-362 · 2026-11-05T00:17:42+00:00 · Review #441 (trả nợ #439) lại BLOCKING: 1 🔴 do diff (AUD-SEC-496 dò Git dir dừng ở thư mục con khi guard thừa hưởng GIT_OBJECT_DIRECTORY mà lệnh gỡ biến), 2 🟠 (AUD-SEC-493 heredoc/here-string có chuyển hướng thành UNSEEN; quyết định phụ thuộc kiểu stdin /dev/./stdin), 5 🟢, 4 có từ trước (🔴 /dev/./stdin không chuẩn hoá trong STDIN_SCRIPTS; 🟠 env -S; 🟠 . ./script có sẵn chứa cd; 🟢 giới hạn D-106 cd "$X"; ..) — vòng review guard không hội tụ, làm sao cắt 3.30.0?
-
-- Phương án: (1) Sửa trong #441: hai 🔴 (dò cả hai nhánh có/không objdir, chặn nếu nhánh nào gặp khoá nguy hiểm; chuẩn hoá đường /dev, /proc trong STDIN_SCRIPTS và đường nguồn), hai 🟠 (heredoc có nháy/here-string giải như eval kể cả khi có chuyển hướng thêm; mọi đường dưới /dev hay /proc là UNSEEN sau chuẩn hoá), 🟢 chặn oan tar/unzip (repo chờ '' chỉ khi có repo trần chờ thật), gỡ FD_SCRIPT_RE trùng (giữ một định nghĩa + test), sửa chữ sổ/CHANGELOG; chấp nhận có hạn 2027-01-21 (ADR-0067): 🟢 mở rộng tên khớp với tập phủ định cpio (chưa thấy lỗ), 🟢 AUD-PERF-019 cách giảm khác, 🟠 env -S, 🟠 source script có sẵn chứa cd (guard không quét nội dung script — giới hạn đã ghi ở PROGRESS), 🟢 D-106 cd "$X" + .. · (2) Sửa hết mọi mục kể cả có từ trước rồi review lại
-- Chọn: Sửa trong #441: hai 🔴 (dò cả hai nhánh có/không objdir, chặn nếu nhánh nào gặp khoá nguy hiểm; chuẩn hoá đường /dev, /proc trong STDIN_SCRIPTS và đường nguồn), hai 🟠 (heredoc có nháy/here-string giải như eval kể cả khi có chuyển hướng thêm; mọi đường dưới /dev hay /proc là UNSEEN sau chuẩn hoá), 🟢 chặn oan tar/unzip (repo chờ '' chỉ khi có repo trần chờ thật), gỡ FD_SCRIPT_RE trùng (giữ một định nghĩa + test), sửa chữ sổ/CHANGELOG; chấp nhận có hạn 2027-01-21 (ADR-0067): 🟢 mở rộng tên khớp với tập phủ định cpio (chưa thấy lỗ), 🟢 AUD-PERF-019 cách giảm khác, 🟠 env -S, 🟠 source script có sẵn chứa cd (guard không quét nội dung script — giới hạn đã ghi ở PROGRESS), 🟢 D-106 cd "$X" + ..
-- Lý do (tiêu chí chất lượng cuối): (1) sửa mọi 🔴 và 🟠 thuộc diff, cùng 🔴 có từ trước rẻ (chuẩn hoá đường); phần còn lại là giới hạn phân tích tĩnh đã được ADR-0067 chấp nhận có hạn — hàng rào lớp hai (sandbox) xét trước 2027-01-21; (2) mỗi mục chấp nhận có dòng sổ + hạn, không ẩn; (5) phương án 2 không hội tụ (D-347: bốn lượt review liên tiếp đều lộ lỗ mới), chặn phát hành 3.30.0 vô hạn
-- Đường lùi: Mở lại dòng chấp nhận thành mở và sửa trong PR guard kế tiếp
-
-### D-363 · 2026-11-05T00:42:29+00:00 · T-3700/T-3701: ca FLOW perf trial gọi xt.py nào — bản sao .xtemplates/scripts/xt.py trong repo đồ chơi (giống dự án đích, mất coverage) hay ROOT/scripts/xt.py (coverage tính được)? Kèm: tên trường sổ jsonl và schema chưa chốt
-
-- Phương án: (1) Gọi ROOT/scripts/xt.py; luật ADR §5 'exec công cụ chấm từ blob gốc' chỉ exec khi byte của file đang chạy KHÁC blob ở base (bằng nhau thì chạy tiếp, không exec) — không có cờ/biến môi trường riêng cho test; T-3701 chốt tên trường perf-trials.jsonl (event, reason), schema 1, setup là chuỗi shell và ghi vào ADR §3; vế held-out so cả gốc của AUD-HAR-231 thêm test đơn vị ở T-3705 · (2) Gọi bản sao trong repo đồ chơi; test_perf_trial phủ 100 % trong tiến trình bằng cách tắt exec qua biến môi trường
-- Chọn: Gọi ROOT/scripts/xt.py; luật ADR §5 'exec công cụ chấm từ blob gốc' chỉ exec khi byte của file đang chạy KHÁC blob ở base (bằng nhau thì chạy tiếp, không exec) — không có cờ/biến môi trường riêng cho test; T-3701 chốt tên trường perf-trials.jsonl (event, reason), schema 1, setup là chuỗi shell và ghi vào ADR §3; vế held-out so cả gốc của AUD-HAR-231 thêm test đơn vị ở T-3705
-- Lý do (tiêu chí chất lượng cuối): (1) không thêm cửa sau tắt exec (biến môi trường tắt bộ chấm là bề mặt lách); so byte với blob gốc là điều kiện đúng nghĩa: cùng byte thì chính là công cụ gốc; (3) coverage 100 % giữ được qua coverage subprocess sẵn có; (3) tên trường chốt một nơi (ADR §3)
-- Đường lùi: Gọi bản sao (phương án 2) nếu so byte gây sai khi dự án đích sửa dòng cuối file (CRLF)
-
-### D-364 · 2026-11-05T01:20:18+00:00 · Sửa #441 lộ thêm hai lỗ có từ trước: (1) ghi qua thư mục mở trên fd — printf x > /dev/fd/3/guard.py 3< .claude/hooks (guard bỏ qua đích dưới /dev/); (2) bash ./link <<'EOF' với link → /dev/stdin (_stdin_shell không lần symlink theo thư mục chạy)
-
-- Phương án: (1) (1) sửa ngay: đích có tiền tố /dev/fd/N/…, /dev/std*/…, /proc/*/fd/N/… coi là thư mục không biết (D-106), áp _where lên phần đuôi (AUD-SEC-521); (2) chấp nhận có hạn 2027-01-21 theo ADR-0067, cùng lớp AUD-SEC-519 (AUD-SEC-522) · (2) Chặn thẳng mọi đích ghi đi qua fd và sửa cả (2) bằng truyền thư mục ứng viên vào _stdin_shell
-- Chọn: (1) sửa ngay: đích có tiền tố /dev/fd/N/…, /dev/std*/…, /proc/*/fd/N/… coi là thư mục không biết (D-106), áp _where lên phần đuôi (AUD-SEC-521); (2) chấp nhận có hạn 2027-01-21 theo ADR-0067, cùng lớp AUD-SEC-519 (AUD-SEC-522)
-- Lý do (tiêu chí chất lượng cuối): (1) lỗ (1) ghi được hook nên sửa; cách (a) chặt mà gần như không chặn oan (4) — chặn thẳng thô hơn; (2) cần sửa nhiều chỗ gọi, cùng lớp giới hạn đã chấp nhận ở D-362 — (5) không chặn 3.30.0
-- Đường lùi: Chặn thẳng mọi đích ghi qua fd nếu (a) lọt biến thể
-
-### D-365 · 2026-11-05T01:46:16+00:00 · T-3701/T-3702 perf trial: duyệt sáu quyết định nhỏ của người viết và chọn thời điểm gỡ ID FLOW khỏi XFAIL
-
-- Phương án: (1) Nhận cả sáu (done= cho ca đã xanh; log đòi HEAD^{tree} = cây giữ/log gần nhất; điểm nóng nhận file có ở HEAD do lần giữ trước thêm; khoá mặc định **/ và từ chối khoá lạ; đếm ba lần qua mọi vòng, base từ SHA máy chủ; setup qua /bin/sh -c) — thư mục tạm của exec blob gốc phải dọn ở T-3703; gỡ ID khỏi XFAIL ở T-3707 cùng lúc sửa Gate T-3700 · (2) Giữ cơ chế done= vĩnh viễn
-- Chọn: Nhận cả sáu (done= cho ca đã xanh; log đòi HEAD^{tree} = cây giữ/log gần nhất; điểm nóng nhận file có ở HEAD do lần giữ trước thêm; khoá mặc định **/ và từ chối khoá lạ; đếm ba lần qua mọi vòng, base từ SHA máy chủ; setup qua /bin/sh -c) — thư mục tạm của exec blob gốc phải dọn ở T-3703; gỡ ID khỏi XFAIL ở T-3707 cùng lúc sửa Gate T-3700
-- Lý do (tiêu chí chất lượng cuối): (1) năm điểm chặt hơn hoặc trung tính; điểm nóng do lần giữ thêm đã qua máy kiểm; (3) XFAIL không còn ca là rác — gỡ ở task cuối giữ Gate T-3700 đúng nghĩa; (2) rò thư mục tạm có task chủ
-- Đường lùi: Giữ done= nếu sửa Gate T-3700 làm loop verify lịch sử đỏ
-
-### D-366 · 2026-11-05T02:10:21+00:00 · Review #442 🔴: 'máy chủ' của D-361 là URL origin cục bộ — agent đổi set-url/config remote.*.url/insteadOf/GIT_CONFIG_*/packed-refs/.git/refs/remotes để tự chọn gốc vòng; 🟠 hạ cấp gốc bằng nhánh từ tổ tiên cũ; 🟠 diff.ignoreSubmodules lách luật HEAD^{tree}; 🟠 HOME từ env (usercustomize); 🟠 os.walk nuốt lỗi quyền; 5 🟢
-
-- Phương án: (1) Hai lớp: (guard) deny mọi đổi URL/pushurl/refspec/insteadOf của remote kể cả -c và GIT_CONFIG_* đi kèm xt.py, và mọi ghi thẳng .git/packed-refs, .git/refs/remotes/** (Bash lẫn Edit/Write); (xt.py) perf trial lọc env git theo allowlist, bỏ cấu hình git toàn cục/hệ thống khi gọi ls-remote (GIT_CONFIG_NOSYSTEM, GIT_CONFIG_GLOBAL=/dev/null), từ chối khi có insteadOf áp lên URL origin, ghi URL origin vào sổ ở start đầu và từ chối khi đổi. Gốc = ĐẦU nhánh mặc định do máy chủ báo (start đòi HEAD chứa đầu nhánh, không còn merge-base tuỳ tổ tiên) — chặn hạ cấp. So HEAD^{tree} bằng SHA rev-parse, mọi diff thêm --ignore-submodules=none --no-ext-diff --no-textconv. HOME = pwd.getpwuid, PYTHONNOUSERSITE=1. os.walk onerror → exit 2; dọn chmod. Sửa cả 5 🟢 (exec giữ gốc dự án qua CLAUDE_PROJECT_DIR; đọc __file__ /dev/fd → không exec sai; mỗi cây một mkdtemp + remote remove origin trong clone; cây đo phải ngoài cây agent; escape mốc PERF-LOG) và khoá mặc định thêm setup.py, requirements*.txt. ADR §1/§4 ghi giới hạn còn lại: cùng uid sửa trực tiếp file trong .git ngoài guard (lớp hai: sandbox, ADR-0067) · (2) Chỉ ghi giới hạn vào ADR, giữ mã
-- Chọn: Hai lớp: (guard) deny mọi đổi URL/pushurl/refspec/insteadOf của remote kể cả -c và GIT_CONFIG_* đi kèm xt.py, và mọi ghi thẳng .git/packed-refs, .git/refs/remotes/** (Bash lẫn Edit/Write); (xt.py) perf trial lọc env git theo allowlist, bỏ cấu hình git toàn cục/hệ thống khi gọi ls-remote (GIT_CONFIG_NOSYSTEM, GIT_CONFIG_GLOBAL=/dev/null), từ chối khi có insteadOf áp lên URL origin, ghi URL origin vào sổ ở start đầu và từ chối khi đổi. Gốc = ĐẦU nhánh mặc định do máy chủ báo (start đòi HEAD chứa đầu nhánh, không còn merge-base tuỳ tổ tiên) — chặn hạ cấp. So HEAD^{tree} bằng SHA rev-parse, mọi diff thêm --ignore-submodules=none --no-ext-diff --no-textconv. HOME = pwd.getpwuid, PYTHONNOUSERSITE=1. os.walk onerror → exit 2; dọn chmod. Sửa cả 5 🟢 (exec giữ gốc dự án qua CLAUDE_PROJECT_DIR; đọc __file__ /dev/fd → không exec sai; mỗi cây một mkdtemp + remote remove origin trong clone; cây đo phải ngoài cây agent; escape mốc PERF-LOG) và khoá mặc định thêm setup.py, requirements*.txt. ADR §1/§4 ghi giới hạn còn lại: cùng uid sửa trực tiếp file trong .git ngoài guard (lớp hai: sandbox, ADR-0067)
-- Lý do (tiêu chí chất lượng cuối): (1) phương án 1 đóng mọi đường đã tái hiện bằng hai lớp độc lập; đòi HEAD chứa đầu nhánh chặt hơn merge-base và bỏ lựa chọn tổ tiên của agent; phần còn lại là giới hạn cùng uid đã được ADR-0067 chấp nhận — ghi rõ, sửa tiền đề D-361; (3) mỗi điểm có test tái hiện
-- Đường lùi: Trở về merge-base nếu đòi HEAD chứa đầu nhánh làm vòng tối ưu phải gộp main quá thường
-
-### D-367 · 2026-11-05T04:10:16+00:00 · Chủ repo 2026-11-05: tận dụng tối đa nhân CPU khi chạy test, áp cho cả dự án đích — dev-task tự dò hiện chạy pytest/unittest một tiến trình
-
-- Phương án: (1) dev-task tự dò: pytest → 'pytest -q -n auto' khi import được xdist (không thì 'pytest -q' kèm gợi ý cài pytest-xdist), unittest → mỗi module test một tiến trình qua xargs -P; số tiến trình = XT_JOBS nếu đặt, mặc định nproc; Go/Rust/Node giữ (đã song song mặc định); thêm mục SHOULD ở quality-gates.md (test chạy song song theo số nhân + test độc lập thứ tự) và CHANGELOG 'Dự án đích'; dự án đích đã khai lệnh test trong xt.yaml: không đè, PR nâng bản đề xuất cờ song song phù hợp · (2) Chỉ ghi hướng dẫn trong tài liệu, không đổi dev-task
-- Chọn: dev-task tự dò: pytest → 'pytest -q -n auto' khi import được xdist (không thì 'pytest -q' kèm gợi ý cài pytest-xdist), unittest → mỗi module test một tiến trình qua xargs -P; số tiến trình = XT_JOBS nếu đặt, mặc định nproc; Go/Rust/Node giữ (đã song song mặc định); thêm mục SHOULD ở quality-gates.md (test chạy song song theo số nhân + test độc lập thứ tự) và CHANGELOG 'Dự án đích'; dự án đích đã khai lệnh test trong xt.yaml: không đè, PR nâng bản đề xuất cờ song song phù hợp
-- Lý do (tiêu chí chất lượng cuối): (4) dự án dùng lệnh tự dò được lợi ngay; (2) chỉ đổi lệnh tự dò, lệnh khai báo trong xt.yaml giữ nguyên, XT_JOBS=1 trả về tuần tự; (1) test phụ thuộc thứ tự lộ ra là lỗi thật (frontend-testing.md đã nêu) — mục SHOULD đòi test độc lập
-- Đường lùi: XT_JOBS=1 hoặc khai lệnh test tường minh trong xt.yaml
-
-### D-368 · 2026-11-05T05:06:07+00:00 · Review #443 (perf trial finish): 🔴 status --check không ràng HEAD (commit lạ sau lần giữ vẫn exit 0); 🟠 candidate_files thành pathspec glob cuốn sổ .autopilot vào stash; 🟠 cache đĩa (HOME/XDG/TMPDIR một lần mỗi cây, kênh scratch) tính thành tăng tốc; 🟠 candidate tự mang interpreter (.venv/bin, node_modules/.bin đầu PATH không khoá); 6 🟢
-
-- Phương án: (1) Sửa hết trong #443: check đòi cây sạch ngoài .autopilot và HEAD^{tree} == cây neo (sai → exit 1 'commit lạ sau lần giữ'); mọi pathspec qua --pathspec-from-file=- --pathspec-file-nul + GIT_LITERAL_PATHSPECS=1 (sửa luôn Argument list too long); HOME/XDG_*/TMPDIR tạo mới MỖI mẫu, file khớp scratch xoá giữa các mẫu wall; khoá mặc định thêm **/.venv/**, **/node_modules/**, .gitignore và thu hồi khi file candidate nằm dưới thư mục PATH của cây; 🟢: PERF_SUSPECT_RE thêm atexit/sys.stdout/builtins (so toàn stdout với gốc để T-3705), SIGTERM dọn cây + giết nhóm tiến trình + pha về started, README mô tả finish/status --check và sửa 'merge-base' theo D-366, test thứ tự xen kẽ, thông báo --no-apply trỏ T-3706 · (2) Chỉ sửa 🔴, ghi nợ 🟠/🟢
-- Chọn: Sửa hết trong #443: check đòi cây sạch ngoài .autopilot và HEAD^{tree} == cây neo (sai → exit 1 'commit lạ sau lần giữ'); mọi pathspec qua --pathspec-from-file=- --pathspec-file-nul + GIT_LITERAL_PATHSPECS=1 (sửa luôn Argument list too long); HOME/XDG_*/TMPDIR tạo mới MỖI mẫu, file khớp scratch xoá giữa các mẫu wall; khoá mặc định thêm **/.venv/**, **/node_modules/**, .gitignore và thu hồi khi file candidate nằm dưới thư mục PATH của cây; 🟢: PERF_SUSPECT_RE thêm atexit/sys.stdout/builtins (so toàn stdout với gốc để T-3705), SIGTERM dọn cây + giết nhóm tiến trình + pha về started, README mô tả finish/status --check và sửa 'merge-base' theo D-366, test thứ tự xen kẽ, thông báo --no-apply trỏ T-3706
-- Lý do (tiêu chí chất lượng cuối): (1) ba 🟠 là đường giữ oan/hỏng sổ đã tái hiện — lệnh này sắp thành Gate thật ở T-3707 cùng bản 3.30.0, nợ sẽ chặn release-check anyway; (3) mỗi điểm có ca tái hiện chuyển thành test; (5) sửa một lần rẻ hơn ghi nợ rồi PR riêng
-- Đường lùi: Tách 🟢 sang PR sau nếu PR quá lớn để review
-
-### D-369 · 2026-11-05T05:08:03+00:00 · Review #444 (T-3708): bộ chia unittest theo module tự viết gây xanh giả (lớp định nghĩa ở module khác bị bỏ), đỏ giả (setUpClass/setUpModule skip → zero_tests_red exit 5; load_tests/doctest, FunctionTestCase, stdout lúc import lẫn vào danh sách); pytest -n ép cả khi cấu hình tắt xdist; BASE-GATE-020 chép QA-STRAT-007; CI đỏ BASE-CFG-003 (XT_JOBS thiếu README)
-
-- Phương án: (1) Unittest trở về discover tuần tự như cũ (bỏ bộ chia); chỉ pytest + xdist song song: python3 -m pytest -q -n <JOBS>, dò bằng importlib.util.find_spec('xdist'), bỏ -n khi PYTEST_DISABLE_PLUGIN_AUTOLOAD đặt hoặc cấu hình pytest (pytest.ini/pyproject/setup.cfg/tox.ini) có 'no:xdist'; XT_JOBS có trần 4×nproc; README thêm XT_JOBS; BASE-GATE-020 chỉ giữ ý song song, trỏ QA-STRAT-007 cho độc lập thứ tự, sửa '→ Kiểm'; CHANGELOG ghi cwd vào sys.path; sửa hàm phụ tests_dir bị gom thành test · (2) Sửa bộ chia unittest (TestLoader ghi module, gom output, dò không-test toàn cục)
-- Chọn: Unittest trở về discover tuần tự như cũ (bỏ bộ chia); chỉ pytest + xdist song song: python3 -m pytest -q -n <JOBS>, dò bằng importlib.util.find_spec('xdist'), bỏ -n khi PYTEST_DISABLE_PLUGIN_AUTOLOAD đặt hoặc cấu hình pytest (pytest.ini/pyproject/setup.cfg/tox.ini) có 'no:xdist'; XT_JOBS có trần 4×nproc; README thêm XT_JOBS; BASE-GATE-020 chỉ giữ ý song song, trỏ QA-STRAT-007 cho độc lập thứ tự, sửa '→ Kiểm'; CHANGELOG ghi cwd vào sys.path; sửa hàm phụ tests_dir bị gom thành test
-- Lý do (tiêu chí chất lượng cuối): (1) bộ chia tự viết sai ở 7 dạng hợp lệ của unittest — xanh giả là lỗi nặng nhất của một cổng; discover tuần tự đúng sẵn; (3) pytest-xdist là công cụ chuẩn, đã kiểm; (4) dự án Python muốn song song dùng pytest-xdist (BASE-GATE-020 nói cách); (5) tốc độ chỉ phá hoà
-- Đường lùi: Mở task riêng cho bộ chia unittest có TestLoader ghi module nếu dự án đích unittest-thuần cần tốc độ
-
-### D-370 · 2026-11-05T07:03:50+00:00 · Review #445 (perf trial T-3705…T-3707): 🔴 Gate mẫu <(git cat-file …) xanh khi không đọc được công cụ (pipefail không áp cho process substitution); 🔴 SIGTERM sau đóng băng đưa pha về started không tốn lượt → rút lại hạt giống held-out vô hạn; 🟠 held-out chỉ đòi improved còn target chỉ xét chỉ số chính; 🟠 chưa so đầu ra chỉ số chính với gốc (atexit print); 🟠 chết giữa dòng decide và state decided → --resume ghi decide trùng; 🟠 --no-apply kept rồi abort làm vòng kẹt
-
-- Phương án: (1) Sửa hết trong #445: Gate mẫu fail-closed '<(git cat-file blob refs/remotes/origin/HEAD:… || echo raise SystemExit\(2\))' + test qua run_gate_shell khi thiếu origin/HEAD và sai đường; ngắt sau đóng băng tiêu lần đo lại duy nhất (chung bộ đếm resumes), ngắt/chết lần hai → incomplete, sửa ADR §9; target đòi cả held-out gộp đạt; chỉ số chính gom đầu ra và so với gốc như held-out (khác → inequivalent); finish/--resume kiểm dòng decide đã có trước khi ghi; abort sau --no-apply kept ghi dòng aborted và thu hồi nhất quán (không kẹt); 🟢 lý do kept không nhắc held-out khi không khai, lệnh stash in ra theo pathspec nghĩa đen · (2) Chỉ sửa hai 🔴, ghi nợ 🟠
-- Chọn: Sửa hết trong #445: Gate mẫu fail-closed '<(git cat-file blob refs/remotes/origin/HEAD:… || echo raise SystemExit\(2\))' + test qua run_gate_shell khi thiếu origin/HEAD và sai đường; ngắt sau đóng băng tiêu lần đo lại duy nhất (chung bộ đếm resumes), ngắt/chết lần hai → incomplete, sửa ADR §9; target đòi cả held-out gộp đạt; chỉ số chính gom đầu ra và so với gốc như held-out (khác → inequivalent); finish/--resume kiểm dòng decide đã có trước khi ghi; abort sau --no-apply kept ghi dòng aborted và thu hồi nhất quán (không kẹt); 🟢 lý do kept không nhắc held-out khi không khai, lệnh stash in ra theo pathspec nghĩa đen
-- Lý do (tiêu chí chất lượng cuối): (1) bốn 🟠 là đường giữ oan/kẹt đã tái hiện trên chính Gate sắp phát hành ở 3.30.0 — nợ sẽ chặn release-check; (3) mỗi điểm có kịch bản tái hiện chuyển thành test; ADR §9 đã hứa 'đo lại tới khi may không làm được quá một lần'
-- Đường lùi: Tách 🟠 sang PR sau nếu PR quá lớn để review
-
-### D-371 · 2026-11-05T08:07:48+00:00 · Audit delta T-3557 (#435–#445): 5 🟠 — F1 vòng /optimize không tới done (commit sổ sách làm status --check đỏ, merge mở vòng mới), F2 start từ chối khi PLAN-opt/D-NNN commit trên nhánh, F3 module giả (unittest.py/pytest.py) ở gốc lừa equiv, F4 Gate dự phòng perf-gate.sh bị guard chặn (đường lùi khai ở ADR-0071/D-356/CHANGELOG không dùng được), F5 trial_verdict không có test bắt đảo luật giữ; ~20 🟢
-
-- Phương án: (1) Sửa hết 🟠 + 🟢 rẻ trong hai PR song song trước khi cắt 3.30.0: (A, xt.py perf trial) so cây neo ở start/log/status --check bỏ qua đường sổ sách docs/autopilot/**, PROGRESS.md, đường PERF-LOG (cấu hình không được trỏ lệnh đo/khoá vào các đường này — kiểm ở start), check nhận lần giữ của vòng trước khi cây neo == HEAD^{tree} trừ sổ sách; file mới của candidate trùng tên mô-đun nhập được ở cây gốc (unittest, pytest, …) → tampered, khoá mặc định thêm cấu hình runner (.pytest.ini, jest/vitest config, .mocharc*); test đơn vị trial_verdict + GIT_CONFIG cô lập; 🟢 interrupt ghim candidate_fp, log dùng trial_live, ⚠ khi ls-remote rơi về ref cục bộ, tree_fingerprint --ignore-submodules=none; đường lùi = gỡ skill khỏi perf trial, dùng perf compare/guard tay (bỏ lời hứa perf-gate.sh qua loop); đồng bộ ADR/README/skill/optimization-loop/CHANGELOG. (B, phần còn lại) harness-files.md theo #442, DEPENDENCIES.md thêm Gitleaks CLI, GlobCommandNameTest dùng thời gian CPU, dev-task coi pytest.py/conftest gốc là cấu hình cổng, PLAN-upgrade tick T-3670/T-3671; 🟢 nghi ngờ chưa tái hiện ghi sổ mở · (2) Cắt 3.30.0 ngay, chấp nhận có hạn các 🟠
-- Chọn: Sửa hết 🟠 + 🟢 rẻ trong hai PR song song trước khi cắt 3.30.0: (A, xt.py perf trial) so cây neo ở start/log/status --check bỏ qua đường sổ sách docs/autopilot/**, PROGRESS.md, đường PERF-LOG (cấu hình không được trỏ lệnh đo/khoá vào các đường này — kiểm ở start), check nhận lần giữ của vòng trước khi cây neo == HEAD^{tree} trừ sổ sách; file mới của candidate trùng tên mô-đun nhập được ở cây gốc (unittest, pytest, …) → tampered, khoá mặc định thêm cấu hình runner (.pytest.ini, jest/vitest config, .mocharc*); test đơn vị trial_verdict + GIT_CONFIG cô lập; 🟢 interrupt ghim candidate_fp, log dùng trial_live, ⚠ khi ls-remote rơi về ref cục bộ, tree_fingerprint --ignore-submodules=none; đường lùi = gỡ skill khỏi perf trial, dùng perf compare/guard tay (bỏ lời hứa perf-gate.sh qua loop); đồng bộ ADR/README/skill/optimization-loop/CHANGELOG. (B, phần còn lại) harness-files.md theo #442, DEPENDENCIES.md thêm Gitleaks CLI, GlobCommandNameTest dùng thời gian CPU, dev-task coi pytest.py/conftest gốc là cấu hình cổng, PLAN-upgrade tick T-3670/T-3671; 🟢 nghi ngờ chưa tái hiện ghi sổ mở
-- Lý do (tiêu chí chất lượng cuối): (1) F1/F2 làm tính năng chính của bản (/optimize qua perf trial) không dùng được theo đúng tài liệu — phát hành như vậy là khai xong sai; F3/F5 là đường giữ oan/test không bắt; (2) miễn sổ sách chỉ cho đường không thuộc lệnh đo/khoá, kiểm ở start; (5) hai PR song song theo vùng file
-- Đường lùi: Bỏ miễn sổ sách, đòi PLAN-opt + D-NNN vào main trước start (tài liệu hoá F2) nếu miễn bị lách
-
-### D-372 · 2026-11-05T09:06:50+00:00 · Review #447: miễn sổ sách của D-371 (trọn thư mục docs/autopilot) bị lách — symlink từ cây mã vào docs/autopilot/fast.py, sửa file đó sau lần giữ, Gate xanh cho mã chưa đo (hồi quy so main); 🟠 F3 bỏ sót gói namespace; 🟠 Gate nhận lần giữ vòng trước khi main đã đổi mã
-
-- Phương án: (1) Thu hẹp miễn về đúng file sổ sách thường: docs/autopilot/PLAN*.md, DECISIONS*.md, PERF-LOG (đường cấu hình), PROGRESS.md — file thường, không symlink; cây candidate/HEAD có symlink trỏ vào đường sổ sách → tampered; candidate (diff start_head..candidate) nhắc chuỗi đường sổ sách (docs/autopilot, PROGRESS.md) ngoài chính các file sổ sách → tampered; F3 coi gói namespace là nhập được; check chỉ nhận lần giữ vòng trước khi cây gốc vòng mới == cây gốc vòng trước trừ sổ sách hoặc == HEAD^{tree} (squash-merge); ghi rủi ro còn lại (đường dựng lúc chạy, cùng uid) vào ADR §2 và optimization-loop.md · (2) Bỏ hẳn miễn sổ sách (đường lùi D-371): F1/F2 quay lại, /optimize không tới done
-- Chọn: Thu hẹp miễn về đúng file sổ sách thường: docs/autopilot/PLAN*.md, DECISIONS*.md, PERF-LOG (đường cấu hình), PROGRESS.md — file thường, không symlink; cây candidate/HEAD có symlink trỏ vào đường sổ sách → tampered; candidate (diff start_head..candidate) nhắc chuỗi đường sổ sách (docs/autopilot, PROGRESS.md) ngoài chính các file sổ sách → tampered; F3 coi gói namespace là nhập được; check chỉ nhận lần giữ vòng trước khi cây gốc vòng mới == cây gốc vòng trước trừ sổ sách hoặc == HEAD^{tree} (squash-merge); ghi rủi ro còn lại (đường dựng lúc chạy, cùng uid) vào ADR §2 và optimization-loop.md
-- Lý do (tiêu chí chất lượng cuối): (1) phương án 1 đóng cả R1, R1b (symlink → tampered; nhắc đường → tampered) và giữ được F1/F2; phần còn lại là đường dựng lúc chạy cùng lớp giới hạn đã chấp nhận (ADR-0067); (4) phương án 2 làm tính năng chính không dùng được theo tài liệu; thay D-371 ở phần phạm vi miễn
-- Đường lùi: Bỏ hẳn miễn (đường lùi D-371) nếu review sau lại lách được
 
 ### D-373 · 2026-11-05T10:50:02+00:00 · Audit ARCH T-3557: .claude/hooks/ đạt 843 817 B = 2,28× mốc 2026-10-26 (369 274 B) từ #433 — ADR-0050 đòi ADR xét lại khi vượt 2× trước 2027-01-21, chưa có ADR, không cổng máy nào bắt
 
@@ -476,20 +392,6 @@
 - Đính chính số (khi gộp `main` #503, 2026-11-11): `main` đã cấp T-3740 cho việc khác ở PLAN-harden-2026-11-11 — task nghiên cứu của PLAN-factory-e2e đánh số lại thành T-3766 để không tái sử dụng ID; PLAN là T-3741…T-3766.
 - Đính chính số (khi gộp `main` #504, 2026-11-11): `main` tiếp tục cấp T-3741, T-3742 cho việc khác ở PLAN-harden-2026-11-11 — cả dải của PLAN-factory-e2e dời sang T-3841…T-3866 (T-37xx → T-38xx, giữ hai chữ số cuối) để hết trùng với phiên đang cấp số tuần tự; các số T-37xx ở mục này và ở commit cũ của nhánh đọc theo phép dời đó.
 
-### D-425 · 2026-11-11T23:57:24+00:00 · install.py gặp thư mục cha là symlink trên đường ghi harness/.github/adapter: từ chối cả lần cài hay bỏ qua file đó?
-
-- Phương án: (1) Bỏ qua file đó (skipped-symlink) kèm cảnh báo, cài tiếp phần còn lại · (2) Từ chối cả lần cài (exit 2)
-- Chọn: Bỏ qua file đó (skipped-symlink) kèm cảnh báo, cài tiếp phần còn lại
-- Lý do (tiêu chí chất lượng cuối): Cùng quy ước AUD-HAR-010 cho symlink ở đích: đúng và an toàn (không ghi ra ngoài), đường lùi giữ nguyên, người dùng thấy cảnh báo; từ chối cả lần chặn dự án monorepo hợp lệ có .github là symlink
-- Đường lùi: Đổi classify_copy trả lỗi thay vì skipped-symlink
-
-### D-426 · 2026-11-12T00:07:26+00:00 · AUD-DATA-011: migration 0005 đã phát hành dựng index thường — sửa tại chỗ, thêm runner không transaction, hay giữ + test chặn migration mới?
-
-- Phương án: (1) Giữ 0005, test buộc migration mới CONCURRENTLY (0005 miễn có dòng sổ), README nêu cách làm; chấp nhận tới 2027-01-21 · (2) Thêm runner kysely chạy migration không transaction (phạm vi lớn, API chưa xác minh) · (3) Sửa 0005 tại chỗ
-- Chọn: Giữ 0005, test buộc migration mới CONCURRENTLY (0005 miễn có dòng sổ), README nêu cách làm; chấp nhận tới 2027-01-21
-- Lý do (tiêu chí chất lượng cuối): Đúng và an toàn: DB-MIG-003 cấm sửa migration đã áp; runner mới cần xác minh API kysely và có phạm vi riêng; test chặn tái phát ngay, đường lùi giữ nguyên
-- Đường lùi: Bỏ MigrationIndexTest và dòng README; mở lại dòng sổ
-
 ### D-422 · 2026-11-11T19:40:12+00:00 · Chủ dự án 2026-11-11: còn gì cần viết đặc tả thì viết nốt trước — duyệt bảy đặc tả SPEC-factory-* (deploy, intake, acceptance, parallel, scale, setup, learning) của PLAN-factory-e2e với các lựa chọn thiết kế nào?
 
 - Phương án: (1) Duyệt bộ bảy đặc tả với: receipt là sổ theo git do xt.py deploy ghi, release-check chỉ đọc sổ; hợp đồng triển khai trung lập công cụ, gói dùng Docker Engine + Compose; bản dev là môi trường dựng lại bằng một lệnh, không phải địa chỉ luôn bật; bộ nghiệm thu khoá bằng digest ở sổ riêng và phải đỏ trước khi viết mã; mở M/L bằng hai khoá trần riêng mặc định S và 1 thuộc HARD_GATED_KEYS, dòng người dùng thử ghi MÁY MÔ PHỎNG; mục MUST lớp B vẫn là việc người; mảnh changelog.d cho CHANGELOG, sổ sách còn lại do phiên điều phối ghi; worker bắt buộc có trần chi phí; admin-plan chỉ đọc; repo sản phẩm là repo riêng hoặc bundle; không đổi schema registry · (2) Chỉ viết ADR ở từng lát (T-3841, T-3850), không viết đặc tả trước · (3) Dùng lại release_signoff: agent và stage_approval: agent cho mọi quy mô, không thêm khoá trần
@@ -511,6 +413,20 @@
 - Chọn: Sửa trong PR: (1) thuộc tính bền của một bản là attestation do workflow phát hành ký, kiểm ở nơi dùng bằng lệnh chỉ đọc release-verify; ruleset tag và luật guard cấm phiên agent tạo tag phiên bản là lớp chặn thêm; (2) rollback ở môi trường khác dev cũng đòi HEAD nằm trong nhánh chính của remote, digest_<env> chạy không có biến đáp án; (3) bỏ tự tiếp quản: nhánh quá hạn chỉ báo, phiên điều phối giao lại bằng lệnh có D-NNN, thời điểm nhận nằm trong tên ref, chi phí cộng dồn đi theo nhánh, có trần số lượt; worktree song song do xt.py tạo và không tick PLAN; ở M/L và giai đoạn 2/3 agent chỉ ký/duyệt ứng viên đã nằm trên nhánh chính; canary bằng số ngày + danh sách thu hồi; các phần còn câu hỏi chặn (F-131, F-133, F-121, F-113, F-142) về Draft, task của chúng quyết trước khi viết mã
 - Lý do (tiêu chí chất lượng cuối): (1) đúng/an toàn: ba lỗi đều là đường đưa thứ chưa qua cổng tới nơi dùng (tag giả tới mọi dự án đích, lệnh nhánh chưa merge tới production, hai worker cùng tiêu trần); attestation là bằng chứng mà người tạo tag giả không làm ra được, khác với tên tag; một nơi quyết định giao lại thì không còn đua; (2) đường lùi: chưa có mã; phần Draft ghi rõ điều phải thử thật trước khi duyệt; (3) đơn giản: bỏ hẳn cơ chế tiếp quản tự động thay vì thêm ba cơ chế con để vá — hai lượt review liên tiếp đều tìm ra lỗ ở chính phần này nên thiết kế trên giấy chưa đủ tin, cần thử trên git/GitHub thật (phương án 2 đi tiếp trên giấy); phương án 3 đưa lỗ đã biết vào nền của 26 task
 - Đường lùi: Sửa đặc tả bằng PR và D-NNN mới; chưa task nào có mã
+
+### D-425 · 2026-11-11T23:57:24+00:00 · install.py gặp thư mục cha là symlink trên đường ghi harness/.github/adapter: từ chối cả lần cài hay bỏ qua file đó?
+
+- Phương án: (1) Bỏ qua file đó (skipped-symlink) kèm cảnh báo, cài tiếp phần còn lại · (2) Từ chối cả lần cài (exit 2)
+- Chọn: Bỏ qua file đó (skipped-symlink) kèm cảnh báo, cài tiếp phần còn lại
+- Lý do (tiêu chí chất lượng cuối): Cùng quy ước AUD-HAR-010 cho symlink ở đích: đúng và an toàn (không ghi ra ngoài), đường lùi giữ nguyên, người dùng thấy cảnh báo; từ chối cả lần chặn dự án monorepo hợp lệ có .github là symlink
+- Đường lùi: Đổi classify_copy trả lỗi thay vì skipped-symlink
+
+### D-426 · 2026-11-12T00:07:26+00:00 · AUD-DATA-011: migration 0005 đã phát hành dựng index thường — sửa tại chỗ, thêm runner không transaction, hay giữ + test chặn migration mới?
+
+- Phương án: (1) Giữ 0005, test buộc migration mới CONCURRENTLY (0005 miễn có dòng sổ), README nêu cách làm; chấp nhận tới 2027-01-21 · (2) Thêm runner kysely chạy migration không transaction (phạm vi lớn, API chưa xác minh) · (3) Sửa 0005 tại chỗ
+- Chọn: Giữ 0005, test buộc migration mới CONCURRENTLY (0005 miễn có dòng sổ), README nêu cách làm; chấp nhận tới 2027-01-21
+- Lý do (tiêu chí chất lượng cuối): Đúng và an toàn: DB-MIG-003 cấm sửa migration đã áp; runner mới cần xác minh API kysely và có phạm vi riêng; test chặn tái phát ngay, đường lùi giữ nguyên
+- Đường lùi: Bỏ MigrationIndexTest và dòng README; mở lại dòng sổ
 
 ### D-427 · 2026-11-12T05:49:35+00:00 · AUD-DEP-021 (T-3720): quét lockfile npm của gói web-api-ts bằng công cụ nào trong dep-audit.yml?
 
@@ -604,6 +520,20 @@
 - Lý do (tiêu chí chất lượng cuối): (1) an toàn: đo trên 19.026 lệnh Bash thật cả hai phương án chênh 0 lệnh; khi chi phí bằng nhau chọn bên chặt (printf -v ghi biến như read/let; pytest chạy mã từ conftest/-p). ADR-0076 không sửa (đã Accepted): câu 'pytest không qua cổng' bị D này thay — cổng chỉ chặn dạng cờ/lệnh con có mở rộng nên rất hiếm chạm pytest.
 - Đường lùi: Chuyển printf về GATE_PASSIVE hoặc pytest/tox/nox sang GATE_PASSIVE (sửa PASSIVE_PIN và test ghim)
 
+### D-442 · 2026-11-13T10:37:42+00:00 · Khôi phục vòng bị chặn khi đổi PLAN hoặc ngân sách như thế nào?
+
+- Phương án: (1) Từ chối mọi loop init tới khi loop unblock · (2) Giữ nguyên cờ blocked, lý do và thời điểm qua mọi loop init; chỉ loop unblock có lý do mới gỡ chặn
+- Chọn: Giữ nguyên cờ blocked, lý do và thời điểm qua mọi loop init; chỉ loop unblock có lý do mới gỡ chặn
+- Lý do (tiêu chí chất lượng cuối): Từ chối init gây bế tắc khi ngân sách hết hoặc PLAN mất vì unblock cũng từ chối. Mang cờ giữ nguyên hàng rào và bằng chứng gỡ chặn, đồng thời cho sửa PLAN/ngân sách. Hướng dẫn release dùng lối ra thật của vòng.
+- Đường lùi: Hoàn lại bản vá và test trong PR riêng nếu hợp đồng vòng cần đổi.
+
+### D-450 · 2026-11-13T11:35:35+00:00 · Đóng AUD-HAR-378/379 trong corpus khi adapter hiện tại chưa chạy vòng thật?
+
+- Phương án: (1) Chỉ thêm ID hoặc miễn trừ vào scope · (2) Thêm adapter loop_block giới hạn, chạy CLI thật và kiểm trạng thái/hướng dẫn
+- Chọn: Thêm adapter loop_block giới hạn, chạy CLI thật và kiểm trạng thái/hướng dẫn
+- Lý do (tiêu chí chất lượng cuối): Hành vi block/init/unblock là quyết định tự chủ nên phải có bằng chứng corpus. Hai kịch bản carry/expired, mỗi kịch bản có control phục hồi; mutation bỏ cờ phải false_green, sai lối ra phải mismatch. Không gắn nhãn vào ca không liên quan hay nới yêu cầu phủ.
+- Đường lùi: Tách adapter bằng PR riêng khi có nhóm corpus vòng lặp tương đương, giữ các ca và không khai đóng nợ nếu mất coverage.
+
 ### D-452 · 2026-11-13T11:47:36+00:00 · Khởi tạo dự án mới offline nguyên tử và không chạy hook trước commit đầu thế nào?
 
 - Phương án: (1) Bootstrap trực tiếp trong đích, giữ file dở khi hỏng · (2) Dựng ở sibling riêng, commit rồi hook/doctor, công bố bằng rename nguyên tử
@@ -639,6 +569,13 @@
 - Lý do (tiêu chí chất lượng cuối): Path.rename ghi đè thư mục rỗng xuất hiện giữa chừng, làm cwd của người khác mất liên kết. Exclusive mkdir portable trong stdlib nhận một đích duy nhất; giữ inode và dữ liệu khi lỗi quan trọng hơn atomic publish. Chỉ ghi sau khi kiểm đầu vào. Từ chối nếu tiến trình khác tạo đích trước mkdir; không chuyển sang nhánh existing trong race. Thay D452 phần staging cho đích thiếu.
 - Đường lùi: Khôi phục staging chỉ khi có primitive no-replace portable và probe giữ inode qua race xanh; giữ regression cạnh tranh.
 
+### D-477 · 2026-11-13T15:59:22+00:00 · Lát T3736/T3737 vượt150dòng khi cần adapter corpus CLI thật: tách hình thức hay giữ một PR nguyên khối?
+
+- Phương án: (1) Một PR cùng lifecyclefix, adapter giới hạn, hồi quy và auditrefs; mỗi phần cần để bằng chứng đúng hành vi · (2) Tách nhiều PR helper/adapter/fix làm mỗi phần dưới150dòng
+- Chọn: Một PR cùng lifecyclefix, adapter giới hạn, hồi quy và auditrefs; mỗi phần cần để bằng chứng đúng hành vi
+- Lý do (tiêu chí chất lượng cuối): Hai bug cùng hợp đồng blocked và recovery. Đóng HAR378379 đòi ca thật carry/expired/control cùng lúc, không gắnIDvào ca khôngliênquan hoặc miễntrừ scope. Gitfixture phải cáchly routing/config để tests khôngđụngrepo ngoài. Mộtlát rollbackđược, độc lậpreviewvàgate-fast xanh; tách chỉ đểđếm dòng làm review phải ghép nhiều phần bằngchứng.
+- Đường lùi: Revert toàn PR hoặc tách adapter ở PR sau khi có nguồn bằngchứng tươngđương, không bỏ coverage hoặc khai đóng nợ khi mất ca.
+
 ### D-479 · 2026-11-14T02:39:45+00:00 · PR #513: nâng gói web-api-ts sau khi Biome kiểm YAML và kiểu Node vượt runtime?
 
 - Phương án: (1) Nâng Kysely, Biome và Vitest; giữ @types/node 24.19.2 và chuẩn hoá khoảng trắng trước chú thích trong mẫu xt.yaml · (2) Giữ cả nhóm ở bản cũ và đợi Dependabot tách các nâng cấp
@@ -653,6 +590,32 @@
 - Lý do (tiêu chí chất lượng cuối): Cổng cũ exit 0 khi cả ba nhóm chưa quét. Cổng theo phạm vi kiểm đúng việc và không buộc đóng nợ ngoài T-3729
 - Đường lùi: Revert thay đổi Gate của T-3729, giữ cổng phát hành audit --strict
 
+### D-481 · 2026-11-14T03:31:15+00:00 · Audit DOC: đồng bộ hướng dẫn G7/MVP với quyền opt-in đã triển khai ra sao?
+
+- Phương án: (1) Trỏ README và vòng đời tới ADR-0069/0074, nêu người duyệt mặc định và phạm vi MVP · (2) Chép lại điều kiện chi tiết trong từng tài liệu
+- Chọn: Trỏ README và vòng đời tới ADR-0069/0074, nêu người duyệt mặc định và phạm vi MVP
+- Lý do (tiêu chí chất lượng cuối): Giữ một nhà cho điều kiện; lời hướng dẫn khớp code đang chạy và không thay đổi điều kiện phê duyệt
+- Đường lùi: Revert lát tài liệu để phục hồi cách diễn đạt trước đó
+
+### D-482 · 2026-11-14T03:45:11+00:00 · Giữ trần docs/autopilot khi hợp nhất các PR sau #532 bằng cách nào?
+
+- Phương án: (1) Dời nguyên văn các quyết định cũ đã có trong bản phát hành sang sổ tháng theo D-314 · (2) Dời thêm PLAN đã đóng sang kho theo ADR-0070
+- Chọn: Dời nguyên văn các quyết định cũ đã có trong bản phát hành sang sổ tháng theo D-314
+- Lý do (tiêu chí chất lượng cuối): Các PR đang sửa PLAN hoặc cần nghiệm thu chúng; sổ tháng được máy đọc, giữ nguyên ID và giảm xung đột trên các mục đang dùng
+- Đường lùi: Đưa các mục về đúng thứ tự trong DECISIONS.md và phục hồi mô tả phạm vi sổ tháng
+
+### D-483 · 2026-11-14T04:00:47+00:00 · AUD-TEST-105: xử lý cặp mẫu retry CPU được ghép chéo thế nào?
+
+- Phương án: (1) Dùng cặp nhỏ/lớn từ cùng lần đo lại · (2) Giữ cực trị từ hai lần đo và thêm báo cáo chỉ số riêng
+- Chọn: Dùng cặp nhỏ/lớn từ cùng lần đo lại
+- Lý do (tiêu chí chất lượng cuối): Nếu cả hai lượt đều vượt ngưỡng, phép kiểm phải đỏ; đối chiếu trong cùng lượt giữ tỷ lệ, sàn, độ dư và một lần retry
+- Đường lùi: Revert thay đổi helper và ca đồng hồ giả nếu cần
+### D-485 · 2026-11-14T07:23:00+00:00 · Chọn chính sách runtime cho X-Templates khi chuyển Python 3.15?
+
+- Phương án: (1) Chỉ hỗ trợ dòng Python 3.15, ghim 3.15.2 trong repo và CI · (2) Dùng Python 3.15 mặc định, giữ cổng hỗ trợ 3.11 và 3.14
+- Chọn: Chỉ hỗ trợ dòng Python 3.15, ghim 3.15.2 trong repo và CI
+- Lý do (tiêu chí chất lượng cuối): Người dùng yêu cầu bỏ các dòng cũ. Một dòng Python giữ môi trường phát triển và CI nhất quán. Giữ kiểm thử nhánh main và ngưỡng coverage hiện hành.
+- Đường lùi: Revert PR runtime và trả về bản khung trước khi nâng nếu dự án đích chưa chuyển được.
 ### D-484 · 2026-11-14T04:01:16+00:00 · T-3842: tách việc đưa CLI triển khai vào khung ra sao?
 
 - Phương án: (1) Tách bộ đọc sổ và deploy status khỏi lệnh có hiệu ứng · (2) Đưa cùng lúc bộ đọc, chạy và quay lui

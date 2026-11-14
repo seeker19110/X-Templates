@@ -1,14 +1,18 @@
 ---
 title: Gói web-api-ts — API nhiều tenant trên Node 24 + Postgres
 kind: index
-updated: 2026-11-06
+updated: 2026-11-14
 ---
 
 # Gói `web-api-ts`
 
-> Stack lấy từ dự án đích hotel-manager (`seeker19110/hotel-manager@30492c9`, đọc 2026-11-05): Node 24, pnpm 12.16.1,
-> TypeScript 7.0.2, `pg` 8.23.1 + `kysely` 0.29.6, `vitest` 5.0.3, `biome` 2.5.15, Postgres 17.11 (ghim digest). Không có
-> UI (Next.js của hotel-manager không vào gói đầu — D-359). Hạn hỗ trợ: `pack.json` → `support_until`.
+> Stack lấy từ dự án đích hotel-manager (`seeker19110/hotel-manager@30492c9`, đọc 2026-11-05): Node 24, pnpm,
+> TypeScript, `pg` + `kysely`, `vitest`, `biome` và PostgreSQL. Gói đầu chưa có UI (D-359).
+> Hạn hỗ trợ nằm ở `support_until` trong `pack.json`.
+
+Phiên bản pnpm và các gói npm nằm trong `starter/package.json` ở cây nguồn của gói. Sau khi cài starter, xem
+`package.json` ở gốc dự án. Image PostgreSQL của CI nghiệm thu được ghim theo digest trong
+`managed/.github/workflows/pack-acceptance.yml` ở cây nguồn và `.github/workflows/pack-acceptance.yml` khi dự án nhận workflow.
 
 ## Có gì (starter)
 
@@ -34,12 +38,11 @@ phải làm đỏ đúng test ghi ở `expect_fail`.
 
 ## Giới hạn đã biết
 
-- Migration chạy trong transaction (runner kysely) nên không dựng được index `CONCURRENTLY` trong migration (DB-MIG-006,
-  AUD-DATA-011): `0005_sessions_expiry` dựng hai index thường trên `sessions` — bảng lớn ở môi trường thật khoá ghi trong
-  lúc dựng. Với bảng có dữ liệu: dựng index bằng bước riêng ngoài transaction (`CREATE INDEX CONCURRENTLY …` qua `psql`),
-  xoá index INVALID nếu thất bại, rồi để migration dùng `CREATE INDEX IF NOT EXISTS` cùng tên. Runner không transaction
-  cho từng migration chưa có trong gói (cách kysely cho tắt transaction: chưa xác minh với bản 0.29.6). Test
-  `MigrationIndexTest` (`tests/test_packs.py`) buộc migration mới dùng `CONCURRENTLY` trên bảng có sẵn; chỉ `0005` được miễn.
+- Lệnh `up` trong `src/migrate.ts` của starter dùng Kysely để áp dụng mọi migration còn thiếu trong cùng một giao dịch
+  PostgreSQL (DB-MIG-006). Cổng từ chối `CREATE INDEX CONCURRENTLY` trong migration và index thường trên bảng có sẵn,
+  kể cả `IF NOT EXISTS`. Ngoại lệ đã phát hành là `0005_sessions_expiry` với hai index trên `sessions` (AUD-DATA-011).
+  Gói chưa có luồng dựng index ngoài giao dịch. Khi bổ sung luồng đó, kiểm định nghĩa và trạng thái hợp lệ của index trước
+  khi tiếp tục migration (AUD-DATA-013).
 
 - Kết nối ứng dụng dùng một vai trò có quyền `SET ROLE app_rw`; triển khai thật: vai trò đăng nhập riêng chỉ là thành viên
   `app_rw` + vai trò migration riêng (sở hữu bảng) — chưa có trong gói.
