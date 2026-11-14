@@ -507,6 +507,8 @@ class ReleaseVerifyWorktreeTest(ReleaseCase):
         self.assertEqual((row["result"], row["level"]), ("FAIL", "BLOCKER"), row)
         self.assertIn("worktree này không có sổ máy", row["evidence"])
         self.assertIn(str(self.repo.resolve()), row["evidence"])
+        self.assertIn("từ worktree chứa sổ", row["evidence"])
+        self.assertIn("loop init", row["evidence"])
         self.assertEqual(run_main("loop", "verify", "--all")[0], 0)
         row = self.verify_from(self.wt)
         self.assertEqual(row["result"], "PASS", row)
@@ -1518,9 +1520,9 @@ class MarkdownShownTest(unittest.TestCase):
         def timed(text: str) -> float:
             gc.disable()
             try:
-                start = time.perf_counter()
+                start = time.process_time()
                 shown = xt._markdown_shown(text)
-                spent = time.perf_counter() - start
+                spent = time.process_time() - start
             finally:
                 gc.enable()
             self.assertTrue(shown.endswith("x"))
