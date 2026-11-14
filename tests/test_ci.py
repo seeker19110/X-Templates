@@ -267,6 +267,22 @@ class GateFanOutTest(unittest.TestCase):
         self.assertRegex(yaml, r"(?m)^test_combine: .*coverage report --fail-under=100$")
         self.assertIn("--fail-under=100", test)
 
+    def test_fast_parallelism_preserved(self):
+        # Tách nproc ra biến trước số học: số job và đường lùi khi nproc lỗi giữ như lệnh trước P0.
+        before = '"$(( ("$(nproc 2>/dev/null || echo 2)" + 1) / 2 ))"'
+        command = xt._xt_keys(ROOT)["test_fast"]
+        setup = command.partition(" && ")[0]
+        match = re.search(r" -P (.*) -n 1 python3 -m unittest$", command)
+        self.assertIsNotNone(match)
+        after = match[1]
+        for cpus in (1, 2, 3, 4, 5, 8, 16, 63, 64, 127, 128, 1024, None):
+            with self.subTest(cpus=cpus):
+                stub = "return 1" if cpus is None else f"printf '%s' {cpus}"
+                source = f"nproc() {{ {stub}; }}; printf '%s\\n' {before}; {setup}; printf '%s\\n' {after}"
+                got = subprocess.run(["bash", "-c", source], capture_output=True, text=True, timeout=5, check=True)
+                expected = str(((2 if cpus is None else cpus) + 1) // 2)
+                self.assertEqual(got.stdout.splitlines(), [expected, expected])
+
     def test_xt_yaml_commands_pass_repo_guard(self):
         """Review adr-guard 🔴: mọi lệnh của `xt.yaml` qua guard của repo (LOOP-STOP-027 — `dev-task.sh` hỏi guard trước khi
         chạy. `test_list` và `test_unit` gọi `python3` bằng tên nguyên văn)."""
