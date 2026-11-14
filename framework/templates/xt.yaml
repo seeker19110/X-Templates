@@ -24,15 +24,17 @@ test_fast: "" # test liên quan file đổi (XT_CHANGED_FILES, mỗi dòng một
 # test_combine: ""
 # merge_autonomy: L3 = máy merge ghim head theo làn · L2 = chỉ làn nhanh · L1 = người merge (ADR-0015, D-122)
 merge_autonomy: L3
+# Không bắt buộc review để merge; đặt required nếu dự án cần review.
+merge_review: optional
 merge_risk_paths: "" # glob thêm vào đường dẫn nhạy cảm (ngoại lệ cứng), cách nhau dấu phẩy
 # merge_hard_exceptions: auto = máy merge PR chạm auth/tiền/PII khi CI xanh (mặc định từ 3.24.0 — ADR-0047, D-176 của repo khung) ·
 # human = người merge ngoại lệ cứng (ADR-0016). Dự án có tiền thật/dữ liệu người dùng thật: đặt human, hoặc ghi D-NNN/ADR
 # của dự án chấp nhận rủi ro khi giữ auto (LOOP-STOP-005). Thiếu khoá = human; PR đổi khoá luôn người merge
 merge_hard_exceptions: auto
-# delivery_phase: build = CI xanh là merge, review ghi nợ (trừ rủi ro cao: auth/thanh toán/bí mật/migration — ADR-0062) · harden (chỉ khi lên production) = review sạch ở head (ADR-0031/0037)
+# delivery_phase xác định pha build hoặc harden. Review merge được cấu hình ở merge_review (ADR-0079).
 delivery_phase: build
 # max_rethink: 1              # trần `pr rethink` mỗi PR (ADR-0061): hết → `pr next` trả `split-or-close`; 0 = không trần; PR cắt bản miễn; lấy mức chặt hơn với nhánh đích
-# review_identity: ""         # chỉ dấu review của tài khoản này mở được merge (T-1508)
+# review_identity: ""         # khi review required, chỉ dấu của tài khoản này mở được merge (T-1508)
 # author_model_family: ""     # reviewer năng lực cao hơn tác giả: bậc model cao hơn, cùng họ thì effort cao hơn (ci-check kiểm)
 # reviewer_model_family: ""
 # author_effort: ""           # low|medium|high|xhigh|max — cần cả hai khi cùng họ (D-161); chỉ dùng cùng model lấy từ cấu hình

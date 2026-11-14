@@ -62,13 +62,13 @@ Summary của run `pr-steward` (mục `## pr-steward`, mỗi PR một dòng).
 |---|---|---|
 | PR treo, không ai merge | `action` = `review` (chưa có dấu review sạch ở đúng head), `fix`, `wait` (CI chưa xanh), hoặc `defer-human` (fork/tác giả không quyền ghi, ngoại lệ cứng) | Đọc `why` của `pr next`; làm đúng `do`. Review xong: `xt.py pr reviewed --pr <N> --head <H> --clean ...` (đăng lên PR; steward kích bằng `issue_comment`) |
 | Auto-merge người bật bị tắt | Đúng thiết kế (D-122): PR chưa đủ điều kiện ở head hiện tại → `disable-auto-merge` | Không bật lại; steward/`pr next` merge ghim head khi đủ điều kiện. Tắt "Allow auto-merge" ở Settings → General |
-| PR đủ điều kiện mà chưa merge | CI chưa xong (`wait`); PR có nhãn `risk:`; push mới đổi head sau review; `merge_autonomy` L1/L2 (làn chuẩn ở L2 là người merge); lệnh `gh` lỗi (thiếu quyền token) | `pr next` cho `why`; review lại ở head mới; sửa quyền token |
+| PR chưa merge | CI chưa xong, nhánh tụt base, cấu hình cần review hoặc API báo lỗi | Đọc `pr next` và Step Summary; xử lý nguyên nhân được nêu |
 | CI không chạy trên nhánh chính sau merge | Steward merge bằng `GITHUB_TOKEN` (thiếu `XT_STEWARD_TOKEN`) và dispatch CI lỗi: summary có `→ dispatch CI ✗ …` + `warn` (job đỏ) — thường thiếu `actions: write` (pr-steward.yml cũ), `ci.yml` thiếu `workflow_dispatch`, hoặc file CI tên khác | Chạy lại `install.py --with-github` (dự án đích); tên file CI khác: đặt biến `XT_CI_WORKFLOW`; chạy tay `gh workflow run ci.yml --ref main`; hoặc đặt secret `XT_STEWARD_TOKEN` (merge kích `push`) |
-| PR tụt sau nhánh đích, không tự cập nhật | Chưa đặt `XT_STEWARD_TOKEN` (`XT_STEWARD_UPDATE=off`): commit cập nhật bằng `GITHUB_TOKEN` không kích CI nên PR kẹt chờ check; `why` ghi "đặt XT_STEWARD_TOKEN" | Đặt secret `XT_STEWARD_TOKEN`, hoặc cập nhật nhánh tay (`gh pr update-branch <N>`) |
+| PR tụt sau nhánh đích, không tự cập nhật | Thiếu `XT_STEWARD_TOKEN` | Đặt secret hoặc cập nhật nhánh bằng `gh pr update-branch <N>` |
 | Run steward đỏ nhưng PR không bị gì | `warn` không gắn được nhãn `xt-standard-lane` (thiếu `issues: write`) hoặc `error` không đọc lại được PR | Xem Step Summary; lượt sau tự thử lại |
 | Không thấy steward chạy | Workflow bị disable; cron GitHub bị tắt sau 60 ngày repo không hoạt động; `issue_comment` bị lọc (không phải dấu review của người có quyền ghi) | `gh workflow list`; chạy tay `gh workflow run pr-steward.yml` |
 | Merge nhầm | PR đủ điều kiện máy nhưng nội dung sai | Revert commit squash qua PR mới; siết nhãn `risk:`/`merge_hard_exceptions`; ghi nguyên nhân (D-NNN nếu đổi luật) |
-| Token lộ/hết hạn | `XT_STEWARD_TOKEN` | Thu hồi token ở GitHub, tạo mới, cập nhật secret (không dán giá trị vào log/commit). Chưa có token mới thì xoá secret: steward chạy bằng `GITHUB_TOKEN` — mất cập nhật nhánh, CI trên nhánh chính sau merge chạy nhờ `workflow_dispatch`, các việc khác như cũ |
+| Token lộ/hết hạn | `XT_STEWARD_TOKEN` | Thu hồi token ở GitHub và cập nhật secret. Khi dùng `GITHUB_TOKEN`, steward báo nhánh tụt để cập nhật. |
 
 Bí mật: chỉ `XT_STEWARD_TOKEN` (Settings → Secrets and variables → Actions) và biến `XT_REVIEW_IDENTITY` (tuỳ chọn);
 giá trị không nằm trong repo. Liên hệ trực: chủ repo (sự cố bảo mật: `SECURITY.md`).

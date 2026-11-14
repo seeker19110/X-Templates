@@ -616,3 +616,10 @@
 - Chọn: Chỉ hỗ trợ dòng Python 3.15, ghim 3.15.2 trong repo và CI
 - Lý do (tiêu chí chất lượng cuối): Người dùng yêu cầu bỏ các dòng cũ. Một dòng Python giữ môi trường phát triển và CI nhất quán. Giữ kiểm thử nhánh main và ngưỡng coverage hiện hành.
 - Đường lùi: Revert PR runtime và trả về bản khung trước khi nâng nếu dự án đích chưa chuyển được.
+
+### D-486 · 2026-11-14T08:41:08+00:00 · Cổng merge và thứ tự PR cho khung và dự án đích?
+
+- Phương án: (1) CI xanh, ưu tiên diff nhỏ · (2) Giữ review bắt buộc theo làn
+- Chọn: CI xanh, ưu tiên diff nhỏ
+- Lý do (tiêu chí chất lượng cuối): Chủ dự án yêu cầu áp dụng cho cả dự án đích và không bắt buộc review; giữ check CI và ghim head
+- Đường lùi: Đặt merge_review required và khôi phục thứ tự steward theo ADR-0079
