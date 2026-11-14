@@ -46,7 +46,7 @@ jobs:
           fetch-depth: 0 # cần origin/<nhánh gốc>
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
-          python-version: "3.14"
+          python-version: "3.15.2"
       - name: baseline.json khớp nhánh gốc hoặc phiên bản gói tăng
         env:
           BASE_REF: ${{ github.base_ref }}
@@ -82,7 +82,7 @@ jobs:
           persist-credentials: false # job không push (AUD-CI-028)
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
-          python-version: "3.14"
+          python-version: "3.15.2"
       - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
         with:
           version: 12.16.1

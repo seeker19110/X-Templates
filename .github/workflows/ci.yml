@@ -22,7 +22,7 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 # Số lớp test tối thiểu mà `dev-task.sh test-shard` phải liệt kê được (tổng của bộ test, trước khi chia — một chỗ cho mọi
-# shard của `test` và `py311`): discover hỏng/rỗng thì đỏ thay vì xanh với 0 test.
+# shard của `test` và `test-main`): discover hỏng/rỗng thì đỏ thay vì xanh với 0 test.
 env:
   XT_MIN_TESTS: "100"
 
@@ -32,7 +32,7 @@ jobs:
   # `merge-gate.yml` chỉ là stub tạm (D-122, ADR-0036) giữ context `merge-gate` tới khi chủ repo gỡ khỏi ruleset sống.
   # Fan-out/fan-in (WF-CI-024): mỗi task của `scripts/dev-task.sh gate` (build · typecheck · lint · test) là MỘT job song
   # song gọi đúng `dev-task.sh <task>` (lệnh trong xt.yaml — WF-CI-002); `test` chia 4 shard theo lớp, `coverage` gộp dữ
-  # liệu các shard và đòi đúng ngưỡng của `test`; `py311` (sàn hỗ trợ) 3 shard; `checks` (bench + kiểm của repo khung).
+  # liệu các shard và đòi đúng ngưỡng của `test`; `test-main` (checkout tên nhánh main) 3 shard; `checks` (bench + kiểm của repo khung).
   # Wall time ≈ nhánh chậm nhất (test → coverage) thay vì cộng dồn. Test `tests/test_ci.py` giữ cho không trôi: mọi task
   # của `gate` có job, `quality` needs mọi job con và `if: always()`.
   build:
@@ -46,11 +46,7 @@ jobs:
           persist-credentials: false # job không push; token không nằm lại trong .git/config (AUD-CI-028)
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
-          # 3.11 = sàn hỗ trợ (3.10 hết hạn 2026-10-01); 3.14 = mặc định (3.13 chỉ còn vá bảo mật từ 2026-10-01; xác minh 2026-10-21,
-          # research §4.3). Phiên bản liệt kê sau cùng đứng đầu PATH → `python3` là 3.14. Cài cả hai trong MỖI job để môi trường giống nhau.
-          python-version: |
-            3.11
-            3.14
+          python-version: "3.15.2"
           cache: pip # khoá = hash requirements-dev.txt (setup-python băm file khai ở dưới); đổi khoá → cài lại (AUD-CI-028)
           cache-dependency-path: requirements-dev.txt
       - name: Công cụ ghim kèm hash (requirements-dev.txt — khớp xt.yaml)
@@ -69,9 +65,7 @@ jobs:
           persist-credentials: false # job không push; token không nằm lại trong .git/config (AUD-CI-028)
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
-          python-version: |
-            3.11
-            3.14
+          python-version: "3.15.2"
           cache: pip # khoá = hash requirements-dev.txt (setup-python băm file khai ở dưới); đổi khoá → cài lại (AUD-CI-028)
           cache-dependency-path: requirements-dev.txt
       - name: Công cụ ghim kèm hash (requirements-dev.txt — khớp xt.yaml)
@@ -90,9 +84,7 @@ jobs:
           persist-credentials: false # job không push; token không nằm lại trong .git/config (AUD-CI-028)
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
-          python-version: |
-            3.11
-            3.14
+          python-version: "3.15.2"
           cache: pip # khoá = hash requirements-dev.txt (setup-python băm file khai ở dưới); đổi khoá → cài lại (AUD-CI-028)
           cache-dependency-path: requirements-dev.txt
       - name: Công cụ ghim kèm hash (requirements-dev.txt — khớp xt.yaml)
@@ -100,7 +92,7 @@ jobs:
       - name: lint — đúng lệnh trong xt.yaml (validate · link · progress · changelog · ci-check · ruff · shellcheck · JSON)
         run: scripts/dev-task.sh lint
 
-  # Test 3.14 có coverage, 4 shard theo lớp, chia tham lam theo trọng số đo thật (`xt.yaml` `test_weights`, LPT; lớp lạ lấy trung vị — D-095). Mỗi shard tải dữ liệu
+  # Test có coverage, 4 shard theo lớp, chia tham lam theo trọng số đo thật (`xt.yaml` `test_weights`, LPT; lớp lạ lấy trung vị — D-095). Mỗi shard tải dữ liệu
   # `.coverage.*` lên artefact; job `coverage` gộp và đòi 100 % — cùng tập test, cùng ngưỡng với `xt.yaml` `test`.
   test:
     name: test ${{ matrix.shard }}/4
@@ -117,9 +109,7 @@ jobs:
           persist-credentials: false # job không push; token không nằm lại trong .git/config (AUD-CI-028)
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
-          python-version: |
-            3.11
-            3.14
+          python-version: "3.15.2"
           cache: pip # khoá = hash requirements-dev.txt (setup-python băm file khai ở dưới); đổi khoá → cài lại (AUD-CI-028)
           cache-dependency-path: requirements-dev.txt
       - name: Công cụ ghim kèm hash (requirements-dev.txt — khớp xt.yaml)
@@ -137,8 +127,7 @@ jobs:
           echo "$BUN_SHA256  $RUNNER_TEMP/bun.tgz" | sha256sum -c -
           tar -xzf "$RUNNER_TEMP/bun.tgz" -C "$RUNNER_TEMP" package/bin/bun
           echo "$RUNNER_TEMP/package/bin" >> "$GITHUB_PATH"
-      # COVERAGE_CORE=sysmon (sys.monitoring, Python ≥ 3.12): đo thử T-1831; đã chạy `dev-task.sh test` trên 3.14.6 cục bộ
-      # vẫn 100 % dòng + nhánh. Job `coverage` đỏ dưới 100 % → bỏ biến này (ghi D-NNN).
+      # COVERAGE_CORE=sysmon dùng sys.monitoring. Job `coverage` đòi 100 % dòng và nhánh.
       - name: Test shard (coverage ghi vào thư mục tạm của runner)
         env:
           SHARD: ${{ matrix.shard }}
@@ -167,9 +156,7 @@ jobs:
           persist-credentials: false # job không push; token không nằm lại trong .git/config (AUD-CI-028)
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
-          python-version: |
-            3.11
-            3.14
+          python-version: "3.15.2"
           cache: pip # khoá = hash requirements-dev.txt (setup-python băm file khai ở dưới); đổi khoá → cài lại (AUD-CI-028)
           cache-dependency-path: requirements-dev.txt
       - name: Công cụ ghim kèm hash (requirements-dev.txt — khớp xt.yaml)
@@ -184,8 +171,8 @@ jobs:
           COVERAGE_CORE: sysmon
         run: scripts/dev-task.sh test-combine "$RUNNER_TEMP/cov"
 
-  py311:
-    name: py311 ${{ matrix.shard }}/3
+  test-main:
+    name: test-main ${{ matrix.shard }}/3
     runs-on: ubuntu-latest
     timeout-minutes: 10
     strategy:
@@ -199,20 +186,17 @@ jobs:
           persist-credentials: false # job không push; token không nằm lại trong .git/config (AUD-CI-028)
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
-          python-version: |
-            3.11
-            3.14
+          python-version: "3.15.2"
           cache: pip # khoá = hash requirements-dev.txt (setup-python băm file khai ở dưới); đổi khoá → cài lại (AUD-CI-028)
           cache-dependency-path: requirements-dev.txt
       - name: Công cụ ghim kèm hash (requirements-dev.txt — khớp xt.yaml)
         run: pip install --quiet --require-hashes -r requirements-dev.txt
       # Job `test` chạy trên checkout của PR (HEAD tách rời); test lại trên nhánh tên `main` như CI sau merge — test phụ
       # thuộc nhánh (guard: `git push` không refspec trên `main`) từng xanh ở PR mà đỏ trên `main` (AUD-TEST-005, #124).
-      # Liệt kê và chạy bằng python3.11 (`XT_PY`): module lỗi import trên 3.11 → đỏ. Không đo coverage lần hai.
-      - name: Test trên Python 3.11 (sàn hỗ trợ), checkout mang tên nhánh `main`
+      # Coverage đã đo ở job `test`.
+      - name: Test trên checkout mang tên nhánh `main`
         env:
           SHARD: ${{ matrix.shard }}
-          XT_PY: python3.11
         run: |
           set -euo pipefail
           git checkout -q -B main
@@ -229,10 +213,9 @@ jobs:
           fetch-depth: 0 # `xt.py progress-check` cần lịch sử để kiểm SHA bàn giao là tổ tiên HEAD
           persist-credentials: false # job không push; token không nằm lại trong .git/config (AUD-CI-028)
 
-      # Python cố định như các job khác (trước đây job này dùng python hệ thống của runner).
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
-          python-version: "3.14"
+          python-version: "3.15.2"
           cache: pip # AUD-CI-028
           cache-dependency-path: requirements-dev.txt
 
@@ -298,7 +281,7 @@ jobs:
           persist-credentials: false # AUD-CI-028
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
-          python-version: "3.14"
+          python-version: "3.15.2"
           cache: pip # AUD-CI-028
           cache-dependency-path: requirements-e2e.txt
       - name: Playwright ghim kèm hash (requirements-e2e.txt)
@@ -315,13 +298,16 @@ jobs:
   # quả gộp (một shard đỏ → `failure`). Thêm job con mà quên `needs` → `tests/test_ci.py` đỏ.
   quality:
     name: quality
-    needs: [build, typecheck, lint, test, coverage, py311, checks, app-e2e]
+    needs: [build, typecheck, lint, test, coverage, test-main, checks, app-e2e]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 2
     env:
       RESULTS: ${{ toJSON(needs) }}
     steps:
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.15.2"
       - name: Mọi job con phải `success`
         run: |
           python3 - <<'PY'
@@ -346,6 +332,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false # AUD-CI-028 — bước API dùng GH_TOKEN qua env
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.15.2"
       - name: Required check trong ruleset ↔ job có thật
         run: |
           set -euo pipefail
