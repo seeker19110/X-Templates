@@ -214,6 +214,9 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
 - Guard (T-3769; lý do chạm hàng rào: đóng đường bỏ sót argv hoặc cho qua khi parser không đọc được): Precheck AUD-SEC-730: ngoặc trong tham số không nháy trả BUDGET; giữ literal, nháy kép và ngoặc thoát. Lỗi recursion đọc sớm được sửa ở lát riêng T-3867.
   Bằng chứng chặn oan: [mẫu 505 lượt lệnh thật](research/evidence/2026-11-13-guard-parameter.json), 464 thân lệnh,
   0 lượt đổi quyết định trên mẫu; không suy rộng thành bảo đảm cho toàn lịch sử. Gate gốc được ghi bằng `loop record`.
+- AUD-DOC-273/274: báo cáo pilot phân biệt số đo chưa xác minh với bằng chứng CI; PLAN chỉ rõ cổng Production, reviewer bắt buộc và phê duyệt đúng run, theo cấu hình đọc ngày 2026-11-13. Chỉ sửa tài liệu, không thay quyền triển khai.
+- Lưu nguyên văn ba mục DOC đã sửa từ tag v3.31.0 vào sổ lưu trữ để giữ trần `docs/ops`.
+- D-451: xếp AUD-DOC-273/274 vào nhóm tài liệu/bằng chứng sẵn có của corpus tự chủ; giữ nguyên định nghĩa nhóm, ca kiểm và ngưỡng.
 - Review #530: làm chặt vai trò từ trình bọc và descriptor mơ hồ (AUD-SEC-781…783). Xác nhận với đối chứng lành.
 - PR #530 (D-443): `test_fast` lấy `nproc` vào biến trước số học để qua tập con P0. Giữ nguyên ceil(N/2), fallback 2, tập test và ngưỡng; không mở ngoại lệ parser. Có test tương đương số worker và hai ca nháy lồng có thể chạy lệnh.
 - Guard — ADR-0076 lát 4, tiền tố P0 (T-3764; lý do chạm hàng rào: năm 🔴 có từ trước AUD-SEC-657/659/663/664/700,
