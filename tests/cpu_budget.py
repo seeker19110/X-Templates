@@ -38,11 +38,11 @@ def assert_not_quadratic(
     Test chỉ canh hàm mũ (ngân sách quét) có thể nới `ratio` tới 40 (cho phép bậc hai, FACTOR**2 = 16 lần) — hàm mũ
     vẫn vượt xa.
 
-    Lần đầu vượt ngưỡng thì đo lại một lượt và lấy cỡ nhỏ lớn nhất, cỡ lớn nhỏ nhất (D-380): tranh CPU nhất thời khi cổng
-    chạy song song không lặp lại ở lượt hai, còn mã bậc hai thật vượt ở cả hai lượt — ngưỡng không đổi."""
+    Lần đầu vượt ngưỡng thì đo lại một lượt (D-380, D-483). So cỡ nhỏ và lớn cùng lượt để nếu cả hai lượt đều vượt
+    ngưỡng thì test đỏ."""
     small = max(cost(work, n, clock), FLOOR)
     big = cost(work, FACTOR * n, clock)
     if big >= small * ratio + SLACK:
-        small = max(small, cost(work, n, clock))
-        big = min(big, cost(work, FACTOR * n, clock))
+        small = max(cost(work, n, clock), FLOOR)
+        big = cost(work, FACTOR * n, clock)
     tc.assertLess(big, small * ratio + SLACK, f"cỡ {FACTOR * n}: {big:.3f} s; cỡ {n}: {small:.3f} s — bậc hai?")

@@ -13,6 +13,11 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
   bootstrap; giữ inode thư mục và `.git`, không nhận nhầm thư mục của tiến trình khác hay xoá dữ liệu khi lỗi.
   Git bootstrap cách ly cấu hình, hooks và metadata môi trường; identity không đọc được dùng mặc định, không in
   byte cấu hình. Gate task: 46 test đạt; kiểm độc lập bốn ca race/identity đạt, các helper mới phủ dòng và nhánh 100 %.
+- Ghi [audit delta DOC](docs/ops/AUDIT-REPORT-2026-11-14-delta.md) đến `2bf2e1cf` và mở AUD-DOC-293.
+  Lưu kho nguyên văn 10 phát hiện DOC đã sửa ở v3.31.0 để giữ trần `docs/ops`.
+
+- Bổ sung bằng chứng HAR và TEST trong báo cáo audit delta 2026-11-14. Mở AUD-TEST-105 cho kết quả đo CPU ghép giữa hai lượt.
+
 - [ADR-0077](docs/adr/0077-deployment-receipts.md) (T-3841, D-422…D-424) chốt cấu hình theo môi trường, receipt của
   bản đang phục vụ, hàng `deploy` trong `release-check` và đích dev mặc định của gói `web-api-ts`. Mã triển khai
   thuộc các lát T-3842 đến T-3844 và T-3860.
@@ -209,6 +214,7 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
 
 - `xt.py doctor` nạp guard của dự án một lần để kiểm cả bộ lệnh mẫu (AUD-PERF-028, phần đầu T-3726).
 
+- AUD-TEST-105: cổng đo CPU so cỡ nhỏ và lớn trong cùng lượt retry, giữ ngưỡng hiện hành (D-483).
 - Vòng tự động (T-3736/T-3737, AUD-HAR-378/379, D-442): `loop init` giữ cờ chặn, lý do và thời điểm qua cả đổi PLAN
   và `--force`; chỉ `loop unblock --reason …` mới gỡ cờ và ghi can thiệp. Hàng `verify`/`release-sign` chỉ đúng lối
   phục hồi khi hết ngân sách, mất PLAN hoặc chưa khởi tạo, theo cây làm việc chứa state; tạo đợt mới vẫn phải gỡ cờ.
