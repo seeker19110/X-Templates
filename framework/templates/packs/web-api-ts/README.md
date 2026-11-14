@@ -10,7 +10,7 @@ updated: 2026-11-14
 > TypeScript 7.0.2, `pg` 8.23.1 + `kysely` 0.29.6, `vitest` 5.0.3, `biome` 2.5.15, Postgres 17.11 (ghim digest). Không có
 > UI (Next.js của hotel-manager không vào gói đầu — D-359). Hạn hỗ trợ: `pack.json` → `support_until`.
 
-Phiên bản đang ghim trong starter xem ở [`starter/package.json`](starter/package.json).
+Phiên bản đang ghim ở `starter/package.json` trong cây nguồn của gói.
 
 ## Có gì (starter)
 
@@ -36,7 +36,7 @@ phải làm đỏ đúng test ghi ở `expect_fail`.
 
 ## Giới hạn đã biết
 
-- Runner [`src/migrate.ts`](starter/src/migrate.ts) dùng `Migrator` với cấu hình transaction mặc định của Kysely.
+- Runner `starter/src/migrate.ts` dùng `Migrator` với cấu hình transaction mặc định của Kysely.
   Gói chưa có tuỳ chọn chạy riêng một migration ngoài transaction (DB-MIG-006, AUD-DATA-011).
   `0005_sessions_expiry` dựng hai index thường trên `sessions` — bảng lớn ở môi trường thật khoá ghi trong lúc dựng.
   Với bảng có dữ liệu, dựng index bằng bước riêng ngoài transaction (`CREATE INDEX CONCURRENTLY …` qua `psql`),
