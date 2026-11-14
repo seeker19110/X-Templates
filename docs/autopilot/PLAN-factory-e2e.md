@@ -50,7 +50,7 @@
 
 ### Lát 0 — Dữ kiện sống và hợp đồng
 - [x] `T-3866` `/research` nguồn sống có ngày: ảnh container + compose cho bản dev tự host, runner CI, worktree và phiên headless, scheduled task, GitHub App manifest — Gate: `git grep --untracked -qE '^title: .*bản dev tự host' -- research`
-- [ ] `T-3841` ADR hợp đồng triển khai: khoá `xt.yaml` theo môi trường, schema receipt, hàng `release-check`, đích dev mặc định (sau: T-3866) — Gate: `git grep --untracked -qiE '^# ADR-[0-9]+: .*receipt' -- docs/adr`
+- [x] `T-3841` ADR hợp đồng triển khai: khoá `xt.yaml` theo môi trường, schema receipt, hàng `release-check`, đích dev mặc định ([ADR-0077](../adr/0077-deployment-receipts.md); sau: T-3866) — Gate: `git grep --untracked -qiE '^# ADR-[0-9]+: .*receipt' -- docs/adr`
 
 ### Lát 1 — Bản dev có receipt
 - [ ] `T-3842` xt.py: lệnh triển khai đọc khoá `xt.yaml`, ghi receipt (môi trường · digest · thời điểm · smoke), smoke đỏ thì quay lui; fixture âm sai digest, smoke đỏ, receipt cũ (sau: T-3841; topo: review) — Gate: `python3 -m unittest tests.test_deploy_receipt`
