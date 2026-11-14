@@ -9903,6 +9903,7 @@ class GuardPrefixGateTest(_GuardDebtCase):
 
     def test_descriptor_like_argument_before_redirection_is_ambiguous(self):
         self.assert_code(('printf "%s" "{build_log}" >o', "printf '%s' {build_log} >o"), "BUDGET")
+        self.assert_allowed(('printf "%s" "draft {" >o',))
 
     def test_nested_wrappers_keep_known_quoted_values(self):
         self.assert_allowed(
@@ -9913,6 +9914,10 @@ class GuardPrefixGateTest(_GuardDebtCase):
                 'command -pv "$tool"',
             )
         )
+
+    def test_wrapper_reports_quoted_assignment_prefix_as_uncertain(self):
+        assignment = '"COLOR=blue"'
+        self.assertEqual(self.g._wrapper_bad(["env", assignment, "printenv", "COLOR"]), assignment)
 
     def test_old_rule_code_kept(self):  # luật cũ chặn trước giữ mã cũ (bài học review #523), cả strict
         cmds = (
