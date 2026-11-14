@@ -257,6 +257,8 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
 
 - Tài liệu và mẫu GO-NO-GO ghi rõ quyền ký phát hành (ADR-0074) và duyệt MVP (ADR-0069) khi dự án bật tự động (D-481).
 
+- `release-check` (ADR-0077, D-422): loại đúng `docs/ops/DEPLOYS.json` khỏi `subject.content` để ghi sổ triển khai
+  và commit sổ mà vẫn giữ định danh nội dung của ứng viên.
 - T-3726, AUD-PERF-029: `audit plan` đọc blame một lần cho mọi dòng blueprint, giữ nguyên cảnh báo bằng chứng cũ.
 
 - T-3728: skill `autopilot` theo hành động `stage-approve` của `loop next-step` khi dự án bật tự nghiệm thu MVP

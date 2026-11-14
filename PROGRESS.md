@@ -3,9 +3,10 @@
 > Giai đoạn hiện tại: G8 Vận hành & tiến hoá (khung 3.33.0, pha `harden` — D-136) · Cập nhật: 2026-11-14
 
 ## Đang làm
-- 2026-11-11 **ADR-0075** xưởng đầu-cuối (chủ dự án: song song theo file · thiết lập sau bản dev · mọi quy mô — D-419) + [PLAN-factory-e2e](docs/autopilot/PLAN-factory-e2e.md) (D-420, T-3841…T-3866) + 7 đặc tả `docs/specs/SPEC-factory-*.md` (D-422…D-424). T-3866 xong ([research](research/2026-11-12-dev-self-host-live-sources.md)). T-3841 chốt hợp đồng triển khai ([ADR-0077](docs/adr/0077-deployment-receipts.md)). T-3845 (#536): `install.py --new`, `doctor --offline` (D-452/D-453/D-455/D-460). Kế T-3842, triển khai lệnh và receipt.
+- 2026-11-11 **ADR-0075** xưởng đầu-cuối (chủ dự án: song song theo file · thiết lập sau bản dev · mọi quy mô — D-419) + [PLAN-factory-e2e](docs/autopilot/PLAN-factory-e2e.md) (D-420, T-3841…T-3866) + 7 đặc tả `docs/specs/SPEC-factory-*.md` (D-422…D-424). T-3866 xong ([research](research/2026-11-12-dev-self-host-live-sources.md)). T-3841 chốt hợp đồng triển khai ([ADR-0077](docs/adr/0077-deployment-receipts.md)). T-3845 (#536): `install.py --new`, `doctor --offline` (D-452/D-453/D-455/D-460). T-3842 giữ fingerprint khi ghi receipt; kế là lệnh triển khai.
 - #513–#515, #538 đã merge. Audit 2026-11-14: xem sổ `docs/ops/AUDIT-STATUS.md`; D-480 sửa Gate T-3729.
-- T-3763: xét lại tham số thay lệnh Bash. [Mẫu 505 lượt](research/evidence/2026-11-13-guard-p4.json) giữ nguyên quyết định; AUD-SEC-609 còn mở.
+- T-3763: [mẫu 505 lượt](research/evidence/2026-11-13-guard-p4.json) không đổi; AUD-SEC-609 mở.
+- T-3867: xử lý giới hạn đệ quy của guard.
 - AUD-DOC-273/274: [báo cáo pilot](docs/ops/ARTIFACT-PILOT-2026-11-08.md) đối chiếu receipt staging và cổng Production. Còn receipt bền và kiểm artifact trên VPS.
 - Chờ người: §5 ký GO-NO-GO 3.30.0…3.31.1 và [3.33.0](docs/ops/GO-NO-GO-2026-11-08-v3.33.0.md) (3.32.0 đã ký #476); bật `release_signoff: agent` ở `xt.yaml` là PR chủ repo merge (HARD_GATED, D-402). T-3557 còn `[ ]`.
 - Dự án đích (`main` 2026-11-08, [registry](docs/ops/registry.json)): cả 4 ở 3.32.0; PR nâng 3.33.0 chưa mở. Còn mở: AUD-TEST-061 (CodeQL); fixture host Codex/Gemini.
