@@ -2193,6 +2193,7 @@ def _allowlist_why(cmd: str, root: str = "", cwd: Optional[str] = None) -> str:
     why = _dyn_head_why(cmd) or _reread_why(cmd) or _split_why(cmd) or _here_shell_why(cmd)
     why = why or _array_arg_why(cmd) or _script_run_why(cmd) or _reuse_why(cmd) or _fd_script_why(cmd)
     why = why or _home_dyn_why(cmd) or _run_named_why(cmd) or _implicit_load_why(cmd) or _patch_file_why(cmd)
+    why = why or _prefix_why(cmd)  # ADR-0076 P0 (lát 4)
     return why or _git_cfg_env_why(cmd, root, cwd) or _ruled_word_why(cmd)
 
 
@@ -3854,10 +3855,11 @@ def _argv_shell_why(cmd: str, tokens: List[str], root: str, cwd: Optional[str]) 
     return old or _allowlist_why(cmd, root, cwd)
 
 
-def _raw_tokens(cmd: str, subst: bool = False) -> Optional[List[str]]:
+def _raw_tokens(cmd: str, subst: bool = False, fd_issues: Optional[List[str]] = None) -> Optional[List[str]]:
     """Token GIỮ nháy/thoát (shlex không POSIX) của chữ đã nối dòng, gấp heredoc, giải `$'…'` thành chữ nháy, bỏ comment
     — cùng tiền xử lý `tokenize` trừ viết lại `$IFS`/`$(pwd)`; nháy không đóng → None. `subst`: gấp heredoc như
-    `_ShellScan` (thân có nháy trong `"$(…)"` thành dòng trống — chữ, ngoặc lẻ trong đó không làm hỏng tách từ)."""
+    `_ShellScan` (thân có nháy trong `"$(…)"` thành dòng trống — chữ, ngoặc lẻ trong đó không làm hỏng tách từ).
+    `fd_issues` giữ từ dạng fd mà không thể xác nhận trước khi bỏ khoảng trắng và nháy."""
     s = strip_comments(expand_ansi_c(_fold_heredocs(join_continuations(cmd), subst, True)), True)
     out: List[str] = []
     word: List[str] = []
@@ -3865,7 +3867,13 @@ def _raw_tokens(cmd: str, subst: bool = False) -> Optional[List[str]]:
     while i < len(s):
         c = s[i]
         if c in " \t\r" or c in PUNCT:
-            out += ["".join(word)] if word else []
+            joined = "".join(word)
+            if fd_issues is not None and c in "<>&":
+                fd = _uncertain_named_fd(joined, out[-1] if out else "", s[i : i + 3])
+                if fd:
+                    fd_issues.append(fd)
+            if joined:
+                out.append(joined)
             word = []
             j = i
             while j < len(s) and s[j] in PUNCT:  # dãy dấu liền nhau là một token (như shlex `punctuation_chars`)
@@ -5045,10 +5053,9 @@ def _env_opt(opt: str) -> Tuple[str, Optional[str]]:
 
 def _skip_wrapper_args(name: str, a: List[str]) -> None:
     """Sau wrapper: bỏ tuỳ chọn (kèm giá trị nếu có) và đối số thời lượng của `timeout`."""
-    with_value = WRAPPER_OPTS_WITH_VALUE.get(name, set())
     while a and a[0].startswith("-") and a[0] != "-":
         opt = a.pop(0)
-        if opt in with_value and a:
+        if _wrapper_opt_takes_next(name, opt) and a:
             a.pop(0)
     if name == "timeout" and a:
         a.pop(0)  # DURATION
@@ -5076,8 +5083,8 @@ def _strip_prefixes(argv: List[str], dirs: Optional[List[str]] = None) -> List[s
         head = a[0]
         if _is_redirect(head):
             del a[:2]  # toán tử + đích
-        elif head.isdigit() and len(a) > 1 and _is_redirect(a[1]):
-            a.pop(0)  # số fd (`2>`)
+        elif FD_NAME_RE.fullmatch(head) and len(a) > 1 and _is_redirect(a[1]):
+            a.pop(0)  # số fd (`2>`) hay tên biến fd (`{fd}>o git …` — bash chạy git với fd=10; AUD-SEC-657/700)
         elif head == "function" and len(a) > 1:
             del a[:2]  # `function TÊN`: từ khoá khai báo hàm + tên — thân hàm là lệnh thường (AUD-SEC-611)
         elif head in SHELL_KEYWORDS:
@@ -5093,6 +5100,170 @@ def _strip_prefixes(argv: List[str], dirs: Optional[List[str]] = None) -> List[s
         else:
             break
     return a
+
+
+# ADR-0076 lát 4 (P0 tiền tố, T-3764; D-415/D-430): tiền tố mà các bộ đọc của guard không đọc như bash → BUDGET, mắt
+# xích của `_allowlist_why` (sau luật cũ). (a) `time` là TỪ KHOÁ (không nháy, ở vị trí lệnh: đầu, sau dấu tách, `{`,
+# `!`, `if`, `do`…) rồi tới gán, từ khoá mở thân hay builtin — bash giữ phép gán (`time d=X; echo $d` → `X`) và chạy
+# thân trong shell này, guard chỉ ghi nhận gán/`export`/`for`/`function` khi chúng đứng đầu lệnh (AUD-SEC-663); (b)
+# `coproc` ở vị trí lệnh: thân `coproc [TÊN] { … }` không được quét như lệnh thường (AUD-SEC-664); (c) từ của trình bọc
+# (cờ, giá trị cờ, thời lượng `timeout`) có mở rộng/glob — bash có thể dựng ra số từ khác guard (`timeout $X 5 CMD`: X
+# rỗng thì `5` là thời lượng). Đọc lại, không chặn: `{tên}>` đứng đầu (AUD-SEC-657/700 — `_strip_prefixes` đọc như số
+# fd, `FD_NAME_RE`), cụm cờ `exec -la x` (AUD-SEC-659 — `_wrapper_opt_takes_next` đọc như getopt): luật cũ thấy đúng lệnh.
+PREFIX_WHY = (
+    "tiền tố lệnh guard không đọc chắc (`{}`) — `time` rồi gán/từ khoá/builtin, `coproc`, cờ/giá trị trình bọc có mở"
+    " rộng (ADR-0076 P0, AUD-SEC-663/664); viết lại: `time env PATH=… cmd`, gán ở lệnh riêng trước `time`, bỏ `time`"
+    ' trước cấu trúc/builtin, giá trị trình bọc nguyên văn hay trong nháy kép sau cờ (`timeout 30 cmd`, `nice -n "$N"`)'
+)
+TIME_BODY = frozenset(SHELL_KEYWORDS - {"!"}) | {"for", "select", "case", "function", "coproc"}
+# Lệnh dựng sẵn của bash 5.3 (`compgen -b`, đo 2026-11-13): chạy trong shell hiện tại nên đổi được trạng thái guard theo
+# dõi ở đầu lệnh (`time export d=/`, `time read d <<< /` — `_record_assigns` mất như phép gán). So trên từ đã bỏ nháy:
+# nháy không làm builtin thành lệnh ngoài (`time 'export' d=/` vẫn là builtin), khác từ khoá.
+BASH_BUILTINS = frozenset(
+    ". : [ alias bg bind break builtin caller cd command compgen complete compopt continue declare dirs disown echo"
+    " enable eval exec exit export false fc fg getopts hash help history jobs kill let local logout mapfile popd printf"
+    " pushd pwd read readarray readonly return set shift shopt source suspend test times trap true type typeset ulimit"
+    " umask unalias unset wait".split()
+)
+
+
+def _prefix_why(cmd: str) -> str:
+    """Lý do (rỗng = qua) của P0 trên mọi lệnh đơn — cùng bộ đọc với `_ruled_word_why`; một lượt, tuyến tính."""
+    fd_issues: List[str] = []
+    raw = _raw_tokens(cmd, True, fd_issues)
+    if fd_issues:
+        return FD_PREFIX_WHY.format(clean_text(fd_issues[0])[:80])
+    for argv in (None if raw is None else _plain_argvs(raw)) or []:
+        bad = _lead_word_bad(argv) or next(filter(None, map(_wrapper_bad, _brace_segments(argv))), "")
+        if bad:
+            return PREFIX_WHY.format(clean_text(bad)[:80])
+    return ""
+
+
+def _lead_word_bad(argv: List[str]) -> str:
+    """Từ phạm (a)/(b) của lệnh đơn `argv` (token còn nháy — `\\time`, `'coproc'` là tên lệnh, không phải từ khoá);
+    rỗng = qua. Sau `time`: `-p`, `--`, `!`, `time` lồng và chuyển hướng giữ vị trí lệnh."""
+    timed, i = False, 0
+    while i < len(argv):
+        w, nxt = argv[i], argv[i + 1 : i + 2]
+        if w == "coproc" or timed and (w in TIME_BODY or _dequote(w) in BASH_BUILTINS or IFS_ASSIGN_WORD_RE.match(w)):
+            return w
+        if timed and (_is_redirect(w) or bool(FD_NAME_RE.fullmatch(w)) and nxt != [] and _is_redirect(nxt[0])):
+            i += 1 + _is_redirect(w)  # chuyển hướng + đích, hay tên fd
+            continue
+        if not (w in SHELL_KEYWORDS or w == "time" or timed and w in ("-p", "--")):
+            return ""
+        timed, i = timed or w == "time", i + 1
+    return ""
+
+
+def _wrapper_bad(seg: List[str]) -> str:
+    """Đọc nguyên văn từng trình bọc, từ cờ đến giá trị rồi mới chuyển sang tên lệnh tiếp theo."""
+    rest = _no_redirects(seg)
+    plain = [_dequote(t) for t in rest]
+    i, known = 0, True
+    while i < len(rest):
+        head = plain[i]
+        i += 1
+        if head in SHELL_KEYWORDS or ENV_ASSIGN_RE.fullmatch(head):
+            continue
+        name = posixpath.basename(head)
+        if name not in WRAPPERS and name != "env":
+            break
+        i, known, bad = _wrapper_arguments(name, rest, plain, i, known)
+        if bad:
+            return bad
+    return ""
+
+
+WRAPPER_FIXED_FLAGS = {
+    "command": frozenset({"-p", "-v", "-V", "-pv", "-pV", "-vp", "-Vp"}),
+    "env": frozenset({"-", "-i", "--ignore-environment", "-0", "--null", "--debug"}),
+    "exec": frozenset({"-c", "-l", "-cl", "-lc"}),
+    "nice": frozenset(),
+    "time": frozenset({"-p", "--portability", "-a", "--append", "-v", "--verbose"}),
+    "timeout": frozenset({"--foreground", "--preserve-status", "-v", "--verbose"}),
+    "xargs": frozenset(
+        {"-0", "--null", "-r", "--no-run-if-empty", "-x", "--exit", "-p", "--interactive", "-t", "--verbose"}
+    ),
+}
+DQ_SCALAR_SPECIAL_RE = re.compile(r'["$\x60\\]')
+DQ_SCALAR_PARAM_RE = re.compile(r"\$(?:[A-Za-z_][A-Za-z0-9_]*|\{[A-Za-z_][A-Za-z0-9_]*\}|[0-9?#$!*])")
+DQ_ARITH_RE = re.compile(r'"\$\(\([0-9A-Za-z_ \t()+*/%-]+\)\)"')
+DQ_COMMAND_RE = re.compile(r'"\$\((?!\()[0-9A-Za-z_./ \t<>|&-]+\)"')
+
+
+def _quoted_scalar_text(word: str) -> bool:
+    """Duyệt chữ và tham số vô hướng một lượt, không thử lại các cách chia tên biến."""
+    end = len(word) - 1
+    if end < 1 or word[0] != '"' or word[end] != '"':
+        return False
+    start = 1
+    while special := DQ_SCALAR_SPECIAL_RE.search(word, start, end):
+        parameter = DQ_SCALAR_PARAM_RE.match(word, special.start(), end)
+        if parameter is None:
+            return False
+        start = parameter.end()
+    return True
+
+
+def _quoted_scalar(word: str) -> bool:
+    """Phần nháy kép được phép làm đúng một giá trị cờ."""
+    return bool(
+        _quoted_scalar_text(word)
+        or DQ_ARITH_RE.fullmatch(word)
+        and _raw_group_end(word, 3, "(") == len(word) - 1
+        or DQ_COMMAND_RE.fullmatch(word)
+    )
+
+
+def _wrapper_dynamic(word: str) -> bool:
+    skeleton = _gate_skeleton(word)
+    return GATE_DYN in skeleton or GATE_GLOB in skeleton
+
+
+def _wrapper_arguments(name: str, raw: List[str], plain: List[str], start: int, known: bool) -> Tuple[int, bool, str]:
+    """Đọc cờ của riêng một trình bọc; khi gặp cờ lạ, chưa rõ vai trò của các giá trị động theo sau."""
+    i = start
+    while i < len(plain) and plain[i].startswith("-") and (plain[i] != "-" or name == "env"):
+        opt = plain[i]
+        if _wrapper_dynamic(raw[i]):
+            return i, known, raw[i]
+        i += 1
+        if opt == "--":
+            break
+        if _wrapper_value(name, opt):
+            if i < len(plain) and _wrapper_dynamic(raw[i]) and not (known and _quoted_scalar(raw[i])):
+                return i, known, raw[i]
+            i += 1
+        else:
+            known = known and opt in WRAPPER_FIXED_FLAGS.get(name, ())
+    if name == "env":
+        while i < len(plain) and ENV_ASSIGN_RE.fullmatch(plain[i]):
+            if not re.match(r"[A-Za-z_][A-Za-z0-9_]*\+?=", raw[i]):
+                return i, known, raw[i]
+            i += 1
+    if i < len(plain) and (name == "timeout" or not known) and _wrapper_dynamic(raw[i]):
+        return i, known, raw[i]
+    return i + (name == "timeout"), known, ""
+
+
+def _wrapper_value(name: str, prev: str) -> bool:
+    """Từ đứng sau `prev` là GIÁ TRỊ của cờ trình bọc `name` (`-n` của nice, `-a`/`-la` của exec, `-u`/`-C` của env —
+    không `-S`: giá trị là lệnh)."""
+    if name == "env":
+        key, val = _env_opt(prev)
+        return key in ("u", "C", "a") and val is None
+    return _wrapper_opt_takes_next(name, prev)
+
+
+EXEC_A_LAST_RE = re.compile(r"-[^a]*a")  # cụm cờ `exec` mà `a` ĐẦU TIÊN đứng cuối: tên ở từ kế (`-la x`, `-ca x`)
+
+
+def _wrapper_opt_takes_next(name: str, opt: str) -> bool:
+    """Cờ `opt` của trình bọc `name` ăn từ kế làm giá trị. `exec` đọc cụm cờ như getopt của bash (AUD-SEC-659, cùng
+    `_exec_login`): `-la x CMD`/`-ca x CMD` — `a` cuối cụm ăn `x`; `-al CMD` là `-a l` (giá trị dính)."""
+    return opt in WRAPPER_OPTS_WITH_VALUE.get(name, ()) or name == "exec" and bool(EXEC_A_LAST_RE.fullmatch(opt))
 
 
 # Cấu hình làm `git push` đẩy nhiều nhánh/nhánh chính mà lệnh không ghi refspec (AUD-SEC-047): `push.default=matching`,
@@ -7782,7 +7953,27 @@ def _vague(tok: str) -> bool:
 XT_MODULE_RE = re.compile(r"-[A-Za-z]*m((?:[\w.]*\.)?xt)?")
 XT_MODULE_NAME_RE = re.compile(r"(?:[\w.]*\.)?xt")
 STDIN_FEEDERS = ("xargs", "parallel")  # thêm đối số từ stdin vào lệnh
-FD_NAME_RE = re.compile(r"\d+|\{\w+\}")  # fd trước chuyển hướng: `2>`, `{fd}>`
+# Chỉ bóc fd có tên nguyên văn và chỉ số mảng thập phân cố định. Các dạng còn lại do bộ đọc thô xét.
+FD_NAME_RE = re.compile(r"\d+|\{[A-Za-z_][A-Za-z0-9_]*(?:\[[0-9]+\])?\}")
+FD_PREFIX_WHY = (
+    "không xác nhận được fd có tên (`{}`) trước chuyển hướng — viết lại: dùng tên biến nguyên văn"
+    " viết liền với toán tử chuyển hướng, hoặc đặt đối số chữ sau chuyển hướng"
+)
+
+
+def _uncertain_named_fd(adjacent: str, previous: str, operator: str) -> str:
+    """Từ trông như fd mà cách đọc đã bỏ nháy/khoảng trắng có thể hiểu khác bộ đọc thô."""
+    if operator.startswith((">(", "<(")) or operator[0] == "&" and not operator.startswith("&>"):
+        return ""
+    word = adjacent or previous
+    if "{" not in word:
+        return ""
+    dequoted = _dequote(word)
+    if not (dequoted.startswith("{") and dequoted.endswith("}") and dequoted[1:-1]):
+        return ""
+    return "" if operator[0] in "<>" and adjacent and FD_NAME_RE.fullmatch(adjacent) else word
+
+
 # Lệnh chỉ đọc/so/chép file, không chạy script — `cat scripts/xt.py "$F"` không phải gọi `xt.py`
 STAGE_READERS = frozenset(
     {"cat", "grep", "rg", "git", "ruff", "black", "mypy", "shellcheck", "wc", "head", "tail", "less", "more", "bat"}
