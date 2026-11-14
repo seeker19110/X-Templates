@@ -85,7 +85,7 @@
 - [~] `T-3755` 🔴 AUD-SEC-665 guard: thay lệnh `${ …; }`/`${| …; }` của bash 5.3 được quét hoặc BUDGET (topo: review) — Bỏ: gộp vào T-3761 (ADR-0076, D-430) — Gate: `python3 -m unittest tests.test_hooks tests.test_guard_fuzz`
 - [~] `T-3756` 🔴 AUD-SEC-666 guard: extglob `!(…)`/`?(…)`/`*(…)`/`+(…)`/`@(…)` ở lệnh có luật → BUDGET (D-415) (topo: review) — Bỏ: gộp vào T-3761 (ADR-0076, D-430) — Gate: `python3 -m unittest tests.test_hooks tests.test_guard_fuzz`
 - [~] `T-3759` 🔴 AUD-SEC-690/710/711 guard: mở rộng dính vào cờ/lệnh con git ngoài phạm vi #523 — cụm cờ ngắn và tên lệnh con có mở rộng (`-d$X`, `push$X`), mở rộng dính TRƯỚC cờ (`$X--delete`), cờ dài ngoài `GIT_DANGER_LONG` (`--creat$X`, `--stdi$X`, `--no-verif$X`) → BUDGET (D-415) (sau: T-3743; topo: review) — Bỏ: gộp vào T-3762 (ADR-0076, D-430) — Gate: `python3 -m unittest tests.test_hooks tests.test_guard_fuzz`
-- [ ] `T-3729` Quét lại nhóm TEST, DOC, HAR (`chưa quét`) + sổ `đã sửa` cho các lát trên (sau: T-3724, T-3726) — Gate: `python3 scripts/xt.py audit check docs/ops/AUDIT-STATUS.md`
+- [ ] `T-3729` Quét lại nhóm TEST, DOC, HAR (`chưa quét`) + sổ `đã sửa` cho các lát trên (D-480; sau: T-3724, T-3726) — Gate: `python3 scripts/xt.py audit check docs/ops/AUDIT-STATUS.md && test "$(git grep -c -E '^\| (4 \| TEST|9 \| DOC|13 \| HAR) \| [^|]+ \| đã quét \|' -- docs/ops/AUDIT-STATUS.md)" = docs/ops/AUDIT-STATUS.md:3`
 
 ### Lát 6 — ADR-0076 cổng tập con dương
 > Thay các task guard `[~]` "gộp vào T-376x" ở trên (D-430…D-432); mỗi lát một PR, test đỏ trước, review `reviewer-alt`,

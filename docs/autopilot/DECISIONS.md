@@ -631,3 +631,17 @@
 - Chọn: Một PR cùng lifecyclefix, adapter giới hạn, hồi quy và auditrefs; mỗi phần cần để bằng chứng đúng hành vi
 - Lý do (tiêu chí chất lượng cuối): Hai bug cùng hợp đồng blocked và recovery. Đóng HAR378379 đòi ca thật carry/expired/control cùng lúc, không gắnIDvào ca khôngliênquan hoặc miễntrừ scope. Gitfixture phải cáchly routing/config để tests khôngđụngrepo ngoài. Mộtlát rollbackđược, độc lậpreviewvàgate-fast xanh; tách chỉ đểđếm dòng làm review phải ghép nhiều phần bằngchứng.
 - Đường lùi: Revert toàn PR hoặc tách adapter ở PR sau khi có nguồn bằngchứng tươngđương, không bỏ coverage hoặc khai đóng nợ khi mất ca.
+
+### D-479 · 2026-11-14T02:39:45+00:00 · PR #513: nâng gói web-api-ts sau khi Biome kiểm YAML và kiểu Node vượt runtime?
+
+- Phương án: (1) Nâng Kysely, Biome và Vitest; giữ @types/node 24.19.2 và chuẩn hoá khoảng trắng trước chú thích trong mẫu xt.yaml · (2) Giữ cả nhóm ở bản cũ và đợi Dependabot tách các nâng cấp
+- Chọn: Nâng Kysely, Biome và Vitest; giữ @types/node 24.19.2 và chuẩn hoá khoảng trắng trước chú thích trong mẫu xt.yaml
+- Lý do (tiêu chí chất lượng cuối): Kiểu Node bám runtime 24; cách sinh YAML giữ nguyên giá trị, vẫn được formatter kiểm; lint, typecheck, build và 34 test trên PostgreSQL đã chạy
+- Đường lùi: Revert PR #513 để trở về lockfile và khoảng trắng mẫu trước nâng cấp
+
+### D-480 · 2026-11-14T03:11:52+00:00 · T-3729: kiểm việc quét lại TEST, DOC, HAR bằng cổng nào?
+
+- Phương án: (1) Kiểm sổ theo schema và đòi đúng ba nhóm có trạng thái đã quét · (2) Dùng audit check --strict cho cả sổ và mọi nợ phát hành
+- Chọn: Kiểm sổ theo schema và đòi đúng ba nhóm có trạng thái đã quét
+- Lý do (tiêu chí chất lượng cuối): Cổng cũ exit 0 khi cả ba nhóm chưa quét. Cổng theo phạm vi kiểm đúng việc và không buộc đóng nợ ngoài T-3729
+- Đường lùi: Revert thay đổi Gate của T-3729, giữ cổng phát hành audit --strict
