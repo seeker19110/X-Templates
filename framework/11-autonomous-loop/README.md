@@ -1,7 +1,7 @@
 ---
 title: Vòng lặp tự động (autopilot)
 kind: index
-updated: 2026-11-01
+updated: 2026-11-14
 ---
 
 # 11 — Vòng lặp tự động (autopilot)
@@ -32,8 +32,7 @@ template và `AGENTS.md` chỉ tóm tắt và liên kết, không chép bảng/n
 ## Giao thức autopilot (AGENTS.md trỏ tới đây)
 
 `<XT>` = `python3 .xtemplates/scripts/xt.py` trong dự án đích (`python3 scripts/xt.py` trong repo khung). Skill
-`/autopilot` (`.claude/skills/autopilot/SKILL.md`) là checklist của giao thức này. Máy in sẵn bước kế ở mỗi lệnh (`doctor`,
-`loop init`, `loop status`, `pr next`, Stop hook) — tài liệu không chép lại output đó; agent làm theo output.
+`/autopilot` (`.claude/skills/autopilot/SKILL.md`) là checklist của giao thức này. Agent làm theo bước kế do máy in.
 
 **Pha 0 — chuẩn bị** ([`LOOP-HARNESS-020`](harness-files.md), [`LOOP-HARNESS-028`](harness-files.md))
 
@@ -99,8 +98,8 @@ template và `AGENTS.md` chỉ tóm tắt và liên kết, không chép bảng/n
     = PLAN hết task, 0 MUST mở ngoài chờ người, 0 🔴/🟠 → `/audit full` sạch → đề xuất bước 17.
     `done-pending-human` → như `done` + chờ người. `blocked`/`budget` → lý do + bước kế, không khai "xong".
 17. **Pha 3 — hoàn thiện** (`/complete`, ADR-0046; dự án đã `harden` chạy luật này từ bước 12): PR đặt `delivery_phase: harden`
-    → `/audit` + nợ review → `PLAN-harden-<ngày>.md` → vòng lặp bước 9–15 luật harden → `<XT> release-check` không
-    NO-GO → `GO-NO-GO.md` (người ký).
+    → audit, trả nợ → `PLAN-harden-<ngày>.md` → bước 9–15 → `<XT> release-check` không NO-GO → người ký
+    `GO-NO-GO.md`. Agent chỉ ký khi đã bật `release_signoff: agent` và đủ điều kiện ADR-0074.
 
 ## Lệnh thật
 
