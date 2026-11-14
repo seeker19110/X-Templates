@@ -489,7 +489,13 @@ class GuardFuzzWrapTest(unittest.TestCase):
         with unittest.mock.patch.object(xt.BenchEnv, "module", broken):
             red = fuzz(rounds=0)["red"]
         kinds = {(k.split("--")[1], v["invariant"]) for k, v in red.items() if not excused(k, v)}
-        self.assertEqual(kinds, {("nice", "deny-monotone"), ("timeout", "allow-kept")})
+        expected = {("nice", "deny-monotone"), ("timeout", "allow-kept")}
+        unexpected = {
+            k: {"case_id": v["case"]["id"], **{n: v[n] for n in ("command", "invariant", "error", "allowed")}}
+            for k, v in red.items()
+            if not excused(k, v) and (k.split("--")[1], v["invariant"]) not in expected
+        }
+        self.assertEqual(kinds, expected, unexpected)
 
     def test_guard_fuzz_runner_records_exception(self) -> None:
         """Ngoại lệ trong `_rule_decision` được ghi (bất biến 2) dù bench chuyển nó thành `_failure_decision`."""

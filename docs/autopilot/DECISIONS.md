@@ -392,20 +392,6 @@
 - Đính chính số (khi gộp `main` #503, 2026-11-11): `main` đã cấp T-3740 cho việc khác ở PLAN-harden-2026-11-11 — task nghiên cứu của PLAN-factory-e2e đánh số lại thành T-3766 để không tái sử dụng ID; PLAN là T-3741…T-3766.
 - Đính chính số (khi gộp `main` #504, 2026-11-11): `main` tiếp tục cấp T-3741, T-3742 cho việc khác ở PLAN-harden-2026-11-11 — cả dải của PLAN-factory-e2e dời sang T-3841…T-3866 (T-37xx → T-38xx, giữ hai chữ số cuối) để hết trùng với phiên đang cấp số tuần tự; các số T-37xx ở mục này và ở commit cũ của nhánh đọc theo phép dời đó.
 
-### D-425 · 2026-11-11T23:57:24+00:00 · install.py gặp thư mục cha là symlink trên đường ghi harness/.github/adapter: từ chối cả lần cài hay bỏ qua file đó?
-
-- Phương án: (1) Bỏ qua file đó (skipped-symlink) kèm cảnh báo, cài tiếp phần còn lại · (2) Từ chối cả lần cài (exit 2)
-- Chọn: Bỏ qua file đó (skipped-symlink) kèm cảnh báo, cài tiếp phần còn lại
-- Lý do (tiêu chí chất lượng cuối): Cùng quy ước AUD-HAR-010 cho symlink ở đích: đúng và an toàn (không ghi ra ngoài), đường lùi giữ nguyên, người dùng thấy cảnh báo; từ chối cả lần chặn dự án monorepo hợp lệ có .github là symlink
-- Đường lùi: Đổi classify_copy trả lỗi thay vì skipped-symlink
-
-### D-426 · 2026-11-12T00:07:26+00:00 · AUD-DATA-011: migration 0005 đã phát hành dựng index thường — sửa tại chỗ, thêm runner không transaction, hay giữ + test chặn migration mới?
-
-- Phương án: (1) Giữ 0005, test buộc migration mới CONCURRENTLY (0005 miễn có dòng sổ), README nêu cách làm; chấp nhận tới 2027-01-21 · (2) Thêm runner kysely chạy migration không transaction (phạm vi lớn, API chưa xác minh) · (3) Sửa 0005 tại chỗ
-- Chọn: Giữ 0005, test buộc migration mới CONCURRENTLY (0005 miễn có dòng sổ), README nêu cách làm; chấp nhận tới 2027-01-21
-- Lý do (tiêu chí chất lượng cuối): Đúng và an toàn: DB-MIG-003 cấm sửa migration đã áp; runner mới cần xác minh API kysely và có phạm vi riêng; test chặn tái phát ngay, đường lùi giữ nguyên
-- Đường lùi: Bỏ MigrationIndexTest và dòng README; mở lại dòng sổ
-
 ### D-422 · 2026-11-11T19:40:12+00:00 · Chủ dự án 2026-11-11: còn gì cần viết đặc tả thì viết nốt trước — duyệt bảy đặc tả SPEC-factory-* (deploy, intake, acceptance, parallel, scale, setup, learning) của PLAN-factory-e2e với các lựa chọn thiết kế nào?
 
 - Phương án: (1) Duyệt bộ bảy đặc tả với: receipt là sổ theo git do xt.py deploy ghi, release-check chỉ đọc sổ; hợp đồng triển khai trung lập công cụ, gói dùng Docker Engine + Compose; bản dev là môi trường dựng lại bằng một lệnh, không phải địa chỉ luôn bật; bộ nghiệm thu khoá bằng digest ở sổ riêng và phải đỏ trước khi viết mã; mở M/L bằng hai khoá trần riêng mặc định S và 1 thuộc HARD_GATED_KEYS, dòng người dùng thử ghi MÁY MÔ PHỎNG; mục MUST lớp B vẫn là việc người; mảnh changelog.d cho CHANGELOG, sổ sách còn lại do phiên điều phối ghi; worker bắt buộc có trần chi phí; admin-plan chỉ đọc; repo sản phẩm là repo riêng hoặc bundle; không đổi schema registry · (2) Chỉ viết ADR ở từng lát (T-3841, T-3850), không viết đặc tả trước · (3) Dùng lại release_signoff: agent và stage_approval: agent cho mọi quy mô, không thêm khoá trần
@@ -427,6 +413,20 @@
 - Chọn: Sửa trong PR: (1) thuộc tính bền của một bản là attestation do workflow phát hành ký, kiểm ở nơi dùng bằng lệnh chỉ đọc release-verify; ruleset tag và luật guard cấm phiên agent tạo tag phiên bản là lớp chặn thêm; (2) rollback ở môi trường khác dev cũng đòi HEAD nằm trong nhánh chính của remote, digest_<env> chạy không có biến đáp án; (3) bỏ tự tiếp quản: nhánh quá hạn chỉ báo, phiên điều phối giao lại bằng lệnh có D-NNN, thời điểm nhận nằm trong tên ref, chi phí cộng dồn đi theo nhánh, có trần số lượt; worktree song song do xt.py tạo và không tick PLAN; ở M/L và giai đoạn 2/3 agent chỉ ký/duyệt ứng viên đã nằm trên nhánh chính; canary bằng số ngày + danh sách thu hồi; các phần còn câu hỏi chặn (F-131, F-133, F-121, F-113, F-142) về Draft, task của chúng quyết trước khi viết mã
 - Lý do (tiêu chí chất lượng cuối): (1) đúng/an toàn: ba lỗi đều là đường đưa thứ chưa qua cổng tới nơi dùng (tag giả tới mọi dự án đích, lệnh nhánh chưa merge tới production, hai worker cùng tiêu trần); attestation là bằng chứng mà người tạo tag giả không làm ra được, khác với tên tag; một nơi quyết định giao lại thì không còn đua; (2) đường lùi: chưa có mã; phần Draft ghi rõ điều phải thử thật trước khi duyệt; (3) đơn giản: bỏ hẳn cơ chế tiếp quản tự động thay vì thêm ba cơ chế con để vá — hai lượt review liên tiếp đều tìm ra lỗ ở chính phần này nên thiết kế trên giấy chưa đủ tin, cần thử trên git/GitHub thật (phương án 2 đi tiếp trên giấy); phương án 3 đưa lỗ đã biết vào nền của 26 task
 - Đường lùi: Sửa đặc tả bằng PR và D-NNN mới; chưa task nào có mã
+
+### D-425 · 2026-11-11T23:57:24+00:00 · install.py gặp thư mục cha là symlink trên đường ghi harness/.github/adapter: từ chối cả lần cài hay bỏ qua file đó?
+
+- Phương án: (1) Bỏ qua file đó (skipped-symlink) kèm cảnh báo, cài tiếp phần còn lại · (2) Từ chối cả lần cài (exit 2)
+- Chọn: Bỏ qua file đó (skipped-symlink) kèm cảnh báo, cài tiếp phần còn lại
+- Lý do (tiêu chí chất lượng cuối): Cùng quy ước AUD-HAR-010 cho symlink ở đích: đúng và an toàn (không ghi ra ngoài), đường lùi giữ nguyên, người dùng thấy cảnh báo; từ chối cả lần chặn dự án monorepo hợp lệ có .github là symlink
+- Đường lùi: Đổi classify_copy trả lỗi thay vì skipped-symlink
+
+### D-426 · 2026-11-12T00:07:26+00:00 · AUD-DATA-011: migration 0005 đã phát hành dựng index thường — sửa tại chỗ, thêm runner không transaction, hay giữ + test chặn migration mới?
+
+- Phương án: (1) Giữ 0005, test buộc migration mới CONCURRENTLY (0005 miễn có dòng sổ), README nêu cách làm; chấp nhận tới 2027-01-21 · (2) Thêm runner kysely chạy migration không transaction (phạm vi lớn, API chưa xác minh) · (3) Sửa 0005 tại chỗ
+- Chọn: Giữ 0005, test buộc migration mới CONCURRENTLY (0005 miễn có dòng sổ), README nêu cách làm; chấp nhận tới 2027-01-21
+- Lý do (tiêu chí chất lượng cuối): Đúng và an toàn: DB-MIG-003 cấm sửa migration đã áp; runner mới cần xác minh API kysely và có phạm vi riêng; test chặn tái phát ngay, đường lùi giữ nguyên
+- Đường lùi: Bỏ MigrationIndexTest và dòng README; mở lại dòng sổ
 
 ### D-427 · 2026-11-12T05:49:35+00:00 · AUD-DEP-021 (T-3720): quét lockfile npm của gói web-api-ts bằng công cụ nào trong dep-audit.yml?
 
@@ -520,6 +520,20 @@
 - Lý do (tiêu chí chất lượng cuối): (1) an toàn: đo trên 19.026 lệnh Bash thật cả hai phương án chênh 0 lệnh; khi chi phí bằng nhau chọn bên chặt (printf -v ghi biến như read/let; pytest chạy mã từ conftest/-p). ADR-0076 không sửa (đã Accepted): câu 'pytest không qua cổng' bị D này thay — cổng chỉ chặn dạng cờ/lệnh con có mở rộng nên rất hiếm chạm pytest.
 - Đường lùi: Chuyển printf về GATE_PASSIVE hoặc pytest/tox/nox sang GATE_PASSIVE (sửa PASSIVE_PIN và test ghim)
 
+### D-442 · 2026-11-13T10:37:42+00:00 · Khôi phục vòng bị chặn khi đổi PLAN hoặc ngân sách như thế nào?
+
+- Phương án: (1) Từ chối mọi loop init tới khi loop unblock · (2) Giữ nguyên cờ blocked, lý do và thời điểm qua mọi loop init; chỉ loop unblock có lý do mới gỡ chặn
+- Chọn: Giữ nguyên cờ blocked, lý do và thời điểm qua mọi loop init; chỉ loop unblock có lý do mới gỡ chặn
+- Lý do (tiêu chí chất lượng cuối): Từ chối init gây bế tắc khi ngân sách hết hoặc PLAN mất vì unblock cũng từ chối. Mang cờ giữ nguyên hàng rào và bằng chứng gỡ chặn, đồng thời cho sửa PLAN/ngân sách. Hướng dẫn release dùng lối ra thật của vòng.
+- Đường lùi: Hoàn lại bản vá và test trong PR riêng nếu hợp đồng vòng cần đổi.
+
+### D-450 · 2026-11-13T11:35:35+00:00 · Đóng AUD-HAR-378/379 trong corpus khi adapter hiện tại chưa chạy vòng thật?
+
+- Phương án: (1) Chỉ thêm ID hoặc miễn trừ vào scope · (2) Thêm adapter loop_block giới hạn, chạy CLI thật và kiểm trạng thái/hướng dẫn
+- Chọn: Thêm adapter loop_block giới hạn, chạy CLI thật và kiểm trạng thái/hướng dẫn
+- Lý do (tiêu chí chất lượng cuối): Hành vi block/init/unblock là quyết định tự chủ nên phải có bằng chứng corpus. Hai kịch bản carry/expired, mỗi kịch bản có control phục hồi; mutation bỏ cờ phải false_green, sai lối ra phải mismatch. Không gắn nhãn vào ca không liên quan hay nới yêu cầu phủ.
+- Đường lùi: Tách adapter bằng PR riêng khi có nhóm corpus vòng lặp tương đương, giữ các ca và không khai đóng nợ nếu mất coverage.
+
 ### D-452 · 2026-11-13T11:47:36+00:00 · Khởi tạo dự án mới offline nguyên tử và không chạy hook trước commit đầu thế nào?
 
 - Phương án: (1) Bootstrap trực tiếp trong đích, giữ file dở khi hỏng · (2) Dựng ở sibling riêng, commit rồi hook/doctor, công bố bằng rename nguyên tử
@@ -555,6 +569,13 @@
 - Lý do (tiêu chí chất lượng cuối): Path.rename ghi đè thư mục rỗng xuất hiện giữa chừng, làm cwd của người khác mất liên kết. Exclusive mkdir portable trong stdlib nhận một đích duy nhất; giữ inode và dữ liệu khi lỗi quan trọng hơn atomic publish. Chỉ ghi sau khi kiểm đầu vào. Từ chối nếu tiến trình khác tạo đích trước mkdir; không chuyển sang nhánh existing trong race. Thay D452 phần staging cho đích thiếu.
 - Đường lùi: Khôi phục staging chỉ khi có primitive no-replace portable và probe giữ inode qua race xanh; giữ regression cạnh tranh.
 
+### D-477 · 2026-11-13T15:59:22+00:00 · Lát T3736/T3737 vượt150dòng khi cần adapter corpus CLI thật: tách hình thức hay giữ một PR nguyên khối?
+
+- Phương án: (1) Một PR cùng lifecyclefix, adapter giới hạn, hồi quy và auditrefs; mỗi phần cần để bằng chứng đúng hành vi · (2) Tách nhiều PR helper/adapter/fix làm mỗi phần dưới150dòng
+- Chọn: Một PR cùng lifecyclefix, adapter giới hạn, hồi quy và auditrefs; mỗi phần cần để bằng chứng đúng hành vi
+- Lý do (tiêu chí chất lượng cuối): Hai bug cùng hợp đồng blocked và recovery. Đóng HAR378379 đòi ca thật carry/expired/control cùng lúc, không gắnIDvào ca khôngliênquan hoặc miễntrừ scope. Gitfixture phải cáchly routing/config để tests khôngđụngrepo ngoài. Mộtlát rollbackđược, độc lậpreviewvàgate-fast xanh; tách chỉ đểđếm dòng làm review phải ghép nhiều phần bằngchứng.
+- Đường lùi: Revert toàn PR hoặc tách adapter ở PR sau khi có nguồn bằngchứng tươngđương, không bỏ coverage hoặc khai đóng nợ khi mất ca.
+
 ### D-479 · 2026-11-14T02:39:45+00:00 · PR #513: nâng gói web-api-ts sau khi Biome kiểm YAML và kiểu Node vượt runtime?
 
 - Phương án: (1) Nâng Kysely, Biome và Vitest; giữ @types/node 24.19.2 và chuẩn hoá khoảng trắng trước chú thích trong mẫu xt.yaml · (2) Giữ cả nhóm ở bản cũ và đợi Dependabot tách các nâng cấp
@@ -582,3 +603,10 @@
 - Chọn: Dời nguyên văn các quyết định cũ đã có trong bản phát hành sang sổ tháng theo D-314
 - Lý do (tiêu chí chất lượng cuối): Các PR đang sửa PLAN hoặc cần nghiệm thu chúng; sổ tháng được máy đọc, giữ nguyên ID và giảm xung đột trên các mục đang dùng
 - Đường lùi: Đưa các mục về đúng thứ tự trong DECISIONS.md và phục hồi mô tả phạm vi sổ tháng
+
+### D-485 · 2026-11-14T07:23:00+00:00 · Chọn chính sách runtime cho X-Templates khi chuyển Python 3.15?
+
+- Phương án: (1) Chỉ hỗ trợ dòng Python 3.15, ghim 3.15.2 trong repo và CI · (2) Dùng Python 3.15 mặc định, giữ cổng hỗ trợ 3.11 và 3.14
+- Chọn: Chỉ hỗ trợ dòng Python 3.15, ghim 3.15.2 trong repo và CI
+- Lý do (tiêu chí chất lượng cuối): Người dùng yêu cầu bỏ các dòng cũ. Một dòng Python giữ môi trường phát triển và CI nhất quán. Giữ kiểm thử nhánh main và ngưỡng coverage hiện hành.
+- Đường lùi: Revert PR runtime và trả về bản khung trước khi nâng nếu dự án đích chưa chuyển được.
