@@ -695,3 +695,10 @@
 - Chọn: CI xanh, ưu tiên số PR tăng dần
 - Lý do (tiêu chí chất lượng cuối): Chủ dự án yêu cầu áp dụng cho cả dự án đích và không bắt buộc review; giữ check CI và ghim head
 - Đường lùi: Đặt merge_review required và khôi phục thứ tự steward theo ADR-0079
+
+### D-488 · 2026-11-14T13:06:45+00:00 · Cổng merge làm gì khi không xác minh được ruleset hoặc nguồn của check bắt buộc?
+
+- Phương án: (1) Giữ hành vi hiện tại và dựa vào ruleset GitHub · (2) Không kết luận merge khi không đọc được ruleset hoặc không xác minh đúng app; giữ CI và ruleset
+- Chọn: Không kết luận merge khi không đọc được ruleset hoặc không xác minh đúng app; giữ CI và ruleset
+- Lý do (tiêu chí chất lượng cuối): Hai fixture độc lập tái hiện verdict merge sai; GitHub yêu cầu check từ app đã ghim, nên chờ bằng chứng đầy đủ giữ an toàn và đường lùi
+- Đường lùi: Revert PR nếu giao diện GitHub không cung cấp đủ nguồn và khôi phục xử lý thủ công trong lúc sửa adapter
