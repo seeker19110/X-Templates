@@ -42,3 +42,15 @@
   Phiên bản ở đầu README ghi rõ là dữ kiện của dự án nguồn. Chủ xử lý: người duy trì gói `web-api-ts`.
 
 Điều kiện phát hành vẫn theo `release-check`, gồm sổ audit `--strict`.
+
+## 4. Bằng chứng HAR trên `2bf2e1cf`
+
+- Rà 17 tệp quy trình, skill, installer và cấu hình trong `454d146..2bf2e1cf`. `python3 -m unittest -q tests.test_install tests.test_adapters tests.test_doctor tests.test_stage_agent_approval.StageAgentApprovalCliTest tests.test_release_contract.ReleaseBlockedLoopTest tests.test_release_contract.ReleaseVerifyWorktreeTest` exit 0, 256 ca (bỏ qua một ca OpenCode vì thiếu Bun).
+- `doctor --json` trên clone sạch exit 0, cảnh báo sandbox. Cây chính có vòng một phiên exit 1 vì thiếu sandbox (LOOP-HARNESS-022). Giữ HAR chưa quét: chưa rà hết delta parser guard và chưa kiểm host hook, sandbox OS trên môi trường thật.
+
+## 5. Bằng chứng TEST trên `2bf2e1cf`
+
+- CI #532 có cùng cây Git với commit squash. [Coverage](https://github.com/seeker19110/X-Templates/actions/runs/43552760543/job/132320108268) đạt 100% trên 23.949 câu lệnh và 8.692 nhánh. CI Python 3.14, 3.11, app E2E và quality đều xanh.
+- `python3 -m unittest -q tests.test_ci tests.test_report_fixtures tests.test_registry tests.test_perf_trial tests.test_docs_budget tests.test_check_links tests.test_plan_factory_order tests.test_spec_factory_facts tests.test_stage_agent_approval` exit 0, 288 ca; `python3 -m unittest -q tests.test_ci_shard tests.test_hooks.DevTaskTest` exit 0, 41 ca.
+- Diff `454d146..2bf2e1cf` có 44 tệp `tests/` thay đổi. Diff AST của `test_hooks.py` có 153 test thêm, 6 sửa, 0 xoá; corpus guard thêm 824 ca. Giữ TEST chưa quét vì chưa đối chiếu hành vi dự kiến của từng ca đã đổi.
+- **AUD-TEST-105 🟢**, mở. Với đồng hồ giả, tỷ lệ thử lại ở `tests/cpu_budget.py` xanh khi cả hai cặp đều đỏ: 0,20 s và 3,00 s vượt ngưỡng 2,50 s, 0,09 s và 1,44 s vượt 1,40 s. Hàm ghép số nhỏ lớn nhất với số lớn bé nhất của hai lần đo. Giữ các ngưỡng hiện có và kiểm từng cặp riêng. Chủ xử lý: người duy trì cổng kiểm thử.
