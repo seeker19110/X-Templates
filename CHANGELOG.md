@@ -183,6 +183,8 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
 
 ### Fixed
 
+- `xt.py doctor` nạp guard của dự án một lần để kiểm cả bộ lệnh mẫu (AUD-PERF-028, phần đầu T-3726).
+
 - Guard (T-3769; lý do chạm hàng rào: đóng đường bỏ sót argv hoặc cho qua khi parser không đọc được): Precheck AUD-SEC-730: ngoặc trong tham số không nháy trả BUDGET; giữ literal, nháy kép và ngoặc thoát. Lỗi recursion đọc sớm được sửa ở lát riêng T-3867.
   Bằng chứng chặn oan: [mẫu 505 lượt lệnh thật](research/evidence/2026-11-13-guard-parameter.json), 464 thân lệnh,
   0 lượt đổi quyết định trên mẫu; không suy rộng thành bảo đảm cho toàn lịch sử. Gate gốc được ghi bằng `loop record`.
