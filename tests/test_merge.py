@@ -3333,6 +3333,54 @@ class StrictBaseCheckTest(unittest.TestCase):
         self.assertEqual(self.check(loose, "--pr-json", "-", stdin=snapshot)[1]["verdict"], "merge")
         self.assertFalse(any("/compare/" in path for path in loose.paths()))
 
+    def next_step(self, gh):
+        with gh.patch():
+            rc, out, _ = run_main("pr", "next", "--pr", "7", "--json")
+        self.assertEqual(rc, 0)
+        return json.loads(out)
+
+    def test_pr_next_uses_same_live_base_rule(self):
+        gh, path = self.fake('{"behind_by": 2}', base={"ref": "main", "sha": "2" * 40})
+        result = self.next_step(gh)
+        self.assertEqual(result["action"], "update")
+        self.assertIn(f"expected_head_sha={self.Gh.SHA}", result["do"])
+        self.assertEqual(gh.paths().count(path), 1)
+
+    def test_no_compare_before_other_gates_or_on_loose_branch(self):
+        for action in ("wait", "fix", "update", "retarget", "merge", "review"):
+            with self.subTest(action=action):
+                gh, path = self.fake(strict=action != "merge")
+                if action in ("wait", "fix"):
+                    check = {"name": "test", "status": "queued"}
+                    gh.runs = [check if action == "wait" else {**check, "status": "completed", "conclusion": "failure"}]
+                elif action == "update":
+                    gh.pull["mergeable_state"] = "behind"
+                elif action == "retarget":
+                    gh.pull["base"] = {"ref": "main", "repo": {"default_branch": "trunk"}}
+                elif action == "review":
+                    gh.pull["labels"] = [{"name": xt.STANDARD_LABEL}]
+                self.assertEqual(self.next_step(gh)["action"], action)
+                self.assertNotIn(path, gh.paths())
+
+    def test_local_review_still_precedes_compare(self):
+        gh, path = self.fake('{"behind_by": 2}')
+        xt.update_reviews(self.base, "7", lambda _: {"standard_seen": True})
+        self.assertEqual(self.next_step(gh)["action"], "review")
+        mark = {"head": self.Gh.SHA, "clean": False, "at": "2026-11-13T00:00:00Z"}
+        xt.update_reviews(self.base, "7", lambda _: {"reviews": [mark]})
+        self.assertEqual(self.next_step(gh)["action"], "republish-review")
+        self.assertNotIn(path, gh.paths())
+
+    def test_steward_checks_base_only_for_prs_it_can_handle(self):
+        for assoc, action in (("OWNER", "update"), ("NONE", "defer-human")):
+            with self.subTest(assoc=assoc):
+                gh, path = self.fake('{"behind_by": 2}', author_association=assoc)
+                with gh.patch():
+                    rc, out, _ = run_main("pr", "steward", "--pr", "7", "--json")
+                step = json.loads(out)[0]
+                self.assertEqual((rc, step["action"], step["applied"]), (0, action, False), step)
+                self.assertEqual(gh.paths().count(path), int(assoc == "OWNER"))
+
 
 class BaseMergeCarryTest(unittest.TestCase):
     """D-061: head chỉ là "cập nhật nhánh" sạch của head đã review → review mang sang; steward tự cập nhật nhánh."""
