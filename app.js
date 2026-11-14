@@ -103,7 +103,7 @@ async function overview(page) {
       h("h1", { id: "project-name" }, "X-Templates"),
       h("p", { class: "summary" }, "Khung tham chiếu để lập yêu cầu, ghép blueprint và kiểm tra tiến độ dự án phần mềm."),
       h("div", { class: "project-links" },
-        h("a", { class: "primary-link", href: `${root}/README.md` }, "Đọc hướng dẫn"),
+        h("a", { class: "primary-link", href: `${current.repo}/blob/${current.commit}/README.md` }, "Đọc hướng dẫn"),
         h("a", { href: root }, "Xem mã nguồn"))),
     h("section", { class: "cards", "aria-label": "Dữ liệu của khung" },
       metric("#/catalog", locale.format(current.requirements), "Thư viện yêu cầu", `${current.modules} module`),
