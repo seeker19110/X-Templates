@@ -5451,9 +5451,9 @@ def _doctor_guard_canary(base: Path) -> List[Finding]:
     found = [p for p in guard_paths(base)[:1] if p.is_file()]
     if not found or any(_syntax_error(p) for p in found):  # thiếu/lỗi cú pháp: phần hook đã báo, không báo trùng
         return []
-    with contextlib.ExitStack() as stack:
-        stack.enter_context(_env_patch("XT_GUARD_POLICY", ""))
-        missed = [c for c in GUARD_CANARIES if not guard_block(c, base, found)]
+    with _env_patch("XT_GUARD_POLICY", ""):
+        blocked = guard_blocks(list(GUARD_CANARIES), base, found)
+    missed = [cmd for cmd, reason in zip(GUARD_CANARIES, blocked, strict=True) if not reason]
     if not missed:
         return []
     msg = f"guard KHÔNG chặn lệnh nguy hiểm mẫu: {', '.join(missed)} — hàng rào không hoạt động; {INSTALL_HINT}"
@@ -5576,16 +5576,19 @@ def _doctor_claude_version(base: Path) -> List[Finding]:
     return [Finding("runtime", "warn", msg)]
 
 
-def doctor_findings(base: Path, fw: Path, deep: bool = True) -> List[Finding]:
+def doctor_findings(base: Path, fw: Path, deep: bool = True, offline: bool = False) -> List[Finding]:
     """Audit khung đã cài trong dự án (hoặc repo khung) trước khi chạy autopilot. `deep=False` bỏ phần chậm
-    (validate khung, cú pháp hook, progress-check, đọc tag phát hành qua mạng) — dùng ở `loop init`."""
+    (validate khung, cú pháp hook, progress-check, đọc tag phát hành qua mạng) — dùng ở `loop init`.
+    `offline=True` chỉ bỏ tra tag mới qua mạng; giữ mọi kiểm sâu cục bộ (F-111, D-453)."""
     out = _doctor_runtime() + _doctor_scripts() + _doctor_settings(base, deep) + _doctor_harness_parts(base)
     out += _doctor_docs(base, fw) + _doctor_xt_yaml(base, fw) + _doctor_gate_floor(base) + _doctor_gitignore(base)
     out += _doctor_state(base) + _doctor_legacy(base) + _doctor_git(base) + _doctor_merge(base) + _doctor_memory(base)
     out += _doctor_orchestration(base) + _doctor_sandbox(base)
     if deep:
-        out += _doctor_framework(fw) + _doctor_progress(base) + _doctor_version(base) + _doctor_guard_canary(base)
-        out += _doctor_claude_version(base)
+        out += _doctor_framework(fw) + _doctor_progress(base)
+        if not offline:
+            out += _doctor_version(base)
+        out += _doctor_guard_canary(base) + _doctor_claude_version(base)
     return out
 
 
@@ -16193,14 +16196,18 @@ def cmd_doctor_drift(args: argparse.Namespace) -> int:
 
 
 def cmd_doctor(args: argparse.Namespace) -> int:
+    offline = getattr(args, "offline", False)
+    if offline and args.drift:
+        print("✗ --offline không dùng cùng --drift", file=sys.stderr)
+        return 2
     if args.drift:
         return cmd_doctor_drift(args)
     base = project_dir()
-    findings = doctor_findings(base, args.framework)
+    findings = doctor_findings(base, args.framework, offline=offline)
     fixed: List[str] = []
     if args.fix:
         fixed, failed = doctor_fix(findings)
-        findings = doctor_findings(base, args.framework) + failed
+        findings = doctor_findings(base, args.framework, offline=offline) + failed
     errors = sum(f.level == "error" for f in findings)
     if args.json:  # hợp đồng máy đọc: {"ok", "base", "version", "fixed", "findings": [{code, level, msg, fixable}]}
         rows = [{"code": f.code, "level": f.level, "msg": f.msg, "fixable": f.fix is not None} for f in findings]
@@ -20058,6 +20065,7 @@ def build_parser() -> argparse.ArgumentParser:
     pdr = sub.add_parser("doctor", help="audit khung đã cài (harness, xt.yaml, khung, state) trước /autopilot")
     pdr.add_argument("--fix", action="store_true", help="sửa an toàn, đảo ngược được (không đụng hook/settings)")
     pdr.add_argument("--json", action="store_true")
+    pdr.add_argument("--offline", action="store_true", help="giữ mọi kiểm cục bộ, không tra phiên bản mới qua mạng")
     pdr.add_argument("--drift", action="store_true", help="so manifest.json với bản cài và tag mới nhất (AUTO-06)")
     pdr.add_argument("--latest", help="tag mới nhất (vX.Y.Z) cho --drift; bỏ qua = hỏi gh api (fail-open)")
     pdr.set_defaults(fn=cmd_doctor)

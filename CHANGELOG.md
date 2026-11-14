@@ -8,9 +8,16 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
 
 ### Added
 
+- F-111 (`T-3845`, D-452/D-453/D-455/D-460): `install.py --new` tạo repo sản phẩm cùng khung, gói,
+  `PROJECT.md` và blueprint, rồi chạy `doctor --offline`. Thư mục đích được nhận bằng `mkdir` độc quyền trước
+  bootstrap; giữ inode thư mục và `.git`, không nhận nhầm thư mục của tiến trình khác hay xoá dữ liệu khi lỗi.
+  Git bootstrap cách ly cấu hình, hooks và metadata môi trường; identity không đọc được dùng mặc định, không in
+  byte cấu hình. Gate task: 46 test đạt; kiểm độc lập bốn ca race/identity đạt, các helper mới phủ dòng và nhánh 100 %.
 - Ghi [audit delta DOC](docs/ops/AUDIT-REPORT-2026-11-14-delta.md) đến `2bf2e1cf` và mở AUD-DOC-293.
   Lưu kho nguyên văn 10 phát hiện DOC đã sửa ở v3.31.0 để giữ trần `docs/ops`.
+
 - Bổ sung bằng chứng HAR và TEST trong báo cáo audit delta 2026-11-14. Mở AUD-TEST-105 cho kết quả đo CPU ghép giữa hai lượt.
+
 - [ADR-0077](docs/adr/0077-deployment-receipts.md) (T-3841, D-422…D-424) chốt cấu hình theo môi trường, receipt của
   bản đang phục vụ, hàng `deploy` trong `release-check` và đích dev mặc định của gói `web-api-ts`. Mã triển khai
   thuộc các lát T-3842 đến T-3844 và T-3860.
@@ -185,6 +192,8 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
   ghi ref `force` `RULE_DENY`.
 
 ### Fixed
+
+- `xt.py doctor` nạp guard của dự án một lần để kiểm cả bộ lệnh mẫu (AUD-PERF-028, phần đầu T-3726).
 
 - T-3728: skill `autopilot` theo hành động `stage-approve` của `loop next-step` khi dự án bật tự nghiệm thu MVP
   (AUD-XFEAT-048). Cập nhật số đo biên dịch guard trong chú thích `_lib.sh` theo audit 2026-11-11 (AUD-PERF-031).
