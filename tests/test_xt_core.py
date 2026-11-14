@@ -2173,7 +2173,10 @@ class GuardChokePointTest(TmpMixin, unittest.TestCase):
         self.assertEqual(run("pytest -q\0\0  \0ruff check .\0")[:2], (0, "guard-check: 2 lệnh\n"))
         self.assertEqual(run("")[:2], (0, "guard-check: 0 lệnh\n"))
         self.assertEqual(run("git push --fo\\\nrce origin main\0")[0], 126)  # tiếp dòng: vẫn là `git push --force`
-        self.assertEqual(run("echo a\rgit push --force origin main\0")[0], 0)  # `\r` là chữ của echo, không tách lệnh
+        # `\r` KHÔNG tách lệnh (bash đọc là chữ của echo) nhưng CR trần ngoài nháy không đọc chắc → BUDGET (AUD-SEC-645,
+        # D-429): chặn thay vì đoán; trong nháy CR vẫn là chữ thường và cho qua
+        self.assertEqual(run("echo a\rgit push --force origin main\0")[0], 126)
+        self.assertEqual(run("echo 'a\rgit push --force origin main'\0")[:2], (0, "guard-check: 1 lệnh\n"))
         with unittest.mock.patch.object(xt, "_load_guard", wraps=xt._load_guard) as load:
             self.assertEqual(xt.guard_blocks(["pytest -q"], self.base), [""])
             once = load.call_count

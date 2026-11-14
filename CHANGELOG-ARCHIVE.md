@@ -180,7 +180,7 @@ Phần cũ của [`CHANGELOG.md`](CHANGELOG.md) (T-3651, AUD-DOC-180): mục `##
 - [ADR-0038](docs/adr/0038-local-app-on-xt.md) (D-126; chủ repo hỏi 2026-10-21 "biến dự án này thành app và phân chia công
   việc"): ứng dụng web cục bộ `xt.py app` — `http.server` stdlib trên 127.0.0.1, HTML/CSS/JS thuần không build, API JSON gọi
   đúng hàm của CLI, app không chạy lệnh; chia việc bằng máy `xt.py plan waves`. Kế hoạch
-  [`PLAN-3.14-app.md`](docs/autopilot/PLAN-3.14-app.md): 11 lát, 29 task, 12 đợt song song theo `sau:`/`files:`. Chưa có
+  [`PLAN-3.14-app.md`](docs/archive/autopilot/PLAN-3.14-app.md): 11 lát, 29 task, 12 đợt song song theo `sau:`/`files:`. Chưa có
   mã — dự án đích chưa phải làm gì.
 
 ### Fixed

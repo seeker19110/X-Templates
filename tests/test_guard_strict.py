@@ -823,7 +823,9 @@ class AllowlistLayerTest(unittest.TestCase):
         self.assertEqual(heads('A=1 env B=2 nice -n 5 "$c" x'), ['"$c"'])
         self.assertEqual(guard._dyn_head_why("echo 'x"), guard.DYN_HEAD_WHY)  # không tách chắc: chặn
         # review adr-guard 🔴: từ sau `{` trơn là từ lệnh (`function f { … }`, `coproc f { … }` không có dấu tách trước `{`)
-        self.assertEqual(heads('function f { "${a[@]}"; }'), ["function", '"${a[@]}"'])
+        # AUD-SEC-611 (#517): `function f {` đọc như `f () {` (`_fn_forms`) — đầu lệnh là tên hàm, thân vẫn là từ lệnh
+        self.assertEqual(heads('function f { "${a[@]}"; }'), ["f", '"${a[@]}"'])
+        self.assertEqual(heads('f() { "${a[@]}"; }'), ["f", '"${a[@]}"'])
         self.assertEqual(heads("coproc f { $c; }"), ["coproc", "$c"])
         self.assertEqual(heads("env A=1"), ["env"])  # lệnh bọc không kèm lệnh: chính nó là từ lệnh
 
@@ -1438,6 +1440,10 @@ class ReasonCodeLockTest(unittest.TestCase):
         ("UNRESOLVED_TARGET", "ls | xargs chmod 000"),
         ("BUDGET", "echo " + "a" * guard.CMD_MAX_CHARS),  # vượt ngân sách quét (mẫu ở EXAMPLES là lớp tập con)
         ("BUDGET", "gh pr merge$Z 5"),  # tên lệnh/tên cờ gh có mở rộng (AUD-SEC-587)
+        ("BUDGET", "git pus? --force origin main"),  # lệnh con git không đọc chắc (AUD-SEC-635)
+        # viết tắt cờ dài git nguy hiểm có mở rộng (AUD-SEC-644). D-438: ở `git push …` cổng ADR-0076 chặn trước với lý do
+        # của nó; `git-push` chạy thẳng (tên ngoài `GATE_NAMES` — AUD-SEC-741) vẫn sinh dấu này ở tầng ngoài
+        ("BUDGET", "/usr/lib/git-core/git-push --delet$X origin feat/other"),
     )
 
     def test_every_marker_blocks_a_real_command(self):

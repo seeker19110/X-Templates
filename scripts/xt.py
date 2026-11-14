@@ -1379,6 +1379,8 @@ def _state_lock(base: Path) -> Iterator[None]:
     if fc is None:
         raise OSError("không có fcntl — không ghi state; dùng môi trường hỗ trợ flock (ADR-0054)")
     d = state_dir(base)
+    if d.is_symlink():  # O_NOFOLLOW chỉ che thành phần cuối: thư mục là liên kết thì khoá/ghi xuyên ra ngoài dự án
+        raise OSError(f"{d.name} là symlink — không khoá/ghi state xuyên liên kết ra ngoài dự án (AUD-SEC-651)")
     d.mkdir(parents=True, exist_ok=True)
     fd = os.open(d / STATE_LOCK_FILE, os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0), 0o600)
     try:
@@ -2899,12 +2901,13 @@ def _verify_blueprint(base: Path, st: Dict[str, Any], timeout: int) -> List[Dict
     return out
 
 
-def final_check(base: Path) -> Optional[str]:
-    """Lý do chưa được dừng vì chưa kiểm lại cuối trên cây hiện tại; None nếu đã xanh và khớp (hoặc không phải git)."""
+def final_check(base: Path, ledger: Optional[Path] = None) -> Optional[str]:
+    """Lý do chưa được dừng vì chưa kiểm lại cuối trên cây hiện tại; None nếu đã xanh và khớp (hoặc không phải git).
+    `ledger`: thư mục sổ máy chứa bản ghi verify (mặc định `.autopilot/` của `base`; worktree khác — AUD-HAR-369)."""
     fp = tree_fingerprint(base)
     if fp is None:
         return None
-    rec = _read_json_obj(state_dir(base) / VERIFIED_FILE) or {}
+    rec = _read_json_obj((ledger or state_dir(base)) / VERIFIED_FILE) or {}
     if rec.get("fingerprint") == fp and rec.get("ok") is True:
         if rec.get("mode") == "all":
             return None
@@ -11966,7 +11969,11 @@ def _stage_git_seen(base: Path) -> str:
 
 
 def update_stage(base: Path, fn: Callable[[Optional[Dict[str, Any]]], Dict[str, Any]]) -> Dict[str, Any]:
-    """Đọc–sửa–ghi sổ trong khoá `state.lock` (cùng khoá với state.json, ADR-0052 §2); sổ mới phải hợp lệ mới ghi."""
+    """Đọc–sửa–ghi sổ trong khoá `state.lock` (cùng khoá với state.json, ADR-0052 §2); sổ mới phải hợp lệ mới ghi.
+    Thư mục cha của sổ là symlink → từ chối trước khi khoá/ghi (AUD-SEC-651); chỉ xét từ `base` xuống."""
+    links = [q.as_posix() for q in Path(STAGE_LEDGER).parents if q != Path(".") and (base / q).is_symlink()]
+    if links:
+        raise StageError(f"{links[-1]} là symlink — không ghi sổ giai đoạn xuyên liên kết ra ngoài dự án (AUD-SEC-651)")
     with _state_lock(base):
         new = fn(read_stage(base))
         why = stage_problem(new)
@@ -12425,19 +12432,60 @@ def _release_audit(base: Path, status: str) -> Dict[str, str]:
 
 
 def _release_verify(base: Path) -> Dict[str, str]:
-    st = read_state(base)
-    if not st:
+    """Hàng `verify` đọc sổ máy ở MỌI worktree của repo (AUD-HAR-369, cùng lớp AUD-HAR-340): sổ không theo git, chạy từ
+    worktree không có sổ không được bỏ qua `loop verify --all` của cây chính. Không liệt kê được worktree, sổ không đọc
+    được hay vòng nào bị chặn (AUD-HAR-377) → FAIL; không worktree nào có sổ → N/A (không chạy autopilot)."""
+    files = worktree_state_files(base)
+    if files is None:
+        return _release_row(
+            "verify",
+            "FAIL",
+            "không liệt kê được worktree của repo (`git rev-parse`/`git worktree list`) — không biết vòng của cây chính"
+            " đã `loop verify --all` chưa",
+        )
+    here = state_dir(base.resolve()) / "state.json"
+    live = []
+    for f in files:
+        st = _read_json_obj(f)
+        if st is None:
+            return _release_row("verify", "FAIL", f"không đọc được sổ máy {f} (hỏng hay không phải object)")
+        if st:  # sổ rỗng `{}` = chưa chạy autopilot (như bản cũ: `if not st`)
+            live.append((f, st))
+    if not live:
         return _release_row(
             "verify", "N/A", "không chạy autopilot (không có .autopilot/state.json) — Gate chạy ở CI", "SHOULD"
         )
-    blocked = _loop_block_reason(st)
-    if blocked:  # AUD-HAR-377: vòng bị chặn chờ người quyết — verify xanh cũ không đủ để GO
-        return _release_row("verify", "FAIL", blocked)
-    why = final_check(base)
-    if why:
-        return _release_row("verify", "FAIL", why)
+    files = [f for f, _ in live]
+    for f, st in live:
+        blocked = _loop_block_reason(st)
+        if blocked:  # AUD-HAR-377: vòng bị chặn chờ người quyết — verify xanh cũ không đủ để GO
+            return _release_row("verify", "FAIL", blocked if f == here else f"{f}: {blocked}")
+    if files[0] == here:
+        why = final_check(base)
+        if why:
+            return _release_row("verify", "FAIL", why)
+        return _release_row(
+            "verify", "PASS", "`loop verify --all` xanh và khớp dấu vân tay cây hiện tại (LOOP-DESIGN-022, D-084)"
+        )
+    return _release_verify_elsewhere(base, files)
+
+
+def _release_verify_elsewhere(base: Path, files: List[Path]) -> Dict[str, str]:
+    """Worktree đang kiểm không có sổ máy: PASS chỉ khi sổ của một worktree khác có `loop verify --all` xanh khớp vân tay
+    cây ĐANG kiểm (vân tay = HEAD + diff + file chưa track, so được giữa các worktree)."""
+    for f in files:
+        if final_check(base, f.parent) is None:
+            return _release_row(
+                "verify",
+                "PASS",
+                f"`loop verify --all` ở {f.parent.parent} xanh và khớp dấu vân tay cây hiện tại (worktree này không có"
+                " sổ máy — AUD-HAR-369; LOOP-DESIGN-022, D-084)",
+            )
+    roots = ", ".join(str(f.parent.parent) for f in files)
     return _release_row(
-        "verify", "PASS", "`loop verify --all` xanh và khớp dấu vân tay cây hiện tại (LOOP-DESIGN-022, D-084)"
+        "verify",
+        "FAIL",
+        f"worktree này không có sổ máy; sổ ở {roots}: {final_check(base, files[0].parent)}",
     )
 
 
@@ -13910,22 +13958,30 @@ def _sign_scope_check(base: Path) -> None:
         raise ReleaseSignError(f"còn việc chờ người (`loop defer`): {', '.join(waiting)} — agent không ký")
 
 
-def _sign_state_files(base: Path) -> List[Path]:
-    """`.autopilot/state.json` (kể cả symlink gãy) của dự án ở MỌI worktree của repo, cùng thư mục con như `base`
-    (AUD-HAR-340): sổ máy không theo git và riêng mỗi worktree (`loop_root`) — đọc theo cwd thì ký từ worktree khác thoát
-    việc `loop defer` của cây chính. Không liệt kê được worktree → ReleaseSignError."""
+def worktree_state_files(base: Path) -> Optional[List[Path]]:
+    """`.autopilot/state.json` (kể cả symlink gãy) của dự án ở MỌI worktree của repo, cùng thư mục con như `base`, sổ của
+    `base` đứng đầu (AUD-HAR-340, AUD-HAR-369): sổ máy không theo git và riêng mỗi worktree (`loop_root`) — đọc theo cwd
+    thì chạy từ worktree khác thoát việc của cây chính. Không liệt kê được worktree → None (bên gọi fail-closed)."""
     env = _perf_env()
     prefix = _git(base, "rev-parse", "--show-prefix", env=env)
     trees = _git(base, "worktree", "list", "--porcelain", "-z", env=env)
     if prefix.returncode or trees.returncode:
-        raise ReleaseSignError(
-            "không liệt kê được worktree của repo (`git rev-parse`/`git worktree list`) — không biết còn việc"
-            " `loop defer` ở cây chính, agent không ký"
-        )
+        return None
     sub = prefix.stdout.rstrip("\n")
     roots = [base, *(Path(x[9:]) / sub for x in trees.stdout.split("\0") if x.startswith("worktree "))]
     files = dict.fromkeys(state_dir(r.resolve()) / "state.json" for r in roots)
     return [f for f in files if os.path.lexists(f)]
+
+
+def _sign_state_files(base: Path) -> List[Path]:
+    """`worktree_state_files` cho `release-sign`: không liệt kê được worktree → ReleaseSignError."""
+    files = worktree_state_files(base)
+    if files is None:
+        raise ReleaseSignError(
+            "không liệt kê được worktree của repo (`git rev-parse`/`git worktree list`) — không biết còn việc"
+            " `loop defer` ở cây chính, agent không ký"
+        )
+    return files
 
 
 def _sign_deferred(base: Path) -> List[str]:
