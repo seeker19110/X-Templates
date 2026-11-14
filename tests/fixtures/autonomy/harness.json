@@ -384,6 +384,56 @@
     "recovery": "",
     "unblocked": 1
    }
+  },
+  {
+   "id": "harness-invalid-merge-review",
+   "origin": "audit",
+   "refs": [
+    "AUD-HAR-409"
+   ],
+   "input": {
+    "kind": "merge_review_config",
+    "yaml": "merge_review: optionl\n"
+   },
+   "expect": {
+    "green": false,
+    "ci_green": false,
+    "doctor_green": false
+   }
+  },
+  {
+   "id": "harness-valid-merge-review",
+   "origin": "control",
+   "refs": [],
+   "input": {
+    "kind": "merge_review_config",
+    "yaml": "merge_review: required\n"
+   },
+   "expect": {
+    "green": true,
+    "ci_green": true,
+    "doctor_green": true
+   }
+  },
+  {
+   "id": "harness-optional-review-and-number-order-docs",
+   "origin": "audit",
+   "refs": [
+    "AUD-HAR-410"
+   ],
+   "input": {
+    "kind": "merge_policy_docs",
+    "clauses": {
+     "xt.yaml": "xét theo số PR tăng dần",
+     "LOOP-STOP-002": "khi `merge_review: required`",
+     "LOOP-STOP-009": "nếu `merge_review: required`",
+     "LOOP-STOP-029": "khi `merge_review: required`"
+    }
+   },
+   "expect": {
+    "green": true,
+    "matches": true
+   }
   }
  ]
 }
