@@ -103,7 +103,7 @@ class PackContractTest(unittest.TestCase):
 
 
 INDEX_RE = re.compile(
-    r"CREATE\s+(?:UNIQUE\s+)?INDEX\s+(?P<conc>CONCURRENTLY\s+)?(?:IF\s+NOT\s+EXISTS\s+)?[\w.\"]+\s+ON\s+(?:ONLY\s+)?(?P<table>[\w.\"]+)",
+    r"CREATE\s+(?:UNIQUE\s+)?INDEX\s+(?P<conc>CONCURRENTLY\s+)?(?:(?:IF\s+NOT\s+EXISTS\s+)?[\w.\"]+\s+)?ON\s+(?:ONLY\s+)?(?P<table>[\w.\"]+)",
     re.IGNORECASE,
 )
 TABLE_RE = re.compile(r"CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(?P<table>[\w.\"]+)", re.IGNORECASE)
@@ -122,6 +122,11 @@ class MigrationIndexTest(unittest.TestCase):
 
     def test_scanner(self):
         self.assertEqual(plain_indexes_on_existing_tables("CREATE INDEX i ON sessions (a);"), ["sessions"])
+        self.assertEqual(plain_indexes_on_existing_tables("CREATE INDEX ON sessions (a);"), ["sessions"])
+        self.assertEqual(
+            plain_indexes_on_existing_tables("CREATE UNIQUE INDEX ON ONLY public.sessions (a);"), ["public.sessions"]
+        )
+        self.assertEqual(plain_indexes_on_existing_tables("CREATE INDEX CONCURRENTLY ON sessions (a);"), [])
         self.assertEqual(
             plain_indexes_on_existing_tables("create unique index if not exists i on public.t (a)"), ["public.t"]
         )
