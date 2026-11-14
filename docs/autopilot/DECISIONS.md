@@ -520,12 +520,40 @@
 - Lý do (tiêu chí chất lượng cuối): (1) an toàn: đo trên 19.026 lệnh Bash thật cả hai phương án chênh 0 lệnh; khi chi phí bằng nhau chọn bên chặt (printf -v ghi biến như read/let; pytest chạy mã từ conftest/-p). ADR-0076 không sửa (đã Accepted): câu 'pytest không qua cổng' bị D này thay — cổng chỉ chặn dạng cờ/lệnh con có mở rộng nên rất hiếm chạm pytest.
 - Đường lùi: Chuyển printf về GATE_PASSIVE hoặc pytest/tox/nox sang GATE_PASSIVE (sửa PASSIVE_PIN và test ghim)
 
+### D-452 · 2026-11-13T11:47:36+00:00 · Khởi tạo dự án mới offline nguyên tử và không chạy hook trước commit đầu thế nào?
+
+- Phương án: (1) Bootstrap trực tiếp trong đích, giữ file dở khi hỏng · (2) Dựng ở sibling riêng, commit rồi hook/doctor, công bố bằng rename nguyên tử
+- Chọn: Dựng ở sibling riêng, commit rồi hook/doctor, công bố bằng rename nguyên tử
+- Lý do (tiêu chí chất lượng cuối): Đích thiếu hoặc rỗng; rename thất bại khi đích có nội dung hay symlink, tránh hai lần chạy ghi đè. Không nhúng đường staging vào file. Init không template, core.hooksPath chỉ repo mới; manifest khai trước đường hook cuối, commit đầu rồi mới copy hook và doctor trước công bố. Lọc GIT_* để không chạm repo khác; danh tính thiếu chỉ ghi tạm cục bộ. Ý tưởng luôn là dữ liệu, không remote/network.
+- Đường lùi: Giữ installer cũ nguyên; bỏ nhánh --new bằng PR riêng nếu có lỗi nguyên tử, giữ regression và không tự sửa thư mục đã có dữ liệu.
+
+### D-453 · 2026-11-13T12:04:43+00:00 · Khởi tạo offline có bỏ toàn bộ kiểm tra doctor hay chỉ probe phiên bản từ xa?
+
+- Phương án: (1) Monkeypatch doctor hoặc bỏ các kiểm tra sâu khi bootstrap · (2) Thêm doctor --offline, chỉ bỏ kiểm phiên bản từ xa mang tính gợi ý
+- Chọn: Thêm doctor --offline, chỉ bỏ kiểm phiên bản từ xa mang tính gợi ý
+- Lý do (tiêu chí chất lượng cuối): F-111 phải tạo dự án không mạng, nhưng vẫn cần mọi kiểm tra cục bộ. Thêm cờ rõ nghĩa và giữ hành vi online mặc định; --new gọi doctor đã cài với --offline. Regression phải chứng minh không gọi probe mạng và vẫn kiểm hook/framework/cổng. Không giả VERSION hay thay kết quả doctor.
+- Đường lùi: Bỏ nhánh --offline bằng PR riêng nếu doctor tách kiểm local/remote theo API tương đương; giữ hợp đồng offline của --new.
+
+### D-455 · 2026-11-13T13:01:54+00:00 · Giữ inode của đích rỗng khi người gọi đang đứng trong thư mục đó như thế nào?
+
+- Phương án: (1) Thay cả thư mục bằng rename rồi bắt người gọi cd lại hoặc từ chối dấu chấm · (2) Đích mới dùng staging; đích rỗng có sẵn giữ inode, claim .git độc quyền rồi bootstrap tại chỗ
+- Chọn: Đích mới dùng staging; đích rỗng có sẵn giữ inode, claim .git độc quyền rồi bootstrap tại chỗ
+- Lý do (tiêu chí chất lượng cuối): Probe shell thật thấy rename cả thư mục làm cwd cũ mất liên kết, dù tên đích có đủ file. Giữ inode cho đích có sẵn; ghi tương đối trong thư mục đã giữ, kiểm danh tính đích trước mỗi pha và không đi theo symlink thay thế. Khi hỏng giữ output dở và dữ liệu đồng thời, không xoá đệ quy đích có sẵn. Đích chưa tồn tại vẫn công bố staging nguyên tử. Chỉ thay nhánh đích rỗng của D-452; không thêm hạn chế dùng dấu chấm.
+- Đường lùi: Hoàn lại nhánh tại chỗ khi có cách công bố giữ cwd tương đương; giữ probe shell/race và không xoá dữ liệu để khôi phục.
+
 ### D-457 · 2026-11-13T13:19:31+00:00 · Tạo chỗ cho các lát harden và xưởng dưới trần docs/autopilot bằng cách nào?
 
 - Phương án: (1) Dời hai PLAN factory-A và factory-BE đã đóng, không còn trong PROGRESS, vào docs/archive/autopilot theo ADR-0070 · (2) Tăng trần byte docs/autopilot
 - Chọn: Dời hai PLAN factory-A và factory-BE đã đóng, không còn trong PROGRESS, vào docs/archive/autopilot theo ADR-0070
 - Lý do (tiêu chí chất lượng cuối): Hai PLAN có 13 task đều đóng, không được PROGRESS nhắc là việc sống; dời giữ nguyên lịch sử và số ID, viết lại liên kết. Không đổi trần hoặc dời PLAN đang chạy.
 - Đường lùi: git mv ngược và hoàn lại liên kết trong PR riêng.
+
+### D-460 · 2026-11-13T13:24:09+00:00 · F111: publish thư mục mới mà không thay inode thư mục xuất hiện đồng thời như thế nào?
+
+- Phương án: (1) Mkdir đích thiếu với exist_ok=False rồi bootstrap qua cwd giữ inode; giữ output dở nếu lỗi, cùng cơ chế claim .git như đích rỗng đã có · (2) Giữ staging rồi thêm rename-noreplace riêng theo từng hệ điều hành
+- Chọn: Mkdir đích thiếu với exist_ok=False rồi bootstrap qua cwd giữ inode; giữ output dở nếu lỗi, cùng cơ chế claim .git như đích rỗng đã có
+- Lý do (tiêu chí chất lượng cuối): Path.rename ghi đè thư mục rỗng xuất hiện giữa chừng, làm cwd của người khác mất liên kết. Exclusive mkdir portable trong stdlib nhận một đích duy nhất; giữ inode và dữ liệu khi lỗi quan trọng hơn atomic publish. Chỉ ghi sau khi kiểm đầu vào. Từ chối nếu tiến trình khác tạo đích trước mkdir; không chuyển sang nhánh existing trong race. Thay D452 phần staging cho đích thiếu.
+- Đường lùi: Khôi phục staging chỉ khi có primitive no-replace portable và probe giữ inode qua race xanh; giữ regression cạnh tranh.
 
 ### D-479 · 2026-11-14T02:39:45+00:00 · PR #513: nâng gói web-api-ts sau khi Biome kiểm YAML và kiểu Node vượt runtime?
 
