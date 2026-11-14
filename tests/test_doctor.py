@@ -141,6 +141,22 @@ class DoctorHealthyTest(DoctorCase):
         self.write("xt.yaml", FILLED_YAML)
         self.assertFalse([f for f in self.findings() if "thụt lề" in f.msg])
 
+    def test_merge_review_rejects_invalid_values_in_doctor(self):
+        for value in ("optionl", "", '""', "null", "0", "OPTIONAL", "không"):
+            with self.subTest(value=value):
+                self.write("xt.yaml", FILLED_YAML + f"merge_review: {value}\n")
+                findings = [f for f in self.findings(deep=False) if f.code == "xt-yaml" and f.level == "error"]
+                self.assertTrue(
+                    any("merge_review" in f.msg and "optional" in f.msg and "required" in f.msg for f in findings),
+                    findings,
+                )
+        for line in ("", "merge_review: optional\n", "merge_review: required\n"):
+            with self.subTest(line=line):
+                self.write("xt.yaml", FILLED_YAML + line)
+                self.assertFalse(
+                    [f for f in self.findings(deep=False) if f.level == "error" and "merge_review" in f.msg]
+                )
+
     def test_xt_yaml_duplicate_key_is_error(self):  # AUD-XFEAT-002
         self.write("xt.yaml", FILLED_YAML + "lint: true\n")
         errs = [f.msg for f in self.findings() if f.code == "xt-yaml" and f.level == "error"]

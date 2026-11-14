@@ -5056,6 +5056,9 @@ def _doctor_xt_yaml(base: Path, fw: Path) -> List[Finding]:
     gate_err = commit_gate_error(scalars)
     if gate_err:
         out.append(Finding("xt-yaml", "error", gate_err + " — sửa thành fast hoặc full"))
+    review_err = merge_review_error(scalars)
+    if review_err:
+        out.append(Finding("xt-yaml", "error", review_err))
     rethink_err = max_rethink_error(scalars)
     if rethink_err:
         out.append(Finding("xt-yaml", "warn", f"{rethink_err} — đang dùng trần mặc định {MAX_RETHINK_DEFAULT}"))
@@ -6356,6 +6359,13 @@ def delivery_phase_error(keys: Dict[str, str]) -> Optional[str]:
     if value in ("", *DELIVERY_PHASES):
         return None
     return f"xt.yaml: {PHASE_KEY} '{value}' không hợp lệ (build|harden — ADR-0031)"
+
+
+def merge_review_error(keys: Dict[str, str]) -> Optional[str]:
+    """Khoá vắng dùng optional; đã khai thì phải là optional hoặc required."""
+    if "merge_review" not in keys or keys["merge_review"] in ("optional", "required"):
+        return None
+    return f"xt.yaml: merge_review '{keys['merge_review']}' không hợp lệ (optional|required)"
 
 
 # Cổng trước commit (D-NNN do phiên chính ghi): `fast` = hook commit chạy `dev-task.sh gate-fast` (format/lint/typecheck +
@@ -10703,6 +10713,9 @@ def cmd_ci_check(args: argparse.Namespace) -> int:
     if not d.is_dir():
         if args.dir:  # chỉ định rõ mà không có → sai cách dùng
             raise OSError(f"không thấy thư mục workflow: {d}")
+        if cfg_err := merge_review_error(_xt_keys(project_dir())):
+            print(f"✗ {cfg_err}")
+            return 1
         print(f"– Không có {d} — bỏ qua.")
         return 0
     results = ci_check(d)
@@ -10712,7 +10725,12 @@ def cmd_ci_check(args: argparse.Namespace) -> int:
             print(f"✗ {d / name}: {e}")
         bad += len(errors)
     keys = _xt_keys(project_dir())
-    for cfg_err in (review_family_config_error(keys), delivery_phase_error(keys), commit_gate_error(keys)):
+    for cfg_err in (
+        review_family_config_error(keys),
+        delivery_phase_error(keys),
+        commit_gate_error(keys),
+        merge_review_error(keys),
+    ):
         if cfg_err:
             print(f"✗ {cfg_err}")
             bad += 1
