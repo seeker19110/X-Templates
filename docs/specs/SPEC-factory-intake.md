@@ -19,6 +19,10 @@ giữa chừng.
 `install.py <thư mục> --new --pack <id> --idea "<chữ>" [--name <slug>] [--scale S|M|L]`
 
 - `<thư mục>` chưa tồn tại hoặc rỗng; ngược lại exit 2, không ghi gì.
+- Đích thiếu được nhận bằng `mkdir` độc quyền **trước** bootstrap; thua cuộc đua → exit 2, không nhận lại thư mục bên
+  thắng dù nó còn rỗng. Đích rỗng đã có giữ nguyên inode; bước nhận tiếp theo là `mkdir .git` độc quyền, các pha ghi neo
+  vào thư mục đã nhận và từ chối khi gốc/claim bị thay. Không rename đè đích; lỗi giữ nguyên output dở và báo đường dẫn,
+  không tự xoá thư mục hay dữ liệu đang có (D-455, D-460).
 - Việc làm, theo thứ tự, không cần mạng: `git init` (nhánh `main`) → cài khung, harness, `.github/` mẫu → chép
   `starter/` và `managed/` của gói, ghi khoá của gói vào `xt.yaml` → sổ giai đoạn ở giai đoạn 1 → `PROJECT.md` từ mẫu →
   `compose` blueprint theo profile của gói và `--scale` (mặc định S) → **commit đầu** → **rồi mới cài git hook** → chạy
@@ -26,6 +30,8 @@ giữa chừng.
 - Commit đầu đứng trước bước cài git hook vì lúc đó cây chưa có phụ thuộc để chạy cổng commit (cổng của gói cần cài gói
   qua mạng); cổng chạy từ commit thứ hai trở đi. Máy chưa có `user.name`/`user.email` → lệnh ghi danh tính tạm vào cấu
   hình cục bộ của repo mới và in ra để người dùng sửa.
+- Chỉ lấy tên/email hợp lệ từ cấu hình Git global/system; các cấu hình khác được cách ly trong bootstrap. Metadata không
+  đọc/giải mã được dùng danh tính tạm cục bộ, không in lại byte lỗi.
 - `PROJECT.md`: mục "Ý tưởng gốc" chứa nguyên văn `--idea` trong khối trích (là dữ liệu). Bốn dòng Khung (vấn đề · người
   dùng · một chỉ số · không làm) để trống cho skill điền; mỗi dòng skill điền kết thúc bằng "(mặc định khung — chưa chủ
   xác nhận)" cho tới khi chủ dự án sửa.

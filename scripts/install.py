@@ -31,6 +31,8 @@ Dự án đã cài bản ≤ 2.x (`.xstored/`, `xs.py`, `xs.yaml`, `XS_*`): ch�
 
 Dùng:
   python3 scripts/install.py <thư-mục-dự-án> [--force-harness] [--no-harness] [--no-git-hooks] [--harness codex,…] [--with-github] [--preset safe|autonomous] [--stage-init] [--pack <id>] [--label v1.0.0] [--plan]
+  python3 scripts/install.py <thư-mục-mới-hoặc-rỗng> --new --pack <id> --idea "<ý tưởng>" [--name <slug>] [--scale S|M|L]
+  --new: một repo main, khung + gói + PROJECT + blueprint + giai đoạn 1; commit đầu trước khi cài hook, doctor offline.
   --plan: in JSON kế hoạch (quyền thêm/bớt, hook thêm/đổi matcher, file đè/giữ, git hook, adapter; gói và drift file
           managed khi có --pack), không ghi gì (REC-09)
   --no-git-hooks: không cài git hook sàn chung (`pre-commit`/`commit-msg`/`pre-push`); git hook + adapter khung đã ghi
@@ -39,7 +41,7 @@ Dùng:
   --stage-init: dự án mới — tạo sổ giai đoạn sản phẩm docs/autopilot/STAGE.json (giai đoạn 1, ADR-0058) khi chưa có; không
                 cờ thì không tạo. Sau cài luôn kiểm sổ bằng `xt.py stage status` (sổ có sẵn giữ nguyên).
   (chạy từ bản clone của X-Templates; hoặc: python3 -c "$(curl ...)" KHÔNG được khuyến khích — tải về, kiểm checksum rồi chạy)
-Thoát 0 = ổn; 2 = lỗi tham số.
+Thoát 0 = ổn; 1 = bootstrap/doctor hỏng; 2 = lỗi tham số/đích.
 """
 
 from __future__ import annotations
@@ -56,7 +58,8 @@ import sys
 import tempfile
 import unicodedata
 from collections import Counter
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from typing import Any, TypeGuard
 from pathlib import Path
 
@@ -777,7 +780,7 @@ def git_subdir_of(target: Path) -> Path | None:
     except (OSError, subprocess.SubprocessError):
         return None
     top = Path(r.stdout.strip()).resolve() if r.returncode == 0 and r.stdout.strip() else None
-    return None if top is None or top == target else top
+    return None if top is None or top == target.resolve() else top
 
 
 def github_root_error(target: Path) -> str | None:
@@ -2240,8 +2243,9 @@ def install(
     adapters: list[str] | None = None,
     no_git_hooks: bool = False,
     pack: dict[str, Any] | None = None,
+    _new_cwd: bool = False,
 ) -> int:
-    target = target.resolve()
+    target = target if _new_cwd else target.resolve()
     error = target_error(target, with_github) or pack_root_error(target, pack)
     if error:
         log(error)
@@ -2284,9 +2288,295 @@ def install(
     return 0
 
 
+NEW_NAME_RE = re.compile(r"[a-z0-9][a-z0-9-]{0,38}")
+NEW_IDENTITY_CONFIG_ENV = ("GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM", "GIT_CONFIG_NOSYSTEM")
+
+
+def new_identity_value(key: str, value: str) -> bool:
+    """Chỉ nhận metadata danh tính một dòng; không mang ký tự điều khiển hay dấu phân cách ident vào repo mới."""
+    return (
+        bool(value)
+        and all(char.isprintable() and char not in "<>" for char in value)
+        and (key != "user.email" or not any(char.isspace() for char in value))
+    )
+
+
+def new_trusted_identity() -> dict[str, str]:
+    """Chỉ đọc hai khoá từ scope global/system bằng argv cố định. Không đọc cấu hình local hay override GIT_CONFIG_*.
+    Lệnh `git config --get` không chạy hook, monitor hoặc chương trình ký mà các file ấy có thể khai."""
+    env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
+    env.update({key: os.environ[key] for key in NEW_IDENTITY_CONFIG_ENV if key in os.environ})
+    disabled = env.get("GIT_CONFIG_NOSYSTEM", "").lower() not in ("", "0", "false", "no", "off")
+    scopes = ("--global",) if disabled else ("--global", "--system")
+    identity: dict[str, str] = {}
+    for key in ("user.name", "user.email"):
+        for scope in scopes:
+            try:
+                result = subprocess.run(
+                    ["git", "config", scope, "--includes", "--get", key],
+                    env=env,
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
+                    check=False,
+                )
+            except (OSError, subprocess.SubprocessError, UnicodeError):
+                continue
+            value = result.stdout.strip()
+            if result.returncode == 0 and new_identity_value(key, value):
+                identity[key] = value
+                break
+    return identity
+
+
+@contextmanager
+def new_project_environment() -> Iterator[dict[str, str]]:
+    """Đọc riêng tên/email, rồi cách ly toàn bộ Git config bên ngoài cho cả installer và các tiến trình con.
+    Không thay HOME hay cấu hình global/system. Khôi phục nguyên trạng môi trường gọi, kể cả khi bootstrap lỗi."""
+    identity = new_trusted_identity()
+    inherited = {k: v for k, v in os.environ.items() if k.startswith("GIT_") or k == "CLAUDE_PROJECT_DIR"}
+    for key in inherited:
+        os.environ.pop(key)
+    os.environ.update(
+        GIT_CONFIG_GLOBAL=os.devnull,
+        GIT_CONFIG_SYSTEM=os.devnull,
+        GIT_CONFIG_NOSYSTEM="1",
+        GIT_ALLOW_PROTOCOL="",
+        # Git vẫn đọc XDG git/ignore và git/attributes khi khoá không khai. Chặn nguồn mặc định bằng cấu hình chỉ sống
+        # trong tiến trình bootstrap; không ghi các khoá này vào repo và không ép add file vốn bị gitignore của gói chặn.
+        GIT_CONFIG_COUNT="2",
+        GIT_CONFIG_KEY_0="core.excludesFile",
+        GIT_CONFIG_VALUE_0=os.devnull,
+        GIT_CONFIG_KEY_1="core.attributesFile",
+        GIT_CONFIG_VALUE_1=os.devnull,
+        GIT_ATTR_NOSYSTEM="1",
+    )
+    try:
+        yield identity
+    finally:
+        for key in list(os.environ):
+            if key.startswith("GIT_") or key == "CLAUDE_PROJECT_DIR":
+                os.environ.pop(key)
+        os.environ.update(inherited)
+
+
+def new_target_error(target: Path) -> str | None:
+    """Không resolve đích trước khi kiểm symlink; thư mục có nội dung luôn được giữ nguyên."""
+    if target.is_symlink():
+        return f"✗ --new: đích là symlink: {target}"
+    if target.exists() and (not target.is_dir() or next(target.iterdir(), None) is not None):
+        return f"✗ --new: đích phải chưa tồn tại hoặc là thư mục rỗng: {target}"
+    return None
+
+
+def new_command(target: Path, command: list[str]) -> subprocess.CompletedProcess[str]:
+    """Mọi đối số là dữ liệu argv; không shell, không mạng, không lệnh của gói được chạy lúc bootstrap."""
+    result = subprocess.run(command, cwd=target, capture_output=True, text=True, timeout=120, check=False)
+    if result.stdout:
+        log(result.stdout.rstrip())
+    result.check_returncode()
+    return result
+
+
+def new_git(target: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    return new_command(target, ["git", "-C", str(target), *args])
+
+
+def new_identity(target: Path, trusted: dict[str, str]) -> None:
+    """Chỉ lưu tên/email đã đọc riêng vào .git/config mới; phần thiếu dùng giá trị tạm và báo rõ."""
+    for key, fallback in (("user.name", "Project bootstrap"), ("user.email", "bootstrap@localhost.invalid")):
+        new_git(target, "config", "--local", key, trusted.get(key, fallback))
+        if key not in trusted:
+            log(f"  danh tính tạm cục bộ: {key} = {fallback} — sửa bằng `git config --local {key} …`")
+
+
+def new_project_document(target: Path, name: str, idea: str) -> None:
+    body = template_body((SRC / "framework/templates/PROJECT.md").read_text(encoding="utf-8"))
+    title, _, rest = body.replace("<Tên dự án>", name).partition("\n")
+    quoted = "\n".join("> " + line for line in idea.split("\n"))
+    frame = "\n".join(f"- {label}:" for label in ("Vấn đề", "Người dùng", "Một chỉ số", "Không làm"))
+    (target / "PROJECT.md").write_text(
+        f"{title}\n\n## Ý tưởng gốc\n\n{quoted}\n\n## Khung\n\n{frame}\n\n{rest.lstrip()}", encoding="utf-8"
+    )
+
+
+def new_bootstrap(
+    target: Path,
+    pack: dict[str, Any],
+    name: str,
+    idea: str,
+    scale: str,
+    identity: dict[str, str] | None = None,
+    root_check: Callable[[], None] | None = None,
+) -> int:
+    """D-452: một commit trước hook; manifest dự kiến giống hệt manifest sau khi hook thực sự có mặt."""
+    check = root_check or (lambda: None)
+    check()
+    new_git(target, "init", "--initial-branch=main", "--template=")
+    check()
+    new_git(target, "config", "--local", "core.hooksPath", ".git/hooks")
+    check()
+    new_identity(target, identity or {})
+    check()
+    code = install(
+        target, False, False, None, with_github=True, no_git_hooks=True, pack=pack, _new_cwd=root_check is not None
+    )
+    if code:
+        return code
+    check()
+    stage = run_stage(target, "init")
+    if stage.returncode:
+        log(f"✗ --new: stage init: {stage.stderr.strip() or stage.stdout.strip()}")
+        return 1
+    check()
+    new_project_document(target, name, idea)
+    xt = [sys.executable, str(target / ".xtemplates/scripts/xt.py")]
+    check()
+    new_command(target, [*xt, "compose", "--profile", pack["profiles"][0], "--scale", scale, "--out", "BLUEPRINT.md"])
+    check()
+    record_manifest_paths(target, "git_hooks", [f".git/hooks/{hook}" for hook in GIT_HOOKS])
+    check()
+    new_git(target, "add", "--all")
+    check()
+    new_git(target, "commit", "-m", "chore: initialize project")
+    check()
+    install_git_hooks(target)
+    check()
+    new_command(target, [*xt, "doctor", "--offline"])
+    check()
+    return 0
+
+
+def new_root_identity(path: Path) -> tuple[int, int]:
+    info = path.lstat()
+    if not stat.S_ISDIR(info.st_mode):
+        raise OSError(f"--new: gốc/claim đã bị thay bằng node khác hoặc symlink: {path}")
+    return info.st_dev, info.st_ino
+
+
+@contextmanager
+def new_current_directory(destination: Path) -> Iterator[None]:
+    """Cwd giữ inode của gốc đã nhận, nên ghi qua `.` không đi theo symlink thay thế đường dẫn ban đầu.
+    Khôi phục cwd bằng fd khi hệ điều hành hỗ trợ, kể cả khi đường dẫn cũ đã được đổi tên."""
+    previous = Path.cwd()
+    descriptor = os.open(".", os.O_RDONLY) if hasattr(os, "fchdir") else None
+    try:
+        os.chdir(destination)
+        yield
+    finally:
+        if descriptor is None:
+            os.chdir(previous)
+        else:
+            try:
+                os.fchdir(descriptor)
+            finally:
+                os.close(descriptor)
+
+
+def new_inplace_bootstrap(destination: Path, pack: dict[str, Any], name: str, idea: str, scale: str) -> int:
+    """D-455/D-460: giữ inode của đích; chỉ tiến trình mkdir .git thành công được bootstrap, không xoá dữ liệu khi hỏng."""
+    expected = new_root_identity(destination)
+    with new_current_directory(destination):
+        if new_root_identity(Path(".")) != expected or new_root_identity(destination) != expected:
+            raise OSError("--new: gốc đã bị thay trước khi nhận")
+        error = new_target_error(Path("."))
+        if error:
+            raise OSError(error)
+        Path(".git").mkdir()  # nhận nguyên tử; không exist_ok và không ghi qua tên đích ban đầu
+        complete = False
+        try:
+            claim = new_root_identity(Path(".git"))
+
+            def check() -> None:
+                if (
+                    new_root_identity(destination) != expected
+                    or new_root_identity(Path(".")) != expected
+                    or new_root_identity(Path(".git")) != claim
+                ):
+                    raise OSError("--new: gốc hoặc claim đã bị thay trong lúc bootstrap")
+
+            with new_project_environment() as identity:
+                code = new_bootstrap(Path("."), pack, name, idea, scale, identity, check)
+            complete = code == 0
+            return code
+        finally:
+            if not complete:
+                try:
+                    retained = str(Path.cwd())
+                except OSError:
+                    retained = str(destination)
+                log(f"⚠ --new chưa hoàn tất; giữ nguyên output dở và dữ liệu đang có tại {retained}; không tự xoá")
+
+
+def install_new(target: Path, pack: dict[str, Any], idea: str, name: str | None, scale: str) -> int:
+    """F-111/D-460: mkdir độc quyền cho đích thiếu, rồi bootstrap neo vào inode; mọi lỗi giữ output dở, không rename đích."""
+    idea = "".join(char for char in idea if char in "\n\t" or unicodedata.category(char) != "Cc")
+    profiles = pack.get("profiles")
+    if not 1 <= len(idea) <= 4000 or (name is not None and NEW_NAME_RE.fullmatch(name) is None):
+        log("✗ --new: --idea cần 1…4000 ký tự; tên cần khớp [a-z0-9][a-z0-9-]{0,38}")
+        return 2
+    if not isinstance(profiles, list) or not profiles or not all(isinstance(profile, str) for profile in profiles):
+        log("✗ --new: gói cần ít nhất một profile hợp lệ")
+        return 2
+    try:
+        missing = not target.exists()  # giữ lần quan sát đầu; không nhận một đích mới xuất hiện trong khi kiểm đầu vào
+        error = new_target_error(target)
+        if error:
+            log(error)
+            return 2
+        absolute = target.absolute()
+        destination = absolute.parent.resolve() / absolute.name
+        slug = name if name is not None else destination.name
+        if NEW_NAME_RE.fullmatch(slug) is None:
+            log("✗ --new: tên thư mục cần khớp [a-z0-9][a-z0-9-]{0,38}; dùng --name để chọn tên khác")
+            return 2
+        # Đích chưa tồn tại có thể có cha chưa tồn tại. Chỉ tạo sau khi kiểm đầu vào; không dọn cha vì có thể đã được
+        # tiến trình khác sử dụng trong lúc bootstrap. Không thay node đã có (mkdir exist_ok vẫn từ chối file).
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        if missing:
+            # Thua mkdir là exit 2, không đổi sang nhánh "đích rỗng đã có" và không thay inode của bên thắng (D-460).
+            destination.mkdir()
+        code = new_inplace_bootstrap(destination, pack, slug, idea, scale)
+        if code:
+            return code
+    except (OSError, subprocess.SubprocessError) as exc:
+        detail = exc.stderr.strip() if isinstance(exc, subprocess.CalledProcessError) and exc.stderr else str(exc)
+        log(f"✗ --new: {detail}")
+        return 1 if isinstance(exc, subprocess.SubprocessError) else 2
+    log(f"✓ dự án mới: {destination} — main, một commit; chạy doctor thành công")
+    return 0
+
+
+def new_flags_error(args: argparse.Namespace) -> str | None:
+    if not args.new:
+        return (
+            "--idea/--name/--scale chỉ dùng cùng --new"
+            if any(value is not None for value in (args.idea, args.name, args.scale))
+            else None
+        )
+    if not args.pack or args.idea is None:
+        return "--new cần --pack và --idea"
+    incompatible = (
+        args.force_harness,
+        args.no_harness,
+        args.label is not None,
+        args.with_github,
+        args.plan,
+        args.no_git_hooks,
+        args.preset is not None,
+        args.stage_init,
+        bool(args.harness),
+    )
+    return "--new chỉ nhận --pack/--idea/--name/--scale" if any(incompatible) else None
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description="Cài khung X-Templates vào dự án đích")
     p.add_argument("target", help="thư mục gốc dự án đích")
+    p.add_argument("--new", action="store_true", help="tạo dự án git mới từ thư mục trống, không cần mạng")
+    p.add_argument("--idea", help="ý tưởng gốc (dữ liệu, 1…4000 ký tự), bắt buộc cùng --new")
+    p.add_argument("--name", help="tên dự án mới; mặc định tên thư mục")
+    p.add_argument("--scale", choices=("S", "M", "L"), help="quy mô dự án mới; mặc định S")
     p.add_argument("--force-harness", action="store_true", help="đè .claude/ của dự án bằng bản khung")
     p.add_argument("--no-harness", action="store_true", help="không copy .claude/")
     p.add_argument("--label", help="nhãn phiên bản ghi vào .xtemplates/VERSION (mặc định: git SHA)")
@@ -2326,6 +2616,10 @@ def main(argv: list[str] | None = None) -> int:
         help="gói sản phẩm framework/templates/packs/<id>: starter chỉ vào repo sạch, managed nâng theo hash (ADR-0068)",
     )
     a = p.parse_args(argv)
+    new_error = new_flags_error(a)
+    if new_error:
+        log(f"✗ {new_error}")
+        return 2
     hosts = [h for h in a.harness.split(",") if h]
     bad = [h for h in hosts if h not in ADAPTERS]
     if bad:
@@ -2336,6 +2630,9 @@ def main(argv: list[str] | None = None) -> int:
     except ValueError as exc:
         log(f"✗ --pack: {exc}")
         return 2
+    if a.new:
+        assert pack is not None  # new_flags_error đã đòi --pack; load_pack đã kiểm gói
+        return install_new(Path(a.target), pack, a.idea, a.name, a.scale or "S")
     if a.plan:
         return install_plan(
             Path(a.target),
