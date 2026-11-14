@@ -1,0 +1,56 @@
+:root {
+  color-scheme: light dark;
+  --hero-bg: #edf4fb;
+  --hero-rule: #c4d7eb;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --hero-bg: #182637;
+    --hero-rule: #314965;
+  }
+}
+
+.top { padding: 0 1rem; }
+.top-inner {
+  max-width: 70rem;
+  margin: 0 auto;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 1.5rem;
+}
+.brand { padding: 0.75rem 0; color: var(--foreground); text-decoration: none; }
+.top nav a { padding: 0.75rem 0.55rem; }
+.top nav .github { font-weight: 700; }
+main { padding-top: clamp(1rem, 3vw, 2.5rem); }
+h1 { font-size: clamp(1.75rem, 4vw, 2.5rem); }
+
+.intro {
+  border: 1px solid var(--hero-rule);
+  background: var(--hero-bg);
+  padding: clamp(1.35rem, 6vw, 4rem);
+  border-radius: 1rem;
+  margin-bottom: 1rem;
+}
+.intro h1 { font-size: clamp(2.25rem, 9vw, 5.5rem); letter-spacing: -0.06em; line-height: 1.08; }
+.intro .version { margin: 0 0 0.75rem; color: var(--muted-foreground); font-weight: 650; }
+.intro .summary { max-width: 36rem; margin: 1rem 0 1.5rem; font-size: clamp(1rem, 3vw, 1.25rem); }
+.project-links { display: flex; flex-wrap: wrap; align-items: center; gap: 1rem; }
+.primary-link {
+  color: var(--primary-foreground);
+  background: var(--primary);
+  padding: 0.55rem 0.95rem;
+  border-radius: 0.4rem;
+  font-weight: 650;
+  text-decoration: none;
+}
+.primary-link:hover { text-decoration: underline; }
+.card h2 { margin: 0.25rem 0 0.55rem; font-size: 1rem; }
+.card p { margin: 0.35rem 0; }
+.card { background: var(--background); }
+.snapshot { margin: 1.25rem 0 0; font-size: 0.9rem; color: var(--muted-foreground); }
+.snapshot a + a { margin-inline-start: 1rem; }
+.split > nav { display: block; }
+.split summary { padding: 0.2rem 0; cursor: pointer; }
+select, input { max-width: 100%; font: inherit; }
