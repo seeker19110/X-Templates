@@ -5056,6 +5056,15 @@ class GreenMergePolicyTest(unittest.TestCase):
             with unittest.mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": directory}):
                 self.assertEqual(xt._merge_eval(pr())[0]["review"], "optional")
 
+    def test_invalid_review_policy_remains_required(self):
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            commit_base_xt(base, "merge_autonomy: L3\nmerge_review: optionl\n")
+            with unittest.mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": directory}):
+                decision, _ = xt._merge_eval(pr(files=[{"path": "scripts/xt.py", "additions": 1, "deletions": 0}]))
+            self.assertNotEqual(decision["verdict"], "merge")
+            self.assertFalse(decision.get("review_optional", False))
+
     def test_red_ci_does_not_merge(self):
         with tempfile.TemporaryDirectory() as directory:
             base = Path(directory)
