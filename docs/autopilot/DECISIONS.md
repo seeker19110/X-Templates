@@ -559,6 +559,12 @@
 - Chọn: Giữ guard; lấy nproc vào biến rồi tính cùng ceil(N/2)
 - Lý do (tiêu chí chất lượng cuối): Hai ngoại lệ parser thử nghiệm đều bị review độc lập tìm ra bypass thật bằng sentinel vô hại. Theo D-415, viết lại lệnh vào tập con đọc chắc; giữ fallback 2, tập test, runner, công thức và ngưỡng. Test so sánh 12 đầu vào số và ca nproc lỗi cho kết quả như cũ; hai payload phải vẫn BUDGET.
 - Đường lùi: Hoàn lại cú pháp lệnh khi có parser nháy đủ bằng chứng; không nới guard hay cổng để phục hồi CI.
+### D-445 · 2026-11-13T11:12:01+00:00 · Ngoặc trong tham số Bash không nháy làm lệch tokenizer, nên chặn ở đâu?
+
+- Phương án: (1) Mở rộng parser để hiểu mọi dạng tham số lồng · (2) Precheck lexical theo ngữ cảnh nháy, ngoài tập con trả BUDGET
+- Chọn: Precheck lexical theo ngữ cảnh nháy, ngoài tập con trả BUDGET
+- Lý do (tiêu chí chất lượng cuối): D-415 ưu tiên chặn cú pháp chưa đọc chắc. Precheck trước tách argv đóng cả thay lệnh/thay tiến trình trong tham số; literal và dạng có nháy giữ nguyên. Một số lý do RULE_DENY thành BUDGET nhưng ma trận chính sách không nới deny; corpus cũ không đổi quyết định. RecursionError ở lối đọc sớm được tách thành lát kế, không khai đã đóng.
+- Đường lùi: Hoàn lại precheck bằng PR riêng khi có parser tương đương được kiểm đối kháng; giữ các ca regression.
 
 ### D-452 · 2026-11-13T11:47:36+00:00 · Khởi tạo dự án mới offline nguyên tử và không chạy hook trước commit đầu thế nào?
 

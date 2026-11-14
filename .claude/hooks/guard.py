@@ -1511,6 +1511,10 @@ STRICT_BARE = (
 BARE_CR_WHY = "CR (`\\r`) trần ngoài nháy — bash coi CR là ký tự của từ (AUD-SEC-645); bỏ ký tự CR khỏi dòng lệnh"
 # `\` lẻ cuối lệnh: `shlex` lỗi và `tokenize` rơi về tách thô, không tách `(`/`<` khỏi từ (AUD-SEC-656).
 TAIL_BACKSLASH_WHY = "`\\` lẻ cuối lệnh — guard tách thô khác bash (AUD-SEC-656); bỏ `\\` cuối hoặc đặt trong nháy"
+PARAM_PAREN_WHY = (
+    "ngoặc trong `${…}` không nháy — guard có thể tách mất đối số phía sau (AUD-SEC-730); viết lại: đặt cả mở rộng"
+    ' trong nháy kép (`"${x:-…}"`), hoặc lưu kết quả rồi dùng biến trong nháy kép'
+)
 EXTGLOB_WHY = (
     "extglob trần `?(`/`*(`/`+(`/`@(`/`!(` ngoài `((…))` — bật `extglob` thì bash bung thành tên tệp (AUD-SEC-666);"
     " liệt kê tệp nguyên văn, `! (lệnh)` có dấu cách, mẫu glob/grep đặt trong nháy; regex của `[[ $x =~ … ]]` gán vào"
@@ -1520,6 +1524,28 @@ EXTGLOB_WHY = (
 
 def _bare_cr_why(v: "_CodeView") -> str:
     return BARE_CR_WHY if "\r" in v.s and any(c == "\r" and k in "cp" for c, k in zip(v.s, v.kind)) else ""
+
+
+def _parameter_paren_why(v: "_CodeView") -> str:
+    """AUD-SEC-730: `${…}` mở ở mã không nháy chứa ngoặc, kể cả `$()`/`<()` lồng, khác ngữ pháp tokenizer.
+    Bỏ qua cả span để không quét bậc hai; `${…}` nháy kép và dấu ngoặc thoát giữ nguyên."""
+    s, i = v.s, 0
+    if "(" not in s and ")" not in s:
+        return ""
+    while i < len(s):
+        if s.startswith("${", i) and v.kind[i] == "c":
+            try:
+                end = _raw_group_end(s, i + 2, "{")
+            except RecursionError:
+                return PARAM_PAREN_WHY
+            if end < 0:
+                return PARAM_PAREN_WHY
+            if any(s[k] in "()" and v.kind[k] != "q" for k in range(i + 2, end)):
+                return PARAM_PAREN_WHY
+            i = end
+        else:
+            i += 1
+    return ""
 
 
 def _code_paren_pairs(v: "_CodeView") -> Dict[int, int]:
@@ -1720,7 +1746,8 @@ def _strict_why(cmd: str, cwd: Optional[str] = None) -> str:
     why = next((why for rules, text in checks for rx, why in rules if rx.search(text)), "")
     if not why and STRICT_IFS_RE.search(v.s) and STRICT_SHELL_RE.search(v.s):
         why = "`$IFS` trong script của shell lồng (AUD-SEC-239)"
-    why = why or _bare_cr_why(v) or _extglob_why(v) or _arith_hash_why(v) or _ifs_split_why(cmd, live, bare)
+    why = why or _parameter_paren_why(v) or _bare_cr_why(v) or _extglob_why(v) or _arith_hash_why(v)
+    why = why or _ifs_split_why(cmd, live, bare)
     return why or _dyn_text_why(v, live, bare) or _gh_strict_why(v.s, live, cwd)
 
 
