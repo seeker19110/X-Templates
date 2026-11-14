@@ -323,6 +323,7 @@ run_task() { # $1=task -> chạy; 0 nếu ok hoặc no-op, khác 0 nếu lệnh 
   # `test | tee log` từng xanh giả khi test đỏ.
   case "$1" in
     test | test_fast | test_floor) ( cd "$ROOT" && run_counted bash -o pipefail -c "$cmd" ) ;;
+    format) run_format "$cmd" ;;
     *) ( cd "$ROOT" && bash -o pipefail -c "$cmd" ) ;;
   esac
 }
@@ -522,9 +523,18 @@ go_restore() { # $1=thư mục chụp
   while IFS= read -r -d '' f; do
     i=$((i + 1)); [ -f "$1/$i" ] || continue
     if ! cmp -s -- "$1/$i" "$ROOT/$f" 2>/dev/null; then
-      cp -p -- "$1/$i" "$ROOT/$f" && log "format-file: formatter đổi GO-NO-GO '$f' (chữ ký §5 là của người) → khôi phục bản trước"
+      cp -p -- "$1/$i" "$ROOT/$f" && log "$TASK: formatter đổi GO-NO-GO '$f' (chữ ký §5 là của người) → khôi phục bản trước"
     fi
   done <"$1/list"
+}
+run_format() {
+  local snap rc=0
+  snap="$(mktemp -d)" || return 1
+  go_snapshot "$snap"
+  ( cd "$ROOT" && bash -o pipefail -c "$1" ) || rc=$?
+  go_restore "$snap"
+  rm -rf -- "$snap"
+  return "$rc"
 }
 real_path() { # $1=đường dẫn (tương đối theo gốc dự án như lúc formatter chạy) → đường dẫn thật; thiếu realpath thì dùng python3
   if command -v realpath >/dev/null 2>&1; then ( cd "$ROOT" && realpath -- "$1" ) 2>/dev/null && return 0; fi

@@ -702,3 +702,10 @@
 - Chọn: Không kết luận merge khi không đọc được ruleset hoặc không xác minh đúng app; giữ CI và ruleset
 - Lý do (tiêu chí chất lượng cuối): Hai fixture độc lập tái hiện verdict merge sai; GitHub yêu cầu check từ app đã ghim, nên chờ bằng chứng đầy đủ giữ an toàn và đường lùi
 - Đường lùi: Revert PR nếu giao diện GitHub không cung cấp đủ nguồn và khôi phục xử lý thủ công trong lúc sửa adapter
+
+### D-489 · 2026-11-14T14:11:59+00:00 · T-3746 xử lý thế nào với GO-NO-GO có sẵn khi chạy formatter toàn repo?
+
+- Phương án: (1) Chỉ hướng dẫn thêm mẫu bỏ qua cho từng formatter · (2) Dùng lại cơ chế giữ nội dung GO-NO-GO của format-file tại điểm vào format
+- Chọn: Dùng lại cơ chế giữ nội dung GO-NO-GO của format-file tại điểm vào format
+- Lý do (tiêu chí chất lượng cuối): Đo bằng DevTaskTest: formatter thay nội dung GO-NO-GO ở cả exit 0 và 7. Cơ chế dùng chung bảo toàn nội dung và không phụ thuộc stack.
+- Đường lùi: Revert lát format và áp dụng quy tắc ignore của từng formatter.
