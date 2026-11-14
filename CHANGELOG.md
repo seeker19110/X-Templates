@@ -205,6 +205,7 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
 ### Fixed
 
 - `doctor` và `ci-check` báo lỗi khi `merge_review` đã khai giá trị khác `optional` hoặc `required`; thiếu khóa vẫn dùng mặc định.
+- AUD-SEC-730: cập nhật trạng thái sau #535, đối chiếu guard-check và ba test chặn/đối chứng; giới hạn đệ quy tiếp tục theo T-3867.
 
 - `pr next`, steward và màn PR chỉ đề xuất merge sau khi cùng kiểm nhánh đích hiện tại theo `merge-check` (#551).
 - T-3736 (AUD-HAR-378): `release-check` và `release-sign` chỉ lối xử lý theo PLAN và ngân sách của vòng bị chặn.
