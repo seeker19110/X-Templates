@@ -224,6 +224,8 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
 
 - Tài liệu và mẫu GO-NO-GO ghi rõ quyền ký phát hành (ADR-0074) và duyệt MVP (ADR-0069) khi dự án bật tự động (D-481).
 
+- T-3726, AUD-PERF-029: `audit plan` đọc blame một lần cho mọi dòng blueprint, giữ nguyên cảnh báo bằng chứng cũ.
+
 - T-3728: skill `autopilot` theo hành động `stage-approve` của `loop next-step` khi dự án bật tự nghiệm thu MVP
   (AUD-XFEAT-048). Cập nhật số đo biên dịch guard trong chú thích `_lib.sh` theo audit 2026-11-11 (AUD-PERF-031).
 

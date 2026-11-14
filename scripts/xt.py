@@ -4038,13 +4038,23 @@ def _resolve_ref(ref: str, files: List[str]) -> Optional[str]:
     return hits[0] if len(hits) == 1 else None
 
 
-def _line_written_at(root: Path, rel_bp: str, no: int) -> Optional[int]:
-    """Epoch commit của dòng `no` trong blueprint (git blame); None khi chưa commit hoặc không blame được."""
-    blame = _git(root, "blame", "-L", f"{no},{no}", "--porcelain", "--", rel_bp)
-    t = re.search(r"^committer-time (\d+)$", blame.stdout, re.M)
-    if blame.returncode != 0 or not t or blame.stdout.startswith("0000000"):
-        return None
-    return int(t.group(1))
+BLAME_LINE_RE = re.compile(r"^([a-f0-9]{40,64}) \d+ (\d+)(?: \d+)?$")
+BLAME_TIME_RE = re.compile(r"^committer-time (\d+)$")
+
+
+def _blame_line_times(root: Path, rel_bp: str) -> Dict[int, int]:
+    """Commit time of each tracked blueprint line, reading porcelain metadata once."""
+    blame = _git(root, "blame", "--line-porcelain", "--", rel_bp)
+    if blame.returncode != 0:
+        return {}
+    times: Dict[int, int] = {}
+    committed_line: Optional[int] = None
+    for line in blame.stdout.split("\n"):
+        if header := BLAME_LINE_RE.fullmatch(line):
+            committed_line = int(header[2]) if header[1].strip("0") else None
+        elif committed_line is not None and (stamp := BLAME_TIME_RE.fullmatch(line)):
+            times[committed_line] = int(stamp[1])
+    return times
 
 
 def _files_changed_after(root: Path, refs: Iterable[str], written: int, mtime_cache: Dict[str, int]) -> List[str]:
@@ -4067,6 +4077,7 @@ def blueprint_stale_evidence(root: Path, blueprint: Path, files: List[str]) -> L
         return []
     rel_bp = os.path.relpath(blueprint.resolve(), root.resolve()).replace(os.sep, "/")
     mtime_cache: Dict[str, int] = {}
+    written_times: Optional[Dict[int, int]] = None
     out = []
     for no, line in enumerate(lines, 1):
         m = ITEM_RE.match(line)
@@ -4080,7 +4091,9 @@ def blueprint_stale_evidence(root: Path, blueprint: Path, files: List[str]) -> L
         }
         if not refs:
             continue
-        written = _line_written_at(root, rel_bp, no)
+        if written_times is None:
+            written_times = _blame_line_times(root, rel_bp)
+        written = written_times.get(no)
         if written is None:
             continue
         changed = _files_changed_after(root, sorted(refs), written, mtime_cache)
