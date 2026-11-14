@@ -98,8 +98,8 @@ template và `AGENTS.md` chỉ tóm tắt và liên kết, không chép bảng/n
     = PLAN hết task, 0 MUST mở ngoài chờ người, 0 🔴/🟠 → `/audit full` sạch → đề xuất bước 17.
     `done-pending-human` → như `done` + chờ người. `blocked`/`budget` → lý do + bước kế, không khai "xong".
 17. **Pha 3 — hoàn thiện** (`/complete`, ADR-0046; dự án đã `harden` chạy luật này từ bước 12): PR đặt `delivery_phase: harden`
-    → audit, trả nợ → `PLAN-harden-<ngày>.md` → bước 9–15 → `<XT> release-check` → xử lý mục chặn rồi ký
-    `GO-NO-GO.md` theo ADR-0074.
+    → audit, trả nợ → `PLAN-harden-<ngày>.md` → bước 9–15 → `<XT> release-check` không NO-GO → người ký
+    `GO-NO-GO.md`. Agent chỉ ký khi đã bật `release_signoff: agent` và đủ điều kiện ADR-0074.
 
 ## Lệnh thật
 
