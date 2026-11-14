@@ -1,0 +1,53 @@
+{
+  "schema": 1,
+  "baseline_commit": "331145c1ce3b5a8fafaea3609012cb591342191d",
+  "sample": {
+    "recorded_occurrences": 505,
+    "eligible_occurrences": 505,
+    "unique_command_bodies": 464,
+    "excluded": {}
+  },
+  "method": [
+    "Unwrap recorded /bin/bash -lc commands; parse bodies only, never execute historical commands.",
+    "For each candidate, recompute origin/main baseline in the same owning worktree context.",
+    "Use bash_decision followed by default apply_policy, harden phase; merge-check stubbed unavailable.",
+    "Permit guard internal read-only Git metadata probes; preserve absolute paths in historical command bodies."
+  ],
+  "limitations": [
+    "One historical chat sample; not the full distinct-command corpus referenced by ADR-0076.",
+    "Historical cwd remapped to each comparison worktree; repository configuration and filesystem reconstructed from current state.",
+    "Observed delta only; broader false-positive frequency and population guarantee remain inconclusive."
+  ],
+  "provenance": "Final P4 comparison recomputed after its review repair; unchanged parameter and recursion comparisons retained from their own baseline/candidate evaluation in the same worktree contexts.",
+  "comparisons": [
+    {
+      "variant": "parameter",
+      "baseline_guard_sha256": "75ebd025c1f53650ef7bc0691ffbc58d1898524b882249749c2f2ff5460884c9",
+      "candidate_guard_sha256": "a0b956cc04c0954bfb14e71b4eaf8b26208fbe78ee049c2c89b274c5cb282d69",
+      "configuration_sha256": {
+        "xt_yaml_sha256": "a9eb0e19a98b048675b4fdb568e930f7c08ef9c9fae8709c50be9dd4fb279e88",
+        "settings_sha256": "34d24ae1b380a23a5210556ae3404ca27b1c7bfedfd5d2f031ba485e93c22841",
+        "settings_local_sha256": null,
+        "local_config_sha256": "dc1682b5478acfb0204601387a5d20a42062d484624436e9801106e8295eea3a"
+      },
+      "eligible_occurrences": 505,
+      "unique_command_bodies": 464,
+      "baseline_denied": 63,
+      "candidate_denied": 63,
+      "newly_denied_occurrences": 0,
+      "newly_denied_percent": 0.0,
+      "newly_denied_unique": 0,
+      "newly_allowed_occurrences": 0,
+      "newly_allowed_unique": 0,
+      "newly_denied_codes": {},
+      "newly_allowed_baseline_codes": {},
+      "evaluation_exception_counts": {},
+      "observed_delta_within_0_2_percent": true,
+      "candidate_hash_still_current": true,
+      "metadata_still_current": true,
+      "newly_denied_unique_percent": 0.0,
+      "newly_allowed_percent": 0.0,
+      "candidate_hash_rechecked_before_publication": true
+    }
+  ]
+}
