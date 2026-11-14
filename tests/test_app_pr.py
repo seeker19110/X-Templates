@@ -255,6 +255,25 @@ class PrsTest(unittest.TestCase):
         self.assertEqual(row["action"], want["action"])
         self.assertEqual(row["reasons"][0], want["why"])
 
+    def test_strict_base_compare_is_read_only(self) -> None:
+        live = f"repos/{{owner}}/{{repo}}/compare/refs%2Fheads%2Fmain...{SHA7}?per_page=1"
+
+        def gh(path: str, paginate: bool = False) -> List[Any]:
+            if "state=open" in path:
+                return [[{"number": 7}]]
+            if path.endswith("/rules/branches/main"):
+                return [
+                    [{"type": "required_status_checks", "parameters": {"strict_required_status_checks_policy": True}}]
+                ]
+            if path == live:
+                return [{"behind_by": 2}]
+            return gh_pages(path)
+
+        with Sandbox(gh=gh) as sb, mock.patch.object(xt, "merge_autonomy_level", return_value=(3, [])):
+            code, body = sb.call("/api/prs")
+            sb.assert_no_write(self)
+        self.assertEqual((code, body["prs"][0]["action"]), (200, "update"))
+
     def test_passes_rethink_cap_like_cli(self) -> None:
         """Review #380: màn PR truyền trần `max_rethink` (chặt hơn giữa cây và nhánh đích) như `pr next` — không mặc định."""
         real = xt.pr_next
