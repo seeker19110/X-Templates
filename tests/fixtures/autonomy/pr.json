@@ -1363,6 +1363,38 @@
     "auto_merge_ok": false,
     "lane": "chuẩn"
    }
+  },
+  {
+   "id": "pr-rules-unverified-blocked",
+   "origin": "audit",
+   "refs": [
+    "AUD-HAR-407"
+   ],
+   "input": {
+    "pr": {
+     "mergeStateStatus": "BLOCKED",
+     "reviewDecision": "REVIEW_REQUIRED",
+     "rulesUnknown": true
+    }
+   },
+   "expect": {
+    "eligible": false,
+    "verdict": "wait"
+   }
+  },
+  {
+   "id": "pr-rules-unverified-clean",
+   "origin": "control",
+   "refs": [],
+   "input": {
+    "pr": {
+     "rulesUnknown": true
+    }
+   },
+   "expect": {
+    "eligible": false,
+    "verdict": "wait"
+   }
   }
  ]
 }

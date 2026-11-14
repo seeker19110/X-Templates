@@ -476,6 +476,119 @@
     "ci_green": false,
     "ci": "fix"
    }
+  },
+  {
+   "id": "rollup-required-app-missing",
+   "origin": "audit",
+   "refs": [
+    "AUD-HAR-408"
+   ],
+   "input": {
+    "required": [
+     {
+      "context": "quality",
+      "appId": 42
+     }
+    ],
+    "statuses": [
+     {
+      "context": "quality",
+      "state": "success"
+     }
+    ]
+   },
+   "expect": {
+    "ci_green": false,
+    "ci": "human"
+   }
+  },
+  {
+   "id": "rollup-required-app-other",
+   "origin": "audit",
+   "refs": [
+    "AUD-HAR-408"
+   ],
+   "input": {
+    "required": [
+     {
+      "context": "quality",
+      "appId": 42
+     }
+    ],
+    "check_runs": [
+     {
+      "name": "quality",
+      "status": "completed",
+      "conclusion": "success",
+      "app": {
+       "id": 43
+      }
+     }
+    ]
+   },
+   "expect": {
+    "ci_green": false,
+    "ci": "human"
+   }
+  },
+  {
+   "id": "rollup-required-app-duplicate-context",
+   "origin": "audit",
+   "refs": [
+    "AUD-HAR-408"
+   ],
+   "input": {
+    "required": [
+     {
+      "context": "quality"
+     },
+     {
+      "context": "quality",
+      "appId": 42
+     }
+    ],
+    "check_runs": [
+     {
+      "name": "quality",
+      "status": "completed",
+      "conclusion": "success",
+      "app": {
+       "id": 43
+      }
+     }
+    ]
+   },
+   "expect": {
+    "ci_green": false,
+    "ci": "human"
+   }
+  },
+  {
+   "id": "rollup-required-app-matches",
+   "origin": "control",
+   "refs": [],
+   "input": {
+    "required": [
+     {
+      "context": "quality",
+      "appId": 42
+     }
+    ],
+    "check_runs": [
+     {
+      "name": "quality",
+      "status": "completed",
+      "conclusion": "success",
+      "app": {
+       "id": 42
+      }
+     }
+    ]
+   },
+   "expect": {
+    "ci_green": true,
+    "ci": "green"
+   }
   }
  ]
 }
