@@ -467,6 +467,9 @@ class LoopInitCarryTest(TmpRepoCase):
             self.assertIn(f"verdict `blocked`: {reason} — người xem rồi `loop unblock --reason …`)", err)
             self.assertNotIn("`loop stop`", err)
             self.assertNotIn("`loop init --force`", err)  # không nối đuôi gợi lối ra trái nhau
+        # D-442: init --force không xoá cờ; mở có dấu trước khi xét nguồn chặn khác là lỗi lặp.
+        self.assertEqual(run_main("loop", "unblock", "--reason", "đã duyệt hai lý do chặn")[0], 0)
+        self.assertEqual(xt.read_state(self.repo)["unblocked"][-1]["reason"], "đã duyệt hai lý do chặn")
         run_main("loop", "init", "--force")  # nguồn state thứ hai: lỗi lặp ≥ 3 (LOOP-DESIGN-005) — AUD-TEST-021
         for _ in range(3):
             run_main("loop", "record", "--task", "T-001", "--", "false")
