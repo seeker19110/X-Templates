@@ -8,6 +8,9 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
 
 ### Added
 
+- [ADR-0077](docs/adr/0077-deployment-receipts.md) (T-3841, D-422…D-424) chốt cấu hình theo môi trường, receipt của
+  bản đang phục vụ, hàng `deploy` trong `release-check` và đích dev mặc định của gói `web-api-ts`. Mã triển khai
+  thuộc các lát T-3842 đến T-3844 và T-3860.
 - ADR-0076 lát 0 (T-3760; lý do chạm hàng rào: dựng lưới đối chứng cho các lát cổng tập con dương — chỉ thêm ca và hằng,
   không đổi quyết định nào của guard): 150 ca `control` `adr76-ctl-*` trong `tests/fixtures/autonomy/guard.json` lấy từ
   lệnh agent chạy theo quy trình (`xt.py`, `dev-task.sh`, Gate, git/gh đọc-ghi lành, commit/PR bằng heredoc, `rm -rf
@@ -181,6 +184,10 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
 
 - AUD-DOC-273/274: báo cáo pilot phân biệt số đo chưa xác minh với bằng chứng CI; PLAN chỉ rõ cổng Production, reviewer bắt buộc và phê duyệt đúng run, theo cấu hình đọc ngày 2026-11-13. Chỉ sửa tài liệu, không thay quyền triển khai.
 - D-451: xếp AUD-DOC-273/274 vào nhóm tài liệu/bằng chứng sẵn có của corpus tự chủ; giữ nguyên định nghĩa nhóm, ca kiểm và ngưỡng.
+
+- T-3728: skill `autopilot` theo hành động `stage-approve` của `loop next-step` khi dự án bật tự nghiệm thu MVP
+  (AUD-XFEAT-048). Cập nhật số đo biên dịch guard trong chú thích `_lib.sh` theo audit 2026-11-11 (AUD-PERF-031).
+
 - Gói `web-api-ts` dùng Kysely 0.29.8, Biome 2.6.6 và Vitest 5.1.0 (#513, D-479). Giữ kiểu Node 24
   theo runtime của gói. Chuẩn hoá khoảng trắng trước chú thích trong mẫu `xt.yaml` để qua formatter YAML của Biome.
 
