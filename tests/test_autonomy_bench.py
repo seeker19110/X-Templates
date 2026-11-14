@@ -10,6 +10,8 @@ import io
 import json
 import os
 import re
+import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -133,6 +135,141 @@ class AutonomyBenchRepoTest(unittest.TestCase):
         d = json.loads(out)
         self.assertEqual(rc, 0)
         self.assertEqual([r["id"] for r in d["failures"] if r["id"] in moved], [])
+
+
+class AutonomyBenchLoopTest(unittest.TestCase):
+    """Fixture lifecycle qua CLI thật, chặn phát hành và lối ra; gỡ bản sửa thì corpus phải đỏ."""
+
+    def setUp(self):
+        self.env = xt.BenchEnv(Path(self.enterContext(tempfile.TemporaryDirectory())).resolve())
+        cases, _ = xt.autonomy_corpus(CORPUS)
+        self.cases = [c for c in cases if c["input"].get("kind") == "loop_block"]
+
+    def selected(self, scenario):
+        return next(c for c in self.cases if c["input"]["scenario"] == scenario and not c["input"]["recover"])
+
+    def foreign_repo(self):
+        root = self.env.root / f"foreign-{self.env._n}"
+        root.mkdir()
+        template = self.env.root / "empty-template"
+        template.mkdir(exist_ok=True)
+        env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+        env.update(GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_SYSTEM=os.devnull, GIT_TEMPLATE_DIR=str(template))
+        (root / "tracked").write_text("original", encoding="utf-8")
+        for args in (
+            ("init", "-q", "-b", "main"),
+            ("add", "tracked"),
+            ("-c", "user.name=fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "original"),
+        ):
+            subprocess.run(
+                ["git", "-C", str(root), "-c", "maintenance.auto=false", *args],
+                env=env,
+                capture_output=True,
+                check=True,
+            )
+        (root / "tracked").write_text("caller dirty worktree", encoding="utf-8")
+        return root
+
+    @staticmethod
+    def snapshot(root):
+        return {str(p.relative_to(root)): p.read_bytes() for p in root.rglob("*") if p.is_file()}
+
+    def test_git_routing_cannot_change_foreign_repo_and_environment_restores(self):
+        for route in ("dir", "all"):
+            with self.subTest(route=route):
+                foreign = self.foreign_repo()
+                original = self.snapshot(foreign)
+                malicious = {"GIT_DIR": str(foreign / ".git")}
+                if route == "all":
+                    malicious.update(
+                        GIT_WORK_TREE=str(foreign),
+                        GIT_COMMON_DIR=str(foreign / ".git"),
+                        GIT_INDEX_FILE=str(foreign / ".git/index"),
+                        GIT_OBJECT_DIRECTORY=str(foreign / ".git/objects"),
+                        GIT_CONFIG_COUNT="1",
+                        GIT_CONFIG_KEY_0="core.worktree",
+                        GIT_CONFIG_VALUE_0=str(foreign),
+                        GIT_CONFIG_PARAMETERS="'commit.gpgsign=true'",
+                    )
+                with unittest.mock.patch.dict(os.environ, malicious):
+                    caller = dict(os.environ)
+                    row = xt._bench_run(self.selected("carry"), self.env)
+                    self.assertTrue(dict(os.environ) == caller, "caller environment changed")
+                self.assertEqual(
+                    self.snapshot(foreign), original
+                )  # cả HEAD, index, object/ref và cây bẩn của người gọi
+                self.assertEqual(row["status"], "pass", row)
+
+    def test_git_config_hooks_templates_and_signing_are_isolated(self):
+        root = self.env.root
+        marker = root / "decoy-ran"
+        decoy = root / "decoy"
+        decoy.write_text(f"#!/bin/sh\nprintf ran > '{marker}'\nexit 1\n", encoding="utf-8")
+        decoy.chmod(0o755)
+        hooks = root / "hooks"
+        hooks.mkdir()
+        (hooks / "pre-commit").write_bytes(decoy.read_bytes())
+        (hooks / "pre-commit").chmod(0o755)
+        template = root / "template"
+        template.mkdir()
+        shutil.copytree(hooks, template / "hooks")
+        for kind, config in (
+            ("signing", f"[commit]\n gpgsign = true\n[gpg]\n program = {decoy}\n"),
+            ("hooks", f"[core]\n hooksPath = {hooks}\n"),
+            ("template", f"[init]\n templateDir = {template}\n"),
+            ("system", f"[core]\n hooksPath = {hooks}\n"),
+        ):
+            with self.subTest(kind=kind):
+                cfg = root / "global-config"
+                cfg.write_text(config, encoding="utf-8")
+                if marker.exists():
+                    marker.unlink()
+                malicious = {"GIT_CONFIG_GLOBAL": str(cfg), "GIT_CONFIG_SYSTEM": str(cfg)}
+                if kind == "template":
+                    malicious["GIT_TEMPLATE_DIR"] = str(template)
+                if kind == "system":
+                    malicious.update(GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_NOSYSTEM="0")
+                with unittest.mock.patch.dict(os.environ, malicious):
+                    caller = dict(os.environ)
+                    row = xt._bench_run(self.selected("expired"), self.env)
+                    self.assertTrue(dict(os.environ) == caller, "caller environment changed")
+                self.assertFalse(marker.exists(), kind)
+                self.assertEqual(row["status"], "pass", row)
+
+    def test_real_lifecycle_corpus_and_controls(self):
+        self.assertEqual(len(self.cases), 4)
+        self.assertEqual({r for c in self.cases for r in c["refs"]}, {"AUD-HAR-378", "AUD-HAR-379"})
+        for c in self.cases:
+            with self.subTest(case=c["id"]):
+                row = xt._bench_run(c, self.env)
+                self.assertEqual(row["status"], "pass", row)
+
+    def test_corpus_detects_lost_block_and_wrong_guidance(self):
+        carry = xt._carry_previous
+
+        def lose_block(prev, state, base):
+            return carry({**prev, "blocked": False}, state, base)
+
+        with unittest.mock.patch.object(xt, "_carry_previous", side_effect=lose_block):
+            row = xt._bench_run(self.selected("carry"), self.env)
+        self.assertEqual(row["status"], "false_green", row)
+        with unittest.mock.patch.object(xt, "_loop_block_reason", return_value="blocked — `loop unblock --reason …`"):
+            row = xt._bench_run(self.selected("expired"), self.env)
+        self.assertEqual(row["status"], "mismatch", row)
+        self.assertEqual(row["got"]["recovery"], "unblock")
+
+    def test_invalid_scenario_or_failed_fixture_is_error(self):
+        c = self.selected("carry")
+        caller = dict(os.environ)
+        invalid = {**c, "input": {"kind": "loop_block", "scenario": "other"}}
+        self.assertEqual(xt._bench_run(invalid, self.env)["status"], "error")
+        with unittest.mock.patch.object(xt, "_git", return_value=subprocess.CompletedProcess([], 1, "", "failed")):
+            self.assertEqual(xt._bench_run(c, self.env)["status"], "error")
+        with unittest.mock.patch.object(xt, "main", return_value=2):
+            row = xt._bench_run(c, self.env)
+        self.assertEqual(row["status"], "error", row)
+        self.assertIn("exit 2", row["got"]["error"])
+        self.assertTrue(dict(os.environ) == caller, "caller environment changed")
 
 
 class AutonomyBenchCorpusTest(unittest.TestCase):

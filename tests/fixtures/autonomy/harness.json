@@ -312,6 +312,78 @@
    "expect": {
     "green": true
    }
+  },
+  {
+   "id": "harness-aud-har-379-carry",
+   "origin": "audit",
+   "refs": [
+    "AUD-HAR-379"
+   ],
+   "input": {
+    "kind": "loop_block",
+    "scenario": "carry",
+    "recover": false
+   },
+   "expect": {
+    "green": false,
+    "blocked": true,
+    "recovery": "unblock",
+    "unblocked": 0
+   }
+  },
+  {
+   "id": "harness-aud-har-379-carry-recovered",
+   "origin": "control",
+   "refs": [
+    "AUD-HAR-379"
+   ],
+   "input": {
+    "kind": "loop_block",
+    "scenario": "carry",
+    "recover": true
+   },
+   "expect": {
+    "green": true,
+    "blocked": false,
+    "recovery": "",
+    "unblocked": 1
+   }
+  },
+  {
+   "id": "harness-aud-har-378-expired",
+   "origin": "audit",
+   "refs": [
+    "AUD-HAR-378"
+   ],
+   "input": {
+    "kind": "loop_block",
+    "scenario": "expired",
+    "recover": false
+   },
+   "expect": {
+    "green": false,
+    "blocked": true,
+    "recovery": "init",
+    "unblocked": 0
+   }
+  },
+  {
+   "id": "harness-aud-har-378-expired-recovered",
+   "origin": "control",
+   "refs": [
+    "AUD-HAR-378"
+   ],
+   "input": {
+    "kind": "loop_block",
+    "scenario": "expired",
+    "recover": true
+   },
+   "expect": {
+    "green": true,
+    "blocked": false,
+    "recovery": "",
+    "unblocked": 1
+   }
   }
  ]
 }

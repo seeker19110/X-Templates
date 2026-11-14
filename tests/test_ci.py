@@ -84,8 +84,7 @@ def gate_loop() -> List[str]:
 
 
 def gate_tasks() -> List[str]:
-    """Task cố định mà `dev-task.sh gate` chạy — bỏ task tuỳ chọn theo biến (`$FLOOR` = `test_floor` khi khai, T-1812;
-    CI giữ sàn đó bằng job `py311`)."""
+    """Task cố định mà `dev-task.sh gate` chạy. `$FLOOR` chỉ có giá trị khi dự án khai `test_floor`."""
     return [t for t in gate_loop() if not t.startswith("$")]
 
 
@@ -177,25 +176,38 @@ class GateFanOutTest(unittest.TestCase):
         self.assertIn("merge-multiple: true", cov)
         self.assertRegex(cov, r'run: scripts/dev-task\.sh test-combine "\$RUNNER_TEMP/cov"\n')
 
-    def test_py311_shards_on_main_without_coverage(self):
-        self.assert_sharded("py311", cov=False)
-        body = self.jobs["py311"]
-        self.assertIn("XT_PY: python3.11", body)
-        self.assertIn("git checkout -q -B main", body)
+    def test_shards_on_main_without_coverage(self):
+        self.assert_sharded("test-main", cov=False)
+        body = self.jobs["test-main"]
+        self.assertLess(body.index("git checkout -q -B main"), body.index("scripts/dev-task.sh test-shard"))
+        self.assertNotIn("XT_PY", body)
 
-    def test_default_python_314_with_311_floor(self):
-        """T-1831: mọi job cài 3.11 (sàn) + 3.14 (mặc định, đứng sau cùng → đầu PATH); không còn 3.13 trong job."""
-        for name, body in self.jobs.items():
-            if "actions/setup-python@" not in body:
-                continue
-            with self.subTest(job=name):
-                self.assertNotRegex(body, r"(?m)^\s+(?:python-version: \"?)?3\.13\"?$")
-                versions = re.findall(r"python-version: (?:\|\n((?:\s+\d+\.\d+\n)+)|\"?(\d+\.\d+)\"?)", body)
-                self.assertTrue(versions)
-                for block, single in versions:
-                    listed = block.split() if block else [single]
-                    self.assertEqual(listed[-1], "3.14")
-                    self.assertLessEqual(set(listed), {"3.11", "3.14"})
+    def test_python_workflow_jobs_use_repo_pin(self):
+        version = (ROOT / ".python-version").read_text(encoding="utf-8").strip()
+        self.assertRegex(version, r"\A3\.15\.\d+\Z")
+        templates = ROOT / "framework" / "templates"
+        managed_pack = templates / "packs" / "web-api-ts" / "managed" / ".github" / "workflows"
+        workflows = [
+            templates / "ci.yml",
+            *(
+                path
+                for directory in (WORKFLOWS, managed_pack)
+                for path in sorted(directory.iterdir())
+                if path.is_file() and path.suffix in {".yml", ".yaml"}
+            ),
+        ]
+        for path in workflows:
+            for name, body in ci_jobs(path.read_text(encoding="utf-8")).items():
+                body = "\n".join(strip_comment(line) for line in body.splitlines())
+                python_step = re.search(r"\b(?:python3?|dev-task\.sh) \S+", body)
+                setup_step = body.find("uses: actions/setup-python@")
+                if python_step is None and setup_step < 0:
+                    continue
+                with self.subTest(workflow=path.relative_to(ROOT), job=name):
+                    self.assertGreaterEqual(setup_step, 0)
+                    if python_step is not None:
+                        self.assertLess(setup_step, python_step.start())
+                    self.assertEqual(re.findall(r"(?m)^          python-version: (.+)$", body), [f'"{version}"'])
 
     def test_pip_cache_keyed_on_installed_requirements(self):
         """AUD-CI-028 (T-3654): job cài `-r requirements-*.txt` bật `cache: pip` với khoá băm đúng file đó."""
@@ -210,7 +222,7 @@ class GateFanOutTest(unittest.TestCase):
     def test_sysmon_only_on_coverage_measuring_jobs(self):
         self.assertIn("COVERAGE_CORE: sysmon", self.jobs["test"])
         self.assertIn("COVERAGE_CORE: sysmon", self.jobs["coverage"])
-        self.assertNotIn("COVERAGE_CORE", self.jobs["py311"])  # 3.11 không có sys.monitoring, và không đo coverage
+        self.assertNotIn("COVERAGE_CORE", self.jobs["test-main"])  # cổng coverage đã đo đủ ở job test
 
     def test_test_job_installs_pinned_bun_and_requires_it(self):
         """AUD-TEST-056: test plugin OpenCode chạy thật trên CI — job `test` cài bun ghim phiên bản + sha256 (kiểm trước
@@ -222,7 +234,7 @@ class GateFanOutTest(unittest.TestCase):
         self.assertLess(install, body.index("tar -xzf"))
         self.assertLess(body.index('>> "$GITHUB_PATH"'), body.index("scripts/dev-task.sh test-shard"))
         self.assertIn('XT_REQUIRE_BUN: "1"', body)
-        self.assertNotIn("XT_REQUIRE_BUN", self.jobs["py311"])  # sàn 3.11 không cài bun — một job chạy thật là đủ
+        self.assertNotIn("XT_REQUIRE_BUN", self.jobs["test-main"])  # plugin được kiểm với bun ở job test
 
     def test_min_tests_declared_once(self):
         text = CI.read_text(encoding="utf-8")
@@ -250,27 +262,22 @@ class GateFanOutTest(unittest.TestCase):
         yaml = (ROOT / "xt.yaml").read_text(encoding="utf-8")
         test = re.search(r"^test: (.*)$", yaml, re.M).group(1)
         line = re.search(r"^test_list: (.*)$", yaml, re.M).group(1)
-        listings = re.findall(r"\b(python3(?:\.11)?) -c ('[^']+')", line)
-        self.assertEqual([py for py, _ in listings], ["python3", "python3.11"])  # mỗi nhánh `if` một trình thông dịch
-        for _, listing in listings:
-            self.assertIn(f"python3 -c {listing} |", test)
+        self.assertTrue(line.startswith("python3 -c "))
+        self.assertIn(f"{line} |", test)
         self.assertRegex(yaml, r"(?m)^test_combine: .*coverage report --fail-under=100$")
         self.assertIn("--fail-under=100", test)
 
     def test_xt_yaml_commands_pass_repo_guard(self):
         """Review adr-guard 🔴: mọi lệnh của `xt.yaml` qua guard của repo (LOOP-STOP-027 — `dev-task.sh` hỏi guard trước khi
-        chạy; từ lệnh động `"${XT_PY:-python3}"` từng làm shard CI và `gate` exit 126). `XT_PY` chọn trình thông dịch bằng
-        `if` trên tên nguyên văn; giá trị lạ → exit 2, không chạy gì."""
+        chạy. `test_list` và `test_unit` gọi `python3` bằng tên nguyên văn)."""
         keys = xt._xt_keys(ROOT)
         self.assertIn("test_list", keys)
         whys = xt.guard_blocks(list(keys.values()), ROOT)
         self.assertEqual({k: w for k, w in zip(keys, whys) if w}, {})
         for key in ("test_list", "test_unit"):
             with self.subTest(key=key):
-                env = {**{k: v for k, v in os.environ.items() if k != "XT_COV_DIR"}, "XT_PY": "python9"}
-                r = subprocess.run(["bash", "-c", keys[key], "_", "x"], env=env, capture_output=True, text=True)
-                self.assertEqual(r.returncode, 2, r.stderr)
-                self.assertIn("XT_PY", r.stderr)
+                self.assertNotIn("XT_PY", keys[key])
+        self.assertNotIn("test_floor", keys)
 
 
 class SupplyChainArtifactsTest(unittest.TestCase):
