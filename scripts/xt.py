@@ -1154,18 +1154,28 @@ def run_blueprint_checks(checks: List[Dict[str, Any]], base: Path, timeout: int)
     """Chạy lệnh kiểm của các mục trong thư mục `base` = thư mục chứa blueprint (mỗi lệnh một lần, mục cùng lệnh dùng
     chung kết quả): [{"id","cmd","exit_code","output_tail"}] theo thứ tự mục; `cmd`/`output_tail` đã qua `redact`.
     Lệnh rỗng (ghi chú `Kiểm:` không có lệnh trong một cặp backtick) → exit 2, không chạy."""
-    done: List[Tuple[str, int, str]] = []
+    done: Dict[Tuple[bool, str], Tuple[int, str]] = {}
     out: List[Dict[str, Any]] = []
     for c in checks:
-        hit = next(((code, tail) for cmd, code, tail in done if same_command(cmd, c["cmd"])), None)
-        if not c["cmd"]:
+        cmd = c["cmd"]
+        if not cmd:
             hit = (2, "ghi chú `Kiểm:` phải có đúng một lệnh trong một cặp backtick (nhiều lệnh gộp bằng `&&`)")
-        elif hit is None:
-            code, text = run_gate_shell(c["cmd"], base, timeout)
-            hit = (code, redact_tail(text, 20))
-            done.append((c["cmd"], *hit))
-        out.append({"id": c["id"], "cmd": redact(c["cmd"]), "exit_code": hit[0], "output_tail": hit[1]})
+        else:
+            key = _blueprint_command_key(cmd)
+            if key not in done:
+                code, text = run_gate_shell(cmd, base, timeout)
+                done[key] = (code, redact_tail(text, 20))
+            hit = done[key]
+        out.append({"id": c["id"], "cmd": redact(cmd), "exit_code": hit[0], "output_tail": hit[1]})
     return out
+
+
+def _blueprint_command_key(cmd: str) -> Tuple[bool, str]:
+    """Khử trùng lệnh chuẩn và giữ cùng phép so chuỗi thô cho các lệnh lệch nháy."""
+    try:
+        return True, canonical_command(cmd)
+    except ValueError:
+        return False, cmd.strip()
 
 
 def _stale_ids(text: str) -> List[str]:
