@@ -610,6 +610,12 @@
 - Lý do (tiêu chí chất lượng cuối): Các PR đang sửa PLAN hoặc cần nghiệm thu chúng; sổ tháng được máy đọc, giữ nguyên ID và giảm xung đột trên các mục đang dùng
 - Đường lùi: Đưa các mục về đúng thứ tự trong DECISIONS.md và phục hồi mô tả phạm vi sổ tháng
 
+### D-483 · 2026-11-14T04:00:47+00:00 · AUD-TEST-105: xử lý cặp mẫu retry CPU được ghép chéo thế nào?
+
+- Phương án: (1) Dùng cặp nhỏ/lớn từ cùng lần đo lại · (2) Giữ cực trị từ hai lần đo và thêm báo cáo chỉ số riêng
+- Chọn: Dùng cặp nhỏ/lớn từ cùng lần đo lại
+- Lý do (tiêu chí chất lượng cuối): Nếu cả hai lượt đều vượt ngưỡng, phép kiểm phải đỏ; đối chiếu trong cùng lượt giữ tỷ lệ, sàn, độ dư và một lần retry
+- Đường lùi: Revert thay đổi helper và ca đồng hồ giả nếu cần
 ### D-485 · 2026-11-14T07:23:00+00:00 · Chọn chính sách runtime cho X-Templates khi chuyển Python 3.15?
 
 - Phương án: (1) Chỉ hỗ trợ dòng Python 3.15, ghim 3.15.2 trong repo và CI · (2) Dùng Python 3.15 mặc định, giữ cổng hỗ trợ 3.11 và 3.14

@@ -16,6 +16,8 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
 - Ghi [audit delta DOC](docs/ops/AUDIT-REPORT-2026-11-14-delta.md) đến `2bf2e1cf` và mở AUD-DOC-293.
   Lưu kho nguyên văn 10 phát hiện DOC đã sửa ở v3.31.0 để giữ trần `docs/ops`.
 
+- Bổ sung bằng chứng HAR và TEST trong báo cáo audit delta 2026-11-14. Mở AUD-TEST-105 cho kết quả đo CPU ghép giữa hai lượt.
+
 - [ADR-0077](docs/adr/0077-deployment-receipts.md) (T-3841, D-422…D-424) chốt cấu hình theo môi trường, receipt của
   bản đang phục vụ, hàng `deploy` trong `release-check` và đích dev mặc định của gói `web-api-ts`. Mã triển khai
   thuộc các lát T-3842 đến T-3844 và T-3860.
@@ -212,6 +214,7 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
 - AUD-DOC-273/274: báo cáo pilot phân biệt số đo chưa xác minh với bằng chứng CI; PLAN chỉ rõ cổng Production, reviewer bắt buộc và phê duyệt đúng run, theo cấu hình đọc ngày 2026-11-13. Chỉ sửa tài liệu, không thay quyền triển khai.
 - Lưu nguyên văn ba mục DOC đã sửa từ tag v3.31.0 vào sổ lưu trữ để giữ trần `docs/ops`.
 - D-451: xếp AUD-DOC-273/274 vào nhóm tài liệu/bằng chứng sẵn có của corpus tự chủ; giữ nguyên định nghĩa nhóm, ca kiểm và ngưỡng.
+- AUD-TEST-105: cổng đo CPU so cỡ nhỏ và lớn trong cùng lượt retry, giữ ngưỡng hiện hành (D-483).
 - Vòng tự động (T-3736/T-3737, AUD-HAR-378/379, D-442): `loop init` giữ cờ chặn, lý do và thời điểm qua cả đổi PLAN
   và `--force`; chỉ `loop unblock --reason …` mới gỡ cờ và ghi can thiệp. Hàng `verify`/`release-sign` chỉ đúng lối
   phục hồi khi hết ngân sách, mất PLAN hoặc chưa khởi tạo, theo cây làm việc chứa state; tạo đợt mới vẫn phải gỡ cờ.
