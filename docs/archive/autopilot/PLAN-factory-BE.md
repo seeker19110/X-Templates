@@ -1,8 +1,8 @@
 # PLAN-factory-BE.md — ADR-0068 lát B–E · gói Web/API, nâng dự án, worker, registry
 
 > Lập 2026-11-05 trên nhánh `claude/amazing-brahmagupta-9jqbg1` (chủ dự án: "làm lát B-E trước"; không mở PR, không merge).
-> Duyệt: D-359 (phiên chính tự duyệt, ADR-0008). Nguồn: [ADR-0068](../adr/0068-software-factory-direction.md) §Quyết định
-> B–E + §Xác nhận; research [`2026-11-04-software-factory-direction.md`](../../research/2026-11-04-software-factory-direction.md)
+> Duyệt: D-359 (phiên chính tự duyệt, ADR-0008). Nguồn: [ADR-0068](../../adr/0068-software-factory-direction.md) §Quyết định
+> B–E + §Xác nhận; research [`2026-11-04-software-factory-direction.md`](../../../research/2026-11-04-software-factory-direction.md)
 > §5, §7. Stack đọc từ `seeker19110/hotel-manager@30492c9` (2026-11-05): Node 24, pnpm 12, TypeScript, Postgres qua
 > `pg` + `kysely` (RLS theo tenant), `vitest`, `biome`; web là Next.js 16 (không đưa vào gói đầu — D-359).
 >
