@@ -1,6 +1,6 @@
 # AUDIT-REPORT — X-Templates · 2026-11-05 (delta)
 
-> Mốc quét `23447d8..6086e69` trên `main` (PR #435–#445), cộng hai PR sửa [#446](https://github.com/seeker19110/X-Templates/pull/446) và [#447](https://github.com/seeker19110/X-Templates/pull/447) (D-371, D-372). Task T-3557, trước cắt 3.30.0. Ba nhóm auditor độc lập: SEC/CFG/CI · XFEAT/DOC/HAR · CODE/TEST/PERF/DEP. Kết quả theo ID ở [sổ audit](AUDIT-STATUS.md).
+> Mốc quét `23447d8..6086e69` trên `main` (PR #435–#445), cộng hai PR sửa [#446](https://github.com/seeker19110/X-Templates/pull/446) và [#447](https://github.com/seeker19110/X-Templates/pull/447) (D-371, D-372). Task T-3557, trước cắt 3.30.0. Ba nhóm auditor độc lập: SEC/CFG/CI · XFEAT/DOC/HAR · CODE/TEST/PERF/DEP. Kết quả theo ID ở [sổ audit](../../ops/AUDIT-STATUS.md).
 
 ## 1. Tóm tắt
 
@@ -51,4 +51,4 @@ AUD-HAR-296 là suy luận từ cách F3 xét tên ở gốc cây. AUD-HAR-297 c
 
 ## 5. Nhóm ARCH (D-373)
 
-`.claude/hooks/` đạt 843 817 B, gấp 2,29 lần mốc 2026-10-26 (369 274 B). Nhóm vượt 2× từ `024ee79` (#433). ADR-0050 đòi ADR xét lại khi điều đó xảy ra, nhưng chưa có ADR và cũng không có cổng máy nào bắt (AUD-ARCH-009 🟠). Bản sửa ở #448 gồm [ADR-0072](../adr/0072-review-dir-caps-after-2x.md) và cổng `SIZE_MARKS` trong `tests/test_docs_budget.py`. ADR-0072 giữ trần, đặt mốc 2026-11-05 cho `.claude/hooks`. Cổng đỏ khi một nhóm vượt 2× mốc gần nhất. Chi phí compile `guard.py` mỗi lệnh Bash chưa đo, giao T-3709.
+`.claude/hooks/` đạt 843 817 B, gấp 2,29 lần mốc 2026-10-26 (369 274 B). Nhóm vượt 2× từ `024ee79` (#433). ADR-0050 đòi ADR xét lại khi điều đó xảy ra, nhưng chưa có ADR và cũng không có cổng máy nào bắt (AUD-ARCH-009 🟠). Bản sửa ở #448 gồm [ADR-0072](../../adr/0072-review-dir-caps-after-2x.md) và cổng `SIZE_MARKS` trong `tests/test_docs_budget.py`. ADR-0072 giữ trần, đặt mốc 2026-11-05 cho `.claude/hooks`. Cổng đỏ khi một nhóm vượt 2× mốc gần nhất. Chi phí compile `guard.py` mỗi lệnh Bash chưa đo, giao T-3709.

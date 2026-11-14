@@ -526,3 +526,80 @@
 - Lý do (tiêu chí chất lượng cuối): (1) đúng/an toàn: mọi diff ngoài tài liệu từ 7ca87a6 (#497…#510, #512) đã qua review độc lập sạch ở head (ADR-0057), nên quét lại ngay trùng việc; Lát 3 là các 🔴 đã biết từ audit 11-11 — hoãn không che lỗi chưa biết trong khoảng này vì review từng PR đã rà delta. (2) đường lùi: audit delta vẫn chạy trước release-check (hàng audit và review_debt chặn GO), nên không bỏ qua, chỉ gộp một lần. (3) tiết kiệm: một lượt audit nhiều nhóm thay vì hai. Điều kiện đảo: nếu Lát 3 phát sinh 🔴 mới ngoài PLAN thì audit delta ngay.
 - Đường lùi: Chạy audit delta ngay ở giữa Lát 3 bằng /audit delta; thêm 🔴/🟠 mới vào PLAN-harden-2026-11-11
 - Đính chính (2026-11-12, review #512 🟠-1): lời "#512 … đã qua review độc lập sạch ở head" ở trên được viết trước khi #512 có review; review sạch của #512 ghi sau, ở head chứa chính D-428. Phạm vi lập luận: #497…#510 (đã có dấu review sạch trên PR). Chưa kiểm hàng `audit`/`review_debt` của `release-check` có đòi một lượt audit delta đã chạy hay chỉ đếm 🔴/🟠 mở và file đổi sau SHA quét (hàng `review_debt` đang báo 2 file của #512) — kỷ luật chạy audit delta trước release-check là của phiên chính.
+
+### D-429 · 2026-11-12T15:13:01+00:00 · AUD-SEC-645: CR trần ngoài nháy xử lý thế nào ở guard?
+
+- Phương án: (1) Bỏ \r khỏi lex.whitespace của tokenizer · (2) Luật STRICT_BARE: CR trần ngoài nháy → BUDGET (chặn ở mọi chính sách)
+- Chọn: Luật STRICT_BARE: CR trần ngoài nháy → BUDGET (chặn ở mọi chính sách)
+- Lý do (tiêu chí chất lượng cuối): (1) đúng và an toàn: shlex.split, str.split và regex \s ở các tầng khác vẫn tách từ ở CR nên sửa tokenizer không đóng được mọi tầng; BUDGET ở tập con chuẩn đóng cùng lúc, theo D-415 (không đọc chắc → chặn, không thêm cách đọc mới). Chi phí: dòng lệnh CRLF dán vào có CR trần bị chặn — bash vốn đọc sai các lệnh đó.
+- Đường lùi: Xoá luật CR khỏi STRICT_BARE và ca corpus aud645-*, rồi chọn phương án 1 nếu đo được CRLF dán vào gây chặn oan thường xuyên
+
+### D-430 · 2026-11-13T00:49:09+00:00 · Mở rộng tập con guard đọc chắc bằng cách nào để họ lỗi cú pháp shell hội tụ?
+
+- Phương án: (1) Thêm từng cú pháp vào bảng cấm STRICT_* · (2) Ngữ pháp dương: lệnh có luật chỉ qua khi mọi từ thuộc dạng được phép (cổng _ruled_word_why trong _allowlist_why), cú pháp bash mới mặc định ngoài tập con · (3) Parser bash thật (bashlex/tree-sitter)
+- Chọn: Ngữ pháp dương: lệnh có luật chỉ qua khi mọi từ thuộc dạng được phép (cổng _ruled_word_why trong _allowlist_why), cú pháp bash mới mặc định ngoài tập con
+- Lý do (tiêu chí chất lượng cuối): (1) đúng và an toàn: bảng cấm cho qua mọi cú pháp chưa liệt kê nên 16 🔴 cùng họ vẫn mở sau 12 ngày (ADR-0063 đã hứa 'ngoài tập con → chặn'); ngữ pháp dương làm lệch của bộ đọc nghiêng về chặn. (3) stdlib-only loại phương án 3. Đo trên 18.274 lệnh thật: cổng hẹp chặn thêm 13 lệnh (0,07 %), dưới ngưỡng 0,2 %. Chủ repo đã chọn hướng 'khoá tập con đọc chắc'.
+- Đường lùi: Revert từng lát (độc lập nhau); quay về bảng cấm STRICT_* của ADR-0063/0065
+
+### D-431 · 2026-11-13T00:49:23+00:00 · Cổng tập con: mã lý do, độ rộng và ngưỡng dừng
+
+- Phương án: (1) Mã BUDGET deny mọi chính sách, cổng hẹp (P0–P8), lớp giá trị biến không biết chấp nhận có hạn 2027-01-21 theo ADR-0067, ngưỡng dừng 0,2 % lệnh thật mỗi lát · (2) Mã mới tách ask/deny, biến thể chặt cấm mọi từ mở đầu bằng mở rộng (chặn thêm 0,41 %)
+- Chọn: Mã BUDGET deny mọi chính sách, cổng hẹp (P0–P8), lớp giá trị biến không biết chấp nhận có hạn 2027-01-21 theo ADR-0067, ngưỡng dừng 0,2 % lệnh thật mỗi lát
+- Lý do (tiêu chí chất lượng cuối): (1) an toàn: BUDGET đã thuộc UNSURE_CODES nên chặn ở mọi chính sách, ADR-0018/0019 cấm guard hỏi người nên không tách ask/deny; (4) trải nghiệm: cổng hẹp chặn 0,07 % so với 0,41 % của biến thể chặt, và 2,0 % nếu cấm mọi mở rộng trần; lớp 'giá trị biến không biết' (git reset "$X") cần phạm vi chấp nhận của ADR-0067 hoặc sandbox, không đóng được ở cú pháp. Mỗi lát có ca corpus chặn + ca đối chứng allow, lát nào làm hơn 0,2 % lệnh thật đổi từ cho qua sang chặn thì không merge và mở D mới.
+- Đường lùi: Đổi mã BUDGET sang mã khác hoặc nới ngưỡng bằng D mới; revert từng lát
+
+### D-432 · 2026-11-13T00:49:24+00:00 · Hai 🔴 ngoài lớp cú pháp: 691 (ssh-agent) và 648 (formatter chạm dòng ký GO-NO-GO)
+
+- Phương án: (1) 691 bằng đọc lại hậu tố (lệnh lạ có tên có luật trong 3 đối số đầu thì quét hậu tố như một lệnh), không bảng trình bọc; 648 xử lý phía Write/Edit (dòng §5 có ô tên/ngày mà không ở dạng bảng chuẩn thì chặn lúc ghi), ngoài cổng · (2) Bảng trình bọc lệnh mở rộng mãi cho 691; 648 chặn formatter ở Bash
+- Chọn: 691 bằng đọc lại hậu tố (lệnh lạ có tên có luật trong 3 đối số đầu thì quét hậu tố như một lệnh), không bảng trình bọc; 648 xử lý phía Write/Edit (dòng §5 có ô tên/ngày mà không ở dạng bảng chuẩn thì chặn lúc ghi), ngoài cổng
+- Lý do (tiêu chí chất lượng cuối): (2) giữ đường lùi và (3) đơn giản, test được: bảng trình bọc lại là danh sách cấm phải vá mãi (cùng lỗi cốt lõi); đọc lại hậu tố chỉ thêm chặn, gitleaks git --no-banner vẫn qua. 648 là lỗi ghi file, không phải đọc lệnh Bash nên không thuộc cổng.
+- Đường lùi: Bỏ lát 6 và luật Write/Edit của 648; quay về bảng trình bọc hoặc ghi chấp nhận có hạn
+
+### D-433 · 2026-11-13T00:51:31+00:00 · Cắt chỗ nào để docs/autopilot về dưới trần byte khi thêm D-429…D-432?
+
+- Phương án: (1) Dời PLAN-3.14-app.md (đã đóng, 0 task mở, 20 KB) sang docs/archive/autopilot theo ADR-0070 · (2) Nới trần byte của docs/autopilot
+- Chọn: Dời PLAN-3.14-app.md (đã đóng, 0 task mở, 20 KB) sang docs/archive/autopilot theo ADR-0070
+- Lý do (tiêu chí chất lượng cuối): (1) đúng quy tắc ADR-0043: cắt chỗ khác, không nới trần; PLAN không còn task mở, PROGRESS không nhắc, chỉ SPEC-app, ADR-0038, CHANGELOG-ARCHIVE trỏ tới nên viết lại ba liên kết là đủ; test_plan_waves nhúng cứng nên không phụ thuộc đường dẫn.
+- Đường lùi: git mv ngược về docs/autopilot và hoàn lại ba liên kết
+
+### D-434 · 2026-11-13T01:31:08+00:00 · GATE_NAMES có gồm cả tên thụ động/trình thông dịch (python3, echo, cat, ls…) mà _scan_command có nhánh không?
+
+- Phương án: (1) Giữ nguyên: gom mọi tên _scan_command có nhánh vào GATE_NAMES · (2) Tách thêm GATE_PASSIVE (trình thông dịch không phải shell + bảng thụ động) khỏi GATE_NAMES; test buộc mỗi tên rẽ nhánh phải thuộc một trong hai tập
+- Chọn: Tách thêm GATE_PASSIVE (trình thông dịch không phải shell + bảng thụ động) khỏi GATE_NAMES; test buộc mỗi tên rẽ nhánh phải thuộc một trong hai tập
+- Lý do (tiêu chí chất lượng cuối): (1) đúng và nhất quán: ADR-0076 ghi python3 scripts/xt.py … không qua cổng và D-432 coi echo/grep/cat là bảng thụ động, nên cổng không được kích hoạt ở các tên đó; (4) trải nghiệm: phương án 1 kéo python3/echo vào cổng ở lát 2 và có rủi ro vượt ngưỡng chặn oan 0,2 % của D-431. Test hai tập vẫn bắt tên rẽ nhánh mới bị quên.
+- Đường lùi: Gộp GATE_PASSIVE trở lại GATE_NAMES (một dòng) nếu đo thấy lát 2 cần kích hoạt ở tên thụ động
+
+### D-435 · 2026-11-13T02:36:22+00:00 · Trình thông dịch (python3/node/perl/ruby/php) nằm ở GATE_PASSIVE (D-434) nên cổng P2/P3 không kích hoạt: python3 "$X"-c '…' (mở rộng dính vào cờ -c) vẫn lọt sau ADR-0076. Xử lý thế nào?
+
+- Phương án: (1) Kích hoạt cổng P2/P3 cho trình thông dịch (bỏ python3/node/perl/ruby/php khỏi GATE_PASSIVE) · (2) Giữ PASSIVE nhưng thêm luật hẹp: cờ của trình thông dịch có mở rộng/glob → BUDGET (cờ -c/-e/-m/--eval… nguyên văn, mở rộng chỉ ở đối số sau)
+- Chọn: Giữ PASSIVE nhưng thêm luật hẹp: cờ của trình thông dịch có mở rộng/glob → BUDGET (cờ -c/-e/-m/--eval… nguyên văn, mở rộng chỉ ở đối số sau)
+- Lý do (tiêu chí chất lượng cuối): (1) an toàn và (4) trải nghiệm: bỏ trình thông dịch khỏi PASSIVE kéo mọi lệnh 'python3 scripts/xt.py …', 'python3 -m unittest …' qua cổng (hàng nghìn lệnh lành mỗi phiên) và là rủi ro vượt ngưỡng chặn oan 0,2 % của D-431; luật hẹp chỉ chạm lệnh mà CỜ có mở rộng (hiếm) nên đóng đúng lỗ python3 "$X"-c mà không đổi D-434. Cổng vẫn ngữ pháp dương: mọi từ ở vị trí cờ của trình thông dịch phải nguyên văn.
+- Đường lùi: Bỏ luật hẹp, chuyển trình thông dịch về GATE_NAMES nếu đo cho thấy chặn oan thấp
+
+### D-436 · 2026-11-13T02:51:24+00:00 · Cắt chỗ nào để docs/ops về dưới trần byte khi ghi AUD-SEC-724…728 (còn 996 B dưới trần)?
+
+- Phương án: (1) Dời AUDIT-REPORT-2026-11-04-delta.md và AUDIT-REPORT-2026-11-05-delta.md (14,5 KB) sang docs/archive/ops theo ADR-0070 · (2) Dời GO-NO-GO của bản cũ (3.29.0…3.32.0) · (3) Nới trần byte của docs/ops
+- Chọn: Dời AUDIT-REPORT-2026-11-04-delta.md và AUDIT-REPORT-2026-11-05-delta.md (14,5 KB) sang docs/archive/ops theo ADR-0070
+- Lý do (tiêu chí chất lượng cuối): (1) đúng quy tắc ADR-0043/ADR-0070: cắt chỗ khác, không nới trần; giữ báo cáo đầy đủ gần nhất (2026-11-02-full) và delta gần nhất (2026-11-11); không công cụ nào đọc hai báo cáo theo đường dẫn (grep scripts/, tests/, .github/, .claude/, framework/), PROGRESS không nhắc; chỉ AUDIT-STATUS có hai liên kết, viết lại cùng liên kết trong hai báo cáo, check-links xanh. (2) bị loại: GO-NO-GO 3.30.0…3.31.1 còn chờ người ký (PROGRESS) và guard chặn dời GO-NO-GO*.md bằng Bash.
+- Đường lùi: git mv ngược về docs/ops và hoàn lại liên kết
+
+### D-437 · 2026-11-13T07:40:47+00:00 · Lát 2: P2 (không tra GIT_DANGER_LONG) buộc đổi expect của ca từng là đối chứng cho qua (--set-upstream$X, --verbose$X, --soft$X, curl -G -sSd$TOKEN…). Chấp nhận hay thu hẹp P2 bằng bảng cờ nguy hiểm theo lệnh con?
+
+- Phương án: (1) A: đổi expect các ca đó sang BUDGET và ghi D (theo đúng ADR-0076, chặn oan đo được 0,005 %) · (2) B: thu hẹp P2 bằng bảng cờ nguy hiểm theo từng lệnh con (quay lại cách liệt kê mà ADR đã loại; 711 còn lọt dạng mới)
+- Chọn: A: đổi expect các ca đó sang BUDGET và ghi D (theo đúng ADR-0076, chặn oan đo được 0,005 %)
+- Lý do (tiêu chí chất lượng cuối): (1) đúng và an toàn: bảng cờ theo lệnh con chính là danh sách cấm đã gây 16 🔴 cùng họ (D-430); (4) trải nghiệm: đo trên 19.026 lệnh Bash thật chỉ 1 lệnh (0,005 %, dưới ngưỡng 0,2 % của D-431) đổi từ cho qua sang chặn — một vòng lặp git log -S"$id" có giá trị dính liền cờ ngắn. Cách viết lại có sẵn: tên cờ nguyên văn, mở rộng chỉ ở giá trị sau dấu = hoặc ở đối số kế.
+- Đường lùi: Thu hẹp P2 bằng bảng cờ theo lệnh con (phương án B) nếu đo cho thấy chặn oan thường xuyên; khôi phục expect cũ của các ca control
+
+### D-438 · 2026-11-13T07:40:48+00:00 · Lát 2: cổng _ruled_word_why ghi đè câu hỏi BUDGET đã có của luật cũ (gh … $(echo)-d ở strict đổi ask → deny; dấu GIT_DYN_FLAG_MARK không còn lệnh thật sinh ra). Chấp nhận hay cổng nhường khi luật cũ đã hỏi BUDGET?
+
+- Phương án: (1) A: chấp nhận (BUDGET là deny ở mọi chính sách), đổi quyết định thô sang deny và thay ví dụ của dấu · (2) B: cổng nhường khi luật cũ đã hỏi BUDGET (sửa _argv_shell_check)
+- Chọn: A: chấp nhận (BUDGET là deny ở mọi chính sách), đổi quyết định thô sang deny và thay ví dụ của dấu
+- Lý do (tiêu chí chất lượng cuối): (1) an toàn: D-431 đặt BUDGET deny ở mọi chính sách và ADR-0018/0019 cấm guard hỏi người, nên 'ask' mang mã BUDGET vốn đã thành deny — quyết định CUỐI không đổi; phương án B thêm một nhánh ngoại lệ vào _argv_shell_check (thêm cách đọc mới, ngược D-415). Đây là siết (ask → deny), không phải hạ mã như lỗi review #523.
+- Đường lùi: Thêm nhánh nhường BUDGET vào _argv_shell_check và khôi phục 5 dòng AS_MAIN raw ask
+
+### D-439 · 2026-11-13T07:40:49+00:00 · printf ở GATE_PASSIVE dù printf -v ghi biến; pytest/tox/nox ở GATE_NAMES trong khi ADR-0076 ghi pytest không qua cổng. Xếp thế nào?
+
+- Phương án: (1) printf → GATE_NAMES; pytest/tox/nox giữ GATE_NAMES (siết, chặn oan thêm đo được 0 ở cả hai), ADR dòng 56 được D này đính chính · (2) printf giữ PASSIVE; pytest/tox/nox → GATE_PASSIVE theo câu chữ ADR
+- Chọn: printf → GATE_NAMES; pytest/tox/nox giữ GATE_NAMES (siết, chặn oan thêm đo được 0 ở cả hai), ADR dòng 56 được D này đính chính
+- Lý do (tiêu chí chất lượng cuối): (1) an toàn: đo trên 19.026 lệnh Bash thật cả hai phương án chênh 0 lệnh; khi chi phí bằng nhau chọn bên chặt (printf -v ghi biến như read/let; pytest chạy mã từ conftest/-p). ADR-0076 không sửa (đã Accepted): câu 'pytest không qua cổng' bị D này thay — cổng chỉ chặn dạng cờ/lệnh con có mở rộng nên rất hiếm chạm pytest.
+- Đường lùi: Chuyển printf về GATE_PASSIVE hoặc pytest/tox/nox sang GATE_PASSIVE (sửa PASSIVE_PIN và test ghim)

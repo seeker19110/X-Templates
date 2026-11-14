@@ -6,7 +6,7 @@
 | Trạng thái | Approved for implementation (phiên chính tự duyệt, ADR-0008) |
 | Phiên bản | 1 — hợp đồng API chốt trước mọi task màn (`LOOP-ORCH-007`, T-1911) |
 | Kiến trúc, bảo mật | [ADR-0038](../adr/0038-local-app-on-xt.md) — file này không chép lại, chỉ chốt giao ước |
-| Kế hoạch | [`PLAN-3.14-app.md`](../autopilot/PLAN-3.14-app.md) |
+| Kế hoạch | [`PLAN-3.14-app.md`](../archive/autopilot/PLAN-3.14-app.md) |
 
 ## 1. User story
 Là người dùng khung (chủ repo khung hoặc chủ dự án đích), tôi muốn mở một trang web cục bộ bằng một lệnh, để xem thư viện
