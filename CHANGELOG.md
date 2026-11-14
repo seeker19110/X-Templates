@@ -190,6 +190,10 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
 
 ### Fixed
 
+- T-3736 (AUD-HAR-378): `release-check` và `release-sign` chỉ lối xử lý theo PLAN và ngân sách của vòng bị chặn.
+
+- AUD-DATA-013: cổng migration web-api-ts từ chối chỉ mục concurrent trong giao dịch và giữ ngoại lệ 0005.
+
 - T-3726, AUD-PERF-030: lưu kết quả lệnh kiểm Blueprint theo khóa chuẩn, giữ quy tắc phân biệt nháy.
 
 - AUD-DATA-012: cổng migration web-api-ts nhận diện cả CREATE INDEX không ghi tên trên bảng có sẵn.
@@ -201,6 +205,8 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
   các đối chứng tệp `bash x.sh input.txt`, `bash literal-script.sh`, `source ./env.sh` được cho phép.
   Bằng chứng chặn oan: [mẫu 505 lượt lệnh thật](research/evidence/2026-11-13-guard-p4.json), 464 thân lệnh,
   0 lượt đổi quyết định trên mẫu; không suy rộng thành bảo đảm cho toàn lịch sử. Gate gốc `loop record` exit 0: 802 test (1615s) và 2621 ca bench đạt.
+
+- Tài liệu và mẫu GO-NO-GO ghi rõ quyền ký phát hành (ADR-0074) và duyệt MVP (ADR-0069) khi dự án bật tự động (D-481).
 
 - T-3728: skill `autopilot` theo hành động `stage-approve` của `loop next-step` khi dự án bật tự nghiệm thu MVP
   (AUD-XFEAT-048). Cập nhật số đo biên dịch guard trong chú thích `_lib.sh` theo audit 2026-11-11 (AUD-PERF-031).

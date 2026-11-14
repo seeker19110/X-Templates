@@ -604,6 +604,13 @@
 - Lý do (tiêu chí chất lượng cuối): Cổng cũ exit 0 khi cả ba nhóm chưa quét. Cổng theo phạm vi kiểm đúng việc và không buộc đóng nợ ngoài T-3729
 - Đường lùi: Revert thay đổi Gate của T-3729, giữ cổng phát hành audit --strict
 
+### D-481 · 2026-11-14T03:31:15+00:00 · Audit DOC: đồng bộ hướng dẫn G7/MVP với quyền opt-in đã triển khai ra sao?
+
+- Phương án: (1) Trỏ README và vòng đời tới ADR-0069/0074, nêu người duyệt mặc định và phạm vi MVP · (2) Chép lại điều kiện chi tiết trong từng tài liệu
+- Chọn: Trỏ README và vòng đời tới ADR-0069/0074, nêu người duyệt mặc định và phạm vi MVP
+- Lý do (tiêu chí chất lượng cuối): Giữ một nhà cho điều kiện; lời hướng dẫn khớp code đang chạy và không thay đổi điều kiện phê duyệt
+- Đường lùi: Revert lát tài liệu để phục hồi cách diễn đạt trước đó
+
 ### D-482 · 2026-11-14T03:45:11+00:00 · Giữ trần docs/autopilot khi hợp nhất các PR sau #532 bằng cách nào?
 
 - Phương án: (1) Dời nguyên văn các quyết định cũ đã có trong bản phát hành sang sổ tháng theo D-314 · (2) Dời thêm PLAN đã đóng sang kho theo ADR-0070
