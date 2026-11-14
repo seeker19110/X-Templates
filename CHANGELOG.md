@@ -190,6 +190,8 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
 
 ### Fixed
 
+- `pr next`, steward và màn PR chỉ đề xuất merge sau khi cùng kiểm nhánh đích hiện tại theo `merge-check` (#551).
+
 - `xt.py merge-check` kiểm nhánh đích hiện tại trước khi đề xuất merge nếu ruleset đòi cập nhật nhánh. Head tụt sau phải cập nhật
   và chạy lại CI. Lỗi đọc phép so chuyển sang chờ để tránh dùng trạng thái PR cũ (#551).
 
