@@ -1762,8 +1762,22 @@ class AuditPlanTest(GitRepoMixin, unittest.TestCase):
         self.commit_files({"lib/a.py": "1", "b.py": "1", "BLUEPRINT.md": bp}, 1_700_000_000)
         self.commit_files({"lib/a.py": "2"}, 1_700_000_100)
         files = xt._repo_files(self.repo)
-        stale = xt.blueprint_stale_evidence(self.repo, self.repo / "BLUEPRINT.md", files)
+        with unittest.mock.patch.object(xt, "_git", wraps=xt._git) as git:
+            stale = xt.blueprint_stale_evidence(self.repo, self.repo / "BLUEPRINT.md", files)
         self.assertEqual(stale, [{"id": "A-001", "kind": "Bằng chứng", "files": ["lib/a.py"]}])
+        self.assertEqual(sum(call.args[1] == "blame" for call in git.call_args_list), 1)
+
+    def test_audit_plan_ignores_uncommitted_evidence_line(self):
+        self.init_repo()
+        blueprint = self.repo / "BLUEPRINT.md"
+        line = "- [x] `A-001` **MUST** a → Kiểm: x — Bằng chứng: lib/a.py\n"
+        self.commit_files({"lib/a.py": "1", "BLUEPRINT.md": line}, 1_700_000_000)
+        self.commit_files({"lib/a.py": "2"}, 1_700_000_100)
+        files = xt._repo_files(self.repo)
+        blueprint.write_text(line.replace("Kiểm: x", "Kiểm: y"), encoding="utf-8")
+        self.assertEqual(xt.blueprint_stale_evidence(self.repo, blueprint, files), [])
+        blueprint.unlink()
+        self.assertEqual(xt._blame_line_times(self.repo, blueprint.name), {})
 
     def test_audit_plan_rescan_from_status(self):
         self.init_repo()
