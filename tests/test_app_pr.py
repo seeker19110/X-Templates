@@ -263,7 +263,15 @@ class PrsTest(unittest.TestCase):
                 return [[{"number": 7}]]
             if path.endswith("/rules/branches/main"):
                 return [
-                    [{"type": "required_status_checks", "parameters": {"strict_required_status_checks_policy": True}}]
+                    [
+                        {
+                            "type": "required_status_checks",
+                            "parameters": {
+                                "strict_required_status_checks_policy": True,
+                                "required_status_checks": [{"context": "gate"}],
+                            },
+                        }
+                    ]
                 ]
             if path == live:
                 return [{"behind_by": 2}]

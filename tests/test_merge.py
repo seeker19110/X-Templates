@@ -73,7 +73,12 @@ def commit_base_xt(base: Path, committed: str, working: str | None = None) -> No
         (base / "xt.yaml").write_text(working, encoding="utf-8")
 
 
-REQUIRED_TEST = [{"type": "required_status_checks", "parameters": {"required_status_checks": [{"context": "test"}]}}]
+REQUIRED_TEST = [
+    {
+        "type": "required_status_checks",
+        "parameters": {"required_status_checks": [{"context": "test"}], "strict_required_status_checks_policy": False},
+    }
+]
 
 
 class FakeGh:
@@ -268,19 +273,19 @@ class MergeDecisionTest(unittest.TestCase):
         # không bắt buộc: skipped chỉ là không có bằng chứng; cancelled vẫn đỏ như trước
         self.assertEqual(xt._ci_buckets([run("test", "SKIPPED")], [])[3], [])
         self.assertEqual(xt._ci_buckets([run("lint", "CANCELLED")], req)[0], ["lint"])
-        # bản hợp lệ thắng bản skipped cùng tên; vắng hẳn → không phải not_run (việc của missingRequired)
+        # bản hợp lệ thắng bản skipped cùng tên; vắng hẳn cũng không có bằng chứng
         self.assertEqual(xt._ci_buckets([run("test", "SKIPPED"), run("test", "SUCCESS")], req)[2:], (["test"], []))
-        self.assertEqual(xt._ci_buckets([run("lint", "SUCCESS")], req)[3], [])
+        self.assertEqual(xt._ci_buckets([run("lint", "SUCCESS")], req)[3], ["test"])
         # app: ruleset đòi integration_id 15368; bản của app 99 không thay được, dù xanh
         got = xt._ci_buckets([run("test", "SUCCESS", 99), run("lint", "SUCCESS")], [("test", 15368)])
         self.assertEqual((got[2], got[3]), (["lint"], ["test"]))
         got = xt._ci_buckets([run("test", "SUCCESS", 15368), run("lint", "SUCCESS")], [("test", 15368)])
         self.assertEqual((got[2], got[3]), (["test", "lint"], []))
         legacy = {"__typename": "StatusContext", "context": "test", "state": "SUCCESS"}  # commit status không có app
-        self.assertEqual(xt._ci_buckets([legacy], [("test", 15368)])[2:], (["test"], []))
+        self.assertEqual(xt._ci_buckets([legacy], [("test", 15368)])[2:], ([], ["test"]))
         # merge_decision: PR "xanh" nhưng check bắt buộc bị skip → human, không phải merge
         p = pr(
-            statusCheckRollup=[run("test", "SKIPPED"), run("lint", "SUCCESS")],
+            statusCheckRollup=[run("test", "SKIPPED"), run("lint", "SUCCESS", 15368)],
             requiredChecks=[{"context": "test"}, {"context": "lint", "appId": 15368}, "rác"],
         )
         d = xt.merge_decision(p, 3)
@@ -312,7 +317,8 @@ class MergeDecisionTest(unittest.TestCase):
             {
                 "type": "required_status_checks",
                 "parameters": {
-                    "required_status_checks": [{"context": "test", "integration_id": 15368}, {"context": "lint"}]
+                    "required_status_checks": [{"context": "test", "integration_id": 15368}, {"context": "lint"}],
+                    "strict_required_status_checks_policy": False,
                 },
             }
         ]
@@ -1344,13 +1350,13 @@ class MergeCheckCliTest(unittest.TestCase):
             {"id": 1, "name": "quality", "status": "completed", "conclusion": "failure"},
             {"id": 2, "name": "quality", "status": "completed", "conclusion": "success"},
         ]
-        with FakeGh(runs=runs).patch():
+        with FakeGh(runs=runs, rules=[]).patch():
             got = xt.merge_decision(xt._pr_rest("7"), autonomy=2)
         self.assertEqual(got["verdict"], "merge")
-        with FakeGh(runs=list(reversed(runs)), statuses=[]).patch():  # thứ tự trả về không quyết định
+        with FakeGh(runs=list(reversed(runs)), statuses=[], rules=[]).patch():  # thứ tự trả về không quyết định
             self.assertEqual(xt.merge_decision(xt._pr_rest("7"), autonomy=2)["verdict"], "merge")
         newer_red = [{**runs[0], "id": 3}, runs[1]]
-        with FakeGh(runs=newer_red).patch():
+        with FakeGh(runs=newer_red, rules=[]).patch():
             self.assertEqual(xt.merge_decision(xt._pr_rest("7"), autonomy=2)["verdict"], "fix")
 
     def test_review_decision_from_latest_review_per_user(self):
@@ -3229,7 +3235,8 @@ class MissingRequiredCheckTest(unittest.TestCase):
         {
             "type": "required_status_checks",
             "parameters": {
-                "required_status_checks": [{"context": "test"}, {"context": "dast"}, {"context": "dast"}, {}]
+                "required_status_checks": [{"context": "test"}, {"context": "dast"}, {"context": "dast"}],
+                "strict_required_status_checks_policy": False,
             },
         },
     ]
@@ -3249,13 +3256,21 @@ class MissingRequiredCheckTest(unittest.TestCase):
         self.assertNotEqual(p["reviewDecision"], "REVIEW_REQUIRED")
         d = xt.merge_decision(p, 3)
         self.assertEqual(d["verdict"], "human")
-        self.assertIn("ruleset đòi check bắt buộc không có trên head: dast", d["reasons"][0])
-        self.assertIn("GitHub báo BLOCKED vì thiếu check", d["reasons"][0])
+        self.assertIn("check bắt buộc không chạy thật", d["reasons"][0])
+        self.assertIn("dast", d["reasons"][0])
         changes = {**p, "reviewDecision": "CHANGES_REQUESTED"}
-        self.assertEqual(xt.merge_decision(changes, 3)["verdict"], "fix")  # review đòi sửa vẫn được báo trước
+        self.assertEqual(xt.merge_decision(changes, 3)["verdict"], "human")  # thiếu bằng chứng CI giữ ưu tiên
 
     def test_blocked_without_missing_check_stays_review(self):
-        rules = [{"type": "required_status_checks", "parameters": {"required_status_checks": [{"context": "test"}]}}]
+        rules = [
+            {
+                "type": "required_status_checks",
+                "parameters": {
+                    "required_status_checks": [{"context": "test"}],
+                    "strict_required_status_checks_policy": False,
+                },
+            }
+        ]
         p = self.rest(pull={"mergeable_state": "blocked"}, rules=rules)
         self.assertNotIn("missingRequired", p)
         self.assertEqual(p["reviewDecision"], "REVIEW_REQUIRED")
@@ -3273,8 +3288,8 @@ class MissingRequiredCheckTest(unittest.TestCase):
         self.assertEqual(xt.merge_decision(pending, 3)["verdict"], "wait")  # còn check chạy: chờ, chưa kết luận
 
     def test_rules_unreadable_falls_back(self):
-        with unittest.mock.patch.object(xt, "_gh_items", side_effect=xt.PrInputError("403")):
-            self.assertEqual(xt._required_specs("repos/o/r", "main"), ([], False))
+        with unittest.mock.patch.object(xt, "_gh_api", side_effect=xt.PrInputError("403")):
+            self.assertEqual(xt._required_specs("repos/o/r", "main"), (None, False))
         with FakeGh(raw={"repos/{owner}/{repo}/rules/branches/rel%2F1": json.dumps([{"type": "x"}])}).patch():
             self.assertEqual(xt._required_specs("repos/{owner}/{repo}", "rel/1"), ([], False))
 
@@ -5092,3 +5107,172 @@ class GreenMergePolicyTest(unittest.TestCase):
         ):
             args = xt.argparse.Namespace(pr=None, event=None)
             self.assertEqual(xt._steward_targets(args, "repos/o/r")[0], ["7", "8", "9"])
+
+    def test_steward_event_optional_scans_every_pr_in_number_order(self):
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            commit_base_xt(base, "merge_autonomy: L3\nmerge_review: optional\n")
+            event = base / "event.json"
+            event.write_text(json.dumps({"check_suite": {"pull_requests": [{"number": 9}]}}), encoding="utf-8")
+            gh = StewardGh(open_prs=[{"number": 9}, {"number": 7}, {"number": 8}])
+
+            def one(n, repo, worktree, apply, gh_repo):
+                return {"pr": n, "head": "", "action": "wait", "why": "CI", "applied": False}
+
+            with (
+                unittest.mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": directory}),
+                unittest.mock.patch.object(xt, "_steward_one", side_effect=one),
+                gh.patch(),
+            ):
+                rc, out, _ = run_main("pr", "steward", "--event", str(event), "--json")
+            self.assertEqual(rc, 0)
+            self.assertEqual([r["pr"] for r in json.loads(out)], ["7", "8", "9"])
+
+
+class MergeRequiredEvidenceTest(unittest.TestCase):
+    """Không kết luận merge khi chưa đọc được ruleset hay nguồn check đã ghim."""
+
+    class RulesErrorGh(StewardGh):
+        def respond(self, cmd, **kw):
+            if cmd[:2] == ["gh", "api"] and "/rules/branches/" in cmd[-1]:
+                return subprocess.CompletedProcess(cmd, 1, "", "HTTP 403")
+            return super().respond(cmd, **kw)
+
+    def setUp(self):
+        self.base = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        self.enterContext(unittest.mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(self.base)}))
+        commit_base_xt(self.base, "merge_autonomy: L3\nmerge_review: optional\n")
+
+    def test_rules_api_failure_blocks_cli_and_steward(self):
+        gh = self.RulesErrorGh(pull={"mergeable_state": "blocked"})
+        with gh.patch():
+            rc, out, _ = run_main("merge-check", "--pr", "7", "--json")
+            d = json.loads(out)
+            self.assertEqual((rc, d["verdict"], d["eligible"]), (1, "wait", False))
+            self.assertIn("ruleset", " ".join(d["reasons"]))
+            rc, out, _ = run_main("pr", "next", "--pr", "7", "--json")
+            self.assertEqual((rc, json.loads(out)["action"]), (0, "wait"))
+            rc, out, _ = run_main("pr", "steward", "--pr", "7", "--apply", "--json")
+            self.assertEqual((rc, json.loads(out)[0]["action"], gh.writes), (0, "wait", []))
+
+    def test_rules_api_failure_blocks_required_mode_too(self):
+        (self.base / "xt.yaml").write_text("merge_autonomy: L3\nmerge_review: required\n", encoding="utf-8")
+        subprocess.run(
+            ["git", "-C", str(self.base), "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qam", "required"],
+            check=True,
+            capture_output=True,
+        )
+        subprocess.run(["git", "-C", str(self.base), "update-ref", "refs/remotes/origin/main", "HEAD"], check=True)
+        gh = self.RulesErrorGh(pull={"mergeable_state": "clean"})
+        with gh.patch():
+            rc, out, _ = run_main("merge-check", "--pr", "7", "--json")
+        d = json.loads(out)
+        self.assertEqual((rc, d["verdict"], d["eligible"]), (1, "wait", False))
+
+    def test_malformed_rules_response_blocks(self):
+        path = f"{FakeGh.REPO}/rules/branches/main"
+        for raw in (
+            "{}",
+            "null",
+            "[{}]",
+            '[{"type":"required_status_checks","parameters":{}}]',
+            "<html>",
+            '[{"type":"required_status_checks","parameters":{"strict_required_status_checks_policy":false,"required_status_checks":[{}]}}]',
+            '[{"type":"required_status_checks","parameters":{"strict_required_status_checks_policy":false,"required_status_checks":[{"context":"ci","integration_id":true}]}}]',
+        ):
+            gh = StewardGh(raw={path: raw})
+            with self.subTest(raw=raw), gh.patch():
+                rc, out, _ = run_main("merge-check", "--pr", "7", "--json")
+                self.assertEqual((rc, json.loads(out)["verdict"]), (1, "wait"))
+
+    def test_unknown_strict_policy_blocks_merge_and_steward(self):
+        for value in ("missing", None, "true", 0, 1):
+            params = {"required_status_checks": [{"context": "test"}]}
+            if value != "missing":
+                params["strict_required_status_checks_policy"] = value
+            gh = StewardGh(rules=[{"type": "required_status_checks", "parameters": params}])
+            with self.subTest(value=value), gh.patch():
+                rc, out, _ = run_main("merge-check", "--pr", "7", "--json")
+                self.assertEqual((rc, json.loads(out)["verdict"]), (1, "wait"))
+                rc, out, _ = run_main("pr", "steward", "--pr", "7", "--apply", "--json")
+                self.assertEqual((rc, json.loads(out)[0]["action"], gh.writes), (0, "wait", []))
+
+    def test_readable_empty_rules_are_not_an_error(self):
+        gh = StewardGh(pull={"mergeable_state": "blocked"}, rules=[])
+        with gh.patch():
+            rc, out, _ = run_main("merge-check", "--pr", "7", "--json")
+        self.assertEqual((rc, json.loads(out)["verdict"]), (0, "merge"))
+
+    def test_pinned_app_requires_verified_matching_source(self):
+        rules = [
+            {
+                "type": "required_status_checks",
+                "parameters": {
+                    "required_status_checks": [{"context": "quality", "integration_id": 42}],
+                    "strict_required_status_checks_policy": False,
+                },
+            }
+        ]
+        for app_id, verdict in ((42, "merge"), (43, "human"), (None, "human")):
+            run = {"name": "quality", "status": "completed", "conclusion": "success"}
+            if app_id is not None:
+                run["app"] = {"id": app_id}
+            gh = StewardGh(pull={"mergeable_state": "blocked"}, rules=rules, runs=[run], statuses=[])
+            with self.subTest(app_id=app_id), gh.patch():
+                rc, out, _ = run_main("merge-check", "--pr", "7", "--json")
+                result = json.loads(out)
+                self.assertEqual((rc, result["verdict"]), (0 if verdict == "merge" else 1, verdict), result)
+                if verdict != "merge":
+                    rc, out, _ = run_main("pr", "steward", "--pr", "7", "--apply", "--json")
+                    self.assertEqual((rc, json.loads(out)[0]["action"], gh.writes), (0, "defer-human", []))
+        gh = StewardGh(
+            pull={"mergeable_state": "blocked"},
+            rules=rules,
+            runs=[],
+            statuses=[{"context": "quality", "state": "success"}],
+        )
+        with gh.patch():
+            rc, out, _ = run_main("merge-check", "--pr", "7", "--json")
+        self.assertEqual((rc, json.loads(out)["verdict"]), (1, "human"))
+
+    def test_repeated_context_preserves_each_required_source(self):
+        runs = [{"name": "quality", "status": "completed", "conclusion": "success", "app": {"id": 43}}]
+        for specs, verdict in (
+            ([{"context": "quality"}, {"context": "quality", "integration_id": 42}], "human"),
+            ([{"context": "quality", "integration_id": 42}, {"context": "quality"}], "human"),
+            ([{"context": "quality", "integration_id": 42}, {"context": "quality", "integration_id": 43}], "human"),
+        ):
+            rules = [
+                {
+                    "type": "required_status_checks",
+                    "parameters": {"required_status_checks": specs, "strict_required_status_checks_policy": False},
+                }
+            ]
+            gh = StewardGh(rules=rules, runs=runs, statuses=[])
+            with self.subTest(specs=specs), gh.patch():
+                rc, out, _ = run_main("merge-check", "--pr", "7", "--json")
+                self.assertEqual((rc, json.loads(out)["verdict"]), (1, verdict))
+
+    def test_missing_required_context_blocks_clean_and_pr_json(self):
+        rules = [
+            {
+                "type": "required_status_checks",
+                "parameters": {
+                    "required_status_checks": [{"context": "missing"}],
+                    "strict_required_status_checks_policy": False,
+                },
+            }
+        ]
+        runs = [{"name": "lint", "status": "completed", "conclusion": "success"}]
+        gh = StewardGh(pull={"mergeable_state": "clean"}, rules=rules, runs=runs, statuses=[])
+        with gh.patch():
+            rc, out, _ = run_main("merge-check", "--pr", "7", "--json")
+            self.assertEqual((rc, json.loads(out)["verdict"]), (1, "human"))
+            rc, out, _ = run_main("pr", "steward", "--pr", "7", "--apply", "--json")
+            self.assertEqual((rc, json.loads(out)[0]["action"], gh.writes), (0, "defer-human", []))
+        snapshot = pr(requiredChecks=[{"context": "missing"}])
+        rc, out, _ = run_main("merge-check", "--pr-json", "-", "--json", stdin=json.dumps(snapshot))
+        self.assertEqual((rc, json.loads(out)["verdict"]), (1, "human"))
+        snapshot["requiredChecks"] = []
+        rc, out, _ = run_main("merge-check", "--pr-json", "-", "--json", stdin=json.dumps(snapshot))
+        self.assertEqual((rc, json.loads(out)["verdict"]), (0, "merge"))

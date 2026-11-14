@@ -2676,6 +2676,7 @@ class MergeGuardBase(unittest.TestCase):
                     for f in pr["files"]
                 ],
                 f"{repo}/pulls/{n}/reviews?per_page=100": [],
+                f"{repo}/rules/branches/main": [],
                 f"{repo}/issues/{n}/comments?per_page=100": (
                     [
                         {
