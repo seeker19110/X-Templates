@@ -5149,15 +5149,30 @@ WRAPPER_FIXED_FLAGS = {
         {"-0", "--null", "-r", "--no-run-if-empty", "-x", "--exit", "-p", "--interactive", "-t", "--verbose"}
     ),
 }
-DQ_SCALAR_RE = re.compile(r'"(?:[^"$\x60\\]|\$(?:[A-Za-z_][A-Za-z0-9_]*|\{[A-Za-z_][A-Za-z0-9_]*\}|[0-9?#$!*]))*"')
+DQ_SCALAR_SPECIAL_RE = re.compile(r'["$\x60\\]')
+DQ_SCALAR_PARAM_RE = re.compile(r"\$(?:[A-Za-z_][A-Za-z0-9_]*|\{[A-Za-z_][A-Za-z0-9_]*\}|[0-9?#$!*])")
 DQ_ARITH_RE = re.compile(r'"\$\(\([0-9A-Za-z_ \t()+*/%-]+\)\)"')
 DQ_COMMAND_RE = re.compile(r'"\$\((?!\()[0-9A-Za-z_./ \t<>|&-]+\)"')
+
+
+def _quoted_scalar_text(word: str) -> bool:
+    """Duyệt chữ và tham số vô hướng một lượt, không thử lại các cách chia tên biến."""
+    end = len(word) - 1
+    if end < 1 or word[0] != '"' or word[end] != '"':
+        return False
+    start = 1
+    while special := DQ_SCALAR_SPECIAL_RE.search(word, start, end):
+        parameter = DQ_SCALAR_PARAM_RE.match(word, special.start(), end)
+        if parameter is None:
+            return False
+        start = parameter.end()
+    return True
 
 
 def _quoted_scalar(word: str) -> bool:
     """Phần nháy kép được phép làm đúng một giá trị cờ."""
     return bool(
-        DQ_SCALAR_RE.fullmatch(word)
+        _quoted_scalar_text(word)
         or DQ_ARITH_RE.fullmatch(word)
         and _raw_group_end(word, 3, "(") == len(word) - 1
         or DQ_COMMAND_RE.fullmatch(word)

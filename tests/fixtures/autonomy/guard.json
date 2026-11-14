@@ -23476,6 +23476,9 @@
 {"id": "adr76-p0-ctl-nice-literal", "origin": "control", "refs": ["ADR-0076"], "input": {"command": "nice -n 10 make"}, "expect": {"allowed": true}},
 {"id": "adr76-p0-ctl-xargs-quoted-value", "origin": "control", "refs": ["ADR-0076"], "input": {"command": "xargs -r -P \"$(nproc)\" -n 1 echo"}, "expect": {"allowed": true}, "note": "giá trị trong một cặp nháy kép sau cờ nhận giá trị"},
 {"id": "adr76-p0-ctl-timeout-literal", "origin": "control", "refs": ["ADR-0076"], "input": {"command": "timeout 30 npm test"}, "expect": {"allowed": true}},
-{"id": "adr76-p0-ctl-env-assign", "origin": "control", "refs": ["ADR-0076"], "input": {"command": "env FOO=$BAR npm test"}, "expect": {"allowed": true}}
+{"id": "adr76-p0-ctl-env-assign", "origin": "control", "refs": ["ADR-0076"], "input": {"command": "env FOO=$BAR npm test"}, "expect": {"allowed": true}},
+{"id": "aud781-ctl-quoted-build-priority", "origin": "control", "refs": ["AUD-SEC-781"], "input": {"command": "nice -n \"$priority\" make"}, "expect": {"allowed": true}},
+{"id": "aud782-ctl-nested-build-timeout", "origin": "control", "refs": ["AUD-SEC-782"], "input": {"command": "nice -n \"${priority}\" timeout -k \"$delay\" 10 make"}, "expect": {"allowed": true}},
+{"id": "aud783-ctl-descriptor-like-text", "origin": "control", "refs": ["AUD-SEC-783"], "input": {"command": "printf \"%s\" \"{build_log}\" >o"}, "expect": {"allowed": false, "code": "BUDGET"}}
  ]
 }

@@ -9919,6 +9919,15 @@ class GuardPrefixGateTest(_GuardDebtCase):
         assignment = '"COLOR=blue"'
         self.assertEqual(self.g._wrapper_bad(["env", assignment, "printenv", "COLOR"]), assignment)
 
+    def test_quoted_scalar_text_consumes_literal_words_and_parameters(self):
+        classify = self.g._quoted_scalar_text
+        for word in ('""', '"nightly build"', '"$OUTPUT_2/${NAME}.$1-$?"', '"$NAME-$NAME"'):
+            with self.subTest(word=word):
+                self.assertTrue(classify(word))
+        for word in ("", '"', "nightly", '"nightly', '"build"label"'):
+            with self.subTest(word=word):
+                self.assertFalse(classify(word))
+
     def test_old_rule_code_kept(self):  # luật cũ chặn trước giữ mã cũ (bài học review #523), cả strict
         cmds = (
             "nice -n$X git push origin feat/me --force",
