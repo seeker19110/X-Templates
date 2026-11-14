@@ -111,6 +111,39 @@ class ProgressCheckEdgeTest(TmpDirCase):
 # --------------------------------------------------------------------------- ci-check
 
 
+class CiMergeReviewConfigTest(TmpDirCase):
+    def test_ci_rejects_invalid_merge_review_and_accepts_supported_or_missing(self):
+        workflow = self.tmp / "workflows"
+        workflow.mkdir()
+        (workflow / "ci.yml").write_text(GOOD_WORKFLOW, encoding="utf-8")
+        with unittest.mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(self.tmp)}):
+            for value in ("optionl", "", '""', "null", "0", "OPTIONAL", "không"):
+                with self.subTest(value=value):
+                    (self.tmp / "xt.yaml").write_text(f"merge_review: {value}\n", encoding="utf-8")
+                    rc, out, _ = run_main("ci-check", workflow)
+                    self.assertEqual(rc, 1, out)
+                    self.assertIn("merge_review", out)
+                    self.assertIn("optional", out)
+                    self.assertIn("required", out)
+            for line in ("", "merge_review: optional\n", "merge_review: required\n"):
+                with self.subTest(line=line):
+                    (self.tmp / "xt.yaml").write_text(line, encoding="utf-8")
+                    rc, out, _ = run_main("ci-check", workflow)
+                    self.assertEqual(rc, 0, out)
+
+    def test_ci_checks_review_setting_without_workflow_directory(self):
+        (self.tmp / "xt.yaml").write_text("merge_review: optionl\n", encoding="utf-8")
+        with chdir(self.tmp), unittest.mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(self.tmp)}):
+            rc, out, _ = run_main("ci-check")
+        self.assertEqual(rc, 1, out)
+        self.assertIn("merge_review", out)
+        (self.tmp / "xt.yaml").write_text("merge_review: required\n", encoding="utf-8")
+        with chdir(self.tmp), unittest.mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(self.tmp)}):
+            rc, out, _ = run_main("ci-check")
+        self.assertEqual(rc, 0, out)
+        self.assertIn("bỏ qua", out)
+
+
 class CiCheckEdgeTest(unittest.TestCase):
     def test_workflow_without_jobs_key(self):
         self.assertEqual(xt.ci_check_text("permissions: read-all\non:\n  push:\n"), [])
