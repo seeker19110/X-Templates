@@ -81,7 +81,8 @@ Trong Claude Code, sau khi cài khung, gõ `/autopilot <mô tả yêu cầu>`:
    là CI/ruleset nhánh/review); mâu thuẫn spec không còn là điểm dừng: phiên chính tự quyết, ghi `D-NNN`.
 5. Hoàn thiện và phát hành bằng `/complete` (pha harden, ADR-0046): PR đặt `delivery_phase: harden` → `/audit` → trả nợ
    review theo PR/lát → `PLAN-harden` (🔴/🟠, MUST còn mở, sàn Gate M/L, thiết kế đầy đủ, refactor, hiệu năng) chạy cùng vòng
-   lặp với luật harden → `xt.py release-check` GO → `GO-NO-GO.md` (người ký). Lặp lại mỗi bản phát hành.
+   lặp với luật harden → `xt.py release-check` → `GO-NO-GO.md`. Người ký theo mặc định. Dự án bật ký tự động dùng
+   `xt.py release-sign` khi đủ điều kiện của [ADR-0074](docs/adr/0074-agent-release-signoff.md). Lặp lại mỗi bản phát hành.
 
 Hook trong [`.claude/`](.claude/settings.json) chặn thao tác nguy hiểm/không đảo ngược (lệnh phá huỷ, `curl | sh`, push nhánh chính…) mà không hỏi người (ADR-0018),
 chạy cổng chất lượng trước mỗi commit. Luật cho mọi harness ở [`AGENTS.md`](AGENTS.md). Giao thức đầy đủ:
