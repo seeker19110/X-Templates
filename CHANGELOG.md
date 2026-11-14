@@ -8,6 +8,9 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
 
 ### Added
 
+- [ADR-0077](docs/adr/0077-deployment-receipts.md) (T-3841, D-422…D-424) chốt cấu hình theo môi trường, receipt của
+  bản đang phục vụ, hàng `deploy` trong `release-check` và đích dev mặc định của gói `web-api-ts`. Mã triển khai
+  thuộc các lát T-3842 đến T-3844 và T-3860.
 - ADR-0076 lát 0 (T-3760; lý do chạm hàng rào: dựng lưới đối chứng cho các lát cổng tập con dương — chỉ thêm ca và hằng,
   không đổi quyết định nào của guard): 150 ca `control` `adr76-ctl-*` trong `tests/fixtures/autonomy/guard.json` lấy từ
   lệnh agent chạy theo quy trình (`xt.py`, `dev-task.sh`, Gate, git/gh đọc-ghi lành, commit/PR bằng heredoc, `rm -rf
