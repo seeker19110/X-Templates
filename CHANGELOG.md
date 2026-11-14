@@ -183,6 +183,8 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
 
 ### Fixed
 
+- `xt.py doctor` nạp guard của dự án một lần để kiểm cả bộ lệnh mẫu (AUD-PERF-028, phần đầu T-3726).
+
 - AUD-TEST-105: cổng đo CPU so cỡ nhỏ và lớn trong cùng lượt retry, giữ ngưỡng hiện hành (D-483).
 
 - T-3728: skill `autopilot` theo hành động `stage-approve` của `loop next-step` khi dự án bật tự nghiệm thu MVP
