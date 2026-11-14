@@ -624,3 +624,10 @@
 - Chọn: Kiểm sổ theo schema và đòi đúng ba nhóm có trạng thái đã quét
 - Lý do (tiêu chí chất lượng cuối): Cổng cũ exit 0 khi cả ba nhóm chưa quét. Cổng theo phạm vi kiểm đúng việc và không buộc đóng nợ ngoài T-3729
 - Đường lùi: Revert thay đổi Gate của T-3729, giữ cổng phát hành audit --strict
+
+### D-483 · 2026-11-14T04:00:47+00:00 · AUD-TEST-105: xử lý cặp mẫu retry CPU được ghép chéo thế nào?
+
+- Phương án: (1) Dùng cặp nhỏ/lớn từ cùng lần đo lại · (2) Giữ cực trị từ hai lần đo và thêm báo cáo chỉ số riêng
+- Chọn: Dùng cặp nhỏ/lớn từ cùng lần đo lại
+- Lý do (tiêu chí chất lượng cuối): Nếu cả hai lượt đều vượt ngưỡng, phép kiểm phải đỏ; đối chiếu trong cùng lượt giữ tỷ lệ, sàn, độ dư và một lần retry
+- Đường lùi: Revert thay đổi helper và ca đồng hồ giả nếu cần
