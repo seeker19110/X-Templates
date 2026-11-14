@@ -183,6 +183,8 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
 
 ### Fixed
 
+- `xt.py doctor` nạp guard của dự án một lần để kiểm cả bộ lệnh mẫu (AUD-PERF-028, phần đầu T-3726).
+
 - `release-check` (ADR-0077, D-422): loại đúng `docs/ops/DEPLOYS.json` khỏi `subject.content` để ghi sổ triển khai
   và commit sổ mà vẫn giữ định danh nội dung của ứng viên.
 
