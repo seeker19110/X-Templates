@@ -11605,6 +11605,17 @@ def _check_live_base(pr: Dict[str, Any], d: Dict[str, Any]) -> Dict[str, Any]:
     return result
 
 
+def _eval_pr_next(
+    pr: Dict[str, Any], d: Dict[str, Any], rec: Dict[str, Any], base: Path, check_base: bool = True
+) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    """(Quyết định cổng, bước kế) sau khi `pr next` đã xét cả review cục bộ."""
+    auto_merge, cap = bool(pr.get("autoMergeRequest")), pr_rethink_cap(base, pr)
+    out = pr_next(d, auto_merge, rec, cap)
+    if check_base and out["action"] == "merge" and (observed := _check_live_base(pr, d)) is not d:
+        return observed, pr_next(observed, auto_merge, rec, cap)
+    return d, out
+
+
 def merge_check_result(
     pr: Dict[str, Any],
     autonomy: int,
@@ -15577,8 +15588,9 @@ def _steward_one(pr_arg: str, repo: str, base: Path, apply: bool, gh_repo: List[
     )
     if _standard_seen(pr):  # từng vào làn chuẩn (nhãn bền): push sau đó không hạ PR về làn nhanh
         rec = {**rec, "standard_seen": True}
-    out = {**pr_next(d, bool(pr.get("autoMergeRequest")), rec, pr_rethink_cap(base, pr)), "applied": False}
     why_not = steward_untrusted(pr)
+    d, next_step = _eval_pr_next(pr, d, rec, base, check_base=not why_not)
+    out = {**next_step, "applied": False}
     if why_not and out["action"] not in ("done", "closed", "disable-auto-merge"):
         return {**out, "action": "defer-human", "why": why_not}
     if apply and d["lane"] == "chuẩn" and not _standard_seen(pr):
@@ -16055,7 +16067,7 @@ def cmd_pr(args: argparse.Namespace) -> int:
         print(f"✗ {exc}", file=sys.stderr)
         return 2
     d, _, rec = _pr_next_state(pr, base)
-    out = pr_next(d, bool(pr.get("autoMergeRequest")), rec, pr_rethink_cap(base, pr))
+    _, out = _eval_pr_next(pr, d, rec, base)
     if args.json:
         print(json.dumps(out, ensure_ascii=False))
         return 0
