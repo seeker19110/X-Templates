@@ -5453,9 +5453,9 @@ def _doctor_guard_canary(base: Path) -> List[Finding]:
     found = [p for p in guard_paths(base)[:1] if p.is_file()]
     if not found or any(_syntax_error(p) for p in found):  # thiếu/lỗi cú pháp: phần hook đã báo, không báo trùng
         return []
-    with contextlib.ExitStack() as stack:
-        stack.enter_context(_env_patch("XT_GUARD_POLICY", ""))
-        missed = [c for c in GUARD_CANARIES if not guard_block(c, base, found)]
+    with _env_patch("XT_GUARD_POLICY", ""):
+        blocked = guard_blocks(list(GUARD_CANARIES), base, found)
+    missed = [cmd for cmd, reason in zip(GUARD_CANARIES, blocked, strict=True) if not reason]
     if not missed:
         return []
     msg = f"guard KHÔNG chặn lệnh nguy hiểm mẫu: {', '.join(missed)} — hàng rào không hoạt động; {INSTALL_HINT}"

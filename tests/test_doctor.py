@@ -1082,7 +1082,9 @@ class DoctorGuardAndClaudeVersionTest(DoctorCase):
     """LOOP-HARNESS-025 (guard chặn lệnh mẫu) và LOOP-HARNESS-026 (`claude_min_version`) — rà stored 2026-10-18."""
 
     def test_installed_guard_blocks_canaries(self):
-        self.assertEqual(xt._doctor_guard_canary(self.base), [])
+        with unittest.mock.patch.object(xt, "_load_guard", wraps=xt._load_guard) as load_guard:
+            self.assertEqual(xt._doctor_guard_canary(self.base), [])
+        load_guard.assert_called_once_with((self.base / xt.GUARD_FILE).resolve())
 
     def test_permissive_guard_is_error(self):
         stub = "def bash_decision(c, r, w):\n    return {'decision': ''}\n\ndef apply_policy(o):\n    return o\n"
