@@ -17,3 +17,9 @@ Kế hoạch: D-488 xử lý 407/408 và thiếu context trước; sau đó sử
 - T-3890: kiểm độc lập bằng lỗi I/O giả trên tệp mẫu cho thấy snapshot lỗi vẫn chạy formatter và restore lỗi mất bản sao. Sửa ở điểm vào formatter của khung; AUD-SEC-648 vẫn mở cho formatter gọi trực tiếp.
 - T-3891: README, skill complete và runbook còn mô tả review cũ. Đối chiếu `GreenMergePolicyTest` 7/7 và ruleset sống ngày 2026-11-14.
 - Nợ test mức xanh: kiểm thứ tự qua hai chữ số, cách ly GITHUB_STEP_SUMMARY và ghim điều kiện review vào đúng mệnh đề LOOP-STOP-002.
+
+## T-3892 tại 4a3e7947
+
+- TEST: CI 43610149568 xanh, 3.423 unit test, 8 E2E, 100 % dòng/nhánh. Hai lượt rà tập trung đạt 336 và 168 test. Đã rà cấu trúc 64 tệp đổi, chưa kiểm từng assertion/corpus và 84 miễn trừ mới. AUD-TEST-107/108 được xác minh độc lập với XML/corpus tạm.
+- HAR: rà 10/11 tệp kể từ 454d146; còn nội bộ guard và bằng chứng cũ. Hai lượt test đạt 96 và 62 ca. AUD-HAR-401/406 tái hiện; AUD-HAR-411 xác minh độc lập. Không nâng SHA quét TEST/HAR.
+- D-492/T-3867: giả lập RecursionError với lệnh vô hại. Kiểm độc lập cả hai lượt đọc, hook, adapter và Gate. Không kết luận đóng các mục đỏ khác.

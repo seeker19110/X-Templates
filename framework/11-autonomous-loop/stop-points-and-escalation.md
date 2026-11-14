@@ -152,7 +152,7 @@ mặc định L3 (ADR-0015) và bỏ qua bậc thang theo lựa chọn đó. Ở
 Ngoại lệ cứng: **xác thực/phân quyền · thanh toán · mật mã luôn là làn kiến trúc**, kể cả diff 1 dòng và kể cả ở L3
 (`xt.py merge-check` trả `hard`: thêm bí mật, nhãn `risk:pii`/`risk:admin`/`risk:secret`, `merge_risk_paths` — ADR-0016).
 `xt.yaml` `merge_hard_exceptions: auto` (ADR-0020), đọc ở nhánh đích đã commit (không ở cây làm việc): `merge-check` vẫn
-liệt kê lý do ở `hard_waived` nhưng `hard` rỗng — PR vẫn làn chuẩn, ở L3 merge như PR làn chuẩn khác (pha harden: review sạch ở H khi `merge_review: required` — `LOOP-STOP-022`; pha build: ngoại lệ cứng đã miễn là rủi ro cao — review độc lập bắt buộc, ADR-0062); thiếu khoá, giá
+liệt kê lý do ở `hard_waived` nhưng `hard` rỗng — PR vẫn làn chuẩn, ở L3 merge như PR làn chuẩn khác (khi `merge_review: required`, harden cần review sạch ở H và build yêu cầu review độc lập cho ngoại lệ cứng đã miễn vì thuộc rủi ro cao — ADR-0062; xem `LOOP-STOP-022`); thiếu khoá, giá
 trị lạ, không đọc được = `human`. PR đổi chính khoá luôn người merge (không tự miễn).
 
 ### Steward theo sự kiện và Routine kích phiên (AUTO-05)
