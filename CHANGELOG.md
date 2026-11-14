@@ -8,6 +8,8 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
 
 ### Added
 
+- Audit TEST/HAR sau #558 ghi hai sai lệch cổng merge, hai vấn đề cấu hình/tài liệu và một khoảng trống test; các nhóm vẫn chưa quét đủ.
+
 - F-111 (`T-3845`, D-452/D-453/D-455/D-460): `install.py --new` tạo repo sản phẩm cùng khung, gói,
   `PROJECT.md` và blueprint, rồi chạy `doctor --offline`. Thư mục đích được nhận bằng `mkdir` độc quyền trước
   bootstrap; giữ inode thư mục và `.git`, không nhận nhầm thư mục của tiến trình khác hay xoá dữ liệu khi lỗi.
