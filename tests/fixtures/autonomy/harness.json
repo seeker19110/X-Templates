@@ -425,7 +425,7 @@
     "kind": "merge_policy_docs",
     "clauses": {
      "xt.yaml": "xét theo số PR tăng dần",
-     "LOOP-STOP-002": "khi `merge_review: required`",
+     "LOOP-STOP-002": "review sạch ở đúng head nếu `merge_review: required`",
      "LOOP-STOP-009": "nếu `merge_review: required`",
      "LOOP-STOP-029": "khi `merge_review: required`"
     }
