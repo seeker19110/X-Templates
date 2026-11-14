@@ -183,6 +183,8 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
 
 ### Fixed
 
+- `xt.py doctor` nạp guard của dự án một lần để kiểm cả bộ lệnh mẫu (AUD-PERF-028, phần đầu T-3726).
+
 - AUD-DOC-273/274: báo cáo pilot phân biệt số đo chưa xác minh với bằng chứng CI; PLAN chỉ rõ cổng Production, reviewer bắt buộc và phê duyệt đúng run, theo cấu hình đọc ngày 2026-11-13. Chỉ sửa tài liệu, không thay quyền triển khai.
 - Lưu nguyên văn ba mục DOC đã sửa từ tag v3.31.0 vào sổ lưu trữ để giữ trần `docs/ops`.
 - D-451: xếp AUD-DOC-273/274 vào nhóm tài liệu/bằng chứng sẵn có của corpus tự chủ; giữ nguyên định nghĩa nhóm, ca kiểm và ngưỡng.
