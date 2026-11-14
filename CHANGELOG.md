@@ -190,6 +190,8 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
 
 ### Fixed
 
+- AUD-DATA-012: cổng migration web-api-ts nhận diện cả CREATE INDEX không ghi tên trên bảng có sẵn.
+
 - `xt.py doctor` nạp guard của dự án một lần để kiểm cả bộ lệnh mẫu (AUD-PERF-028, phần đầu T-3726).
 
 - Guard (T-3769; lý do chạm hàng rào: đóng đường bỏ sót argv hoặc cho qua khi parser không đọc được): Precheck AUD-SEC-730: ngoặc trong tham số không nháy trả BUDGET; giữ literal, nháy kép và ngoặc thoát. Lỗi recursion đọc sớm được sửa ở lát riêng T-3867.
