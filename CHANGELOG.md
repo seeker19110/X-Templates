@@ -8,6 +8,11 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
 
 ### Added
 
+- F-111 (`T-3845`, D-452/D-453/D-455/D-460): `install.py --new` tạo repo sản phẩm cùng khung, gói,
+  `PROJECT.md` và blueprint, rồi chạy `doctor --offline`. Thư mục đích được nhận bằng `mkdir` độc quyền trước
+  bootstrap; giữ inode thư mục và `.git`, không nhận nhầm thư mục của tiến trình khác hay xoá dữ liệu khi lỗi.
+  Git bootstrap cách ly cấu hình, hooks và metadata môi trường; identity không đọc được dùng mặc định, không in
+  byte cấu hình. Gate task: 46 test đạt; kiểm độc lập bốn ca race/identity đạt, các helper mới phủ dòng và nhánh 100 %.
 - [ADR-0077](docs/adr/0077-deployment-receipts.md) (T-3841, D-422…D-424) chốt cấu hình theo môi trường, receipt của
   bản đang phục vụ, hàng `deploy` trong `release-check` và đích dev mặc định của gói `web-api-ts`. Mã triển khai
   thuộc các lát T-3842 đến T-3844 và T-3860.
@@ -76,6 +81,8 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
   người, định nghĩa "máy không thể", phân loại, lát triển khai.
 
 ### Changed
+
+- Lưu nguyên văn D-361…D-372 vào sổ tháng 11 theo D-314; giữ ID, thứ tự và trần tài liệu (D-482).
 
 - Lưu kho hai PLAN `factory-A`/`factory-BE` đã đóng theo ADR-0070 (D-457); sửa liên kết, giữ ID và trần byte.
 - `xt.py loop decide-prod` + guard (lý do chạm hàng rào: 🟠 AUD-SEC-541, audit delta 2026-11-11): quyết đề xuất "Khi
