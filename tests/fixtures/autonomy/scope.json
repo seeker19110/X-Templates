@@ -746,6 +746,12 @@
     "AUD-DOC-308",
     "AUD-DOC-309"
    ]
+  },
+  {
+   "reason": "Lệnh kiểm BASE-REPO-006 của blueprint (tag, VERSION, đồng hồ, GO-NO-GO) cần repo git thật; không phải quyết định mô phỏng bằng corpus. Đỡ bằng blueprint-status --run trong release-check.",
+   "ids": [
+    "AUD-HAR-459"
+   ]
   }
  ]
 }

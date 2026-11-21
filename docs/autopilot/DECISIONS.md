@@ -557,15 +557,15 @@
 
 - Phương án: (1) Sửa tài liệu và tên test (b): tệp Codex là sản phẩm SINH từ .claude/; tệp trùng đầu ra sinh được ghi nhận (như mọi tệp harness trùng bản khung) và đi theo .claude/ ở các lần cài sau, kể cả khi --force-harness thay nguồn; chỉ tệp khác bản đã ghi nhận mới được giữ kèm .xtemplates-new · (2) Sửa mã (a): khi --force-harness, bỏ qua hash codex_files cho tệp có nguồn không phải bản khung → .xtemplates-new
 - Chọn: Phương án (1): sửa tài liệu và tên test (b)
-- Lý do (tiêu chí chất lượng cuối): Đúng: gương là bản sao byte của nguồn; khi người dùng chủ động --force-harness thay .claude/skills/<tên> thì gương giữ bản cũ sẽ LỆCH nguồn (test gương trùng byte của dự án như dhcb đỏ) — đi theo nguồn mới là hành vi nhất quán với mô hình 'tệp trùng bản khung ghi là của khung' mà install.py dùng cho mọi tệp harness. Phương án (a) thêm ngoại lệ vào luật sở hữu và để gương lệch nguồn. Lần cài ĐẦU với --force-harness vẫn giữ gương và để .xtemplates-new (chưa có ghi nhận) — đã sửa ở lượt 2.
+- Lý do (tiêu chí chất lượng cuối): Đúng: gương là bản sao byte của nguồn; khi người dùng chủ động --force-harness thay .claude/skills/<tên> thì gương giữ bản cũ sẽ LỆCH nguồn (test gương của dhcb đỏ) — đi theo nguồn mới là hành vi nhất quán với mọi tệp harness. Phương án (a) thêm ngoại lệ vào luật sở hữu và để gương lệch nguồn. Lần cài ĐẦU với --force-harness vẫn giữ gương và để .xtemplates-new.
 - Đường lùi: Áp phương án (a) trong install.py
 
 ### D-521 · 2026-11-19T23:39:27+00:00 · Điều phối một dự án từ ý tưởng qua ba giai đoạn tới vận hành bằng gì?
 
 - Phương án: (1) Dùng sổ giai đoạn, trạng thái vòng lặp và chứng cứ bản chạy hiện có; chốt phạm vi nghiệm thu ở Git; diễn tập trước chuyển giao cho CD của sản phẩm · (2) Tạo bộ điều phối riêng với sổ trạng thái, quyền duyệt và hạ tầng production mặc định
-- Chọn: Dùng sổ giai đoạn, trạng thái vòng lặp và chứng cứ bản chạy hiện có; chốt phạm vi nghiệm thu ở Git; diễn tập trước chuyển giao cho CD của sản phẩm
-- Lý do (tiêu chí chất lượng cuối): Giữ một nguồn trạng thái cho mỗi quyết định, tôn trọng duyệt đúng bản, đo thời gian và kiểm lại được trên repo sinh mới và repo có sẵn
-- Đường lùi: Các dự án có thể tiếp tục dùng những lệnh stage, loop, release-check, deploy và perf riêng; kiểm lại hợp đồng khi thay adapter đích.
+- Chọn: Phương án (1)
+- Lý do (tiêu chí chất lượng cuối): Giữ một nguồn trạng thái cho mỗi quyết định, duyệt đúng bản, đo thời gian, kiểm lại được trên repo mới và repo có sẵn
+- Đường lùi: Dự án tiếp tục dùng các lệnh stage, loop, release-check, deploy, perf riêng; kiểm lại hợp đồng khi đổi adapter.
 
 ### D-522 · 2026-11-20T01:05:30+00:00 · Trình MVP lúc nào?
 
@@ -650,3 +650,11 @@
 - Chọn: Chấp nhận tới 2027-01-21
 - Lý do (tiêu chí chất lượng cuối): cần agent làm trái `pr next` hoặc fork đổi tên; an toàn; sửa đòi mã guard sát trần.
 - Đường lùi: Mở lại và sửa
+
+### D-535 · 2026-11-21T12:38:25+00:00 · BASE-REPO-006 chặn ký sau 15 phút kể từ VERSION: nới?
+
+- Phương án: (1) Thêm điều kiện có docs/ops/GO-NO-GO-*-<VERSION>.md (glob neo hai đầu) · (2) Giữ, chủ repo tạo tag tay
+- Chọn: Phương án (1)
+- Lý do (tiêu chí chất lượng cuối): cửa sổ 15 phút ngắn hơn CI + review nên chữ ký ở PR sau không bao giờ được duyệt; GO-NO-GO vẫn chặn phát hành (`go_no_go`, `release-sign`).
+- Đánh đổi chấp nhận: thiếu tag không còn bị BASE-REPO-006 báo khi đã có tệp GO-NO-GO (kể cả đã ký mà `release-tag.yml` hỏng); `go_no_go` và `release-check` vẫn đỏ/chờ. Có từ trước (AUD-HAR-460, chấp nhận tới 2027-01-21): BLUEPRINT.md tính là tài liệu nên đổi lệnh kiểm không sinh nợ review.
+- Đường lùi: Bỏ điều kiện `git ls-files` khỏi lệnh kiểm BASE-REPO-006

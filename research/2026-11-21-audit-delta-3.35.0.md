@@ -12,13 +12,13 @@ Mốc rà là `main` tại `29ddf2d85a1c`; phần sửa vào `main` ở `51d4e6c
 | D | workflow, `install.py`, mẫu dự án đích, `doctor`/`admin-plan` | 0 | 2 | 2 | `test_install*.py` chi tiết, `routine-check`, `field-export` |
 | E | tài liệu khung, ADR 0081–0087, CHANGELOG, mẫu | 0 | 3 | 6 | ADR-0081…0085 so với mã, `docs/ops/FACTORY-PILOT-1*`, `packs/**` |
 
-Tổng thô 9 🟠 gồm hai cặp trùng giữa lô C và D (`upgrade open-pr`, `xt-field.yml` mở PR bằng `GITHUB_TOKEN`) nên ghi sổ 8 dòng 🟠 duy nhất.
+Tổng thô 9 🟠 gồm hai cặp trùng giữa lô C và D (`upgrade open-pr`, `xt-field.yml` mở PR bằng `GITHUB_TOKEN`) nên các lô cho 7 dòng 🟠 duy nhất; dòng thứ 8 (AUD-HAR-458) đến từ review #711.
 
 ## Phát hiện đã sửa trước khi ký (sổ: dòng `đã sửa` kèm PR)
 
 - **AUD-XFEAT-051 (🟠, có từ trước, #710):** PR fork thường ở L2/L3 với CI xanh ra `merge`; nay `human`; làn `derived` giữ `wait`.
 - **AUD-CI-038, AUD-HAR-457, AUD-XFEAT-052 (🟠, #711):** `upgrade open-pr` không chạy xong ở dự án thật; token steward lọt vào hook `push`; bản thu hồi giữ PR mở.
-- **AUD-CI-039 (🟠, #711):** job lịch luôn bị bỏ qua, `xt-field.yml` mở PR bằng `GITHUB_TOKEN`; review #711 thêm điều kiện loại tag trùng tên nhánh mặc định. **AUD-HAR-458 (🟠, có từ trước, #711):** `pr-steward.yml` luôn checkout nhánh mặc định.
+- **AUD-CI-039 (🟠, #711):** job lịch luôn bị bỏ qua, `xt-field.yml` mở PR bằng `GITHUB_TOKEN`; review #711 thêm điều kiện loại tag trùng tên nhánh mặc định. **AUD-HAR-458 (🟠, có từ trước, #711):** `pr-steward.yml` checkout không có `ref:` nên dispatch trên ref khác chạy mã ref đó với `XT_STEWARD_TOKEN`; nay luôn checkout nhánh mặc định.
 - **AUD-DOC-308, AUD-DOC-309 (🟠, #710/#712):** tài liệu `--with-github`; `WF-REVIEW-007` lệch ADR-0079 (D-533). **AUD-DOC-310 (🟢):** sáu mục tài liệu.
 - Lô A: năm 🟢 và lô B/C/D còn lại 🟢 ghi ở AUD-HAR-456, AUD-CI-037, AUD-XFEAT-050 (mở) hoặc đã gộp vào các dòng trên.
 

@@ -23,10 +23,11 @@ DIR_CAPS = {  # nhóm → (pathspec git, trần byte); đo: `git ls-files -z -- 
     "scripts (xt.py, install.py, xt_app)": (("scripts/*.py", "scripts/xt_app/"), 711855 + 1048576),  # 677958 B
     ".claude/hooks": ((".claude/hooks/",), 369393 + 1048576),  # 351803 B
     "framework/11-autonomous-loop": (("framework/11-autonomous-loop/",), 232307 + 1048576),  # 221245 B
-    # Sổ sách đang dùng (T-3651, AUD-DOC-180, D-314): kích thước sau lưu trữ + 5 %, không cộng 1 MiB — đo 2026-11-02.
+    # Sổ sách đang dùng (T-3651, AUD-DOC-180, D-314): ban đầu kích thước sau lưu trữ + 5 %; nới +1 MiB theo ADR-0088
+    # (chủ dự án yêu cầu 2026-11-21 vì sổ audit, báo cáo và quyết định đã kín trần) — như ADR-0050 cho ba nhóm trên.
     # File lưu trữ (`*-ARCHIVE.md`, `DECISIONS-YYYY-MM.md`) đóng băng, không tính: lưu trữ thêm phải làm trần còn chỗ.
-    "docs/ops": (("docs/ops/", ":(exclude)docs/ops/*-ARCHIVE.md"), 810114),  # 771538 B
-    "docs/autopilot": (("docs/autopilot/", ":(exclude)docs/autopilot/DECISIONS-*.md"), 352345),  # 335567 B
+    "docs/ops": (("docs/ops/", ":(exclude)docs/ops/*-ARCHIVE.md"), 810114 + 1048576),  # 771538 B
+    "docs/autopilot": (("docs/autopilot/", ":(exclude)docs/autopilot/DECISIONS-*.md"), 352345 + 1048576),  # 335567 B
 }
 # Mốc kích thước (ADR-0050 §Hệ quả, ADR-0072): mỗi nhóm ≤ 2× mốc mới nhất. Vượt → ADR xét lại khai mốc mới ở đây (máy bắt,
 # không chờ audit). Mốc = (ngày, byte theo pathspec của nhóm ở commit ghi trong ADR, ADR ghi mốc); không xoá mốc cũ. MỘT
