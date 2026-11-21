@@ -3,7 +3,7 @@ title: Spec-driven: spec là hợp đồng, tiêu chí chấp nhận, truy vết
 kind: module
 prefix: WF-SDD
 applies_to: [all]
-updated: 2026-10-16
+updated: 2026-11-21
 ---
 
 # Spec-driven: spec là hợp đồng, tiêu chí chấp nhận, truy vết
@@ -56,6 +56,7 @@ updated: 2026-10-16
 - [ ] `WF-SDD-015` **SHOULD** Dùng công cụ SDD có ghim phiên bản (Spec Kit `specify-cli` / OpenSpec) hoặc skill `/research` + template của khung; không trộn hai quy trình trong một repo. → Kiểm: ADR chọn công cụ; lockfile/phiên bản ghi.
 - [ ] `WF-SDD-016` **MAY** Sinh test khung (skeleton) từ AC bằng agent, người/evaluator duyệt trước khi implement. → Kiểm: test skeleton có `AC-` tag, trạng thái `todo/skip` có lý do cho tới khi implement.
 - [ ] `WF-SDD-017` **MAY** Spec song ngữ/thuật ngữ thống nhất (glossary) cho đội đa ngôn ngữ; thuật ngữ nghiệp vụ là một nguồn. → Kiểm: `docs/GLOSSARY.md` tồn tại và được link từ spec.
+- [ ] `WF-SDD-018` **SHOULD** Việc lớn làm **tương tác** (viết lại, refactor nhiều tệp, nâng major, đổi schema) bắt đầu ở **Plan Mode** của Claude Code (`Shift+Tab`, `/plan <prompt>` hoặc `claude --permission-mode plan`): agent chỉ đọc mã và đề xuất hướng làm, người duyệt kế hoạch rồi mới cho sửa — sai ở kế hoạch chỉ tốn vài phút, sai sau khi đã đổi hàng chục tệp tốn cả buổi. Ở màn hình duyệt kế hoạch bấm `Esc` trước, vì `Shift+Tab` ở đó là *duyệt*. Vòng tự động (`/autopilot`) không dùng Plan Mode: kế hoạch là PLAN máy kiểm cùng `loop decide` (`WF-SDD-008`). → Kiểm: `AGENTS.md` của dự án nêu bước này cho việc lớn; PR viết lại link kế hoạch hoặc ghi "đã duyệt ở Plan Mode". · Nguồn: Claude Code docs *Permission modes* (mục "Analyze before you edit with plan mode"); Anthropic, *The Claude Code guide for startups* (2026-08-20), chương "Build for rebuilding".
 
 ## Bẫy thường gặp
 
@@ -87,5 +88,7 @@ updated: 2026-10-16
 - OpenSpec `@fission-ai/openspec` 1.14.1 (npm) — xác minh 2026-10-13; (chưa xác minh) README OpenSpec — không fetch ngày 2026-10-13.
 - Anthropic — Harness design for long-running application development (sprint contract, generator/evaluator): <https://www.anthropic.com/engineering/harness-design-long-running-apps> — theo `research/2026-10-13-stored-catalog-extraction.md` §2.10 và catalog 21 §2.2 (đọc 2026-10-12); không fetch lại ngày 2026-10-13.
 - DORA — Working in small batches (INVEST, batch > 1 tuần là quá lớn): <https://dora.dev/capabilities/working-in-small-batches/> — xác minh 2026-10-13
+- Claude Code docs — Permission modes (Plan Mode: `Shift+Tab` hoặc `/plan`, `claude --permission-mode plan`; ở màn hình duyệt bấm `Esc` trước vì `Shift+Tab` là duyệt): <https://code.claude.com/docs/en/permission-modes> — xác minh 2026-11-21
+- Anthropic, *The Claude Code guide for startups* (2026-08-20; PDF 27 trang): <https://claude.com/resources/articles/claude-code-guide-for-startups> — xác minh 2026-11-21 (`research/2026-11-21-claude-code-startup-guide.md`). Thân chương "Build for rebuilding" ghi `--plan`, checklist ghi `/plan`, còn docs permission-modes chỉ có `--permission-mode plan`: khung theo docs.
 - Khung cũ X-stored commit `1b80fe4`: `docs/specs/AI-HARNESS-AND-COMPANY-SPEC.md` §B3.1a (test viết mù từ spec), §B6.3 (rework cap 3 → leo thang), `docs/framework/project-completion.md` (truy vết F→W→PR→bằng chứng).
 - `research/2026-10-13-stored-catalog-extraction.md` §2.8 (Spec Kit/Kiro/BMAD/OpenSpec; spec là hợp đồng và tiêu chí dừng; PR feat link spec; spec hở thì dừng; grill: sự thật tự tra, quyết định hỏi người), §2.9 (SCOPE.md); catalog `13-dev-stack-devops` §5; `23-own-repos-lessons` §2.3, §2.5, §4.3 (AI Delivery Loop).

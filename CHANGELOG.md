@@ -18,6 +18,8 @@ Bản < 3.20.0: [`CHANGELOG-ARCHIVE.md`](CHANGELOG-ARCHIVE.md) (T-3651; `changel
 
 - Dự án có thể khóa SPEC và bộ nghiệm thu trước khi lập trình, rồi đối chiếu từng tệp với kết quả JUnit. CI gói đã bàn giao [MVP sổ ghi chú](docs/ops/FACTORY-PILOT-1.md) bằng git bundle. Bốn ca nghiệm thu chạy trên bản dev với PostgreSQL và Chromium.
 - `feedback routine-check` so ngày phản hồi từ các dự án đã đăng ký với PR báo cáo. Workflow đọc theo lịch hằng tuần và báo quá hạn khi có mục mới.
+- `WF-SDD-018` (SHOULD): việc lớn làm tương tác (viết lại, refactor nhiều tệp, nâng major, đổi schema) bắt đầu ở Plan Mode của Claude Code; autopilot vẫn dùng PLAN. `XC-DOCAI-011` nêu cách đặt `AGENTS.md` theo thư mục kèm `CLAUDE.md` cầu nối. Nguồn: [The Claude Code guide for startups](https://claude.com/resources/articles/claude-code-guide-for-startups) (2026-08-20), xác minh 2026-11-21.
+- Repo khung có `scripts/AGENTS.md` và `tests/AGENTS.md` (kèm `CLAUDE.md` cầu nối): quy ước riêng của hai thư mục, nạp khi làm việc ở đó. Hai tệp này không được cài sang dự án đích.
 
 - `plan waves --handoff` xuất spec, Gate và phạm vi file của đợt đầu trong một lệnh. Lịch ưu tiên chuỗi phụ thuộc dài khi giảm được số đợt. [ADR-0086](docs/adr/0086-plan-wave-handoff.md).
 
