@@ -49,7 +49,7 @@
 - [x] `T-3922` Chấp nhận có hạn các mục D-499 còn lại (AUD-HAR-341/347/368/375/376, AUD-PERF-026, AUD-SEC-563/564/568/647/662, AUD-DEP-026, AUD-DOC-277/292) — Gate: `python3 scripts/xt.py audit check docs/ops/AUDIT-STATUS.md` (sau: T-3917, T-3918, T-3919, T-3920, T-3921; files: docs/ops/AUDIT-STATUS.md)
 - [x] `T-3923` Sổ không còn nợ review mở — Gate: `test "$(python3 scripts/xt.py audit check --strict docs/ops/AUDIT-STATUS.md 2>&1 | grep -c 'nợ review còn mở')" = 0` (sau: T-3922; files: docs/ops/AUDIT-STATUS.md)
 
-## Đợt 4 — sửa phát hiện audit delta cổng ký (ADR-0080, [báo cáo](../ops/AUDIT-REPORT-2026-11-17-delta.md))
+## Đợt 4 — sửa phát hiện audit delta cổng ký (ADR-0080, [báo cáo](../../ops/AUDIT-REPORT-2026-11-17-delta.md))
 > Cổng ký lần 1 (ứng viên `fa81dd3e`): 🔴 3 · 🟠 10 · 🟢 12 → FAIL → đợt này, rồi audit delta lần 2 trên phần sửa và phần INCONCLUSIVE. D-500: harden không audit theo mốc.
 
 ### Lát M — guard
@@ -61,7 +61,7 @@
 ### Lát O — cổng ký lần 2
 - [x] `T-3928` Sổ không còn 🔴/🟠 mở — Gate: `python3 scripts/xt.py audit check docs/ops/AUDIT-STATUS.md && ! grep -E '^\| AUD-[A-Z]+-[0-9]+ \| (🔴|🟠) \| mở' docs/ops/AUDIT-STATUS.md` (sau: T-3924, T-3925, T-3926, T-3927; files: docs/ops/AUDIT-STATUS.md)
 
-## Đợt 5 — sửa phát hiện cổng ký lần 2 theo lớp (D-502, [báo cáo](../ops/AUDIT-REPORT-2026-11-17-delta.md))
+## Đợt 5 — sửa phát hiện cổng ký lần 2 theo lớp (D-502, [báo cáo](../../ops/AUDIT-REPORT-2026-11-17-delta.md))
 > Cổng ký lần 2 (ứng viên `b68527fc`): 🔴 11 · 🟠 9 · 🟢 14 — hầu hết có từ trước; AUD-HAR-422, AUD-SEC-832 do bản sửa đợt 4. Sửa theo lớp, rồi cổng ký lần 3 chỉ rà diff sửa + hồi quy.
 
 ### Lát P — guard
@@ -151,7 +151,7 @@
 > Đính chính đợt 16: 12 phút mỗi commit ở checkout chính là do 4 tệp chưa track không ánh xạ được (cả 697 lớp), không phải do chọn theo tệp; commit trong worktree dưới gốc dự án không qua cổng (hook `exit 0`).
 
 - [x] `T-3964` 🟠 AUD-HAR-442: commit trong worktree cùng repo chạy cổng của dự án trên worktree đó — Gate: `python3 -m unittest tests.test_hooks.CommitGateWorktreeTest` (files: .claude/hooks/pre-bash-guard.sh, tests/test_hooks.py)
-- [ ] `T-3965` 🟢 AUD-HAR-443 (hoãn, D-518: bản đầu sai tiền đề, rút khỏi #680): commit là `git commit` đứng một mình (trường mới của guard.py) → loại tệp chưa track khỏi tập tệp đổi — Gate: `python3 -m unittest tests.test_commit_gate` (files: .claude/hooks/guard.py, .claude/hooks/pre-bash-guard.sh, scripts/dev-task.sh, tests/)
+- [~] `T-3965` 🟢 AUD-HAR-443 (hoãn, D-518: bản đầu sai tiền đề, rút khỏi #680): commit là `git commit` đứng một mình (trường mới của guard.py) → loại tệp chưa track khỏi tập tệp đổi — Bỏ: làm thay ở T-3977 (PLAN-harden-2026-11-21) — Gate: `python3 -m unittest tests.test_commit_gate` (files: .claude/hooks/guard.py, .claude/hooks/pre-bash-guard.sh, scripts/dev-task.sh, tests/)
 
 ## Đợt 18 — harness Codex sinh từ `.claude/` (ADR-0082, D-519)
 > Chủ repo 2026-11-19: tệp dính tài khoản cá nhân vào `.gitignore` (#682), tệp harness thì tích hợp. Tệp `/import` cũ không commit (guard cũ, đường tuyệt đối).

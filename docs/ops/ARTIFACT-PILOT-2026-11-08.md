@@ -88,4 +88,4 @@ Báo cáo pilot 2026-11-08 ghi main có 0 approval, `Production` có 0 required 
 
 Sáu lượt/ba commit được báo cáo cho bốn bước deploy staging; mức bằng chứng theo đầu báo cáo. Mốc 90% cần chu kỳ thật theo PLAN. Pilot nối hai job bằng artifact cùng run và SHA-256 metadata; ký provenance và kiểm trên đích bền là mốc riêng.
 
-PLAN tại [đây](../autopilot/PLAN-harden-2026-11-08-artifact-pilot.md). Quyết định D-398 ghi trong [sổ quyết định](../autopilot/DECISIONS.md).
+PLAN tại [đây](../archive/autopilot/PLAN-harden-2026-11-08-artifact-pilot.md). Quyết định D-398 ghi trong [sổ quyết định](../autopilot/DECISIONS.md).

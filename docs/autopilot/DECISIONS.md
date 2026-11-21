@@ -636,3 +636,10 @@
 - Chọn: Merge, ghi AUD-HAR-452/453 chấp nhận
 - Lý do (tiêu chí chất lượng cuối): base cũng lọt, cùng họ D-332; #707 nhẹ hơn base = 0; hàng rào thật là ruleset tag v*.
 - Đường lùi: Mở lại hai mục và vá.
+
+### D-533 · 2026-11-21T09:15:19+00:00 · Duyệt PLAN-harden-2026-11-21 (hoàn thiện khung: 19 task T-3974…T-3992 trong 6 lát) — thứ tự nào?
+
+- Phương án: (1) Một PLAN chủ theo thứ tự: rủi ro có hạn và CI sát trần, PLAN khớp sổ, cổng ký và cắt 3.35.0, production hotel-manager, quyết việc kế bằng số đo, hạn 2027-01-21; thay T-3555, T-3965, T-3892 và dời ba PLAN đã đóng vào kho · (2) Giữ lộ trình 3.35.0 ở PROGRESS: đề xuất stored, tách guard.py, worker song song · (3) Pilot production ý tưởng mới T-3863 song song với khép khoảng hở kiểm soát
+- Chọn: Một PLAN chủ theo thứ tự: rủi ro có hạn và CI sát trần, PLAN khớp sổ, cổng ký và cắt 3.35.0, production hotel-manager, quyết việc kế bằng số đo, hạn 2027-01-21; thay T-3555, T-3965, T-3892 và dời ba PLAN đã đóng vào kho
+- Lý do (tiêu chí chất lượng cuối): Tiêu chí 1: hạn GitHub 2026-12-02 và shard CI 9 phút 21 giây dưới trần 10 phút là rủi ro làm đỏ main. Tiêu chí 3: research 2026-11-19 đo nghẽn nằm sau khâu viết mã, mọi dự án đích environments rỗng, nên sản phẩm có sẵn lên production cho bằng chứng mạnh hơn pilot ý tưởng mới và hơn tăng tốc khâu viết mã. G7 chỉ còn đỏ review_debt nên cắt bản gần.
+- Đường lùi: Bỏ PLAN này bằng PR revert; ba PLAN trong kho dời lại docs/autopilot và ba task trở về trạng thái mở
